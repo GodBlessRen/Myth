@@ -59,10 +59,11 @@ Flow 是对 durable facts 的投影，不创建新的执行真相。
 - configured context window；
 - settled input tokens；
 - settled output tokens；
+- Prompt Cache hit：命中 token / input token 与命中率（Provider 提供时）；
 - model calls；
 - unknown-held token liability（存在时）。
 
-不要把 byte budget 冒充 token usage。
+不要把 byte budget 冒充 token usage，也不要把 keep-alive、KV cache、相似上下文或推测值冒充 Prompt Cache hit。Provider 不提供缓存计量时必须显示 N/A。
 
 ### Context Window
 
@@ -175,7 +176,7 @@ Observatory 不拥有状态，不写业务真相。
 2. 现在执行到哪一步？
 3. 最近发生了哪些 durable event？
 4. 当前上下文用了多少？哪些被 dropped/folded？
-5. Token 使用和 unknown-held 是多少？
+5. Token 使用、Prompt Cache 命中率和 unknown-held 是多少？
 6. 调用了哪些 Tool？Ticket/Operation 状态是什么？
 7. 当前 Control / Budget 是什么？
 8. “完成”基于什么 Artifact / Receipt / Verification？
