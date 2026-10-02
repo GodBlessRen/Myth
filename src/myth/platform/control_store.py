@@ -62,13 +62,10 @@ class SqliteControlService:
                 (run_id, settings.get("model"), canonical_json(settings.get("thinking"))),
             )
 
-    def _snapshot(self, run_id: str) -> ControlSnapshot:
-        self.ensure(run_id)
-        row = self.store.db.execute(
-            "SELECT * FROM workspace_control_projection WHERE run_id=?", (run_id,)
-        ).fetchone()
+    @staticmethod
+    def _snapshot_from_row(row) -> ControlSnapshot:
         if row is None:
-            raise KeyError(run_id)
+            raise KeyError("control projection missing")
         return ControlSnapshot(
             revision=int(row["revision"]),
             paused=bool(row["paused"]),
@@ -78,6 +75,15 @@ class SqliteControlService:
             steering_note=row["steering_note"],
             compact_requested=bool(row["compact_requested"]),
         )
+
+    def _snapshot(self, run_id: str) -> ControlSnapshot:
+        self.ensure(run_id)
+        row = self.store.db.execute(
+            "SELECT * FROM workspace_control_projection WHERE run_id=?", (run_id,)
+        ).fetchone()
+        if row is None:
+            raise KeyError(run_id)
+        return self._snapshot_from_row(row)
 
     def view(self, run_id: str) -> dict[str, Any]:
         snap = self._snapshot(run_id)
@@ -107,23 +113,40 @@ class SqliteControlService:
 
     def command(self, run_id: str, command: str | ControlCommand, payload: Any = None) -> dict[str, Any]:
         kind = command if isinstance(command, ControlCommand) else ControlCommand(str(command))
-        turn = self.repository.turn(run_id)
-        if turn["status"] in {"COMPLETED", "FAILED", "CANCELLED", "BUDGET_EXHAUSTED"}:
-            raise ValueError("terminal turn does not accept control commands")
 
-        current = self._snapshot(run_id)
-        updated = self.machine.apply(current, kind, payload)
-        settings = dict(turn["settings"])
-
-        if kind is ControlCommand.SWITCH_MODEL:
-            model = str(updated.model or "").strip()
-            if not model or len(model) > 200:
-                raise ValueError("model must contain 1-200 characters")
-            settings["model"] = model
-        elif kind is ControlCommand.SWITCH_THINKING:
-            settings["thinking"] = updated.thinking
-
+        # BEGIN IMMEDIATE makes revision allocation a single-writer critical
+        # section across separate MythRuntime connections. Read current state,
+        # validate, allocate the next revision and persist the command together.
         with self.store.tx() as db:
+            turn = db.execute(
+                "SELECT status,settings_json FROM workspace_turns WHERE run_id=?",
+                (run_id,),
+            ).fetchone()
+            if turn is None:
+                raise KeyError(run_id)
+            if turn["status"] in {"COMPLETED", "FAILED", "CANCELLED", "BUDGET_EXHAUSTED"}:
+                raise ValueError("terminal turn does not accept control commands")
+
+            settings = json.loads(turn["settings_json"])
+            db.execute(
+                "INSERT OR IGNORE INTO workspace_control_projection"
+                "(run_id,model,thinking_json) VALUES (?,?,?)",
+                (run_id, settings.get("model"), canonical_json(settings.get("thinking"))),
+            )
+            row = db.execute(
+                "SELECT * FROM workspace_control_projection WHERE run_id=?", (run_id,)
+            ).fetchone()
+            current = self._snapshot_from_row(row)
+            updated = self.machine.apply(current, kind, payload)
+
+            if kind is ControlCommand.SWITCH_MODEL:
+                model = str(updated.model or "").strip()
+                if not model or len(model) > 200:
+                    raise ValueError("model must contain 1-200 characters")
+                settings["model"] = model
+            elif kind is ControlCommand.SWITCH_THINKING:
+                settings["thinking"] = updated.thinking
+
             db.execute(
                 "UPDATE workspace_control_projection SET revision=?,paused=?,aborted=?,model=?,"
                 "thinking_json=?,steering_note=?,compact_requested=?,updated_at=CURRENT_TIMESTAMP "
@@ -142,7 +165,13 @@ class SqliteControlService:
             db.execute(
                 "INSERT INTO workspace_control_commands(command_id,run_id,revision,command,payload_json) "
                 "VALUES (?,?,?,?,?)",
-                (self._id(), run_id, updated.revision, "stop" if kind is ControlCommand.ABORT else kind.value, canonical_json(payload)),
+                (
+                    self._id(),
+                    run_id,
+                    updated.revision,
+                    "stop" if kind is ControlCommand.ABORT else kind.value,
+                    canonical_json(payload),
+                ),
             )
             if kind in {ControlCommand.SWITCH_MODEL, ControlCommand.SWITCH_THINKING}:
                 db.execute(
@@ -160,7 +189,7 @@ class SqliteControlService:
                 {"command": kind.value, "revision": updated.revision},
             )
 
-        # Status changes are projections of the durable command.  Late model/tool
+        # Status changes are projections of the durable command. Late model/tool
         # receipts are still allowed to settle after pause/stop.
         if kind is ControlCommand.PAUSE:
             self.gate(run_id)
