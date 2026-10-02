@@ -1,4 +1,4 @@
-# Myth v0.9 architecture
+# Myth v0.10 architecture
 
 > Architecture Constitution: [ARCHITECTURE_CONSTITUTION.md](ARCHITECTURE_CONSTITUTION.md)  
 > Composable map: [PLATFORM_MAP.md](PLATFORM_MAP.md)
@@ -15,9 +15,11 @@ Goal → Run → Action → Attempt → Ticket → Receipt → Artifact → Veri
 
 围绕 Core 的 Coordination / Control / Execution / Capability / State / Context / Memory / Personal State / Observability 等是**正交 Domain**。
 
-Decision、Planning、Routing、Workflow、Parallel、Multi-Agent、Managed Agent、Personal Agent 是 **Coordination Strategy**；它们可以组合、替换或完全跳过。
+Intent Pick、Information Resolution、Information Gain、Decision、Planning、Routing、Workflow、Parallel、Multi-Agent、Managed Agent、Personal Agent 都属于可插拔 Strategy/Policy；它们可以组合、替换或完全跳过。Information Delta 是信息状态变化合同，不是强制执行层。
 
 外部模型、协议和基础设施通过 Port/Adapter 接入。OpenAI、Ollama、MCP、A2A、Browser、Shell、SQLite 都不能成为 Core 依赖。
+
+在进入昂贵 Agent Loop 前，未来的 Intent Pick 可以选择 direct / local retrieval / deterministic / agent / ask-user 等路径；当前 v0.10 只完成纯合同与 Port，尚未接管主请求链。Information Resolution 的含义固定为同一信息的 L0 Abstract → L1 Overview → L2 Detail/Evidence 渐进展开，而不是“回答充分性”。Information Gain 表示已有信息上的边际任务价值，不能把相似度直接冒充 Gain；Information Delta 只记录 added/updated/removed/conflicted 的变化事实。
 
 代码中的 `MythComponents` 只负责装配和架构快照，不是执行 Kernel。`MythKernel` 仅作为 v0.6-v0.8 兼容别名保留。真正的执行事实仍由 `MythRuntime` / repositories / execution adapters 管理。
 
