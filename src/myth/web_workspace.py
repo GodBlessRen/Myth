@@ -114,7 +114,7 @@ class ConversationWebService:
                 item=dict(row)
                 if item["status"]=="RUNNING":
                     lease=workspace.repository.driver_lease(item["run_id"])
-                    if lease and lease["expired"]:
+                    if lease is None or lease["expired"]:
                         workspace.repository.sweep_expired_driver(item["run_id"])
                         item=dict(runtime.store.db.execute(
                             "SELECT run_id,session_id,status,current_step,max_steps,error,created_at "
@@ -144,7 +144,7 @@ class ConversationWebService:
                 active=set(self.active)
             for turn in value["turns"]:
                 lease=workspace.repository.driver_lease(turn["run_id"])
-                if turn["status"]=="RUNNING" and lease and lease["expired"]:
+                if turn["status"]=="RUNNING" and (lease is None or lease["expired"]):
                     turn=workspace.repository.sweep_expired_driver(turn["run_id"])
                     lease=workspace.repository.driver_lease(turn["run_id"])
                 turn["driver_active"]=bool(
