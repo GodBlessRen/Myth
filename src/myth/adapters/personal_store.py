@@ -43,6 +43,17 @@ CREATE TABLE IF NOT EXISTS personal_state(
     value_json TEXT NOT NULL,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS goal_work_state(
+    goal_id TEXT PRIMARY KEY NOT NULL REFERENCES goals(goal_id),
+    current_state TEXT NOT NULL DEFAULT '',
+    next_action TEXT NOT NULL DEFAULT '',
+    waiting_for TEXT NOT NULL DEFAULT '',
+    progress_note TEXT NOT NULL DEFAULT '',
+    last_run_id TEXT,
+    revision INTEGER NOT NULL DEFAULT 1,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 """
 
 
@@ -70,7 +81,12 @@ class SqlitePersonalState:
                 "INSERT INTO goals(goal_id,title,description,state) VALUES (?,?,?,?)",
                 (goal_id, name, detail, GoalState.ACTIVE.value),
             )
-        return self.goal(goal_id)
+        with self.store.tx() as db:
+            db.execute(
+                "INSERT OR IGNORE INTO goal_work_state(goal_id,current_state,next_action,progress_note) VALUES (?,?,?,?)",
+                (goal_id, "READY", "Start or continue the next admitted work item.", "Goal created."),
+            )
+        return self.goal_view(goal_id)
 
     def goal(self, goal_id: str) -> dict[str, Any]:
         row = self.store.db.execute(
@@ -124,6 +140,98 @@ class SqlitePersonalState:
                 (goal_id,),
             ).fetchall()
         ]
+
+
+    def work_state(self, goal_id: str) -> dict[str, Any]:
+        self.goal(goal_id)
+        row = self.store.db.execute(
+            "SELECT * FROM goal_work_state WHERE goal_id=?", (goal_id,)
+        ).fetchone()
+        if row is None:
+            with self.store.tx() as db:
+                db.execute(
+                    "INSERT INTO goal_work_state(goal_id,current_state,next_action,progress_note) VALUES (?,?,?,?)",
+                    (goal_id, "READY", "Continue this goal.", "Legacy goal initialized."),
+                )
+            row = self.store.db.execute(
+                "SELECT * FROM goal_work_state WHERE goal_id=?", (goal_id,)
+            ).fetchone()
+        return dict(row)
+
+    def goal_view(self, goal_id: str) -> dict[str, Any]:
+        goal = self.goal(goal_id)
+        return {**goal, "work": self.work_state(goal_id)}
+
+    def goal_views(self, *, include_archived: bool = False) -> list[dict[str, Any]]:
+        return [self.goal_view(item["goal_id"]) for item in self.goals(include_archived=include_archived)]
+
+    def update_work_state(
+        self,
+        goal_id: str,
+        *,
+        current_state: str | None = None,
+        next_action: str | None = None,
+        waiting_for: str | None = None,
+        progress_note: str | None = None,
+        last_run_id: str | None = None,
+    ) -> dict[str, Any]:
+        current = self.work_state(goal_id)
+        values = {
+            "current_state": current["current_state"] if current_state is None else str(current_state).strip(),
+            "next_action": current["next_action"] if next_action is None else str(next_action).strip(),
+            "waiting_for": current["waiting_for"] if waiting_for is None else str(waiting_for).strip(),
+            "progress_note": current["progress_note"] if progress_note is None else str(progress_note).strip(),
+            "last_run_id": current["last_run_id"] if last_run_id is None else last_run_id,
+        }
+        for key in ("current_state","next_action","waiting_for","progress_note"):
+            if len(values[key].encode("utf-8")) > 4000:
+                raise ValueError(f"{key} exceeds 4000 UTF-8 bytes")
+        with self.store.tx() as db:
+            db.execute(
+                "UPDATE goal_work_state SET current_state=?,next_action=?,waiting_for=?,progress_note=?,"
+                "last_run_id=?,revision=revision+1,updated_at=CURRENT_TIMESTAMP WHERE goal_id=?",
+                (
+                    values["current_state"], values["next_action"], values["waiting_for"],
+                    values["progress_note"], values["last_run_id"], goal_id,
+                ),
+            )
+            db.execute("UPDATE goals SET updated_at=CURRENT_TIMESTAMP WHERE goal_id=?", (goal_id,))
+        return self.goal_view(goal_id)
+
+    def checkpoint_run(
+        self,
+        goal_id: str,
+        run_id: str,
+        *,
+        status: str,
+        summary: str = "",
+        next_action: str = "",
+        waiting_for: str = "",
+    ) -> dict[str, Any]:
+        mapping = {
+            "COMPLETED": "READY",
+            "WAITING_USER": "WAITING",
+            "PAUSED": "PAUSED",
+            "UNKNOWN": "RECONCILE",
+            "FAILED": "BLOCKED",
+            "BUDGET_EXHAUSTED": "BLOCKED",
+            "CANCELLED": "PAUSED",
+            "RUNNING": "IN_PROGRESS",
+        }
+        return self.update_work_state(
+            goal_id,
+            current_state=mapping.get(status, status),
+            next_action=next_action or (
+                "Continue from the latest durable checkpoint."
+                if status in {"COMPLETED","PAUSED","CANCELLED"}
+                else "Reconcile the latest run before continuing."
+                if status=="UNKNOWN"
+                else ""
+            ),
+            waiting_for=waiting_for,
+            progress_note=summary,
+            last_run_id=run_id,
+        )
 
     def add_trigger(
         self,
