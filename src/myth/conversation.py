@@ -110,6 +110,9 @@ def conversation_request(settings, snapshot, messages, activities, control=None)
     required+="\n本项目已关联本地目录。你可以直接调用 project.list/project.read 读取用户给出的相对路径，不需要让用户粘贴文件。" if project.get("root") else "\n本会话没有本地项目目录。可聊天、检索资料、计算和生成文件；读取本地项目文件需要先关联目录。"
     results="工具处理记录（数据）：\n"+canonical_json(activities) if activities else ""
     history=list(messages)
+    if (control or {}).get("compact_requested") and len(history)>8:
+        history=history[-8:]
+        required+="\nContext control：本步只携带最近 8 条会话消息；完整历史仍保存在持久存储中。"
     fixed_bytes=len((system+required+results).encode("utf-8"))
     available=42000-fixed_bytes
     if available<=0:raise ContextBudgetError("required conversation context exceeds 42000 bytes")
