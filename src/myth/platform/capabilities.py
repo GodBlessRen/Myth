@@ -52,6 +52,7 @@ def default_capabilities() -> CapabilityRegistry:
     executable = [
         ("knowledge.search", "knowledge", "Search local indexed text with source references.", "read"),
         ("knowledge.read", "knowledge", "Expand one admitted knowledge document to paginated L2 evidence.", "read"),
+        ("knowledge.resolve", "knowledge", "Project one admitted knowledge source at L0/L1/L2 under a fixed digest.", "read"),
         ("project.list", "file", "List an explicitly associated project directory.", "read"),
         ("project.read", "file", "Read UTF-8 project content inside the admitted root.", "read"),
         ("artifact.write", "file", "Write a managed output artifact without overwriting source files.", "write"),

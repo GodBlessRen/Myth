@@ -16,9 +16,10 @@ _TEXT={"type":"string"}
 _TOOL_ARGUMENTS={
     "knowledge.search":object_schema({"query":_TEXT,"limit":{"type":"integer","minimum":1,"maximum":8}},["query"]),
     "knowledge.read":object_schema({"document_id":_TEXT,"offset":{"type":"integer","minimum":0},"max_chars":{"type":"integer","minimum":1,"maximum":12000}},["document_id"]),
+    "knowledge.resolve":object_schema({"document_id":_TEXT,"resolution":{"type":"string","enum":["L0","L1","L2"]},"cursor":{"type":"integer","minimum":0},"limit":{"type":"integer","minimum":1,"maximum":12000}},["document_id","resolution"]),
     "project.list":object_schema({"path":_TEXT},[]),
     "project.read":object_schema({"path":_TEXT,"offset":{"type":"integer","minimum":0},"max_chars":{"type":"integer","minimum":1,"maximum":12000}},["path"]),
-    "project.search":object_schema({"query":_TEXT,"path":_TEXT,"limit":{"type":"integer","minimum":1,"maximum":20}},["query"]),
+    "project.search":object_schema({"query":_TEXT,"path":_TEXT,"limit":{"type":"integer","minimum":1,"maximum":20},"cursor":{"type":"integer","minimum":0},"max_files":{"type":"integer","minimum":1,"maximum":2500}},["query"]),
     "diff.preview":object_schema({"path":_TEXT,"content":_TEXT}),
     "git.status":object_schema({},[]),
     "git.diff":object_schema({"path":_TEXT},[]),
@@ -34,10 +35,11 @@ CONVERSATION_SCHEMA={"oneOf":[
 
 TOOL_CATALOG = {
     "knowledge.search": {"query": "search question", "limit": "1-8; project + shared knowledge only"},
-    "knowledge.read": {"document_id": "document id from a citation/source", "offset": "character offset", "max_chars": "100-12000 characters; default 6000"},
+    "knowledge.read": {"document_id": "document id from a citation/source", "offset": "character offset", "max_chars": "1-12000 characters; default 6000; L2 alias"},
+    "knowledge.resolve": {"document_id": "document id", "resolution": "L0 metadata/excerpt, L1 chunk navigation, L2 detailed source text", "cursor": "resolution-specific continuation cursor", "limit": "L1 chunks <=20 or L2 characters <=12000"},
     "project.list": {"path": "optional relative directory"},
     "project.read": {"path": "relative file", "offset": "character offset", "max_chars": "100-12000 characters; default 6000"},
-    "project.search": {"query": "text to find", "path": "optional relative directory", "limit": "1-20 matches"},
+    "project.search": {"query": "text to find", "path": "optional relative directory", "limit": "1-20 returned matches", "cursor": "eligible-file offset cursor", "max_files": "1-2500 files scanned this call; default 500"},
     "diff.preview": {"path": "relative source file", "content": "complete proposed UTF-8 replacement content; preview only"},
     "git.status": {},
     "git.diff": {"path": "optional relative file"},
@@ -57,14 +59,24 @@ def terms(text: str):
     return set(english + [word[i:i+2] for word in chinese for i in range(max(1,len(word)-1))])
 
 
-def rank_chunks(query, candidates, limit=5):
+def score_chunk(query, item):
+    """Score one lexical candidate without assuming the candidate set is complete."""
     query_terms=terms(query)
-    scored=[]
-    for item in candidates:
-        matched=query_terms & terms(item["content"]+" "+item["title"])
-        score=len(matched)/max(1,len(query_terms))
-        if query.strip() and query.lower() in item["content"].lower():score+=1
-        if score:scored.append({**item,"score":round(score,3),"citation":f"doc:{item['document_id']}:{item['chunk_index']}"})
+    matched=query_terms & terms(item["content"]+" "+item["title"])
+    score=len(matched)/max(1,len(query_terms))
+    if query.strip() and query.lower() in item["content"].lower():
+        score+=1
+    if not score:
+        return None
+    return {
+        **item,
+        "score":round(score,3),
+        "citation":f"doc:{item['document_id']}:{item['chunk_index']}",
+    }
+
+
+def rank_chunks(query, candidates, limit=5):
+    scored=[value for item in candidates if (value:=score_chunk(query,item)) is not None]
     return sorted(scored,key=lambda x:(-x["score"],x["document_id"],x["chunk_index"]))[:limit]
 
 

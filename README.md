@@ -2,6 +2,8 @@
 
 **Durable Runtime 打底、Agent Product 向上生长的本地 Agent 平台。**
 
+v0.12 聚焦 **Retrieval Evidence + Eval Foundation**：Knowledge/Memory 取消排序前静默候选截断，检索结果暴露 scanned/matched/pages/exhausted；`project.search` 增加 cursor/max_files 与扫描统计；`knowledge.resolve` 把同一 document/digest 显式投影为 L0 Metadata/Excerpt、L1 Chunk Navigation、L2 Detail/Evidence；新增版本化机器可读 `evals/foundation-v1.json` 与 Case/Observation/Verdict 合同，为后续 Intent / Information Gain / Evolution 共用同一评测地基。
+
 v0.11 把 v0.10 的几项“合同”推进到真实主链：**Control revision 跨连接原子分配**；Goal 在创建 Run/Turn 前完成 admission，并进入 request identity；Episodic Memory 默认按 Project / Session 隔离并携带 `fact_level`；新增 `knowledge.read`，可从检索片段按固定 document digest 分页展开到 **L2 Detail/Evidence**；Intent Pick 首次接入一条保守快路——严格受限的纯算术直接使用本地 deterministic calculator，**0 次模型调用**，任何不确定输入立即回退现有 Agent Loop。Information Gain / Delta 仍不伪装成已校准能力。
 
 v0.10 新增 **Intent Pick + Information Resolution / Delta / Gain** 的纯领域合同与 Ports，明确 Intent Pick 的路径选择语义、L0 Abstract → L1 Overview → L2 Detail/Evidence 的信息分辨率、Delta 的状态变化，以及 Gain 的边际任务价值。v0.11 只连接了可证明的局部路径，不把其余合同提前标成可用。
@@ -65,9 +67,9 @@ python -m myth.cli --root . web
 
 ## Loop、上下文与检索
 
-对话入口先做保守 Intent Pick；严格受限的纯算术走本地 deterministic 快路，其余进入「固定入口 → 持久模型请求 → 决策校验 → 工具授权/收据 → 下一步」的 Agent Loop，可以直接回答或向用户提问。会话消息持久保存；最近 30 条历史作为候选，与召回资料/记忆、旧工具预览共同按 42,000 字节消息预算选入。本轮原始任务、澄清、显式附件片段和最新工具结果优先保留；Compact 只减少旧历史，完整记录仍在本地。Inspector 展示实际字节和取舍数量。必需内容超过预算会在调用前停止。完成的普通对话会写入本地 Episodic Memory：有项目时默认限制在该 Project，无项目时限制在 Session；显式 Semantic/Procedural/Working Memory 仍可作为 global 或指定 scope 持久化，并携带 provenance / revision / fact_level。下一轮只从当前可见 scope 做关键词召回并固定进 Turn Snapshot。
+对话入口先做保守 Intent Pick；严格受限的纯算术走本地 deterministic 快路，其余进入「固定入口 → 持久模型请求 → 决策校验 → 工具授权/收据 → 下一步」的 Agent Loop，可以直接回答或向用户提问。会话消息持久保存；最近 30 条历史作为候选，与召回资料/记忆、旧工具预览共同按 42,000 字节消息预算选入。本轮原始任务、澄清、显式附件片段和最新工具结果优先保留；Compact 只减少旧历史，完整记录仍在本地。Inspector 展示实际字节和取舍数量。必需内容超过预算会在调用前停止。完成的普通对话会写入本地 Episodic Memory：有项目时默认限制在该 Project，无项目时限制在 Session；显式 Semantic/Procedural/Working Memory 仍可作为 global 或指定 scope 持久化，并携带 provenance / revision / fact_level。v0.12 的 Memory recall 会分页扫描全部 active 且当前 scope 可见的候选，不再只看最近 500 条。下一轮召回结果固定进 Turn Snapshot。
 
-知识库按 1,800 字符分块、200 字符重叠，英文词与中文双字关键词排序；本轮只检索共享资料和当前项目资料。检索结果保留文档、片段、digest 与来源标识；`knowledge.read` 可沿同一 document/digest 分页展开到 L2 原文证据。当前没有向量检索、重排器或 PDF/Office 解析器；Keyword Retrieval 仍是可复现 baseline。
+知识库按 1,800 字符分块、200 字符重叠，英文词与中文双字关键词排序；本轮只检索共享资料和当前项目资料。v0.12 不再在排序前静默截断到前 10,000 个 chunk，而是分页扫描全部当前可见候选并返回 scanned/matched/pages/exhausted 诊断。`knowledge.resolve` 可沿同一 document/digest 在 L0/L1/L2 间渐进展开。当前没有向量检索、重排器或 PDF/Office 解析器；Keyword Retrieval 继续作为可复现 baseline。
 
 模型发出执行 Ticket 后结果不明，则保留 UNKNOWN 与预算占用；续跑先对账，不重复未知调用。已持久化的模型收据、文件摘要与工具结果可恢复。SQLite 保证账本事务，不把外部效果宣称为 exactly-once。
 

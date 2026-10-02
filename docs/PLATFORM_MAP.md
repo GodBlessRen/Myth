@@ -1,4 +1,4 @@
-# Myth v0.11 — Composable Runtime Map
+# Myth v0.12 — Composable Runtime Map
 
 Myth 不再把架构描述成 P0 → P1000 的固定层级。
 
@@ -40,11 +40,11 @@ Domains 是同级职责，不是必须顺序经过的层。
 | Execution | usable | Model、文件、检索、Diff、Git 只读执行与对账 |
 | Capability | usable | Registry + executable/planned 准入 |
 | State | usable | SQLite durable state / budget / event / command |
-| Context | usable | ContextCompiler + fixed byte budget + fixed-digest Knowledge L2 expansion |
-| Memory | usable | typed revision + search/revoke + scoped episodic auto-write + provenance fact_level |
+| Context | usable | ContextCompiler + fixed byte budget + fixed-digest Knowledge L0/L1/L2 projection |
+| Memory | usable | typed revision + search/revoke + scoped episodic auto-write + full visible candidate scan + provenance fact_level |
 | Personal State | connected | Goal / Trigger / explicit state 持久化与 API |
 | Observability | usable | Runtime Inspector + operation/event/control projection |
-| Evaluation | exists | 固定质量门函数存在，尚未成为完整 eval pipeline |
+| Evaluation | exists | 固定 Case/Observation/Verdict 合同 + foundation-v1 suite；尚未成为完整在线 eval pipeline |
 | Evolution | exists | candidate/promotion contract 存在，不自动发布 |
 
 ## Strategies

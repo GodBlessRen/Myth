@@ -1,0 +1,104 @@
+{
+  "suite_id": "myth-foundation-v1",
+  "version": 1,
+  "principle": "quality and runtime safety before cost optimization",
+  "cases": [
+    {
+      "case_id": "intent-arithmetic-local",
+      "category": "intent",
+      "input": {
+        "text": "计算 2+3*4"
+      },
+      "expected": {
+        "route": "deterministic",
+        "answer": "14",
+        "model_calls": 0
+      }
+    },
+    {
+      "case_id": "intent-ambiguous-fallback",
+      "category": "intent",
+      "input": {
+        "text": "帮我分析这个计划"
+      },
+      "expected": {
+        "route": "agent"
+      }
+    },
+    {
+      "case_id": "knowledge-late-candidate",
+      "category": "retrieval",
+      "input": {
+        "query": "AFTER-CUTOFF-77",
+        "candidate_position": 10002
+      },
+      "expected": {
+        "found": true,
+        "truncated_before_ranking": false
+      }
+    },
+    {
+      "case_id": "memory-late-candidate",
+      "category": "memory",
+      "input": {
+        "query": "AFTER-MEMORY-500",
+        "candidate_position": 506
+      },
+      "expected": {
+        "found": true,
+        "truncated_before_ranking": false
+      }
+    },
+    {
+      "case_id": "knowledge-resolution-provenance",
+      "category": "information_resolution",
+      "input": {
+        "levels": [
+          "L0",
+          "L1",
+          "L2"
+        ]
+      },
+      "expected": {
+        "same_source_ref": true,
+        "same_digest": true
+      }
+    },
+    {
+      "case_id": "project-search-continuation",
+      "category": "project_search",
+      "input": {
+        "max_files": 1
+      },
+      "expected": {
+        "cursor_continuation": true,
+        "coverage_reported": true
+      }
+    },
+    {
+      "case_id": "control-revision-concurrency",
+      "category": "runtime_safety",
+      "input": {
+        "concurrent_commands": 2
+      },
+      "expected": {
+        "durable_revisions": [
+          2,
+          3
+        ]
+      },
+      "safety_critical": true
+    },
+    {
+      "case_id": "unknown-no-blind-replay",
+      "category": "runtime_safety",
+      "input": {
+        "unknown_external_result": true
+      },
+      "expected": {
+        "redispatch": false
+      },
+      "safety_critical": true
+    }
+  ]
+}

@@ -122,19 +122,73 @@ class LocalConversationExecution:
             if len(files)>=150:break
         return {"files":files,"truncated":len(files)==150}
 
-    def _read_knowledge(self,turn,args):
-        document_id=args.get("document_id")
+    def _knowledge_document(self,turn,document_id):
         if not isinstance(document_id,str) or not document_id.strip() or len(document_id)>200:
             raise ValueError("document_id is required")
         document=self.repository.document(document_id)
         project_id=(turn["snapshot"].get("project") or {}).get("id")
         if document["project_id"] not in {None,project_id}:
             raise PermissionError("knowledge document belongs to another project")
-        offset=args.get("offset",0);limit=args.get("max_chars",6000)
-        if type(offset) is not int or offset<0 or type(limit) is not int or not 1<=limit<=12000:
-            raise ValueError("invalid pagination")
+        return document
+
+    def _resolve_knowledge(self,turn,args):
+        document_id=args.get("document_id")
+        document=self._knowledge_document(turn,document_id)
+        resolution=str(args.get("resolution") or "L2").upper()
+        cursor=args.get("cursor",0)
+        limit=args.get("limit",6000 if resolution=="L2" else 12)
+        if type(cursor) is not int or cursor<0:
+            raise ValueError("cursor must be a non-negative integer")
+        source_ref=f"doc:{document_id}@{document['digest']}"
+        if resolution=="L0":
+            excerpt=document["content"][: min(600,max(120,int(limit)*40))]
+            return {
+                "document_id":document_id,
+                "title":document["title"],
+                "digest":document["digest"],
+                "bytes":document["bytes"],
+                "content":excerpt,
+                "resolution":"L0",
+                "source_ref":source_ref,
+                "cursor":0,
+                "next_cursor":None,
+                "has_more":False,
+            }
+        if resolution=="L1":
+            if type(limit) is not int or not 1<=limit<=20:
+                raise ValueError("L1 limit must be 1-20 chunks")
+            rows=self.repository.store.db.execute(
+                "SELECT chunk_index,content FROM workspace_chunks "
+                "WHERE document_id=? AND chunk_index>=? ORDER BY chunk_index LIMIT ?",
+                (document_id,cursor,limit+1),
+            ).fetchall()
+            values=[
+                {
+                    "chunk_index":int(row["chunk_index"]),
+                    "preview":row["content"][:500],
+                    "citation":f"doc:{document_id}:{row['chunk_index']}",
+                }
+                for row in rows[:limit]
+            ]
+            has_more=len(rows)>limit
+            next_cursor=(values[-1]["chunk_index"]+1) if values and has_more else None
+            return {
+                "document_id":document_id,
+                "title":document["title"],
+                "digest":document["digest"],
+                "resolution":"L1",
+                "source_ref":source_ref,
+                "chunks":values,
+                "cursor":cursor,
+                "next_cursor":next_cursor,
+                "has_more":has_more,
+            }
+        if resolution!="L2":
+            raise ValueError("resolution must be L0/L1/L2")
+        if type(limit) is not int or not 1<=limit<=12000:
+            raise ValueError("L2 limit must be 1-12000 characters")
         text=document["content"]
-        preview=text[offset:offset+limit]
+        preview=text[cursor:cursor+limit]
         while len(preview.encode("utf-8"))>18000:
             preview=preview[:len(preview)//2]
         return {
@@ -142,11 +196,25 @@ class LocalConversationExecution:
             "title":document["title"],
             "content":preview,
             "digest":document["digest"],
-            "offset":offset,
-            "next_offset":offset+len(preview),
-            "has_more":offset+len(preview)<len(text),
+            "cursor":cursor,
+            "next_cursor":cursor+len(preview) if cursor+len(preview)<len(text) else None,
+            "has_more":cursor+len(preview)<len(text),
             "resolution":"L2",
-            "source_ref":f"doc:{document_id}@{document['digest']}",
+            "source_ref":source_ref,
+        }
+
+    def _read_knowledge(self,turn,args):
+        value=self._resolve_knowledge(turn,{
+            "document_id":args.get("document_id"),
+            "resolution":"L2",
+            "cursor":args.get("offset",0),
+            "limit":args.get("max_chars",6000),
+        })
+        # v0.11 wire compatibility: knowledge.read exposed offset/next_offset.
+        return {
+            **value,
+            "offset":value["cursor"],
+            "next_offset":value["next_cursor"],
         }
 
     def _read_project(self,turn,args):
@@ -170,37 +238,55 @@ class LocalConversationExecution:
     def _iter_text_files(self,turn,start="."):
         root,path=self.project_path(turn,start)
         if not path.is_dir():raise ValueError("search path must be a directory")
-        count=0
         for candidate in sorted(path.rglob("*")):
-            if count>=2500:break
             if not candidate.is_file() or candidate.is_symlink():continue
             relative=candidate.relative_to(root)
             try:self.relative_path(str(relative))
             except PermissionError:continue
             if candidate.suffix.lower() not in TEXT_SUFFIXES or candidate.stat().st_size>512_000:
                 continue
-            count+=1
             yield root,candidate,relative
 
     def _search_project(self,turn,args):
         query=str(args.get("query",""))
         if not query.strip() or len(query)>300:raise ValueError("search query must contain 1-300 characters")
         limit=args.get("limit",12)
+        cursor=args.get("cursor",0)
+        max_files=args.get("max_files",500)
         if type(limit) is not int or not 1<=limit<=20:raise ValueError("limit must be 1-20")
+        if type(cursor) is not int or cursor<0:raise ValueError("cursor must be a non-negative integer")
+        if type(max_files) is not int or not 1<=max_files<=2500:raise ValueError("max_files must be 1-2500")
         needle=query.lower()
-        matches=[]
+        matches=[];matched_count=0;eligible_seen=0;scanned=0;has_more=False
         for root,path,relative in self._iter_text_files(turn,args.get("path") or "."):
+            if eligible_seen<cursor:
+                eligible_seen+=1
+                continue
+            if scanned>=max_files:
+                has_more=True
+                break
+            eligible_seen+=1;scanned+=1
             try:text=path.read_text(encoding="utf-8")
             except UnicodeDecodeError:continue
             for line_no,line in enumerate(text.splitlines(),1):
                 if needle in line.lower():
-                    matches.append({
-                        "path":str(relative).replace("\\","/"),
-                        "line":line_no,
-                        "preview":line.strip()[:500],
-                    })
-                    if len(matches)>=limit:return {"matches":matches,"truncated":True}
-        return {"matches":matches,"truncated":False}
+                    matched_count+=1
+                    if len(matches)<limit:
+                        matches.append({
+                            "path":str(relative).replace("\\","/"),
+                            "line":line_no,
+                            "preview":line.strip()[:500],
+                        })
+        next_cursor=cursor+scanned if has_more else None
+        return {
+            "matches":matches,
+            "scanned_files":scanned,
+            "matched_lines":matched_count,
+            "cursor":cursor,
+            "next_cursor":next_cursor,
+            "has_more":has_more,
+            "truncated":has_more or matched_count>len(matches),
+        }
 
     def _diff_preview(self,turn,args):
         root,path=self.project_path(turn,args.get("path"))
@@ -272,13 +358,16 @@ class LocalConversationExecution:
         result={"capability_id":capability}
         intent={"write_bytes":0}
         if capability=="knowledge.search":
-            result["sources"]=self.repository.search(
+            report=self.repository.search_report(
                 args.get("query",""),
                 (turn["snapshot"].get("project") or {}).get("id"),
                 args.get("limit",5),
             )
+            result.update(report)
         elif capability=="knowledge.read":
             result.update(self._read_knowledge(turn,args))
+        elif capability=="knowledge.resolve":
+            result.update(self._resolve_knowledge(turn,args))
         elif capability=="project.list":
             result.update(self.list_project(turn,args.get("path",".")))
         elif capability=="project.read":
