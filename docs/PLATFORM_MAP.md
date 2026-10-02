@@ -1,4 +1,4 @@
-# Myth v0.14 — Composable Runtime Map
+# Myth v0.15 — Composable Runtime Map
 
 Myth 不再把架构描述成 P0 → P1000 的固定层级。
 
@@ -44,8 +44,8 @@ Domains 是同级职责，不是必须顺序经过的层。
 | Memory | usable | typed revision + search/revoke + scoped episodic auto-write + full visible candidate scan + provenance fact_level |
 | Personal State | connected | Goal / Trigger / explicit state 持久化与 API |
 | Observability | usable | Runtime Inspector + operation/event/control projection |
-| Evaluation | usable | foundation-v1/v2/v3 + executable Runner + durable Eval Ledger + paired policy comparison + Release Gate；不自动 promotion |
-| Evolution | exists | candidate/promotion contract 存在，不自动发布 |
+| Evaluation | usable | foundation-v1/v2/v3 + executable Runner + durable Eval Ledger + complete-suite release evidence + paired comparison |
+| Evolution | usable | Cost Model Registry + Calibration Matrix + durable Candidate Registry + explicit Promote/Rollback + Active Policy revision；不自动发布 |
 
 ## Strategies
 
@@ -120,7 +120,7 @@ Outbound Adapters
 | Concept | 当前 | 含义 |
 | --- | --- | --- |
 | Intent Pick | connected | strict arithmetic 走 deterministic；显式/强匹配本地资料走 conservative local_retrieval；其余回退 Agent Loop |
-| Information Resolution | connected | Turn admission 使用可注入 Resolution policy 固定 L0/L1/L2；Eval 可离线替换 policy，生产默认不变 |
+| Information Resolution | connected | Turn admission 从 durable Active Policy 构造 rule/fixed controller 并固定 policy_id；Promote/Rollback 仅影响未来 Turn |
 | Information Delta | exists | added / updated / removed / conflicted 的状态变化合同；尚未自动接入 Memory lifecycle |
-| Information Gain | exists | 边际任务价值及 gain-per-cost 合同；尚无校准 estimator |
+| Information Gain | connected | paired fixed-case observed quality delta + cross-case Calibration Matrix；显式 Cost Model 后可计算 gain-per-cost |
 
