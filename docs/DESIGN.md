@@ -1,29 +1,84 @@
-# Myth v0.5 workspace design
+# Myth v0.7 Product Design
 
-The product starts with a conversation. Sessions, projects, knowledge and model settings each have a working page. A user can ask a normal question before associating files.
+## Product identity
+
+Myth is not a knowledge-base SaaS with an AI chat panel. It is an **Agent Workbench** where users can see how intent becomes execution evidence.
+
+The product identity comes from one causal chain:
+
+```text
+Intent → Decision → Authority → Result → Completion
+```
+
+The primary screen is the work surface, not a marketing hero.
 
 ## Visual system
 
-- Graphite navigation, a cool light canvas, white work surfaces and one muted violet accent.
-- Sans typography with a clear heading/body/metadata hierarchy; mono is reserved for code and file evidence.
-- An original CSS orbital mark, generous spacing and four practical starters in the welcome view.
-- A bounded reading column, floating composer, quiet source links, collapsed tool records and concrete downloads.
-- Project cards, file panels, session rows and knowledge statistics share spacing, corner and border rules.
-- Mobile navigation drawer and single-column pages; reduced-motion rules disable animations.
-- Native HTML/CSS/JS, system fonts and original SVG icons; no remote assets or build dependencies.
+### Color
 
-## Interaction
+- Paper `#F6F2EA` — application canvas.
+- Surface `#FCFAF6` — composer, panels and controlled elevation.
+- Ink `#25231F` — primary structure and high-confidence controls.
+- Muted `#7C756A` — secondary information.
+- Signal Orange `#C77732` — running state, selected authority and execution cut-points only.
+- Success `#5E7A63` — completed / durable positive state.
 
-The URL hash identifies a page/session. Reload restores viewing without submitting a message. Polling retains an unchanged thread, scroll position and open tool records. Replies from an older chat request cannot replace the current selection. Failed submissions retain identity for an unchanged message.
+Orange is not a decorative wash. Runtime state earns the accent.
 
-Dialogs implement project/session editing and knowledge import without browser prompts. Model/file text uses textContent and a limited Markdown renderer. Project roots are user configuration; file results are local copies. Conversation completion, source availability and file generation are distinct UI facts.
+### Type
 
-Source previews retain archived documents for historical references. Removing a document from the index excludes new retrieval without erasing its old source. Answer Markdown exports and immutable artifacts serve different content and are labeled separately.
+- System Sans: navigation, conversation, controls and body copy.
+- Georgia / Noto Serif SC fallback: task headline and major page title only.
+- Monospace: runtime meters, IDs and machine facts only.
 
-## Reference study
+## Information architecture
 
-The implementation is original code. The supplied [video-shotcraft](https://github.com/Vincentwei1021/video-shotcraft), [gc-minimal-zine-poster](https://github.com/LiamGvchi/gc-minimal-zine-poster), [frontend-slides](https://github.com/zarazhangrui/frontend-slides), [GSAP](https://github.com/greensock/GSAP) and [lieflat-charts](https://github.com/larashero3-dotcom/lieflat-charts) informed restrained contrast, negative space, readable hierarchy and motion. No templates or dependencies were copied.
+```text
+History / Context | Conversation / Task | Runtime Inspector
+```
 
-## Validation boundary
+- Conversation stays central.
+- Projects, Knowledge and Session Management are secondary context surfaces.
+- Runtime is visible but does not compete with the task.
+- Model state remains close to the active conversation.
 
-Browser checks cover desktop/mobile navigation, project creation, knowledge import, real model conversation, file download, session search/edit/archive/restore and reload. Complete accessibility and cross-browser audits remain planned; see [validation](VALIDATION.md).
+## Signature move: Execution Spine
+
+The Runtime Inspector is the one memorable visual device. It shows causality instead of presenting a dashboard full of identical cards.
+
+Current projection:
+
+```text
+Decision
+   │
+Authority
+   │
+Result
+   │
+Completion
+```
+
+v0.7 only renders facts already exposed by the conversation API. It does **not** invent Ticket IDs, Receipts or semantic verification that are not present in the API. As deeper durable facts become available, the same layout can evolve into:
+
+```text
+Action → Attempt → Ticket → Receipt → Verification
+```
+
+## State design
+
+Distinct states exist for idle, running, waiting for user, completed, failed/cancelled, unknown/recovering and budget exhausted.
+
+UNKNOWN is amber/brown and is not collapsed into failure red.
+
+## CSS rule
+
+v0.7 replaces the visual system at the source. Do not append another “final refinement override” layer. Tokens, layout primitives and component rules must be edited directly.
+
+## Accessibility floor
+
+- visible keyboard focus;
+- usable touch targets;
+- readable metadata;
+- `prefers-reduced-motion` support;
+- mobile collapses navigation and hides the inspector instead of squeezing three columns;
+- no critical meaning is conveyed by color alone.

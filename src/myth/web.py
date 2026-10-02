@@ -179,7 +179,7 @@ def _json_bytes(value: Any) -> bytes:
 
 def make_handler(service: AgentWebService):
     class Handler(BaseHTTPRequestHandler):
-        server_version = "MythWeb/0.5"
+        server_version = "MythWeb/0.7"
 
         def log_message(self, format: str, *args: object) -> None:
             # Keep local logs useful while avoiding request bodies and credentials.
@@ -242,6 +242,9 @@ def make_handler(service: AgentWebService):
                     return
                 if path == "/app.js":
                     self._asset("app.js", "text/javascript; charset=utf-8")
+                    return
+                if path == "/inspector.js":
+                    self._asset("inspector.js", "text/javascript; charset=utf-8")
                     return
                 if path == "/api/runs":
                     self._json(HTTPStatus.OK, {"runs": service.list_runs()})
