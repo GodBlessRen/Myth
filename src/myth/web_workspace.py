@@ -145,7 +145,9 @@ class ConversationWebService:
             for turn in value["turns"]:
                 lease=workspace.repository.driver_lease(turn["run_id"])
                 if turn["status"]=="RUNNING" and (lease is None or lease["expired"]):
-                    turn=workspace.repository.sweep_expired_driver(turn["run_id"])
+                    swept=workspace.repository.sweep_expired_driver(turn["run_id"])
+                    turn.clear()
+                    turn.update(swept)
                     lease=workspace.repository.driver_lease(turn["run_id"])
                 turn["driver_active"]=bool(
                     turn["run_id"] in active
