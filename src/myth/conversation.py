@@ -113,14 +113,15 @@ def conversation_request(settings, snapshot, messages, activities, control=None)
     if settings["provider"]!="ollama":
         system+="\n当前传输改用 StepDecision：action=reply 对应 decision_type=request_completion 且 goal_coverage=answer，action=ask 对应 ask_user，工具 action 对应 decision_type=tool_call 和 capability_id。arguments 对象编码为 arguments_json 字符串，其他未使用字段按 schema 填空。"
     max_output_tokens=settings.get("max_output_tokens",2048)
-    num_ctx=settings.get("num_ctx",8192) if settings.get("provider")=="ollama" else None
-    max_bytes=conversation_budget_bytes(num_ctx,max_output_tokens)
+    is_ollama=settings.get("provider")=="ollama"
+    num_ctx=settings.get("num_ctx",8192) if is_ollama else None
+    max_bytes=conversation_budget_bytes(num_ctx,max_output_tokens) if is_ollama else 42_000
     projected,report=compile_conversation_context(
         system,snapshot,messages,activities,control,max_bytes=max_bytes
     )
     report["num_ctx"]=num_ctx
     report["max_output_tokens"]=max_output_tokens
-    report["budget_formula"]="(num_ctx-max_output_tokens-512)*2"
+    report["budget_formula"]="(num_ctx-max_output_tokens-512)*2" if is_ollama else "remote-projection-cap=42000"
     return ModelRequest(
         settings["model"],
         projected,
