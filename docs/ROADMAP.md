@@ -4,7 +4,7 @@
 
 “先存在再优化”仍成立，但 v0.11 开始明确第二阶段原则：**已经存在的合同优先进入真实请求链、故障链和评测链；不继续用更多抽象掩盖未闭环的能力。**
 
-## 当前基线：v0.17
+## 当前基线：v0.18
 
 已经可用：
 
@@ -32,16 +32,53 @@
 - Information Delta：exists；尚未自动计算 conflict / supersede / revision delta；
 - Information Gain：**connected（offline evidence）**；paired fixed-case estimator + cross-case calibration matrix 已接通；不把 similarity/confidence 当 Gain。
 
-已经存在但还需加深：
+已经存在但暂不横向扩张：
 
 - Workflow；
 - Routing / Parallel；
 - Multi-Agent；
 - Managed Agent；
-- Personal Agent；
 - Skills / MCP；
-- Evaluation；
-- Evolution。
+- 更复杂的 Evaluation / Evolution。
+
+这些能力只有在真实 Goal 工作流暴露明确瓶颈后才继续深化。
+
+## 当前产品主线 — 先有再优
+
+Myth 暂停横向堆 Multi-Agent / A2A / 更多 Evolution 抽象，先证明一个更重要的问题：
+
+> 能否长期、可靠地替一个人推进真实工作？
+
+当前黄金路径：
+
+```text
+Long-term Goal
+  -> Current State
+  -> Next Action
+  -> admitted Turn
+  -> Observe / Act / Verify
+  -> durable checkpoint
+  -> later Session
+  -> continue the same Goal
+```
+
+v0.18 已完成第一版：
+
+- Goal durable work state：current / progress / next / waiting / last_run / revision；
+- Goal 可绑定到任意新 Turn，并跨 Session 继续；
+- Conversation 真实终态写 Goal checkpoint；
+- Goal checkpoint 作为数据进入下一 Turn 的 bounded context；
+- 第三栏 Runtime Observatory 固定保留并显示 Goal / Flow / Trajectory / Tokens / Context / Tools / Control / Budget；
+- observability UI 身份加入 regression test，后续 UI 重构不能静默删除。
+
+下一步优先级：
+
+1. 10 个真实日常任务 × 重复运行，记录成功/接管/恢复/成本；
+2. 最小 Timer/Schedule：只负责唤醒 due Goal，不绕过 admission/Ticket；
+3. 根据真实任务失败补 Tool / Context / Memory；
+4. 受限 `test.run`，让代码类任务可以验证候选改动；
+5. 连续自用，再决定哪些高级架构值得继续。
+
 
 ## 已完成 — Correctness + Provider hardening
 
