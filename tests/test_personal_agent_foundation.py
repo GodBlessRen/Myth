@@ -24,6 +24,17 @@ class PersonalAgentFoundationTests(unittest.TestCase):
                     "schedule",
                     {"cron":"0 8 * * *"},
                 )
+                workspace.repository.save_settings({
+                    "provider":"ollama",
+                    "model":"demo-model",
+                    "ollama_url":"http://127.0.0.1:11434",
+                    "max_steps":4,
+                    "max_output_tokens":256,
+                    "thinking":False,
+                })
+                session=workspace.repository.create_session("goal work")
+                turn=workspace.repository.create_turn(session["id"],"first run","req-goal")
+                workspace.personal.bind_run(goal["goal_id"],turn["run_id"])
                 workspace.personal.set_state(
                     "permission.email_send",
                     {"allowed":False,"approval_required":True},
@@ -33,6 +44,7 @@ class PersonalAgentFoundationTests(unittest.TestCase):
                 self.assertEqual(trigger["goal_id"],goal["goal_id"])
                 self.assertEqual(trigger["kind"],"schedule")
                 self.assertFalse(workspace.personal.state()["permission.email_send"]["allowed"])
+                self.assertEqual(workspace.personal.runs(goal["goal_id"])[0]["run_id"],turn["run_id"])
 
             with MythRuntime(root) as runtime:
                 workspace=Workspace(runtime)
