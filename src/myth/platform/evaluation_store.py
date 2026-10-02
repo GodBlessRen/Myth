@@ -139,19 +139,24 @@ class SqliteEvaluationLedger:
             comparison_key=row.get("comparison_key") or row["case_id"],
         )
 
-    def compare(self, baseline_eval_run_id: str, candidate_eval_run_id: str) -> list[dict[str, Any]]:
+    def paired_comparisons(self, baseline_eval_run_id: str, candidate_eval_run_id: str):
         baseline=self.run(baseline_eval_run_id)
         candidate=self.run(candidate_eval_run_id)
         if baseline["suite_id"] != candidate["suite_id"] or baseline["suite_version"] != candidate["suite_version"]:
             raise ValueError("policy comparison requires the same suite id/version")
         before={item["case_id"]:item for item in baseline["observations"]}
         after={item["case_id"]:item for item in candidate["observations"]}
-        rows=[]
+        pairs=[]
         for case_id in sorted(set(before) & set(after)):
-            comparison=compare_observations(
+            pairs.append(compare_observations(
                 self._observation(before[case_id],baseline["policy_id"]),
                 self._observation(after[case_id],candidate["policy_id"]),
-            )
+            ))
+        return pairs
+
+    def compare(self, baseline_eval_run_id: str, candidate_eval_run_id: str) -> list[dict[str, Any]]:
+        rows=[]
+        for comparison in self.paired_comparisons(baseline_eval_run_id,candidate_eval_run_id):
             rows.append({
                 "case_id":comparison.case_id,
                 "comparison_key":comparison.comparison_key,
@@ -165,3 +170,4 @@ class SqliteEvaluationLedger:
                 "calibrated":comparison.calibrated,
             })
         return rows
+
