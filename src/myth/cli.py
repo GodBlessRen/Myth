@@ -88,8 +88,27 @@ def build_parser() -> argparse.ArgumentParser:
     recover_model.add_argument("run_id", nargs="?")
 
     evaluate = sub.add_parser("eval", help="run a fixed local Myth evaluation suite")
-    evaluate.add_argument("--suite", default="evals/foundation-v2.json")
+    evaluate.add_argument("--suite", default="evals/foundation-v3.json")
     evaluate.add_argument("--case", action="append", default=[], dest="case_ids")
+    evaluate.add_argument("--policy-id", default="production-default")
+    evaluate.add_argument("--resolution-policy", choices=["default","L0","L1","L2"], default="default")
+    evaluate.add_argument("--record", action="store_true")
+
+    history = sub.add_parser("eval-history", help="show persisted local evaluation runs")
+    history.add_argument("--limit", type=int, default=20)
+
+    compare = sub.add_parser("eval-compare", help="compare two persisted evaluation runs case by case")
+    compare.add_argument("baseline_eval_run_id")
+    compare.add_argument("candidate_eval_run_id")
+
+    gain = sub.add_parser("gain", help="estimate paired information gain for one fixed eval case")
+    gain.add_argument("baseline_eval_run_id")
+    gain.add_argument("candidate_eval_run_id")
+    gain.add_argument("case_id")
+    gain.add_argument("--source-ref")
+    gain.add_argument("--from-resolution", choices=["L0","L1","L2"])
+    gain.add_argument("--to-resolution", choices=["L0","L1","L2"], required=True)
+    gain.add_argument("--weight", action="append", default=[], help="declared cost weight as meter=value")
 
     web = sub.add_parser("web", help="start the local Myth Agent workspace")
     web.add_argument("--host", default="127.0.0.1")
@@ -126,7 +145,66 @@ def main() -> None:
     if args.command == "eval":
         from .evaluation_runner import run_eval_suite
 
-        _print(run_eval_suite(args.suite, args.case_ids))
+        result=run_eval_suite(
+            args.suite,
+            args.case_ids,
+            policy_id=args.policy_id,
+            resolution_policy=args.resolution_policy,
+        )
+        if args.record:
+            from .platform.evaluation_store import SqliteEvaluationLedger
+            with MythRuntime(args.root) as runtime:
+                saved=SqliteEvaluationLedger(runtime).record(result,policy_id=args.policy_id)
+            result["recorded_eval_run_id"]=saved["eval_run_id"]
+        _print(result)
+        return
+    if args.command == "eval-history":
+        from .platform.evaluation_store import SqliteEvaluationLedger
+        with MythRuntime(args.root) as runtime:
+            _print(SqliteEvaluationLedger(runtime).list_runs(args.limit))
+        return
+    if args.command == "eval-compare":
+        from .platform.evaluation_store import SqliteEvaluationLedger
+        with MythRuntime(args.root) as runtime:
+            _print(SqliteEvaluationLedger(runtime).compare(
+                args.baseline_eval_run_id,
+                args.candidate_eval_run_id,
+            ))
+        return
+    if args.command == "gain":
+        from .domains.information import InformationResolution
+        from .platform.evaluation_store import SqliteEvaluationLedger
+        from .strategies import PairedEvalGainEstimator
+
+        weights={}
+        for raw in args.weight:
+            if "=" not in raw:
+                raise SystemExit("--weight must use meter=value")
+            meter,value=raw.split("=",1)
+            meter=meter.strip()
+            if not meter:
+                raise SystemExit("--weight meter cannot be empty")
+            try:
+                weights[meter]=float(value)
+            except ValueError as exc:
+                raise SystemExit("--weight value must be numeric") from exc
+        with MythRuntime(args.root) as runtime:
+            pairs=SqliteEvaluationLedger(runtime).paired_comparisons(
+                args.baseline_eval_run_id,
+                args.candidate_eval_run_id,
+            )
+        pair=next((item for item in pairs if item.case_id==args.case_id),None)
+        if pair is None:
+            raise SystemExit("case_id is not present in both evaluation runs")
+        source_ref=args.source_ref or (pair.evidence_refs[0] if pair.evidence_refs else f"eval:{pair.case_id}")
+        estimate=PairedEvalGainEstimator().estimate(
+            pair,
+            source_ref=source_ref,
+            from_resolution=InformationResolution(args.from_resolution) if args.from_resolution else None,
+            to_resolution=InformationResolution(args.to_resolution),
+            cost_weights=weights or None,
+        )
+        _print(estimate.serializable())
         return
     if args.command == "web":
         from .web import serve
