@@ -63,7 +63,7 @@
       <div class="page-heading">
         <div>
           <h1>固定事实与边界，不固定智能怎么组织。</h1>
-          <p>Myth 不是一条必须逐层经过的流水线。Core 保持稳定；Domains 正交协作；Decision / Routing / Workflow / Multi-Agent 是可插拔 Strategy；模型、MCP、A2A、存储与执行器都留在 Adapter 外圈。</p>
+          <p>Myth 不是一条必须逐层经过的流水线。Core 保持稳定；Domains 正交协作；Intent Pick / Information Resolution / Decision / Routing / Workflow / Multi-Agent 都是可插拔 Strategy；模型、MCP、A2A、存储与执行器都留在 Adapter 外圈。</p>
         </div>
         <a class="secondary" href="#chat">回到对话</a>
       </div>
@@ -76,7 +76,7 @@
       </div>
       <section class="architecture-section"><div class="architecture-heading"><h2>Core</h2><p>Goal / Run / Action / Attempt / Ticket / Receipt / Artifact / Verification</p></div><div id="runtimeCore" class="platform-grid"></div></section>
       <section class="architecture-section"><div class="architecture-heading"><h2>Domains</h2><p>统筹、控制、执行、能力、状态、上下文、记忆、个人状态、验证与观测是正交职责，不是上下层。</p></div><div id="platformLayers" class="platform-grid"></div></section>
-      <section class="architecture-section"><div class="architecture-heading"><h2>Strategies</h2><p>Direct、Agent Loop、Routing、Workflow、Parallel、Multi-Agent、Managed Agent、Personal Agent 可按任务组合。</p></div><div id="runtimeStrategies" class="platform-grid"></div></section>
+      <section class="architecture-section"><div class="architecture-heading"><h2>Strategies</h2><p>Intent Pick 先决定值得走哪条处理路径；Information Resolution 决定信息展开到 L0/L1/L2 哪一级；其余 Direct、Agent Loop、Routing、Workflow、Parallel、Multi-Agent 等按任务组合。</p></div><div id="runtimeStrategies" class="platform-grid"></div></section>
       <section class="architecture-section"><div class="architecture-heading"><h2>Adapters</h2><p>OpenAI / Ollama / MCP / A2A / Browser / Shell / SQLite 等通过 Ports 接入，不进入 Core。</p></div><div id="runtimeAdapters" class="platform-grid"></div></section>
       <section class="panel platform-capabilities">
         <div class="panel-heading"><div><h2>能力存在，不等于拥有执行权。</h2></div><span id="capabilityCount" class="count-badge"></span></div>
