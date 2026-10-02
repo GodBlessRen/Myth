@@ -167,6 +167,7 @@ class MythRuntime:
         old_text: str,
         new_text: str,
         expected_count: int,
+        decision_id: str | None = None,
     ) -> dict[str, Any]:
         """Create one durable patch Action/Attempt inside an existing Agent Run.
 
@@ -178,6 +179,14 @@ class MythRuntime:
         source = Path(source_path).resolve()
         target_name = source.name
         managed = self.workspaces.path_for(run_id, target_name)
+        if decision_id is not None:
+            bound = self.store.db.execute("SELECT action_id FROM agent_tool_bindings WHERE decision_id=?", (decision_id,)).fetchone()
+            if bound is not None:
+                action = self.store.get_action(bound[0])
+                if action["run_id"] != run_id:
+                    raise ValueError("bound tool action belongs to another run")
+                attempt = self.store.get_attempt_for_action(action["action_id"])
+                return {**action, "attempt_id": attempt["attempt_id"], "managed_file": str(managed)}
         before = managed.read_bytes() if managed.exists() else source.read_bytes()
         plan = exact_patch(before, old_text, new_text, expected_count)
         self.objects.put(plan.before)
@@ -227,6 +236,7 @@ class MythRuntime:
                 "envelope_digest": envelope_digest,
             },
             reservations={"tool_calls": 1, "write_bytes": len(plan.after)},
+            decision_id=decision_id,
         )
         return {
             "action_id": action_id,
@@ -237,33 +247,36 @@ class MythRuntime:
             "managed_file": str(managed),
         }
 
-    def execute_patch_action(self, run_id: str) -> dict[str, Any]:
+    def execute_patch_action(self, run_id: str, *, action_id: str | None = None) -> dict[str, Any]:
         """Execute the latest patch Attempt but do not complete the overall Run."""
 
-        attempt = self.store.get_attempt_for_run(run_id)
+        action = self.store.get_action(action_id) if action_id else self.store.get_action_for_run(run_id)
+        if action["run_id"] != run_id:
+            raise ValueError("action belongs to another run")
+        attempt = self.store.get_attempt_for_action(action["action_id"])
         if attempt["state"] == AttemptState.INTENT.value:
             ticket = self.store.start_attempt(attempt["attempt_id"], self._id("tkt"))
-            attempt = self.store.get_attempt_for_run(run_id)
+            attempt = self.store.get_attempt_for_action(action["action_id"])
         elif attempt["state"] == AttemptState.TICKETED.value:
             raise RecoveryRequired(
                 "Attempt already has a Ticket; reconcile before dispatching it again"
             )
         elif attempt["state"] == AttemptState.RESOLVED.value:
-            action = self.store.get_action_for_run(run_id)
+            receipt = self.store.db.execute("SELECT * FROM receipts WHERE attempt_id=? ORDER BY rowid DESC LIMIT 1", (attempt["attempt_id"],)).fetchone()
             return {
                 "action": action,
                 "attempt": attempt,
                 "managed_file": str(self.workspaces.path_for(run_id, action["target_name"])),
+                "receipt": dict(receipt) if receipt else {},
             }
         else:
             raise RecoveryRequired(f"Attempt is {attempt['state']}; reconcile before continuing")
 
         receipt = self._execute_ticket(run_id, attempt, ticket, None)
         self.store.settle_receipt(receipt, usage_known=True)
-        action = self.store.get_action_for_run(run_id)
         return {
             "action": action,
-            "attempt": self.store.get_attempt_for_run(run_id),
+            "attempt": self.store.get_attempt_for_action(action["action_id"]),
             "receipt": {
                 "receipt_id": receipt.receipt_id,
                 "outcome": receipt.outcome.value,
@@ -280,7 +293,7 @@ class MythRuntime:
         ticket: dict[str, Any],
         failpoint: str | None,
     ) -> ReceiptData:
-        action = self.store.get_action_for_run(run_id)
+        action = self.store.get_action(attempt["action_id"])
         path = self.workspaces.path_for(run_id, action["target_name"])
         current = path.read_bytes()
         current_digest = sha256_bytes(current)
@@ -343,19 +356,23 @@ class MythRuntime:
         self.store.settle_receipt(receipt, usage_known=True)
         return self._verify_and_deliver(run_id)
 
-    def recover(self, run_id: str | None = None) -> list[dict[str, Any]]:
+    def recover(self, run_id: str | None = None, *, deliver: bool = True) -> list[dict[str, Any]]:
         """Reconcile durable Tickets without blindly replaying the business write."""
 
         recovered: list[dict[str, Any]] = []
         for attempt in self.store.get_pending_attempts(run_id):
             rid = str(attempt["run_id"])
-            action = self.store.get_action_for_run(rid)
+            # Agent 的恢复只补执行事实；不能绕过其固定目标验收发布 P1 Delivery。
+            has_agents = self.store.db.execute("SELECT 1 FROM sqlite_master WHERE name='agent_runs'").fetchone()
+            agent_owned = has_agents and self.store.db.execute("SELECT 1 FROM agent_runs WHERE run_id=?", (rid,)).fetchone()
+            can_deliver = deliver and not agent_owned
+            action = self.store.get_action(attempt["action_id"])
             journaled = self.journal.read(attempt["attempt_id"])
             if journaled is not None:
                 if journaled.envelope_digest != attempt["envelope_digest"]:
                     raise RecoveryRequired("journal receipt belongs to a different envelope")
                 self.store.settle_receipt(journaled, usage_known=True)
-                recovered.append(self._verify_and_deliver(rid))
+                recovered.append(self._verify_and_deliver(rid) if can_deliver else {"attempt_id": attempt["attempt_id"], "state": "RESOLVED"})
                 continue
 
             path = self.workspaces.path_for(rid, action["target_name"])
@@ -370,16 +387,19 @@ class MythRuntime:
                     usage={},
                 )
                 self.store.settle_receipt(receipt, usage_known=False)
-                recovered.append(self._verify_and_deliver(rid))
+                recovered.append(self._verify_and_deliver(rid) if can_deliver else {"attempt_id": attempt["attempt_id"], "state": "RESOLVED"})
             else:
                 self.store.mark_attempt_unknown(
                     attempt["attempt_id"],
                     "Ticket exists but no durable receipt and managed content does not prove the expected effect",
                 )
-                recovered.append(self.status(rid))
+                recovered.append(self.status(rid) if can_deliver else {"attempt_id": attempt["attempt_id"], "state": "UNKNOWN"})
         return recovered
 
     def _verify_and_deliver(self, run_id: str) -> dict[str, Any]:
+        has_agents = self.store.db.execute("SELECT 1 FROM sqlite_master WHERE name='agent_runs'").fetchone()
+        if has_agents and self.store.db.execute("SELECT 1 FROM agent_runs WHERE run_id=?", (run_id,)).fetchone():
+            raise RecoveryRequired("Agent delivery requires its fixed goal verifier")
         run = self.store.get_run(run_id)
         if run["state"] == RunState.SUCCEEDED.value:
             return self.status(run_id)

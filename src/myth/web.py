@@ -14,7 +14,7 @@ from pathlib import Path
 import threading
 import socket
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 import webbrowser
 
 from .agent_runtime import AgentRuntime
@@ -54,7 +54,14 @@ class AgentWebService:
 
     def status(self, run_id: str) -> dict[str, Any]:
         with MythRuntime(self.root) as runtime:
-            return AgentRuntime(runtime).status(run_id)
+            result = AgentRuntime(runtime).status(run_id)
+        with self._lock:
+            result["driver_active"] = run_id in self._active
+        return result
+
+    def _fixed_provider_payload(self, run_id):
+        agent = self.status(run_id)["agent"]
+        return {**agent["provider_options"], "provider": agent["provider_id"], "model": agent["model_id"]}
 
     def _spawn(self, run_id: str, payload: dict[str, Any], *, resume_text: str | None = None) -> None:
         with self._lock:
@@ -70,7 +77,10 @@ class AgentWebService:
                     if resume_text is None:
                         agent.run(run_id, provider)
                     else:
-                        agent.resume(run_id, provider, resume_text)
+                        agent.resume(run_id, provider, resume_text, question_id=payload.get("question_id"))
+            except Exception as exc:
+                with MythRuntime(self.root) as runtime:
+                    AgentRuntime(runtime).repository.block(run_id, "UNKNOWN", f"{type(exc).__name__}: {exc}")
             finally:
                 with self._lock:
                     self._active.discard(run_id)
@@ -98,8 +108,8 @@ class AgentWebService:
         if not files:
             raise ValueError("at least one explicit allowed file is required")
 
-        max_steps = int(payload.get("max_steps") or 6)
-        max_output_tokens = int(payload.get("max_output_tokens") or 1024)
+        max_steps = payload.get("max_steps", 6)
+        max_output_tokens = payload.get("max_output_tokens", 1024)
         thinking_value = payload.get("thinking")
         thinking = str(thinking_value).strip() if thinking_value else None
 
@@ -112,16 +122,53 @@ class AgentWebService:
                 max_steps=max_steps,
                 max_output_tokens=max_output_tokens,
                 thinking=thinking,
+                request_id=payload.get("request_id"),
+                acceptance=payload.get("acceptance"),
+                provider_options={"ollama_url": payload.get("ollama_url", "http://127.0.0.1:11434"), "pi_command": payload.get("pi_command", "pi")},
             )
-        self._spawn(run_id, payload)
-        return {"run_id": run_id, "status": "RUNNING"}
+        existing = self.status(run_id)
+        if existing["agent"]["status"] == "RUNNING" and not existing["driver_active"]:
+            self._spawn(run_id, self._fixed_provider_payload(run_id))
+        return {"run_id": run_id, "status": existing["agent"]["status"]}
 
     def resume(self, run_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         text = str(payload.get("text") or "").strip()
         if not text:
             raise ValueError("text is required")
-        self._spawn(run_id, payload, resume_text=text)
+        current = self.status(run_id)["agent"]
+        if current["status"] != "WAITING_USER" or payload.get("question_id") != current["question_id"]:
+            raise ValueError("answer must match the current pending question_id")
+        self._spawn(run_id, {**self._fixed_provider_payload(run_id), "question_id": current["question_id"]}, resume_text=text)
         return {"run_id": run_id, "status": "RUNNING"}
+
+    def advance(self, run_id):
+        status = self.status(run_id)["agent"]["status"]
+        if status not in {"RUNNING", "UNKNOWN"}:
+            raise ValueError("only interrupted or uncertain runs can be continued")
+        self._spawn(run_id, self._fixed_provider_payload(run_id))
+        return {"run_id": run_id, "status": "RUNNING"}
+
+    def cancel(self, run_id):
+        with MythRuntime(self.root) as runtime:
+            return AgentRuntime(runtime).cancel(run_id)
+
+    def demo(self):
+        from .demo import create_demo
+        with MythRuntime(self.root) as runtime:
+            run_id, _ = create_demo(runtime)
+        self._spawn(run_id, {"provider": "scripted"})
+        return {"run_id": run_id, "status": "RUNNING"}
+
+    def artifact(self, run_id, index):
+        with MythRuntime(self.root) as runtime:
+            status = AgentRuntime(runtime).status(run_id)
+            if status["agent"]["status"] != "SUCCEEDED" or not status["delivery"]:
+                raise PermissionError("only verified deliveries can be downloaded")
+            files = status["acceptance"]["files"]
+            if index < 0 or index >= len(files):
+                raise KeyError(index)
+            item = files[index]
+            return Path(item["path"]).name, runtime.objects.get(item["expected_digest"])
 
 
 def _json_bytes(value: Any) -> bytes:
@@ -130,7 +177,7 @@ def _json_bytes(value: Any) -> bytes:
 
 def make_handler(service: AgentWebService):
     class Handler(BaseHTTPRequestHandler):
-        server_version = "MythWeb/0.3"
+        server_version = "MythWeb/0.4"
 
         def log_message(self, format: str, *args: object) -> None:
             # Keep local logs useful while avoiding request bodies and credentials.
@@ -143,6 +190,7 @@ def make_handler(service: AgentWebService):
             self.send_header("Cache-Control", "no-store")
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("X-Frame-Options", "DENY")
+            self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
             self.end_headers()
             self.wfile.write(body)
 
@@ -150,6 +198,8 @@ def make_handler(service: AgentWebService):
             self._send(status, _json_bytes(value), "application/json; charset=utf-8")
 
         def _read_json(self) -> dict[str, Any]:
+            if self.headers.get("Content-Type", "").split(";")[0].strip() != "application/json":
+                raise ValueError("Content-Type must be application/json")
             length = int(self.headers.get("Content-Length") or 0)
             if length <= 0 or length > 1_000_000:
                 raise ValueError("request body must be between 1 byte and 1 MB")
@@ -168,6 +218,7 @@ def make_handler(service: AgentWebService):
         def do_GET(self) -> None:
             path = urlparse(self.path).path
             try:
+                self._check_origin()
                 if path == "/":
                     self._asset("index.html", "text/html; charset=utf-8")
                     return
@@ -181,12 +232,26 @@ def make_handler(service: AgentWebService):
                     self._json(HTTPStatus.OK, {"runs": service.list_runs()})
                     return
                 if path.startswith("/api/runs/"):
+                    parts = path.removeprefix("/api/runs/").split("/")
+                    if len(parts) == 3 and parts[1] == "artifacts":
+                        name, data = service.artifact(parts[0], int(parts[2]))
+                        self.send_response(HTTPStatus.OK)
+                        self.send_header("Content-Type", "application/octet-stream")
+                        self.send_header("Content-Length", str(len(data)))
+                        self.send_header("X-Content-Type-Options", "nosniff")
+                        self.send_header("Cache-Control", "no-store")
+                        self.send_header("Content-Disposition", "attachment; filename*=UTF-8''" + quote(name))
+                        self.end_headers()
+                        self.wfile.write(data)
+                        return
                     run_id = path.removeprefix("/api/runs/").strip("/")
                     if not run_id or "/" in run_id:
                         raise ValueError("invalid run id")
                     self._json(HTTPStatus.OK, service.status(run_id))
                     return
                 self._json(HTTPStatus.NOT_FOUND, {"error": "not found"})
+            except PermissionError as exc:
+                self._json(HTTPStatus.FORBIDDEN, {"error": str(exc)})
             except KeyError:
                 self._json(HTTPStatus.NOT_FOUND, {"error": "run not found"})
             except Exception as exc:
@@ -198,7 +263,11 @@ def make_handler(service: AgentWebService):
         def do_POST(self) -> None:
             path = urlparse(self.path).path
             try:
+                self._check_origin()
                 payload = self._read_json()
+                if path == "/api/demo":
+                    self._json(HTTPStatus.ACCEPTED, service.demo())
+                    return
                 if path == "/api/provider/check":
                     self._json(HTTPStatus.OK, service.provider_check(payload))
                     return
@@ -208,6 +277,12 @@ def make_handler(service: AgentWebService):
                 if path.startswith("/api/runs/") and path.endswith("/resume"):
                     run_id = path.removeprefix("/api/runs/").removesuffix("/resume").strip("/")
                     self._json(HTTPStatus.ACCEPTED, service.resume(run_id, payload))
+                    return
+                if path.startswith("/api/runs/") and path.endswith("/continue"):
+                    self._json(HTTPStatus.ACCEPTED, service.advance(path.split("/")[3]))
+                    return
+                if path.startswith("/api/runs/") and path.endswith("/cancel"):
+                    self._json(HTTPStatus.OK, service.cancel(path.split("/")[3]))
                     return
                 self._json(HTTPStatus.NOT_FOUND, {"error": "not found"})
             except (ValueError, PermissionError) as exc:
@@ -219,6 +294,15 @@ def make_handler(service: AgentWebService):
                     HTTPStatus.CONFLICT,
                     {"error": f"{type(exc).__name__}: {exc}"},
                 )
+
+        def _check_origin(self):
+            host = self.headers.get("Host", "")
+            parsed = urlparse("http://" + host)
+            if parsed.hostname not in {"localhost", "127.0.0.1", "::1"} or parsed.port != self.server.server_port:
+                raise PermissionError("Host must match this local server")
+            origin = self.headers.get("Origin")
+            if origin and origin != "http://" + host:
+                raise PermissionError("cross-origin access is not allowed")
 
     return Handler
 
@@ -239,7 +323,8 @@ def serve(
             address_family = socket.AF_INET6
         server_type = IPv6ThreadingHTTPServer
     server = server_type((host, port), make_handler(service))
-    url = f"http://{host}:{port}/"
+    display_host = f"[{host}]" if ":" in host else host
+    url = f"http://{display_host}:{server.server_port}/"
     print(f"Myth Web: {url}")
     if open_browser:
         threading.Timer(0.35, lambda: webbrowser.open(url)).start()

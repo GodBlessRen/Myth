@@ -1,155 +1,100 @@
-# Myth Architecture — P1 + P2 + P3
+# Myth v0.4 architecture
 
-## Runtime contract
+## Dependency direction
 
-```text
-User goal
-  ↓
-AgentRuntime
-  ↓
-Model Action → Model Attempt → Model Ticket → Provider
-                                      ↓
-                           durable model receipt
-                                      ↓
-                               StepDecision
-                      ┌────────┼───────────┐
-                  ask_user   tool_call   request_completion
-                      │          │                │
-                    pause    Policy gate       Verifier
-                                 │                │
-                           Tool Action           PASS?
-                                 ↓                │
-                           Tool Attempt           ↓
-                                 ↓             Delivery
-                           StartTicket
-                                 ↓
-                           managed effect
-                                 ↓
-                              Receipt
-                                 ↓
-                           back to model
-```
-
-The architecture deliberately keeps three truths separate:
-
-1. **proposal truth** — what the model suggested;
-2. **execution truth** — what a Ticket/Receipt says happened;
-3. **completion truth** — what independent verification can prove.
-
-## P3 Agent loop
-
-`src/myth/agent_runtime.py` is the orchestration layer. It does not replace the lower layers:
-
-- Model calls still flow through `DecisionRuntime`;
-- tool calls still use P1 `Action → Attempt → Ticket → Receipt`;
-- budgets are still stored in the shared `accounts` ledger;
-- uncertain provider/tool outcomes still stop rather than silently retry.
-
-The loop is bounded by `max_steps`. Reaching the bound sets the Run to `BUDGET_EXHAUSTED`.
-
-## Tool admission
-
-P3 supports one admitted capability:
+This is a single-machine modular monolith. The Agent slice now follows a hexagonal boundary:
 
 ```text
-file.patch_exact
+CLI / Web (inbound adapters)
+          ↓
+AgentRuntime (composition facade)
+          ↓
+AgentDriver (application use case)
+          ↓
+AgentRepository / AgentExecution (ports)
+          ↑ implementation
+SqliteAgentRepository / LocalAgentExecution (outbound adapters)
+          ↓
+DecisionRuntime / MythRuntime / providers / objects / workspaces
 ```
 
-Before creating the Tool Action, AgentRuntime validates:
+`acceptance.py` contains pure domain verification and context projection. `application/` depends only on the domain, decision data and ports; it imports no SQL, filesystem or provider implementation. The architectural test protects this direction. P1/P2 remain existing concrete runtime services behind the execution adapter; the entire repository has not yet completed this migration.
 
-- capability ID;
-- argument types;
-- positive expected match count;
-- proposed path ∈ explicit `allowed_files`.
+Ports expose transaction-sized operations rather than cursors. The repository owns state; the driver owns sequencing; execution adapters own I/O and reconciliation. Neither model output nor browser state grants authority.
 
-A rejected proposal is recorded and returned to the next model decision without creating a Tool Ticket.
+## Submission and acceptance
 
-## Completion verification
+1. Validate 1–16 explicitly allowed, distinct-basename UTF-8 files, at most 1 MB each.
+2. Read baseline bytes once, calculate sequential exact-rule results, publish baseline objects and managed copies.
+3. In one SQLite transaction, persist Run, Agent, all accounts, acceptance manifest, settings and initial event/note.
 
-A model completion claim must cite one or more durable `evidence_ref` values.
+The manifest fixes every allowed file's baseline and expected digest. It includes unchanged files. Rules come from the inbound submission; model decisions cannot alter the manifest. Entry identity covers goal, provider/model, baseline, rules and limits. Reusing a request ID with different content is a conflict. Object publication precedes the DB commit and may leave unreferenced objects/workspaces on rejection or repeated submissions; garbage collection is deferred.
 
-AgentVerifier checks:
+The exact-patch primitive operates on UTF-8 bytes without newline normalization. The trusted contract is exact replacement, not unrestricted interpretation of a prose goal. Missing rules are `INCONCLUSIVE`.
+
+## Durable Agent steps
+
+`agent_steps` records `STARTED → DECIDED → DONE`. Opening a new step and advancing the cursor are atomic. A model request key (`run_id:step:number`) is bound to its invocation in the Model Ticket transaction. A committed response can be recovered and parsed without calling the provider again. Invalid JSON is still charged and consumes a step; a new step gets a new request identity.
+
+The local per-run OS lock prevents two drivers from executing the same run concurrently and releases on process exit. It is not a distributed lease. HTTP workers each own a runtime connection and expose `driver_active` only as a live projection. After restart, a user can explicitly continue; the service does not auto-dispatch uncertain work.
+
+`ask_user` finishes the step and stores the question in the same transaction. An answer must match the current decision ID and is consumed once. Provider/model and run settings remain fixed during continuation.
+
+## Tool execution and atomicity
+
+`file.patch_exact` uses the existing durable chain:
 
 ```text
-cited evidence exists
-AND cited Attempt == RESOLVED/SUCCEEDED
-AND managed artifact still exists
-AND sha256(current bytes) == action.after_digest
+decision → Action + Attempt + reservations + decision binding (TX-Intent)
+         → StartTicket + control revision validation (TX-Start)
+         → managed file effect
+         → durable Receipt → budget settlement
+         → tool note + step consumption (one transaction)
 ```
 
-Only then does P3 write an Agent verification report and Agent Delivery and set the Run to `SUCCEEDED`.
+The unique decision-to-Action binding is inserted with the Action intent. Restarting after a file receipt but before consuming the step reuses that Action and receipt. Recovery processes the actual Action owned by each attempt rather than the most recent Action. Agent-owned runs cannot receive P1 delivery through lower-level recovery.
 
-## P2 provider boundary
+`file.read` is a projection of managed bytes into a content-addressed immutable object. Its internal read ticket, snapshot reference and `tool_calls/read_bytes` debit commit together. Reconsuming the same decision returns the recorded snapshot without a second debit. The page limit is 3,000 Unicode characters; accounting uses UTF-8 bytes. It does not claim a two-transaction external-effect protocol for a read.
 
-`src/myth/providers/base.py` defines:
+SQLite is atomic only for its own state. File effects and provider requests are outside DB transactions. After a Ticket, absent durable outcome means `UNKNOWN`; reserved liability remains held, and continuation never resends that uncertain operation. Late model receipts settle the appropriate reserved/unknown-held account once. Actual usage absent from a receipt remains held.
 
-```text
-check()  -> readiness
-invoke() -> ModelResult
-```
+## Cancellation
 
-Built-ins:
+Cancellation commits Agent/Run control state and increments the control revision. Intents without a Ticket become `NOT_STARTED` and release reservations in that transaction. Already-ticketed operations can still complete; late outcomes remain recorded. The driver rechecks cancellation after model I/O; tool admission and delivery also check durable authority. Cancellation does not undo effects or erase accounting.
 
-- `OllamaProvider`
-- `OpenAIApiKeyProvider`
-- `PiOpenAIProvider`
+## Independent goal verification and delivery
 
-Pi remains the owner of browser login, refresh token, credential locking and `auth.json`.
+The model's `request_completion` is only a claim. The pure verifier requires:
 
-## Web architecture
+- fixed trusted rules and no declared remaining work;
+- unique, own-run, durable success evidence;
+- each cited receipt digest matches the current managed candidate;
+- every allowed file matches its fixed expected complete digest;
+- evidence covers every changed file.
 
-`src/myth/web.py` is a thin loopback-only HTTP surface.
+The report, completed step, Agent state, delivery and events commit together. Downloads require an Agent `SUCCEEDED` delivery and serve the expected content-addressed object after digest verification. This binds delivery to immutable accepted bytes even if someone later changes a managed display file. No Agent goal delivery is inferred from a successful P1 patch.
 
-```text
-Browser
-  ↓
-local JSON API
-  ↓
-AgentWebService
-  ↓
-AgentRuntime
-  ↓
-SQLite + content-addressed objects + managed workspaces
-```
+## Context and memory
 
-Agent execution runs in a daemon worker thread while the browser polls durable status. Each worker opens its own MythRuntime connection; the UI never owns runtime authority.
+The event/receipt ledger is the durable execution record. Context compilation creates a deterministic bounded projection: recent notes, shortened old previews, the latest tool result, user corrections/rejections, fixed acceptance and tool evidence references. Dropping optional history never rewrites that record. Required context over 32,768 UTF-8 bytes or a serialized model request over 65,536 bytes stops before a model Ticket. These are byte guards, not accurate token estimates.
 
-The frontend is static HTML/CSS/JS packaged inside the Python distribution. There are no CDN dependencies.
+This version has no semantic summarizer, long-term memory or RAG. Retrieval will be a separate port and a projection of trusted sources rather than a second source of execution truth.
 
-## Physical design
+## Persistence added in v0.4
 
-P1:
+Existing P1/P2/P3 tables remain. New additive tables:
 
-- `runs`
-- `actions`
-- `attempts`
-- `tickets`
-- `receipts`
-- `accounts` + `reservations`
-- `events`
-- `verification_reports`
-- `deliveries`
+| Table | Ownership |
+| --- | --- |
+| `agent_contracts` | frozen acceptance manifest |
+| `agent_settings` | provider configuration |
+| `agent_steps` | durable decision consumption cursor |
+| `model_request_keys` | one model invocation per step identity |
+| `agent_tool_bindings` | one Action per tool decision |
+| `agent_reads` | immutable internal read snapshot and debit |
 
-P2:
+Old P3 runs lacking a contract remain inspectable; verification never fabricates acceptance for them. Automatic migration/resume of legacy in-flight runs has not been validated.
 
-- `model_invocations`
-- `model_reservations`
-- `step_decisions`
+## Web boundary
 
-P3:
-
-- `agent_runs`
-- `agent_notes`
-- `agent_verification_reports`
-- `agent_deliveries`
-
-## Explicit simplifications
-
-- single-machine modular monolith;
-- one current Tool capability;
-- original files are not overwritten;
-- no arbitrary shell/computer-use surface;
-- no automatic repair of malformed model JSON;
-- no distributed lease/exactly-once claim;
-- Web UI is local single-user and intentionally unauthenticated because it cannot bind beyond loopback;
-- remote model content privacy depends on the selected provider.
+The packaged vanilla HTML/CSS/JS calls a loopback-only JSON API. Host and port must match the local listener; mutations require JSON and same-origin when Origin is present. There is no CORS endpoint. CSP, frame denial and `textContent` rendering limit accidental browser execution of file/model text. This is a local, single-user service, not an authenticated multi-user platform or hostile-code sandbox.

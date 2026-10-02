@@ -143,6 +143,10 @@ CREATE TABLE IF NOT EXISTS deliveries (
     report_id TEXT NOT NULL REFERENCES verification_reports(report_id),
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+CREATE TABLE IF NOT EXISTS agent_tool_bindings (
+    decision_id TEXT PRIMARY KEY NOT NULL,
+    action_id TEXT UNIQUE NOT NULL REFERENCES actions(action_id)
+);
 """
 
 
@@ -230,6 +234,7 @@ class RuntimeStore:
         action: dict[str, Any],
         attempt: dict[str, Any],
         reservations: dict[str, int],
+        decision_id: str | None = None,
     ) -> None:
         """TX-Intent: action, attempt, all reservations, and event commit together."""
 
@@ -256,6 +261,11 @@ class RuntimeStore:
                     AttemptState.INTENT.value, attempt["envelope_digest"],
                 ),
             )
+            if decision_id is not None:
+                owner = db.execute("SELECT run_id FROM step_decisions WHERE decision_id=?", (decision_id,)).fetchone()
+                if owner is None or owner[0] != run_id:
+                    raise ValueError("tool decision does not belong to this run")
+                db.execute("INSERT INTO agent_tool_bindings VALUES (?,?)", (decision_id, action["action_id"]))
 
             for meter, amount in sorted(reservations.items()):
                 if type(amount) is not int or amount < 0:
@@ -523,6 +533,18 @@ class RuntimeStore:
         row = self.db.execute("SELECT * FROM actions WHERE run_id=? ORDER BY rowid DESC LIMIT 1", (run_id,)).fetchone()
         if row is None:
             raise KeyError(f"no action for {run_id}")
+        return dict(row)
+
+    def get_action(self, action_id: str) -> dict[str, Any]:
+        row = self.db.execute("SELECT * FROM actions WHERE action_id=?", (action_id,)).fetchone()
+        if row is None:
+            raise KeyError(action_id)
+        return dict(row)
+
+    def get_attempt_for_action(self, action_id: str) -> dict[str, Any]:
+        row = self.db.execute("SELECT * FROM attempts WHERE action_id=? ORDER BY attempt_no DESC LIMIT 1", (action_id,)).fetchone()
+        if row is None:
+            raise KeyError(action_id)
         return dict(row)
 
     def get_attempt_for_run(self, run_id: str) -> dict[str, Any]:
