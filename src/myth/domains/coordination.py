@@ -61,6 +61,24 @@ class StrategyRegistry:
 def default_strategies() -> StrategyRegistry:
     return StrategyRegistry((
         StrategySpec(
+            "intent_pick",
+            "Intent Pick",
+            StrategyState.EXISTS,
+            "Pick the cheapest useful processing path before expensive reasoning; implementation may be rule/Jev/small-model/LLM/cascade.",
+        ),
+        StrategySpec(
+            "information_resolution",
+            "Information Resolution",
+            StrategyState.EXISTS,
+            "Choose how far to expand the same information from L0 abstract to L1 overview to L2 detailed evidence.",
+        ),
+        StrategySpec(
+            "information_gain",
+            "Information Gain",
+            StrategyState.EXISTS,
+            "Estimate marginal task value versus token/latency/tool cost before acquiring or expanding information.",
+        ),
+        StrategySpec(
             "direct",
             "Direct",
             StrategyState.USABLE,
