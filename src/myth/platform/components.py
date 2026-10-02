@@ -181,6 +181,7 @@ DOMAINS: tuple[ArchitectureItem, ...] = (
 
 
 ADAPTERS: tuple[ArchitectureItem, ...] = (
+    ArchitectureItem("chat_ui", "Chat / Web UI", "adapter", Maturity.USABLE, "Conversation is an inbound product/channel adapter, not the Runtime core."),
     ArchitectureItem("sqlite", "SQLite", "adapter", Maturity.USABLE, "Local durable state adapter."),
     ArchitectureItem("local_files", "Local Files", "adapter", Maturity.USABLE, "Scoped UTF-8/project/output execution adapter."),
     ArchitectureItem("ollama", "Ollama", "adapter", Maturity.USABLE, "Local model provider adapter."),
@@ -251,9 +252,6 @@ class MythComponents:
             "domains": [item.as_dict() for item in DOMAINS],
             "strategies": strategy_rows,
             "adapters": [item.as_dict() for item in ADAPTERS],
-            # Legacy alias for clients from v0.6-v0.8.  It intentionally has no
-            # phase/P-number semantics.
-            "layers": [item.as_dict() for item in DOMAINS],
             "capabilities": [
                 {
                     "id": spec.capability_id,
