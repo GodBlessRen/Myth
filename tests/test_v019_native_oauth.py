@@ -1,17 +1,23 @@
 from __future__ import annotations
 
+import io
 import json
 from pathlib import Path
 import tempfile
 import time
 import unittest
 from unittest.mock import patch
-from urllib import parse
+from urllib import error, parse
+
+import jwt
+from cryptography.hazmat.primitives.asymmetric import rsa
 
 from myth.auth.chatgpt import (
     ChatGPTAuthManager,
     ChatGPTOAuthError,
     DYNAMIC_CLIENT_ID,
+    ISSUER,
+    KeyringCredentialStore,
     RESOURCE,
 )
 
@@ -63,6 +69,7 @@ class NativeOAuthTests(unittest.TestCase):
         redirect="http://127.0.0.1:45678/auth/callback"
         attempt=self.manager.begin_login(redirect)
         state=parse.parse_qs(parse.urlparse(attempt["auth_url"]).query)["state"][0]
+        pending=self.manager._pending[state]
         tokens={
             "access_token":"access-secret",
             "refresh_token":"refresh-secret",
@@ -84,7 +91,10 @@ class NativeOAuthTests(unittest.TestCase):
         self.assertTrue(status.sharing)
         self.assertEqual(status.email,"user@example.com")
         metadata=self.manager.metadata_path.read_text(encoding="utf-8")
-        for secret in ("access-secret","refresh-secret","id-secret","one-time-code"):
+        for secret in (
+            "access-secret","refresh-secret","id-secret","one-time-code",
+            state,pending.nonce,pending.code_verifier,
+        ):
             self.assertNotIn(secret,metadata)
         profile_id=status.profile_id
         self.assertEqual(self.store.values[profile_id]["access_token"],"access-secret")
@@ -133,6 +143,71 @@ class NativeOAuthTests(unittest.TestCase):
         }):
             self.assertEqual(self.manager.access_token(),"new-access")
         self.assertEqual(self.store.values[profile_id]["refresh_token"],"new-refresh")
+
+
+    def test_id_token_verification_checks_signature_issuer_audience_and_nonce(self):
+        private_key=rsa.generate_private_key(public_exponent=65537,key_size=2048)
+        public_key=private_key.public_key()
+        now=int(time.time())
+        token=jwt.encode(
+            {
+                "iss":ISSUER,
+                "aud":"oaiapp_verified",
+                "sub":"subject",
+                "exp":now+600,
+                "iat":now,
+                "nonce":"nonce-123",
+                "email":"user@example.com",
+            },
+            private_key,
+            algorithm="RS256",
+            headers={"kid":"test-key"},
+        )
+        class SigningKey:
+            key=public_key
+        with patch.object(self.manager._jwks,"get_signing_key_from_jwt",return_value=SigningKey()):
+            claims=self.manager._verify_id_token(
+                token,
+                client_id="oaiapp_verified",
+                nonce="nonce-123",
+            )
+            self.assertEqual(claims["sub"],"subject")
+            with self.assertRaisesRegex(ChatGPTOAuthError,"verification failed"):
+                self.manager._verify_id_token(
+                    token,
+                    client_id="oaiapp_wrong",
+                    nonce="nonce-123",
+                )
+            with self.assertRaisesRegex(ChatGPTOAuthError,"nonce mismatch"):
+                self.manager._verify_id_token(
+                    token,
+                    client_id="oaiapp_verified",
+                    nonce="wrong-nonce",
+                )
+
+    def test_keyring_store_fails_closed_for_unapproved_backend(self):
+        class InsecureBackend:
+            priority=10
+        store=KeyringCredentialStore()
+        with patch("myth.auth.chatgpt.keyring.get_keyring",return_value=InsecureBackend()):
+            with self.assertRaisesRegex(ChatGPTOAuthError,"secure OS credential store"):
+                store.load("profile")
+
+    def test_oauth_http_error_never_echoes_provider_description(self):
+        body=b'{"error":"invalid_grant","error_description":"refresh-secret-should-not-leak"}'
+        rejected=error.HTTPError(
+            "https://auth.openai.com/token",
+            400,
+            "Bad Request",
+            {},
+            io.BytesIO(body),
+        )
+        with patch("myth.auth.chatgpt.request.urlopen",side_effect=rejected):
+            with self.assertRaises(ChatGPTOAuthError) as caught:
+                self.manager._token_request({"grant_type":"refresh_token"})
+        message=str(caught.exception)
+        self.assertIn("invalid_grant",message)
+        self.assertNotIn("refresh-secret-should-not-leak",message)
 
     def test_logout_clears_local_tokens_even_if_remote_revocation_is_unconfirmed(self):
         profile_id=self.manager._persist_registration("oaiapp_logout")
