@@ -199,6 +199,37 @@ class RuntimeClosureTests(unittest.TestCase):
                         {"document_id": foreign["id"]},
                     )
 
+    def test_strict_arithmetic_intent_finishes_without_model_call(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with MythRuntime(root) as runtime:
+                workspace = Workspace(runtime)
+                workspace.repository.save_settings(SETTINGS)
+                sid = workspace.repository.create_session("math")["id"]
+                rid = workspace.repository.create_turn(
+                    sid, "计算 2+3*4", "req-local-math"
+                )["run_id"]
+
+                class NeverCalled:
+                    provider_id = "ollama"
+                    calls = 0
+
+                    def invoke(self, request):
+                        self.calls += 1
+                        raise AssertionError("deterministic fast path must not invoke the model")
+
+                provider = NeverCalled()
+                workspace.run(rid, provider)
+                turn = workspace.repository.turn(rid)
+                self.assertEqual(turn["status"], "COMPLETED")
+                self.assertEqual(provider.calls, 0)
+                self.assertEqual(
+                    workspace.repository.session(sid)["messages"][-1]["content"],
+                    "14",
+                )
+                accounts = {item["meter"]: item for item in turn["budgets"]}
+                self.assertEqual(accounts["model_calls"]["settled"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()
