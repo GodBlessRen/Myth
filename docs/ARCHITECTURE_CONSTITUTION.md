@@ -78,7 +78,81 @@ Managed Agent: Goal → AgentPort → Remote Managed Agent
 Personal:      Goal ← Trigger → Run ... over time
 ```
 
-## 4. 六边形边界
+## 4. Intent Pick 与 Information
+
+### Intent Pick
+
+Intent Pick 不是传统单标签分类器，也不是固定 LLM 调用。
+
+它回答的是：
+
+> **当前输入最值得走哪条处理路径？**
+
+允许的实现包括规则、关键词、Jev、Small Model、Embedding、LLM 或级联。Intent Pick 只选择处理路径，不授予执行权限。
+
+典型 Route：
+
+- `direct`
+- `local_retrieval`
+- `deterministic`
+- `agent`
+- `ask_user`
+
+当前状态：**exists**。合同和 Port 已存在，但还没有接管 `send()` 主请求链。
+
+### Information Resolution / 信息分辨率
+
+Information Resolution 描述**同一份信息的表示细腻程度**，不是“答案够不够”。
+
+```text
+L0  Abstract
+    极低成本摘要 / retrieval representation
+
+L1  Overview
+    导航、结构、关系、rerank representation
+
+L2  Detail / Evidence
+    细节、原始证据、source-of-truth representation
+```
+
+原则是 Progressive Disclosure：先看低分辨率信息，只有任务需要时才升级 L0 → L1 → L2。
+
+当前状态：**exists**。纯领域合同已存在；Memory/Knowledge 尚未物化 L0/L1/L2 多分辨率视图，也没有 Resolution Controller 接入 ContextCompiler。
+
+### Information Delta / 信息增量
+
+Information Delta 是**信息状态前后发生了什么变化**：
+
+- added
+- updated
+- removed
+- conflicted
+
+它是变化事实，不代表变化一定有价值。
+
+当前状态：**exists**。Delta 数据合同已存在；尚未形成自动 Memory/State lifecycle delta pipeline。
+
+### Information Gain / 信息增益
+
+Information Gain 是：
+
+> **在已有信息状态下，继续获取/展开某份信息能给当前任务带来多少边际价值。**
+
+高相似不等于高增益；重复信息即使语义接近，边际 Gain 也可能接近 0。
+
+后续选择可以考虑：
+
+```text
+Expected Information Gain
+-------------------------
+Token / Latency / Tool Cost
+```
+
+但当前不会伪造一个“科学”的互信息数字。Estimator 必须明确自己的语义、训练/统计来源和适用范围。
+
+当前状态：**exists**。合同与 Port 已存在；没有经过评测校准的 Gain estimator，因此数值策略尚不可用。
+
+## 5. 六边形边界
 
 Core/Domain 依赖 Port，不依赖具体厂商。
 
@@ -93,6 +167,10 @@ Core/Domain 依赖 Port，不依赖具体厂商。
 - ArtifactPort
 - ObservabilityPort
 - GoalRepository
+- IntentPickPort
+- InformationResolutionPort
+- InformationGainPort
+- InformationDeltaPort
 
 Adapters 可以随生态变化替换：
 
@@ -104,7 +182,7 @@ Adapters 可以随生态变化替换：
 
 **协议和厂商只能进入 Adapter 外圈。**
 
-## 5. Personal Agent 规则
+## 6. Personal Agent 规则
 
 Personal Agent 不是另一套 Runtime。
 
@@ -126,7 +204,7 @@ Long-lived Goal
 - Trigger 可以创建未来 Run，但 Trigger 本身不拥有执行权。
 - Background work 仍走 Action → Attempt → Ticket → Receipt。
 
-## 6. Control 规则
+## 7. Control 规则
 
 产品统一使用：
 
@@ -140,7 +218,7 @@ Stop 不声称已经发出的模型请求、工具调用或外部副作用被物
 
 旧的 `abort` API 仅为兼容 v0.8 保留，不再作为新代码和 UI 词汇。
 
-## 7. 成熟度
+## 8. 成熟度
 
 不再使用 P0/P10/.../P1000 表示架构阶段。
 
@@ -154,7 +232,7 @@ Stop 不声称已经发出的模型请求、工具调用或外部副作用被物
 
 开发策略仍然是 **breadth first, depth later**：哪怕未来有很多 Plan，也优先让整体形状和接口存在，再由真实测试决定哪里加深。
 
-## 8. 命名门槛
+## 9. 命名门槛
 
 核心词汇冻结为：
 
@@ -165,6 +243,8 @@ Coordination / Control / Execution / Capability / State
 Context / Memory / Personal State / Observability / Evaluation / Evolution
 
 Port / Adapter / Strategy
+
+Intent Pick / Information Resolution / Information Delta / Information Gain
 ```
 
 新增 Engine、Manager、Plane、Capsule、Supervisor、Coordinator 等抽象前，必须证明现有词无法准确表达。
