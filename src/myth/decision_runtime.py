@@ -382,6 +382,7 @@ class DecisionRuntime:
         max_output_tokens: int = 1024,
         thinking: str | None = None,
         request_key: str | None = None,
+        model_request_override: ModelRequest | None = None,
     ) -> tuple[str, StepDecision]:
         """Make one visible, budgeted model request and commit one proposal."""
 
@@ -403,7 +404,7 @@ class DecisionRuntime:
                     decision = parse_step_decision(receipt["text"])
                     return self._save_decision(run_id, existing["model_attempt_id"], receipt["response_ref"], decision), decision
                 raise RecoveryRequired("this step already owns a model Ticket without a durable response")
-        model_request = self._build_request(run_id, model, allowed_files, context, max_output_tokens, thinking)
+        model_request = model_request_override or self._build_request(run_id, model, allowed_files, context, max_output_tokens, thinking)
         request_bytes = json.dumps(model_request.serializable(), ensure_ascii=False, sort_keys=True).encode("utf-8")
         if len(request_bytes) > 65_536:
             raise ContextBudgetError("serialized model request exceeds the 65536-byte preflight limit")

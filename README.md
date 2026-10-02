@@ -1,112 +1,81 @@
 # Myth
 
-**模型提出步骤，Runtime 授权与记录，独立验收决定完成。**
+**本地 Agent 工作区：对话、会话、项目、知识库与受控文件工具。**
 
-Myth v0.4 是单机、单 Agent 的文件任务工作台。目前可完成有明确规则的 UTF-8 精确替换任务：提交时固定文件基线和期望结果，在受管副本中读取、修改，核对全部允许文件后下载结果。原文件保留。
+v0.5 可以直接进行普通多轮聊天，无需先填写文件替换规则。项目提供共同指令、资料与本地文件范围；知识库提供带来源的关键词检索；Agent 能读取资料、计算、生成文件副本。会话和执行记录保存在本机，关闭页面后可继续查看。
 
-## 立即体验
+## 启动
 
-Python 3.12+，运行时仅使用标准库，无前端构建或 CDN。
+Python 3.12+，运行时仅使用标准库，无前端构建、CDN 或数据库服务。
 
 ```bash
 python -m pip install -e .
 myth --root . web
 ```
 
-访问 `http://127.0.0.1:8765/`，点击「体验一个完整任务」。演示会实际执行读取、替换、核验、交付，使用确定性 `scripted` provider，无需模型或密钥。**演示成功证明本地执行链路，不能证明真实模型能力。**
-
-Windows 也可在仓库目录运行：
+Windows 在仓库目录运行：
 
 ```powershell
 .\start-myth.ps1
 ```
 
-无需安装的源码入口：
+打开 `http://127.0.0.1:8765/`。先启动本机 Ollama；页面自动检测 `http://127.0.0.1:11434` 并选择一个已安装模型，也可在「模型与设置」改地址、模型和本轮限制。Myth 不自动下载模型，不保存 API 密钥。
+
+源码入口无需安装：
 
 ```powershell
 $env:PYTHONPATH = 'src'
-python -m myth.cli demo
+python -m myth.cli --root . web
 ```
 
-## 自己的文件任务
+## 如何使用
 
-在页面填入文件路径和替换规则，选择执行方式，再开始任务。多个规则按提交顺序计算期望结果；全部允许文件都参加验收，包括未修改文件。最多 16 个文件，每个不超过 1 MB；当前要求文件名互不重复。
+| 页面 | 已实现 |
+| --- | --- |
+| 对话 | 普通问答、多轮上下文、Markdown/代码展示、复制/保存回答、附加文本资料、停止/澄清/中断继续、工具记录与文件下载 |
+| 会话管理 | 搜索、重命名、置顶、所属项目、归档与恢复、Markdown 导出 |
+| 项目 | 创建/编辑、共同指令、关联本地目录、文件树、项目对话与专属资料 |
+| 知识库 | 导入 UTF-8 文本或粘贴内容、分块索引、共享/项目范围、关键词搜索、来源预览与移出索引 |
+| 模型与设置 | Ollama 连接检查、已安装模型、输出/步数限制、思考开关 |
 
-CLI 示例：
+先创建一个项目，填入本地目录并添加指令。导入一份资料，再点「开始对话」，例如：
+
+```text
+根据学习约定，每天学习多久？
+请读取项目文件 README.md，概括主要功能。
+把我们的讨论整理成学习计划，生成 study-plan.md 供我下载。
+```
+
+普通讨论也可以选择「独立对话」。文件生成成功后，回答下方出现实际下载卡片；每版下载来自固定摘要的不可变对象。任意回答可另外保存为 Markdown。
+
+文本文件上限 1 MB；每条消息最多附加 4 份资料。项目文件仅支持 UTF-8，Agent 输出到受管会话目录，项目原文件保留。没有任意 shell 或代码执行工具。模型的规划能力会影响连续工具调用，较小模型可能提前回答或生成错误参数；错误会显示在执行记录中并消耗本轮步数。
+
+## Loop、上下文与检索
+
+对话循环是「固定入口 → 持久模型请求 → 决策校验 → 工具授权/收据 → 下一步」，可以直接回答或向用户提问。会话消息持久保存；模型接收最近 30 条历史和本轮资料，必需内容超过 42 KB 会在调用前停止。它是会话记忆，尚无自动长期记忆提炼。
+
+知识库按 1,800 字符分块、200 字符重叠，英文词与中文双字关键词排序；本轮只检索共享资料和当前项目资料。检索结果保留文档、片段与来源标识，来源可点击查看。当前没有向量检索、重排器或 PDF/Office 解析器。
+
+模型发出执行 Ticket 后结果不明，则保留 UNKNOWN 与预算占用；续跑先对账，不重复未知调用。已持久化的模型收据、文件摘要与工具结果可恢复。SQLite 保证账本事务，不把外部效果宣称为 exactly-once。
+
+## 精确验收模式
+
+原有文件精确替换用例继续保留在 CLI 与 `/api/runs`，要求固定完整目标摘要和独立验收，成功才生成验收交付：
 
 ```bash
 myth --root . agent --provider scripted --model exact-patch-demo --allow-file examples/example.txt --acceptance examples/acceptance.json "Replace foo with bar"
 ```
 
-验收 JSON 是规则数组：
+对话轮次 COMPLETED 表示完成一次回答；可下载输出证明文件已实际生成，**不表示自然语言目标已通过独立语义验收**。两种完成边界分别记录，通用聊天不会借用精确替换的验收结论。
 
-```json
-[
-  {"path": "example.txt", "old_text": "foo", "new_text": "bar", "expected_count": 1}
-]
-```
+OpenAI Responses / Pi OAuth 适配器保留，远端凭据通过进程环境或 Pi 管理。本轮只实测本地 Ollama，未验证这两个远端入口。选择远端模型会向其发送选定的对话与资料。
 
-`old_text` 必须非空，匹配次数必须与 `expected_count` 一致。BOM、CRLF 及无关内容按原始字节保留。自然语言任务描述用于指导模型；**固定规则才是本版本可独立验证的完成标准**。未提供规则的任务可检查、执行，但不会获得 Agent 交付。
-
-## 真实模型入口
-
-保留 Ollama、OpenAI Responses 和 Pi OAuth 三种适配器。先检查可用性：
-
-```bash
-myth provider-check --provider ollama --model <model>
-myth --root . agent --provider ollama --model <model> --allow-file examples/example.txt --acceptance examples/acceptance.json "Replace foo with bar"
-```
-
-OpenAI 使用进程环境变量 `OPENAI_API_KEY`，切换为 `--provider openai`。Pi 适配器要求已经登录的 Pi 能执行 `pi auth print-bearer-token --provider openai --min-expiry 10m`，使用 `--provider pi-openai`；凭据仍由 Pi 管理。
-
-本轮没有实际调用这些真实模型，Pi 的当前 CLI 兼容性也未实测。`provider-check` 只证明就绪检查通过，不能替代完整任务验收。远程 provider 会收到任务、允许文件路径、验收规则和上下文；需要内容留在本地时使用本地演示或本地 Ollama。
-
-## 暂停、续跑与取消
-
-页面支持回答当前问题、停止任务，以及在进程退出后「核对记录并继续」。CLI 等价入口：
-
-```bash
-myth agent-status <run_id>
-myth continue-agent --provider scripted --model exact-patch-demo <run_id>
-myth answer-agent --provider scripted --model exact-patch-demo <run_id> <question_id> "answer"
-myth cancel-agent <run_id>
-```
-
-操作时使用创建任务的同一个 `--root`。续跑使用持久化的模型与限制，provider 必须匹配；答复必须匹配当前 `question_id`，旧答复不能消费新问题。取消阻止新的启动授权和交付，已经获 Ticket 的调用可能仍完成，其迟到事实需要对账。
-
-模型请求按运行与步骤去重；工具决策绑定一个 Action。已有收据可恢复，发出 Ticket 后结果不明则保留 `UNKNOWN` 与预算占用，不盲目重试。单机 OS 锁防止两个驱动器同时推进同一运行。浏览器刷新只恢复查看状态。
-
-## 架构与完成边界
-
-```text
-CLI / Web → AgentRuntime（装配）
-                   ↓
-            application.AgentDriver
-                   ↓ ports
-        SQLite Repository / Local Execution
-                   ↓
-        P1 工具账本 / P2 模型账本 / Provider
-
-acceptance：纯目标验收与上下文投影，无数据库或文件 I/O
-```
-
-Agent 用例已分离纯逻辑、端口和适配器，事务级端口拥有状态提交。P1/P2 的底层账本保留原实现，后续逐步迁移；全仓库尚未完成六边形重构。
-
-- `file.read`：受管副本分页读取；快照、计量与内部读取收据一起提交。
-- `file.patch_exact`：Action → Attempt → Ticket → 文件效果 → Receipt。
-- 独立验收：固定期望完整摘要、未修改文件、运行所属成功证据、无剩余事项同时一致才交付。
-- 下载固定摘要对应的不可变对象，后来修改展示副本不会改写已交付内容。
-- 上下文：确定性投影、用户更正与证据引用保留，必需内容超预算时在模型调用前停止；当前没有长期记忆或 RAG。
-
-详见 [架构](docs/ARCHITECTURE.md)、[设计](docs/DESIGN.md)、[后续规划](docs/ROADMAP.md)、[验证范围](docs/VALIDATION.md) 和 [安全边界](SECURITY.md)。
-
-## 验证
+## 验证与架构
 
 ```bash
 python -m compileall -q src tests
 python -m unittest discover -s tests -v
+node --check src/myth/webui/app.js
 ```
 
-测试覆盖错误结果带成功收据、固定基线、多文件保留、请求冲突、取消/澄清竞态、真实子进程硬退出恢复、HTTP 交付和同源限制。见验证文档中的实测范围。
-
-Myth 当前适合小规模、可精确定义结果的本地文件任务。通用代码编辑、任意 shell、语义测试验收、RAG、长期记忆、分布式执行与生产多用户服务仍在后续规划。
+领域逻辑 → 应用用例 → 事务级端口 → SQLite/本地执行/模型适配器；Workspace 负责装配，HTTP 与页面负责交互。原有 P1/P2 底层账本尚未整体迁入端口。详见 [架构](docs/ARCHITECTURE.md)、[设计](docs/DESIGN.md)、[验证](docs/VALIDATION.md)、[规划](docs/ROADMAP.md) 与 [安全边界](SECURITY.md)。

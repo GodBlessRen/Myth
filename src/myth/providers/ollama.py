@@ -54,7 +54,7 @@ class OllamaProvider:
             ],
             "format": model_request.response_schema,
             "stream": False,
-            "options": {"num_predict": model_request.max_output_tokens},
+            "options": {"num_predict": model_request.max_output_tokens,"temperature":0},
         }
         if model_request.thinking is not None:
             payload["think"] = model_request.thinking
@@ -63,13 +63,9 @@ class OllamaProvider:
         message = value.get("message")
         if not isinstance(message, dict) or not isinstance(message.get("content"), str):
             raise RuntimeError("Ollama response is missing message.content")
-        input_tokens = int(value.get("prompt_eval_count") or 0)
-        output_tokens = int(value.get("eval_count") or 0)
-        usage = {
-            "model_calls": 1,
-            "input_tokens": input_tokens,
-            "output_tokens": output_tokens,
-        }
+        usage = {"model_calls":1}
+        for source,meter in [("prompt_eval_count","input_tokens"),("eval_count","output_tokens")]:
+            if type(value.get(source)) is int and value[source]>=0:usage[meter]=value[source]
         total_duration = value.get("total_duration")
         if type(total_duration) is int and total_duration >= 0:
             usage["model_duration_ns"] = total_duration
