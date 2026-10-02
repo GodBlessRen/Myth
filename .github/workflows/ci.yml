@@ -22,6 +22,8 @@ jobs:
       - name: Compile Python
         run: python -m compileall -q src tests
       - name: Check Web JavaScript
-        run: node --check src/myth/webui/app.js
+        run: |
+          node --check src/myth/webui/app.js
+          node --check src/myth/webui/inspector.js
       - name: Unit and crash-recovery tests
         run: python -m unittest discover -s tests -v
