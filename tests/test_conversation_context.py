@@ -14,7 +14,7 @@ from myth.workspace import Workspace
 from test_workspace import ChatProvider, decision
 
 
-SETTINGS = {"provider": "ollama", "model": "test", "max_output_tokens": 512}
+SETTINGS = {"provider": "ollama", "model": "test", "max_output_tokens": 512, "num_ctx": 16384, "temperature": 0.0}
 
 
 class ConversationContextTests(unittest.TestCase):
