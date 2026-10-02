@@ -8,6 +8,7 @@
     <button id="newChat" class="new-chat"><span data-icon="plus"></span>新建对话<span class="keyhint">＋</span></button>
     <nav class="navigation">
       <a href="#chat" data-page="chat"><span data-icon="chat"></span>对话<span class="nav-end">↗</span></a>
+      <a href="#runtime" data-page="runtime"><span data-icon="spark"></span>Runtime</a>
       <a href="#sessions" data-page="sessions"><span data-icon="history"></span>会话管理</a>
       <a href="#projects" data-page="projects"><span data-icon="folder"></span>项目</a>
       <a href="#knowledge" data-page="knowledge"><span data-icon="book"></span>知识库</a>
@@ -47,6 +48,28 @@
     <section id="projectPage" class="page content-page hidden"><a href="#projects" class="back-link">← 所有项目</a><div class="page-heading"><div><div class="section-eyebrow">PROJECT WORKSPACE</div><h1 id="projectName"></h1><p id="projectDescription"></p></div><div class="button-row"><button id="editProject" class="secondary">编辑项目</button><button id="projectChat" class="primary"><span data-icon="chat"></span>开始对话</button></div></div><div class="project-layout"><div><section class="panel"><div class="panel-heading"><h2>项目指令</h2><span data-icon="spark"></span></div><p id="projectInstructions" class="pre-text"></p></section><section class="panel"><div class="panel-heading"><h2>项目会话</h2><span id="projectSessionCount" class="count-badge"></span></div><div id="projectSessions"></div></section></div><div><section class="panel"><div class="panel-heading"><h2>本地文件</h2><span data-icon="folder"></span></div><p id="projectRoot" class="muted path-label"></p><div id="projectFiles"></div></section><section class="panel"><div class="panel-heading"><h2>项目资料</h2><button id="projectImport" class="text-button">＋ 添加</button></div><div id="projectDocuments"></div></section></div></div></section>
 
     <section id="knowledgePage" class="page content-page hidden"><div class="page-heading"><div><div class="section-eyebrow">KNOWLEDGE</div><h1>给回答，多一点依据。</h1><p>导入文本与 Markdown，自动分块，在对话中检索并引用。</p></div><button id="importKnowledge" class="primary"><span data-icon="plus"></span>导入资料</button></div><div class="knowledge-stats" id="knowledgeStats"></div><div class="list-toolbar"><select id="knowledgeProject" aria-label="知识库项目范围"><option value="">共享资料</option></select><div class="search-field"><span data-icon="search"></span><input id="knowledgeSearch" placeholder="检索知识内容…" aria-label="检索知识内容"></div><button id="searchKnowledge" class="secondary">检索</button></div><div id="searchResults" class="hidden"></div><div id="documentList" class="document-list"></div></section>
+
+
+    <section id="runtimePage" class="page content-page hidden">
+      <div class="page-heading">
+        <div>
+          <div class="section-eyebrow">MYTH KERNEL / P0 → P1000</div>
+          <h1>整栋楼先存在，再逐层加深。</h1>
+          <p>这里展示真实的平台成熟度。wired 是已经有合同和装配位置，planned 不会被 Agent 当作可执行能力。</p>
+        </div>
+        <a class="secondary" href="#chat">回到对话</a>
+      </div>
+      <div class="platform-legend">
+        <span><i class="state-dot usable"></i> usable · 已有真实路径</span>
+        <span><i class="state-dot wired"></i> wired · 骨架已接线</span>
+        <span><i class="state-dot planned"></i> planned · 只定义边界</span>
+      </div>
+      <div id="platformLayers" class="platform-grid"></div>
+      <section class="panel platform-capabilities">
+        <div class="panel-heading"><div><div class="section-eyebrow">CAPABILITY REGISTRY</div><h2>能力存在，不等于拥有执行权。</h2></div><span id="capabilityCount" class="count-badge"></span></div>
+        <div id="platformCapabilities" class="capability-matrix"></div>
+      </section>
+    </section>
 
     <section id="settingsPage" class="page content-page hidden"><div class="page-heading"><div><div class="section-eyebrow">PREFERENCES</div><h1>让工作区，适合你。</h1><p>连接已有模型，设置每轮执行的范围。</p></div></div><div class="settings-layout"><section class="panel settings-panel"><div class="panel-heading"><h2>模型连接</h2><span class="tag">LOCAL FIRST</span></div><label for="provider">模型提供方</label><select id="provider"><option value="ollama">Ollama · 本地模型</option><option value="openai">OpenAI · 环境变量 API Key</option><option value="pi-openai">Pi · 已登录 OAuth</option></select><label for="ollamaUrl">Ollama 服务地址</label><input id="ollamaUrl" value="http://127.0.0.1:11434"><div class="field-with-action"><div><label for="model">模型名称</label><input id="model" list="modelOptions" placeholder="检查连接后选择本地模型"><datalist id="modelOptions"></datalist></div><button id="checkConnection" class="secondary">检查连接</button></div><div id="connectionResult" class="connection-result"></div><div class="two-fields"><div><label for="maxSteps">每轮最多步骤</label><input id="maxSteps" type="number" min="2" max="32" value="12"></div><div><label for="maxTokens">每步输出 Token</label><input id="maxTokens" type="number" min="128" max="8192" value="2048"></div></div><label class="check-label"><input id="thinking" type="checkbox">启用模型思考（需模型支持）</label><div class="settings-foot"><button id="saveSettings" class="primary">保存设置</button><span id="settingsSaved" class="muted"></span></div></section><div><section class="panel"><div class="panel-heading"><h2>Agent 可以做什么</h2><span data-icon="spark"></span></div><div class="capability-list"><div><span data-icon="chat"></span><span>多轮对话与澄清</span></div><div><span data-icon="folder"></span><span>浏览、读取项目文件</span></div><div><span data-icon="book"></span><span>检索共享和项目知识</span></div><div><span data-icon="pen"></span><span>写作、生成文件、精确修改副本</span></div><div><span data-icon="code"></span><span>执行受限数学计算</span></div></div></section><section class="panel quiet-panel"><h3>关于数据</h3><p>会话、项目与知识库保存在本机。关联目录仅供读取，修改与生成结果保存在工作区副本中。</p><p>执行可以停止、恢复和核对。模型答复仍需判断；只有文件执行结果有对应收据。</p></section></div></div></section>
   </main>
