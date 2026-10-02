@@ -1,79 +1,105 @@
-# Myth P1 Architecture
+# Myth Architecture — P1 + P2
 
 ## Runtime contract
 
-Myth P1 deliberately proves a small set of strong properties before adding an LLM, RAG, memory, multi-agent scheduling, or RSI.
-
 ```text
-User request
-   ↓
-fixed baseline + acceptance
-   ↓
-Action (business intent)
-   ↓
-Attempt (one execution opportunity)
-   ↓
-TX-Intent + atomic budget reservation
-   ↓
-StartTicket (durable launch authority)
-   ↓
-managed file effect
-   ↓
-Receipt journal / reconciliation
-   ↓
-TX-Settle
-   ↓
-VerificationReport
-   ↓
-Delivery
+User goal
+  ↓
+Run
+  ├─ Model Action → Model Attempt → Model Ticket → Provider
+  │                                      ↓
+  │                           durable model receipt
+  │                                      ↓
+  │                               StepDecision
+  │                               (proposal only)
+  │
+  └─ Tool Action → Tool Attempt → StartTicket → managed effect
+                                         ↓
+                                   Receipt / reconcile
+                                         ↓
+                                    Verification
+                                         ↓
+                                      Delivery
 ```
 
-## Five boundaries that must remain true
+The two paths deliberately share the same ideas: stable intent, one execution opportunity, durable launch authority, durable facts, separate accounting, and recovery without blind replay.
 
-1. **Proposal is not authority.** A future model may propose an Action; only Runtime can reserve, ticket, execute, and settle it.
-2. **Ticket is not success.** A Ticket means execution became possible. After a crash, absence of a response does not mean absence of an effect.
-3. **Effect and usage are independent.** Recovery may know that the file reached the expected digest while still holding usage as unknown.
-4. **Verification is completion authority.** A successful tool outcome cannot directly set `Run=SUCCEEDED`; Delivery requires a matching PASS report.
-5. **UNKNOWN stays unknown.** If neither the receipt journal nor managed content proves the result, recovery blocks instead of blindly replaying a write.
+## P2 provider boundary
+
+`src/myth/providers/base.py` defines a tiny provider port:
+
+```text
+check()  -> readiness only
+invoke() -> ModelResult
+```
+
+Built-ins:
+
+- `OllamaProvider`: local `/api/chat`, structured schema, provider token counts.
+- `OpenAIApiKeyProvider`: OpenAI Responses API with `OPENAI_API_KEY`.
+- `PiOpenAIProvider`: OpenAI Responses API, but authentication is delegated to upstream Pi OAuth.
+
+Pi remains the owner of browser login, refresh token, credential locking and `auth.json`. Myth consumes only a short-lived resolved bearer token. This follows the same separation used by SoL-Pi: the extension/runtime does not take ownership of Pi authentication.
+
+## StepDecision contract
+
+Exactly one of:
+
+- `tool_call` — proposal containing a capability ID and arguments;
+- `ask_user` — required information is missing;
+- `request_completion` — a claim that still requires independent verification.
+
+The provider-facing JSON schema uses a fixed object shape so Ollama and OpenAI can share one transport contract. `arguments_json` contains the tool argument object as JSON text; the Runtime parses and validates it again.
+
+## Model durability
+
+A model call is not a hidden helper call:
+
+```text
+Prepare frozen ModelRequest
+  → TX Model Intent + all meter reservations
+  → Model Ticket
+  → provider I/O
+  → publish raw response object + local model receipt
+  → TX settle provider usage
+  → validate + commit StepDecision
+```
+
+If the provider call raises after a Ticket and no durable response receipt exists, the model Attempt becomes `UNKNOWN`. P2 does not silently call the provider again because that could double-charge or produce a different decision.
+
+If a durable response receipt exists after a crash, `recover-model` can settle it and reconstruct the StepDecision without another provider call.
+
+## Completion boundary
+
+P2 intentionally stops after StepDecision. A model `tool_call` does not yet auto-create/execute a Tool Action. This prevents a subtle but serious mistake: treating “one proposed tool finished” as “the user's overall goal is verified”.
+
+The next layer is:
+
+```text
+StepDecision(tool_call)
+  → Runtime permission/scope validation
+  → Tool Action/Attempt/Ticket
+  → tool Receipt
+  → next Model Decision or Verification
+```
 
 ## Physical design
 
-P1 persists only what is needed to prove durable execution:
+P1 tables remain unchanged. P2 adds only three compact physical structures:
 
-- `runs`
-- `actions`
-- `attempts`
-- `tickets`
-- `receipts`
-- `accounts` + `reservations`
-- `events`
-- `verification_reports`
-- `deliveries`
+- `model_invocations`
+- `model_reservations`
+- `step_decisions`
 
-Concepts such as ContextSnapshot, AuthorizationDecision, ApplyJob, CorpusRevision, MemoryRevision, Replay, Evaluation, and Evolution remain future layers until a real use case needs their own identity, lifecycle, or recovery semantics.
-
-## Crash windows covered by P1
-
-### Effect happened, durable receipt exists, DB settlement did not happen
-
-Recovery reads the receipt journal, validates the frozen envelope identity, and performs TX-Settle. The file operation is not repeated.
-
-### Effect happened, process died before receipt publication
-
-For the v1 local exact-patch tool only, recovery compares the fixed managed file against the fixed expected digest. If it matches, the effect is resolved as successful while usage remains `UNKNOWN_HELD`.
-
-### Ticket exists, no receipt, content does not prove the expected effect
-
-The Attempt becomes `UNKNOWN`; related reserved usage is held. P1 does not guess that the operation never ran and does not blindly replay it.
+Logical Model Action / Attempt / Ticket / Receipt identities are still explicit even though P2 does not create a separate table for every noun.
 
 ## Explicit simplifications
 
-- One driver / one SQLite writer.
-- One writer per managed workspace.
-- One exact UTF-8 patch capability.
-- No arbitrary shell.
-- No editing of the original user directory; Delivery points to the managed verified artifact.
-- No model adapter yet. Scripted planning isolates Runtime correctness from model randomness.
-- No distributed lease/exactly-once claim.
-
-The next layer should add one real model adapter that can only produce a structured decision and must reuse the exact same Runtime path.
+- one driver / one SQLite writer;
+- one model request per `plan` command;
+- no automatic model-output repair yet;
+- no multi-turn Agent loop yet;
+- no automatic tool execution from StepDecision yet;
+- no hidden SDK retry inside Myth provider adapters;
+- OAuth login UI/refresh/storage remains in Pi;
+- no distributed lease/exactly-once claim.
