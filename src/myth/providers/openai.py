@@ -181,6 +181,20 @@ class OpenAIResponsesProvider:
             "input_tokens": int(usage_value.get("input_tokens") or 0),
             "output_tokens": int(usage_value.get("output_tokens") or 0),
         }
+        # Responses reports prompt-cache reuse inside input_tokens_details.
+        # Keep these as observability meters only: cached tokens are already
+        # included in input_tokens and must not be double-counted in budgets.
+        input_details = (
+            usage_value.get("input_tokens_details")
+            if isinstance(usage_value.get("input_tokens_details"), dict)
+            else {}
+        )
+        cached_tokens = input_details.get("cached_tokens")
+        if type(cached_tokens) is int and cached_tokens >= 0:
+            usage["cached_input_tokens"] = cached_tokens
+        cache_write_tokens = input_details.get("cache_write_tokens")
+        if type(cache_write_tokens) is int and cache_write_tokens >= 0:
+            usage["cache_write_input_tokens"] = cache_write_tokens
         return ModelResult(
             text=_extract_output_text(value),
             usage=usage,
