@@ -24,7 +24,7 @@ class ControlTowerTests(unittest.TestCase):
         })
         return runtime, workspace
 
-    def test_control_plane_persists_pause_resume_switches_compact_and_abort(self):
+    def test_control_persists_pause_resume_switches_compact_and_stop(self):
         with tempfile.TemporaryDirectory() as tmp:
             runtime, workspace = self._workspace(Path(tmp))
             try:
@@ -59,8 +59,8 @@ class ControlTowerTests(unittest.TestCase):
                 workspace.control.consume_compaction(rid)
                 self.assertFalse(workspace.control.view(rid)["compact_requested"])
 
-                aborted = workspace.control.command(rid, ControlCommand.ABORT)
-                self.assertTrue(aborted["aborted"])
+                stopped = workspace.control.command(rid, ControlCommand.STOP)
+                self.assertTrue(stopped["stopped"])
                 self.assertEqual(workspace.repository.turn(rid)["status"], "CANCELLED")
                 with self.assertRaises(ValueError):
                     workspace.control.command(rid, ControlCommand.RESUME)
