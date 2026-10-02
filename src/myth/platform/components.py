@@ -94,7 +94,7 @@ DOMAINS: tuple[ArchitectureItem, ...] = (
         "Coordination / 统筹",
         "domain",
         Maturity.USABLE,
-        "Choose how work is organized; conservative Intent Pick can bypass the Agent Loop for strict bounded arithmetic, while unmatched work falls back safely.",
+        "Choose how work is organized; conservative Intent Pick supports deterministic arithmetic and local-retrieval routing, while unmatched work falls back safely.",
         ("goal", "run"),
     ),
     ArchitectureItem(
