@@ -6,7 +6,7 @@ import operator
 import re
 from .domain import canonical_json
 from .models import ModelRequest, STEP_DECISION_SCHEMA
-from .conversation_context import compile_conversation_context
+from .conversation_context import compile_conversation_context, conversation_budget_bytes
 
 def object_schema(properties,required=None):
     return {"type":"object","additionalProperties":False,"properties":properties,"required":list(properties) if required is None else required}
@@ -112,5 +112,23 @@ def conversation_request(settings, snapshot, messages, activities, control=None)
     schema=CONVERSATION_SCHEMA if settings["provider"]=="ollama" else STEP_DECISION_SCHEMA
     if settings["provider"]!="ollama":
         system+="\n当前传输改用 StepDecision：action=reply 对应 decision_type=request_completion 且 goal_coverage=answer，action=ask 对应 ask_user，工具 action 对应 decision_type=tool_call 和 capability_id。arguments 对象编码为 arguments_json 字符串，其他未使用字段按 schema 填空。"
-    projected,report=compile_conversation_context(system,snapshot,messages,activities,control)
-    return ModelRequest(settings["model"],projected,schema,settings.get("max_output_tokens",2048),settings.get("thinking"),context_report=report)
+    max_output_tokens=settings.get("max_output_tokens",2048)
+    is_ollama=settings.get("provider")=="ollama"
+    num_ctx=settings.get("num_ctx",8192) if is_ollama else None
+    max_bytes=conversation_budget_bytes(num_ctx,max_output_tokens) if is_ollama else 42_000
+    projected,report=compile_conversation_context(
+        system,snapshot,messages,activities,control,max_bytes=max_bytes
+    )
+    report["num_ctx"]=num_ctx
+    report["max_output_tokens"]=max_output_tokens
+    report["budget_formula"]="(num_ctx-max_output_tokens-512)*2" if is_ollama else "remote-projection-cap=42000"
+    return ModelRequest(
+        settings["model"],
+        projected,
+        schema,
+        max_output_tokens,
+        settings.get("thinking"),
+        num_ctx=num_ctx,
+        temperature=float(settings.get("temperature",0.0)),
+        context_report=report,
+    )

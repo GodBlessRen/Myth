@@ -3,17 +3,24 @@
 from __future__ import annotations
 
 import json
+import socket
 from urllib import error, request
 
-from ..models import ModelRequest, ModelResult, ProviderStatus
+from ..models import ContextTruncated, ModelRequest, ModelResult, ProviderStatus
 
 
 class OllamaProvider:
     provider_id = "ollama"
 
-    def __init__(self, base_url: str = "http://127.0.0.1:11434", timeout: float = 180.0) -> None:
+    def __init__(
+        self,
+        base_url: str = "http://127.0.0.1:11434",
+        timeout: float = 180.0,
+        keep_alive: str = "5m",
+    ) -> None:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
+        self.keep_alive = keep_alive
 
     def _json_request(self, method: str, path: str, payload: dict | None = None) -> dict:
         body = None if payload is None else json.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -23,11 +30,24 @@ class OllamaProvider:
             method=method,
             headers={"content-type": "application/json", "accept": "application/json"},
         )
-        try:
-            with request.urlopen(req, timeout=self.timeout) as response:
-                raw = response.read()
-        except error.URLError as exc:
-            raise RuntimeError(f"Ollama request failed: {exc}") from exc
+        raw = None
+        for attempt in range(2):
+            try:
+                with request.urlopen(req, timeout=self.timeout) as response:
+                    raw = response.read()
+                break
+            except error.URLError as exc:
+                # Retry only failures that prove no HTTP request was accepted:
+                # connection refused / DNS resolution. Timeouts and other
+                # post-dispatch ambiguity remain single-shot and become UNKNOWN
+                # at the Runtime boundary.
+                reason=getattr(exc,"reason",None)
+                pre_dispatch=isinstance(reason,(ConnectionRefusedError,socket.gaierror))
+                if attempt==0 and pre_dispatch:
+                    continue
+                raise RuntimeError(f"Ollama request failed: {exc}") from exc
+        if raw is None:
+            raise RuntimeError("Ollama request produced no response bytes")
         value = json.loads(raw.decode("utf-8"))
         if not isinstance(value, dict):
             raise RuntimeError("Ollama response must be a JSON object")
@@ -54,7 +74,12 @@ class OllamaProvider:
             ],
             "format": model_request.response_schema,
             "stream": False,
-            "options": {"num_predict": model_request.max_output_tokens,"temperature":0},
+            "keep_alive": self.keep_alive,
+            "options": {
+                "num_predict": model_request.max_output_tokens,
+                "temperature": float(model_request.temperature),
+                **({"num_ctx": model_request.num_ctx} if model_request.num_ctx is not None else {}),
+            },
         }
         if model_request.thinking is not None:
             payload["think"] = model_request.thinking
@@ -69,6 +94,17 @@ class OllamaProvider:
         total_duration = value.get("total_duration")
         if type(total_duration) is int and total_duration >= 0:
             usage["model_duration_ns"] = total_duration
+        used=value.get("prompt_eval_count")
+        if (
+            model_request.num_ctx is not None
+            and type(used) is int
+            and used >= model_request.num_ctx - 16
+        ):
+            raise ContextTruncated(
+                f"prompt_eval_count={used} reached configured num_ctx={model_request.num_ctx}",
+                usage=usage,
+                raw=value,
+            )
         return ModelResult(
             text=message["content"],
             usage=usage,

@@ -6,7 +6,8 @@ import tempfile
 import unittest
 
 from myth.decision_runtime import DecisionRuntime
-from myth.models import ModelResult, ProviderStatus
+from myth.acceptance import ContextBudgetError
+from myth.models import ContextTruncated, ModelResult, ProviderStatus
 from myth.runtime import MythRuntime
 
 
@@ -104,6 +105,44 @@ class DecisionRuntimeTests(unittest.TestCase):
                 self.assertEqual(accounts["model_calls"]["unknown_held"], 1)
                 self.assertGreater(accounts["input_tokens"]["unknown_held"], 0)
                 self.assertEqual(accounts["output_tokens"]["unknown_held"], 50)
+
+    def test_provider_confirmed_truncation_is_failed_not_unknown(self) -> None:
+        class TruncatedProvider:
+            provider_id="fake"
+            def invoke(self,request):
+                raise ContextTruncated(
+                    "prompt reached context ceiling",
+                    usage={"model_calls":1,"input_tokens":40,"output_tokens":3},
+                    raw={"prompt_eval_count":40,"eval_count":3},
+                )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)
+            with MythRuntime(root) as base:
+                decisions=DecisionRuntime(base)
+                run_id=decisions.create_goal_run(
+                    goal="decide what to do",
+                    provider_id="fake",
+                    model_id="fake-model",
+                    max_output_tokens=50,
+                )
+                with self.assertRaises(ContextBudgetError):
+                    decisions.request_decision(
+                        run_id=run_id,
+                        provider=TruncatedProvider(),
+                        model="fake-model",
+                        max_output_tokens=50,
+                    )
+                status=decisions.status(run_id)
+                invocation=status["model_invocations"][0]
+                self.assertEqual(invocation["state"],"RESOLVED")
+                self.assertEqual(invocation["outcome"],"FAILED")
+                accounts={row["meter"]:row for row in status["budgets"]}
+                self.assertEqual(accounts["model_calls"]["unknown_held"],0)
+                self.assertEqual(accounts["input_tokens"]["settled"],40)
+                self.assertEqual(accounts["output_tokens"]["settled"],3)
+                events=[item["kind"] for item in status["events"]]
+                self.assertIn("ModelAttemptFailed",events)
 
 
 if __name__ == "__main__":

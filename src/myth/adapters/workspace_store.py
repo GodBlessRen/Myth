@@ -58,7 +58,12 @@ class SqliteWorkspaceRepository:
 
     def settings(self):
         row=self.store.db.execute("SELECT value_json FROM workspace_settings WHERE id=1").fetchone()
-        return json.loads(row[0]) if row else {"provider":"ollama","model":"","ollama_url":"http://127.0.0.1:11434","max_steps":12,"max_output_tokens":2048,"thinking":False}
+        if row:
+            value=json.loads(row[0])
+            value.setdefault("num_ctx",8192)
+            value.setdefault("temperature",0.0)
+            return value
+        return {"provider":"ollama","model":"","ollama_url":"http://127.0.0.1:11434","max_steps":12,"max_output_tokens":2048,"thinking":False,"num_ctx":8192,"temperature":0.0}
 
     def save_settings(self,value):
         provider=value.get("provider","ollama")
@@ -70,9 +75,12 @@ class SqliteWorkspaceRepository:
         model=str(value.get("model","")).strip()
         if len(model)>200:raise ValueError("model name too long")
         steps=value.get("max_steps",12);tokens=value.get("max_output_tokens",2048)
+        num_ctx=value.get("num_ctx",8192);temperature=value.get("temperature",0.0)
         if type(steps) is not int or not 2<=steps<=32 or type(tokens) is not int or not 128<=tokens<=8192:raise ValueError("invalid step or token limit")
+        if type(num_ctx) is not int or not 2048<=num_ctx<=262144 or num_ctx<=tokens+512:raise ValueError("num_ctx must leave room for output tokens and context reserve")
+        if not isinstance(temperature,(int,float)) or not 0<=float(temperature)<=2:raise ValueError("temperature must be between 0 and 2")
         if type(value.get("thinking",False)) is not bool:raise ValueError("thinking must be boolean")
-        clean={"provider":provider,"model":model,"ollama_url":endpoint,"max_steps":steps,"max_output_tokens":tokens,"thinking":value.get("thinking",False)}
+        clean={"provider":provider,"model":model,"ollama_url":endpoint,"max_steps":steps,"max_output_tokens":tokens,"thinking":value.get("thinking",False),"num_ctx":num_ctx,"temperature":float(temperature)}
         with self.store.tx() as db:db.execute("INSERT INTO workspace_settings VALUES(1,?) ON CONFLICT(id) DO UPDATE SET value_json=excluded.value_json",(canonical_json(clean),))
         return clean
 

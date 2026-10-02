@@ -14,7 +14,7 @@ from myth.workspace import Workspace
 from test_workspace import ChatProvider, decision
 
 
-SETTINGS = {"provider": "ollama", "model": "test", "max_output_tokens": 512}
+SETTINGS = {"provider": "ollama", "model": "test", "max_output_tokens": 512, "num_ctx": 16384, "temperature": 0.0}
 
 
 class ConversationContextTests(unittest.TestCase):
@@ -133,7 +133,7 @@ class ConversationContinuityTests(unittest.TestCase):
         self.runtime = MythRuntime(Path(self.temp.name))
         self.workspace = Workspace(self.runtime)
         self.repo = self.workspace.repository
-        self.repo.save_settings(SETTINGS)
+        self.repo.save_settings({**SETTINGS,"num_ctx":32768})
         self.sid = self.repo.create_session()["id"]
         self.rid = self.repo.create_turn(self.sid, "read then answer", "first")["run_id"]
 
@@ -214,7 +214,7 @@ class ConversationContinuityTests(unittest.TestCase):
 
     def test_context_failure_has_no_model_ticket_or_compiled_event(self):
         turn = self.repo.turn(self.rid)
-        turn["snapshot"]["project"] = {"instructions": "X" * 42000}
+        turn["snapshot"]["project"] = {"instructions": "X" * 70000}
         with self.runtime.store.tx() as db:
             db.execute("UPDATE workspace_turns SET snapshot_json=? WHERE run_id=?",
                        (canonical_json(turn["snapshot"]), self.rid))
