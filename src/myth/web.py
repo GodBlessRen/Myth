@@ -160,7 +160,7 @@ class AgentWebService:
                 thinking=thinking,
                 request_id=payload.get("request_id"),
                 acceptance=payload.get("acceptance"),
-                provider_options={"ollama_url": payload.get("ollama_url", "http://127.0.0.1:11434"), "pi_command": payload.get("pi_command", "pi")},
+                provider_options={"ollama_url": payload.get("ollama_url", "http://127.0.0.1:11434")},
             )
         existing = self.status(run_id)
         if existing["agent"]["status"] == "RUNNING" and not existing["driver_active"]:
