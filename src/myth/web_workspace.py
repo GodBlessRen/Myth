@@ -101,9 +101,18 @@ class ConversationWebService:
                     workspace.run(rid,self.provider(settings))
             except Exception as exc:
                 with MythRuntime(self.root) as runtime:
-                    Workspace(runtime).repository.block(
+                    workspace=Workspace(runtime)
+                    workspace.repository.block(
                         rid,"UNKNOWN",f"{type(exc).__name__}: {exc}"
                     )
+                    turn=workspace.repository.turn(rid)
+                    goal_id=(turn.get("snapshot") or {}).get("goal",{}).get("goal_id")
+                    if goal_id:
+                        workspace.personal.checkpoint_run(
+                            goal_id,rid,status="UNKNOWN",
+                            summary=f"{type(exc).__name__}: {exc}",
+                            next_action="Reconcile the uncertain run before continuing.",
+                        )
             finally:
                 with self.lock:self.active.discard(rid)
         threading.Thread(target=work,name=f"chat-{rid[:12]}",daemon=True).start()
@@ -191,6 +200,21 @@ class ConversationWebService:
             workspace=Workspace(runtime)
             projection=workspace.control.command(rid,mapping[action],payload)
             turn=workspace.repository.turn(rid)
+
+        goal_id=(turn.get("snapshot") or {}).get("goal",{}).get("goal_id")
+        if goal_id and action in {"pause","stop","resume"}:
+            with MythRuntime(self.root) as runtime:
+                personal=Workspace(runtime).personal
+                status={"pause":"PAUSED","stop":"CANCELLED","resume":"RUNNING"}[action]
+                personal.checkpoint_run(
+                    goal_id,rid,status=status,
+                    summary=f"Control action applied: {action}.",
+                    next_action=(
+                        "Resume this Goal when ready." if action=="pause"
+                        else "Continue the Goal in a new admitted Turn." if action=="stop"
+                        else "Let the resumed Turn reach a durable checkpoint."
+                    ),
+                )
 
         if action=="resume":
             self._spawn(rid)
