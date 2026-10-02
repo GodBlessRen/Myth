@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.18.1 — Cache Observability
+
+- OpenAI Responses 的 provider-reported cached input tokens 写入 durable model usage。
+- Runtime Observatory 的 Tokens 区显示 Prompt Cache hit token 与命中率。
+- Provider 不提供缓存计量时明确显示 N/A，不从 keep-alive / KV cache / 相似上下文推测。
+- cache hit rate 定义为 `cached_input_tokens / input_tokens`。
+
 Myth 只记录已经落地并进入主线的高价值变化。详细提交历史以 Git 为准。
 
 ## v0.18 — Goal-first Personal Work Loop
