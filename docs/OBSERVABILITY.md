@@ -36,6 +36,27 @@ Intent / Retrieval / Resolution
 
 Flow 是对 durable facts 的投影，不创建新的执行真相。
 
+### Recovery
+
+必须显示：
+
+- current step；
+- last durable checkpoint；
+- current phase；
+- recovery state；
+- Driver active / detached / expired；
+- lease generation / remaining time（适用时）；
+- 下一步是 RESUME 还是 RECONCILE。
+
+必须区分：
+
+```text
+INTERRUPTED -> RESUME
+UNKNOWN     -> RECONCILE
+```
+
+页面刷新、浏览器断开或 Driver 消失不能把 Run 事实抹掉。
+
 ### Trajectory
 
 按顺序展示 durable events，例如：
@@ -123,13 +144,13 @@ Flow 是对 durable facts 的投影，不创建新的执行真相。
 - RUNNING
 - WAITING_USER
 - PAUSED
+- INTERRUPTED / RESUME
+- UNKNOWN / RECONCILE
 - SUCCEEDED / COMPLETED
 - FAILED
 - BUDGET_EXHAUSTED
 - CANCELLED
-- UNKNOWN / RECONCILE
-
-UNKNOWN 不能被染成普通失败，也不能自动视作可重试。
+UNKNOWN 不能被染成普通失败，也不能自动视作可重试。INTERRUPTED 也不能被误标为 UNKNOWN；只有存在已发 Ticket / 未知外部效果时才进入 UNKNOWN。
 
 ## UI 原则
 
@@ -173,12 +194,13 @@ Observatory 不拥有状态，不写业务真相。
 任何 UI 改动完成后，至少能回答：
 
 1. 当前 Goal 是什么？
-2. 现在执行到哪一步？
+2. 现在执行到哪一步？最后 durable checkpoint 在哪？
 3. 最近发生了哪些 durable event？
 4. 当前上下文用了多少？哪些被 dropped/folded？
 5. Token 使用、Prompt Cache 命中率和 unknown-held 是多少？
 6. 调用了哪些 Tool？Ticket/Operation 状态是什么？
 7. 当前 Control / Budget 是什么？
-8. “完成”基于什么 Artifact / Receipt / Verification？
+8. Driver 如果此刻消失，应该 RESUME 还是 RECONCILE？
+9. “完成”基于什么 Artifact / Receipt / Verification？
 
 答不上来，就不是合格的 Runtime Observatory。
