@@ -88,7 +88,7 @@ def build_parser() -> argparse.ArgumentParser:
     recover_model.add_argument("run_id", nargs="?")
 
     evaluate = sub.add_parser("eval", help="run a fixed local Myth evaluation suite")
-    evaluate.add_argument("--suite", default="evals/foundation-v1.json")
+    evaluate.add_argument("--suite", default="evals/foundation-v2.json")
     evaluate.add_argument("--case", action="append", default=[], dest="case_ids")
 
     web = sub.add_parser("web", help="start the local Myth Agent workspace")
