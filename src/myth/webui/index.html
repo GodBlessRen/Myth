@@ -4,154 +4,83 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="color-scheme" content="light">
-  <title>Myth — Durable Agent Runtime</title>
+  <title>Myth · 可验证的任务工作台</title>
   <link rel="stylesheet" href="/app.css">
 </head>
 <body>
-  <div class="paper-noise" aria-hidden="true"></div>
   <div class="app-shell">
-    <aside class="rail">
-      <div class="brand-row">
-        <div class="mark" aria-hidden="true"><span></span></div>
-        <div>
-          <div class="brand">myth</div>
-          <div class="micro">DURABLE AGENT RUNTIME</div>
-        </div>
-      </div>
-
-      <button id="newRun" class="new-run">
-        <span>＋</span><span>新建任务</span>
-      </button>
-
-      <div class="rail-label">RUNS</div>
-      <div id="runList" class="run-list"></div>
-
-      <div class="rail-foot">
-        <div><span class="live-dot"></span> LOCAL / PRIVATE</div>
-        <div class="micro">127.0.0.1 · no cloud UI</div>
-      </div>
+    <aside class="rail" aria-label="任务导航">
+      <a class="brand" href="/" aria-label="Myth 首页"><span class="mark" aria-hidden="true">m</span>myth<span class="edition">04</span></a>
+      <div class="rail-note">YOUR LOCAL WORKSPACE</div>
+      <button id="newRun" class="new-run"><span aria-hidden="true">＋</span> 新建任务</button>
+      <button id="historyToggle" class="mobile-only ghost-btn" aria-expanded="false" aria-controls="runList">任务历史</button>
+      <div class="rail-label">任务历史 <span id="runCount">00</span></div>
+      <nav id="runList" class="run-list" aria-label="已保存任务"><p class="quiet">还没有任务。</p></nav>
+      <div class="rail-foot"><span class="live-dot"></span> 本地运行 · 私有文件<br><small>每次执行，都留下依据。</small></div>
     </aside>
 
     <main class="workspace">
       <header class="topbar">
-        <div class="run-heading">
-          <span id="runKicker" class="kicker">NEW RUN</span>
-          <h1 id="runTitle">把意图变成可验证的执行。</h1>
-        </div>
-        <div class="top-actions">
-          <div id="providerState" class="provider-pill"><span></span> 未检查</div>
-          <button id="toggleConfig" class="icon-btn" title="模型与运行设置">⌘</button>
-        </div>
+        <div class="breadcrumb">WORKSPACE <span>/</span> <span id="runKicker">新任务</span></div>
+        <div class="top-actions"><span id="providerState" class="provider-pill">本地演示</span><button id="evidenceToggle" class="ghost-btn" aria-expanded="false" aria-controls="inspector">执行记录 ↗</button></div>
       </header>
+      <div class="main-scroll">
+        <section id="emptyState" class="welcome">
+          <div class="eyebrow"><span class="accent-rule"></span> INTENT, MADE TANGIBLE.</div>
+          <h1>让每次执行，<br>有据可交付<span class="accent">。</span></h1>
+          <p class="welcome-copy">读懂文件，按规则修改，核对完整结果。<br>先约定完成标准，再让 Agent 开始工作。</p>
+          <div class="welcome-bottom"><button id="demo" class="demo-btn">体验一个完整任务 <span aria-hidden="true">↗</span></button><span class="quiet">无需模型或密钥 · 真实本地文件</span></div>
+          <div class="steps"><div><b>01</b> 固定目标</div><div><b>02</b> 受控执行</div><div><b>03</b> 核验交付</div></div>
+        </section>
 
-      <section id="configPanel" class="config-panel">
-        <div class="field wide">
-          <label>Provider</label>
-          <select id="provider">
-            <option value="ollama">Ollama · Local</option>
-            <option value="pi-openai">ChatGPT OAuth · via Pi</option>
-            <option value="openai">OpenAI API Key</option>
-          </select>
-        </div>
-        <div class="field wide">
-          <label>Model</label>
-          <input id="model" placeholder="例如 qwen3:8b / gpt-5.6-sol">
-        </div>
-        <div class="field">
-          <label>Max steps</label>
-          <input id="maxSteps" type="number" min="2" max="24" value="6">
-        </div>
-        <div class="field">
-          <label>Output tokens</label>
-          <input id="maxTokens" type="number" min="64" max="32768" value="1024">
-        </div>
-        <div class="field">
-          <label>Thinking</label>
-          <select id="thinking">
-            <option value="">default</option>
-            <option value="low">low</option>
-            <option value="medium">medium</option>
-            <option value="high">high</option>
-          </select>
-        </div>
-        <div class="field">
-          <label>Ollama URL</label>
-          <input id="ollamaUrl" value="http://127.0.0.1:11434">
-        </div>
-        <div class="field span-2">
-          <label>Allowed files · 每行一个本地文件路径</label>
-          <textarea id="files" rows="2" placeholder="D:\project\example.txt"></textarea>
-        </div>
-        <div class="config-actions">
-          <button id="checkProvider" class="ghost-btn">检查 Provider</button>
-          <span id="providerDetail" class="micro"></span>
-        </div>
-      </section>
+        <section id="taskForm" class="task-form" aria-labelledby="formTitle">
+          <div class="section-heading"><h2 id="formTitle">一个明确的小任务</h2><span class="micro">EXACT REPLACEMENT</span></div>
+          <label for="files">允许处理的文件 <span class="optional">每行一个本地路径</span></label>
+          <textarea id="files" rows="2" spellcheck="false" placeholder="例如 C:\project\example.txt"></textarea>
+          <div class="rules-heading"><label>完成标准 <span class="optional">以提交时的文件为基线</span></label><button id="addRule" class="text-btn">＋ 添加规则</button></div>
+          <div id="rules" class="rules"></div>
+          <label for="goal">任务描述 <span class="optional">选填，留空按规则生成</span></label>
+          <textarea id="goal" rows="2" placeholder="例如：更新说明文件中的项目名称，保留其他内容。"></textarea>
+          <details id="configPanel" class="config-panel">
+            <summary>模型与运行设置 <span id="configSummary">本地演示 · 最多 6 步</span></summary>
+            <div class="config-grid">
+              <div class="field"><label for="provider">执行方式</label><select id="provider"><option value="scripted">本地演示 · 固定规则</option><option value="ollama">Ollama · 本地模型</option><option value="openai">OpenAI · API Key</option><option value="pi-openai">ChatGPT · Pi OAuth（待实测）</option></select></div>
+              <div class="field"><label for="model">模型</label><input id="model" value="exact-patch-demo" list="modelOptions" placeholder="模型名称"><datalist id="modelOptions"></datalist></div>
+              <div class="field"><label for="maxSteps">最多执行步数</label><input id="maxSteps" type="number" min="2" max="64" value="6"></div>
+              <div class="field"><label for="maxTokens">单轮输出 Token</label><input id="maxTokens" type="number" min="16" max="32768" value="1024"></div>
+              <div class="field"><label for="ollamaUrl">Ollama 地址</label><input id="ollamaUrl" value="http://127.0.0.1:11434"></div>
+              <div class="field"><label for="thinking">推理档位</label><select id="thinking"><option value="">默认</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option></select></div>
+            </div>
+            <div class="config-actions"><button id="checkProvider" class="ghost-btn">检查连接</button><span id="providerDetail" class="quiet"></span></div>
+          </details>
+          <div class="form-foot"><p class="quiet">原文件保留，完成后下载核验过的副本。</p><button id="start" class="primary-btn">开始任务 <span aria-hidden="true">→</span></button></div>
+        </section>
 
-      <section id="emptyState" class="empty-state">
-        <div class="folio">P3 / AGENT</div>
-        <div class="empty-copy">
-          <p class="eyebrow">PROPOSAL → AUTHORITY → EVIDENCE</p>
-          <h2>模型负责提出下一步，<br>Runtime 负责让事实留下来。</h2>
-          <p>
-            选择本地 Ollama、OpenAI API，或通过 Pi 的 ChatGPT OAuth。
-            明确允许访问的文件后，Myth 才会让 Agent 真正执行。
-          </p>
-        </div>
-        <div class="principles">
-          <div><b>01</b><span>LLM 不拥有执行权</span></div>
-          <div><b>02</b><span>Ticket 不是成功</span></div>
-          <div><b>03</b><span>Receipt 才是事实</span></div>
-        </div>
-      </section>
-
-      <section id="timeline" class="timeline hidden" aria-live="polite"></section>
-
-      <footer class="composer-wrap">
-        <div id="waitingBanner" class="waiting-banner hidden"></div>
-        <div class="composer">
-          <textarea id="prompt" rows="1" placeholder="给 Myth 一个明确、可验证的任务…"></textarea>
-          <button id="send" class="send-btn" title="运行">↑</button>
-        </div>
-        <div class="composer-meta">
-          <span id="modeHint">Enter 运行 · Shift+Enter 换行</span>
-          <span>模型输出永远只是 Proposal</span>
-        </div>
-      </footer>
+        <section id="runView" class="run-view hidden" aria-labelledby="runTitle">
+          <div class="run-top"><span id="stateBadge" class="state-badge">准备中</span><span id="stepCount" class="micro"></span></div>
+          <h1 id="runTitle"></h1>
+          <div id="progress" class="progress" aria-label="任务进度"><span>目标已固定</span><span>执行与核验</span><span>文件交付</span></div>
+          <div id="runNotice" class="run-notice hidden" role="status"></div>
+          <div class="run-controls"><button id="continueRun" class="primary-btn hidden">核对记录并继续</button><button id="cancelRun" class="ghost-btn hidden">停止任务</button></div>
+          <section id="delivery" class="delivery hidden" aria-label="核验交付"></section>
+          <div class="timeline-heading"><h2>任务经过</h2><span class="micro">ACTIVITY</span></div>
+          <div id="timeline" class="timeline"></div>
+          <form id="answerForm" class="answer-form hidden"><label id="waitingBanner" for="prompt"></label><div class="composer"><textarea id="prompt" rows="2" placeholder="回复这个问题…"></textarea><button id="send" class="primary-btn" type="submit">答复并继续 →</button></div></form>
+        </section>
+      </div>
+      <footer class="workspace-foot"><span>MYTH / LOCAL AGENT</span><span>完成，要有依据。</span></footer>
     </main>
 
-    <aside class="inspector">
-      <div class="inspector-head">
-        <div>
-          <div class="rail-label">RUNTIME EVIDENCE</div>
-          <h3>Execution Ledger</h3>
-        </div>
-        <span id="stateBadge" class="state-badge">IDLE</span>
-      </div>
-
-      <section class="metric-block">
-        <div class="section-title">BUDGET</div>
-        <div id="budgets" class="budgets empty-mini">No active run</div>
-      </section>
-
-      <section class="metric-block">
-        <div class="section-title">LATEST FACTS</div>
-        <div id="facts" class="facts empty-mini">Ticket / Receipt / Verification will appear here.</div>
-      </section>
-
-      <section class="metric-block grow">
-        <div class="section-title">EVENT STREAM</div>
-        <div id="events" class="events empty-mini">No events yet.</div>
-      </section>
-
-      <div class="inspector-foot">
-        <span class="hairline"></span>
-        <p>Evidence first. Unknown stays unknown.</p>
-      </div>
+    <aside id="inspector" class="inspector" aria-label="执行记录">
+      <div class="inspector-head"><button id="closeEvidence" class="ghost-btn close-evidence" aria-label="关闭执行记录">关闭 ×</button><div class="eyebrow">THE EXECUTION RECORD</div><h2>把过程看清楚<span class="accent">。</span></h2><p class="quiet">目标、资源与核验，都有记录。</p></div>
+      <section class="metric-block"><div class="section-title">完成标准 <span>01</span></div><div id="acceptance" class="facts quiet">提交时固定文件和替换规则。</div></section>
+      <section class="metric-block"><div class="section-title">资源使用 <span>02</span></div><div id="budgets" class="budgets quiet">运行后显示实际用量。</div></section>
+      <section class="metric-block"><div class="section-title">最近核验 <span>03</span></div><div id="facts" class="facts quiet">核对完整内容后才会交付。</div></section>
+      <details class="metric-block event-details"><summary class="section-title">事件明细 <span id="eventCount">00</span></summary><div id="events" class="events quiet">还没有执行事件。</div></details>
+      <div class="inspector-foot"><span class="record-mark" aria-hidden="true">＋</span><p>有结果，也有来路。</p><small>未知结果会保留，等待核对。</small></div>
     </aside>
   </div>
-
-  <div id="toast" class="toast hidden"></div>
+  <div id="toast" class="toast hidden" role="alert"></div>
   <script src="/app.js"></script>
 </body>
 </html>

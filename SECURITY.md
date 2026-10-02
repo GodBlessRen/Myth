@@ -12,7 +12,7 @@ Myth is local-first. Remote model providers are explicit choices; tool authority
 
 - User files must be explicitly present in the Agent Run's `allowed_files` set.
 - Model-proposed paths are resolved and checked against that set before any durable Tool Intent is created.
-- The current executor exposes only `file.patch_exact`; there is no arbitrary shell.
+- The current executor exposes managed `file.read` and `file.patch_exact`; there is no arbitrary shell.
 - Changes occur in Myth's managed workspace. The original user file is not silently overwritten.
 - A Ticket is launch authority, not proof of success. Unknown effects are not blindly replayed.
 
@@ -36,10 +36,12 @@ A model cannot directly:
 - turn a Ticket into a Receipt;
 - mark a Run successful.
 
-A `request_completion` decision is accepted only after AgentVerifier checks cited durable evidence and the current managed artifact digest.
+A `request_completion` decision is accepted only after the independent verifier checks the fixed complete goal manifest, all preserved files, cited own-run durable evidence and no remaining work. Downloads serve the fixed accepted object, not arbitrary paths or mutable workspace files.
 
 ## Web boundary
 
 - `myth web` accepts loopback hosts only: `127.0.0.1`, `localhost`, or `::1`.
-- P3 has no CORS endpoint, credential endpoint, arbitrary file browser or shell endpoint.
+- Host/port validation rejects DNS-rebound hostnames. Mutations require JSON and a matching Origin when supplied. CSP, frame denial and text-only DOM rendering constrain the browser surface.
+- There is no CORS endpoint, credential endpoint, arbitrary file browser or shell endpoint.
+- The service is unauthenticated and trusts the local OS user. A hostile local process can still invoke it; loopback and Origin checks are not a multi-user authentication system.
 - Do not expose the local server through a tunnel/reverse proxy without adding authentication, CSRF protection and a stronger multi-user authorization model first.

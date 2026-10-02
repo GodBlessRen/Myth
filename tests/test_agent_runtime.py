@@ -108,6 +108,7 @@ class AgentRuntimeTests(unittest.TestCase):
                     allowed_files=(source,),
                     max_steps=4,
                     max_output_tokens=100,
+                    acceptance=[{"path": str(source), "old_text": "foo", "new_text": "bar", "expected_count": 1}],
                 )
                 status = agent.run(run_id, provider)
 

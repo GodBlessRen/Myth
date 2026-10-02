@@ -17,7 +17,7 @@ def _print(value: object) -> None:
 
 
 def _provider_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--provider", choices=["ollama", "pi-openai", "openai"], required=True)
+    parser.add_argument("--provider", choices=["scripted", "ollama", "pi-openai", "openai"], required=True)
     parser.add_argument("--model", required=True)
     parser.add_argument("--ollama-url", default="http://127.0.0.1:11434")
     parser.add_argument("--pi-command", default="pi")
@@ -61,6 +61,22 @@ def build_parser() -> argparse.ArgumentParser:
     agent.add_argument("--max-output-tokens", type=int, default=1024)
     agent.add_argument("--thinking")
     agent.add_argument("--request-id")
+    agent.add_argument("--acceptance", type=Path, help="UTF-8 JSON array of fixed exact replacement rules")
+
+    advance = sub.add_parser("continue-agent", help="reconcile and continue a persisted Agent without repeating uncertain work")
+    _provider_args(advance)
+    advance.add_argument("run_id")
+
+    answer = sub.add_parser("answer-agent", help="answer the current durable question")
+    _provider_args(answer)
+    answer.add_argument("run_id")
+    answer.add_argument("question_id")
+    answer.add_argument("text")
+
+    cancel = sub.add_parser("cancel-agent", help="stop new work and delivery; preserve late execution facts")
+    cancel.add_argument("run_id")
+
+    sub.add_parser("demo", help="run a deterministic read/patch/verify demo; no LLM or credentials")
 
     agent_status = sub.add_parser("agent-status", help="show Agent decisions, receipts and verification")
     agent_status.add_argument("run_id")
@@ -171,8 +187,19 @@ def main() -> None:
                 max_output_tokens=args.max_output_tokens,
                 thinking=args.thinking,
                 request_id=args.request_id,
+                acceptance=json.loads(args.acceptance.read_text(encoding="utf-8")) if args.acceptance else None,
             )
             _print(agent.run(run_id, provider))
+        elif args.command == "continue-agent":
+            _print(AgentRuntime(runtime).run(args.run_id, _require_provider(args)))
+        elif args.command == "answer-agent":
+            _print(AgentRuntime(runtime).resume(args.run_id, _require_provider(args), args.text, question_id=args.question_id))
+        elif args.command == "cancel-agent":
+            _print(AgentRuntime(runtime).cancel(args.run_id))
+        elif args.command == "demo":
+            from .demo import create_demo
+            run_id, provider = create_demo(runtime)
+            _print(AgentRuntime(runtime).run(run_id, provider))
         elif args.command == "agent-status":
             _print(AgentRuntime(runtime).status(args.run_id))
         elif args.command == "model-status":

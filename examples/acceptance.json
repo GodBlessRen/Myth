@@ -1,0 +1,3 @@
+[
+  {"path": "example.txt", "old_text": "foo", "new_text": "bar", "expected_count": 1}
+]

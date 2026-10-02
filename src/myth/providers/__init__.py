@@ -5,9 +5,12 @@ from __future__ import annotations
 from .base import ModelProvider
 from .ollama import OllamaProvider
 from .openai import OpenAIApiKeyProvider, PiOpenAIProvider
+from .scripted import ScriptedPatchProvider
 
 
 def create_provider(name: str, *, ollama_base_url: str | None = None, pi_command: str = "pi") -> ModelProvider:
+    if name == "scripted":
+        return ScriptedPatchProvider()
     if name == "ollama":
         return OllamaProvider(base_url=ollama_base_url or "http://127.0.0.1:11434")
     if name == "pi-openai":

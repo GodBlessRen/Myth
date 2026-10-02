@@ -14,7 +14,8 @@ import uuid
 from typing import Any
 
 from .artifacts import atomic_write
-from .domain import AttemptState, BudgetExceeded, InvalidTransition, canonical_json, digest_json
+from .acceptance import ContextBudgetError
+from .domain import AttemptState, BudgetExceeded, InvalidTransition, RecoveryRequired, canonical_json, digest_json
 from .models import (
     DecisionValidationError,
     ModelMessage,
@@ -64,6 +65,10 @@ CREATE TABLE IF NOT EXISTS step_decisions (
     payload_json TEXT NOT NULL,
     response_ref TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS model_request_keys (
+    request_key TEXT PRIMARY KEY NOT NULL,
+    model_attempt_id TEXT UNIQUE NOT NULL REFERENCES model_invocations(model_attempt_id)
 );
 """
 
@@ -177,6 +182,10 @@ class DecisionRuntime:
                 "context": context,
                 "allowed_files": [str(path.resolve()) for path in allowed_files],
                 "tool_catalog": {
+                    "file.read": {
+                        "arguments": ["path", "offset", "limit"],
+                        "rule": "read the fixed managed file; offset/limit are Unicode character units; limit <= 3000",
+                    },
                     "file.patch_exact": {
                         "arguments": ["path", "old_text", "new_text", "expected_count"],
                         "rule": "path must be one of allowed_files; arguments_json must encode a JSON object",
@@ -208,6 +217,7 @@ class DecisionRuntime:
         request_digest: str,
         input_hold: int,
         output_hold: int,
+        request_key: str | None = None,
     ) -> tuple[str, str]:
         action_id = self._id("mact")
         attempt_id = self._id("matt")
@@ -242,6 +252,8 @@ class DecisionRuntime:
                 "UPDATE model_invocations SET state=?,ticket_id=? WHERE model_attempt_id=?",
                 (AttemptState.TICKETED.value, ticket_id, attempt_id),
             )
+            if request_key is not None:
+                db.execute("INSERT INTO model_request_keys VALUES (?,?)", (request_key, attempt_id))
             self._event(db, run_id, "ModelTicketGranted", {"model_attempt_id": attempt_id, "ticket_id": ticket_id})
         return attempt_id, ticket_id
 
@@ -292,10 +304,14 @@ class DecisionRuntime:
                 actual = int(usage.get(meter, 0))
                 if actual < 0:
                     raise ValueError("model usage cannot be negative")
-                db.execute(
-                    "UPDATE accounts SET reserved=reserved-?,settled=settled+? WHERE run_id=? AND meter=?",
-                    (reserved, actual, reservation["run_id"], meter),
-                )
+                # 迟到收据从 UNKNOWN 占用结算，不能再次扣减已转移的预留。
+                held_column = "unknown_held" if reservation["closed"] else "reserved"
+                if meter in usage:
+                    db.execute(f"UPDATE accounts SET {held_column}={held_column}-?,settled=settled+? WHERE run_id=? AND meter=?",
+                               (reserved, actual, reservation["run_id"], meter))
+                elif not reservation["closed"]:
+                    db.execute("UPDATE accounts SET reserved=reserved-?,unknown_held=unknown_held+? WHERE run_id=? AND meter=?",
+                               (reserved, reserved, reservation["run_id"], meter))
                 db.execute(
                     "UPDATE model_reservations SET closed=1 WHERE model_attempt_id=? AND meter=?",
                     (attempt_id, meter),
@@ -365,11 +381,32 @@ class DecisionRuntime:
         context: str = "",
         max_output_tokens: int = 1024,
         thinking: str | None = None,
+        request_key: str | None = None,
     ) -> tuple[str, StepDecision]:
         """Make one visible, budgeted model request and commit one proposal."""
 
+        if request_key is not None:
+            existing = self.store.db.execute(
+                "SELECT m.* FROM model_request_keys k JOIN model_invocations m USING(model_attempt_id) WHERE request_key=?",
+                (request_key,),
+            ).fetchone()
+            if existing is not None:
+                if existing["run_id"] != run_id:
+                    raise ValueError("model request key belongs to another run")
+                self.recover(run_id)
+                saved = self.store.db.execute("SELECT * FROM step_decisions WHERE model_attempt_id=?", (existing["model_attempt_id"],)).fetchone()
+                if saved is not None:
+                    return saved["decision_id"], StepDecision(**json.loads(saved["payload_json"]))
+                receipt_path = self._receipt_path(existing["model_attempt_id"])
+                if receipt_path.exists():
+                    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+                    decision = parse_step_decision(receipt["text"])
+                    return self._save_decision(run_id, existing["model_attempt_id"], receipt["response_ref"], decision), decision
+                raise RecoveryRequired("this step already owns a model Ticket without a durable response")
         model_request = self._build_request(run_id, model, allowed_files, context, max_output_tokens, thinking)
         request_bytes = json.dumps(model_request.serializable(), ensure_ascii=False, sort_keys=True).encode("utf-8")
+        if len(request_bytes) > 65_536:
+            raise ContextBudgetError("serialized model request exceeds the 65536-byte preflight limit")
         request_ref = self.objects.put(request_bytes)
         request_digest = digest_json(model_request.serializable())
         attempt_id, _ = self._reserve_and_ticket(
@@ -380,6 +417,7 @@ class DecisionRuntime:
             request_digest=request_digest,
             input_hold=len(request_bytes),
             output_hold=max_output_tokens,
+            request_key=request_key,
         )
         try:
             result = provider.invoke(model_request)

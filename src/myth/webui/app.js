@@ -1,299 +1,149 @@
-const $ = (s) => document.querySelector(s);
-const els = {
-  runList: $("#runList"), newRun: $("#newRun"), runTitle: $("#runTitle"), runKicker: $("#runKicker"),
-  config: $("#configPanel"), toggleConfig: $("#toggleConfig"), provider: $("#provider"), model: $("#model"),
-  files: $("#files"), maxSteps: $("#maxSteps"), maxTokens: $("#maxTokens"), thinking: $("#thinking"),
-  ollamaUrl: $("#ollamaUrl"), checkProvider: $("#checkProvider"), providerState: $("#providerState"),
-  providerDetail: $("#providerDetail"), prompt: $("#prompt"), send: $("#send"), timeline: $("#timeline"),
-  empty: $("#emptyState"), budgets: $("#budgets"), facts: $("#facts"), events: $("#events"),
-  stateBadge: $("#stateBadge"), waitingBanner: $("#waitingBanner"), modeHint: $("#modeHint"), toast: $("#toast")
-};
-
-const state = { selected: null, runs: [], status: null, busy: false, timer: null };
-
-function toast(msg) {
-  els.toast.textContent = msg;
-  els.toast.classList.remove("hidden");
-  clearTimeout(toast.t);
-  toast.t = setTimeout(() => els.toast.classList.add("hidden"), 2600);
+/* UI owns presentation only. Durable control and completion belong to Runtime. */
+"use strict";
+const $ = id => document.getElementById(id);
+const state = {selected:null, status:null, busy:false, generation:0, notesKey:"", runsKey:"", deliveryKey:"", inspectorKey:"", pending:null, timer:null};
+const labels = {RUNNING:"执行中", SUCCEEDED:"已核验完成", WAITING_USER:"等待答复", UNKNOWN:"结果待核对", FAILED:"已停止 · 失败", CANCELLED:"已停止", BUDGET_EXHAUSTED:"步数或额度已用完"};
+const meterLabels = {model_calls:"决策次数", tool_calls:"工具调用", input_tokens:"输入 Token", output_tokens:"输出 Token", read_bytes:"读取字节", write_bytes:"写入字节"};
+const providerLabels = {scripted:"本地演示",ollama:"Ollama",openai:"OpenAI", "pi-openai":"Pi OAuth"};
+const money = n => Number(n || 0).toLocaleString("zh-CN");
+function node(tag, cls, text) { const n=document.createElement(tag); if(cls)n.className=cls; if(text!==undefined)n.textContent=String(text); return n; }
+function show(id, yes) { $(id).classList.toggle("hidden", !yes); }
+function toast(message) { $("toast").textContent=message; show("toast",true); clearTimeout(toast.timer); toast.timer=setTimeout(()=>show("toast",false),5500); }
+async function api(path, body) {
+  const controller=new AbortController(); const timer=setTimeout(()=>controller.abort(),35000);
+  try { const r=await fetch(path,{method:body===undefined?"GET":"POST",headers:{"Content-Type":"application/json"},body:body===undefined?undefined:JSON.stringify(body),signal:controller.signal});
+    const data=await r.json(); if(!r.ok)throw new Error(data.error || `HTTP ${r.status}`); return data;
+  } finally { clearTimeout(timer); }
 }
-
-function configPayload(extra={}) {
-  return {
-    provider: els.provider.value,
-    model: els.model.value.trim(),
-    ollama_url: els.ollamaUrl.value.trim(),
-    pi_command: "pi",
-    ...extra
-  };
+function files() { return $("files").value.split(/\r?\n/).map(x=>x.trim()).filter(Boolean); }
+function fileOptions(select, selected) {
+  select.replaceChildren(); const values=files();
+  if(!values.length)select.append(node("option","","请先填写允许处理的文件"));
+  values.forEach(path=>{ const opt=node("option","",path); opt.value=path; select.append(opt); });
+  if(values.includes(selected))select.value=selected;
 }
-
-async function api(path, options={}) {
-  const res = await fetch(path, {
-    headers: {"Content-Type":"application/json"},
-    ...options
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-  return data;
-}
-
-function statusClass(v) {
-  return String(v || "").toLowerCase().replace(/[^a-z_]/g,"");
-}
-
-function shorten(v, n=30) {
-  const s = String(v ?? "");
-  return s.length > n ? s.slice(0,n-1) + "…" : s;
-}
-
-function el(tag, cls, text) {
-  const node = document.createElement(tag);
-  if (cls) node.className = cls;
-  if (text !== undefined) node.textContent = text;
-  return node;
-}
-
-function renderRuns() {
-  els.runList.textContent = "";
-  state.runs.forEach(run => {
-    const b = el("button", "run-item" + (run.run_id === state.selected ? " active" : ""));
-    const title = el("strong", "", run.goal || run.run_id);
-    const meta = el("small");
-    meta.append(el("span","", shorten(run.status,14)), el("span","", run.run_id.slice(4,10)));
-    b.append(title, meta);
-    b.onclick = () => selectRun(run.run_id);
-    els.runList.append(b);
-  });
-}
-
-async function refreshRuns() {
-  try {
-    const data = await api("/api/runs");
-    state.runs = data.runs || [];
-    renderRuns();
-  } catch (e) { console.warn(e); }
-}
-
-function renderBudget(rows=[]) {
-  els.budgets.textContent = "";
-  if (!rows.length) { els.budgets.className="budgets empty-mini"; els.budgets.textContent="No budget data."; return; }
-  els.budgets.className="budgets";
-  rows.forEach(r => {
-    const box=el("div","budget-row");
-    const line=el("div","budget-line");
-    line.append(el("b","",r.meter), el("span","",`${r.settled} / ${r.limit_units}`));
-    const track=el("div","budget-track");
-    const fill=el("div","budget-fill");
-    const used=Math.min(100,(Number(r.settled||0)/Math.max(1,Number(r.limit_units||1)))*100);
-    fill.style.width=used+"%";
-    track.append(fill);
-    if (r.unknown_held) {
-      const unknown=el("div","budget-unknown");
-      unknown.style.width=Math.min(100,(Number(r.unknown_held)/Math.max(1,Number(r.limit_units)))*100)+"%";
-      track.append(unknown);
-    }
-    box.append(line,track);
-    els.budgets.append(box);
-  });
-}
-
-function noteText(note) {
-  const p = note.payload || {};
-  switch(note.kind) {
-    case "goal": return p.text || "";
-    case "decision":
-      if (p.decision_type === "tool_call") return `TOOL_CALL → ${p.capability_id}\n${p.reason || ""}`;
-      if (p.decision_type === "ask_user") return `ASK_USER\n${p.question || p.reason || ""}`;
-      return `REQUEST_COMPLETION\n${p.claim || ""}\n${p.reason || ""}`;
-    case "tool_result": return `Executed ${p.capability_id}\n${p.source_file || ""} → managed artifact`;
-    case "tool_rejected": return p.error || "Tool proposal rejected";
-    case "verification_rejected": return `Completion rejected\n${p.reason || ""}`;
-    case "question": return p.text || "";
-    case "user": return p.text || "";
-    case "final": return p.text || "";
-    default: return JSON.stringify(p,null,2);
+function addRule(data={}) {
+  const wrap=node("div","rule"); const meta=node("div","rule-meta");
+  const select=node("select"); select.className="rule-path"; select.setAttribute("aria-label","规则对应文件"); fileOptions(select,data.path);
+  const remove=node("button","remove-rule","×"); remove.setAttribute("aria-label","删除这条规则");
+  remove.onclick=()=>{if($("rules").children.length>1)wrap.remove();else toast("至少保留一条完成标准。");};
+  meta.append(select,remove); const grid=node("div","rule-fields");
+  for(const [key,title,value] of [["old_text","原文字",data.old_text??"foo"],["new_text","替换为",data.new_text??"bar"],["expected_count","次数",data.expected_count??1]]) {
+    if(key==="new_text")grid.append(node("div","rule-arrow","→"));
+    const field=node("div","field"); const input=node(key==="expected_count"?"input":"textarea");
+    input.id=`rule-${crypto.randomUUID()}`; input.dataset.field=key; input.value=value;
+    if(key==="expected_count"){input.type="number";input.min="1";input.step="1";}else {input.rows=2;input.spellcheck=false;}
+    const label=node("label","",title);label.htmlFor=input.id;field.append(label,input);grid.append(field);
   }
+  wrap.append(meta,grid);$("rules").append(wrap);
 }
-
-function renderTimeline(notes=[]) {
-  els.timeline.textContent="";
-  notes.forEach(note => {
-    const wrap=el("article",`entry ${note.kind}`);
-    const head=el("div","entry-head");
-    head.append(el("span","entry-label",note.kind.replaceAll("_"," ")),el("span","entry-seq",String(note.sequence).padStart(2,"0")));
-    const body=el("div","entry-body",noteText(note));
-    wrap.append(head,body);
-    const p=note.payload||{};
-    if (note.kind==="tool_result") {
-      const strip=el("div","evidence-strip");
-      [["ACTION",p.action_id],["DIGEST",shorten(p.after_digest,24)],["RECEIPT",shorten(p.evidence_ref,70)]].forEach(([k,v])=>{
-        strip.append(el("b","",k),el("span","",v||"—"));
-      });
-      wrap.append(strip);
-    }
-    els.timeline.append(wrap);
+function rules() {
+  return [...$("rules").children].map(wrap=>{const value={path:wrap.querySelector("select").value};
+    wrap.querySelectorAll("[data-field]").forEach(input=>value[input.dataset.field]=input.dataset.field==="expected_count"?Number(input.value):input.value);
+    if(!files().includes(value.path)||!value.old_text||!Number.isInteger(value.expected_count)||value.expected_count<1)throw new Error("每条规则都需要文件、非空原文字和正整数次数。");return value;});
+}
+function providerPayload(){return {provider:$("provider").value,model:$("model").value.trim(),ollama_url:$("ollamaUrl").value.trim(),pi_command:"pi"};}
+function updateConfig(){
+  $("configSummary").textContent=`${$("provider").selectedOptions[0].textContent.split(" · ")[0]} · 最多 ${$("maxSteps").value} 步`;
+  localStorage.setItem("myth-settings",JSON.stringify(providerPayload()));
+}
+async function checkProvider(){
+  $("checkProvider").disabled=true;$("providerState").textContent="检查连接…";
+  try {const p=providerPayload();const r=await api("/api/provider/check",p);$("providerState").className="provider-pill "+(r.ready?"good":"bad");
+    $("providerState").textContent=r.ready?(p.provider==="scripted"?"本地演示":"连接已就绪"):"连接未就绪";
+    $("providerDetail").textContent=r.ready?(p.provider==="scripted"?"固定规则演示，不调用模型。":"已通过基础连接检查，实际调用仍需验证。"):r.details?.error||"检查模型或登录状态。";
+    $("modelOptions").replaceChildren();(r.details?.models||[]).forEach(model=>{const o=node("option");o.value=model;$("modelOptions").append(o);});
+    if(!$("model").value&&(r.details?.models||[])[0])$("model").value=r.details.models[0];updateConfig();
+  }catch(e){$("providerState").textContent="连接检查失败";toast(e.message);}finally{$("checkProvider").disabled=false;}
+}
+function setBusy(value){state.busy=value;["start","demo"].forEach(id=>$(id).disabled=value);}
+function address(id){const url=new URL(location.href);if(id)url.searchParams.set("run",id);else url.searchParams.delete("run");history.replaceState(null,"",url);}
+function newRun(){state.selected=null;state.status=null;state.notesKey="";state.generation++;address(null);show("emptyState",true);show("taskForm",true);show("runView",false);$("runKicker").textContent="新任务";$("providerState").textContent=providerLabels[$("provider").value];$("providerState").className="provider-pill";renderInspector(null);refreshRuns();}
+async function selectRun(id){const generation=++state.generation;state.selected=id;state.notesKey="";address(id);
+  try{const r=await api(`/api/runs/${encodeURIComponent(id)}`);if(generation===state.generation)renderStatus(r);refreshRuns();}catch(e){toast(e.message);}}
+async function startRun(){
+  if(state.busy)return;
+  try{const allowed=files();if(!allowed.length)throw new Error("先填写至少一个允许处理的文件，或点击上方体验演示。");
+    const acceptance=rules();const p=providerPayload();if(!p.model)throw new Error("在模型与运行设置中填写模型名称。");
+    const payload={...p,goal:$("goal").value.trim()||`按 ${acceptance.length} 条固定规则替换文字，保留其他内容。`,files:allowed,acceptance,
+      max_steps:Number($("maxSteps").value),max_output_tokens:Number($("maxTokens").value),thinking:$("thinking").value||null};
+    const fingerprint=JSON.stringify(payload);if(state.pending?.fingerprint!==fingerprint)state.pending={fingerprint,request_id:crypto.randomUUID()};
+    setBusy(true);const r=await api("/api/runs",{...payload,request_id:state.pending.request_id});state.pending=null;await selectRun(r.run_id);
+  }catch(e){toast(e.message);}finally{setBusy(false);}
+}
+async function demo(){if(state.busy)return;setBusy(true);try{const r=await api("/api/demo",{});await selectRun(r.run_id);}catch(e){toast(e.message);}finally{setBusy(false);}}
+async function control(action){const id=state.selected;if(!id)return;$(action==="cancel"?"cancelRun":"continueRun").disabled=true;
+  try{await api(`/api/runs/${encodeURIComponent(id)}/${action}`,{});if(state.selected===id)await selectRun(id);}catch(e){toast(e.message);}finally{$("cancelRun").disabled=false;$("continueRun").disabled=false;}}
+async function answer(event){event.preventDefault();const id=state.selected;const question=state.status?.agent?.question_id;const text=$("prompt").value.trim();if(!text||!question)return;
+  $("send").disabled=true;try{await api(`/api/runs/${encodeURIComponent(id)}/resume`,{text,question_id:question});$("prompt").value="";if(state.selected===id)await selectRun(id);}catch(e){toast(e.message);}finally{$("send").disabled=false;}}
+async function refreshRuns(){
+  try{const r=await api("/api/runs");const signature=JSON.stringify([r.runs,state.selected]);if(signature===state.runsKey)return;state.runsKey=signature;
+    $("runCount").textContent=String(r.runs.length).padStart(2,"0");$("runList").replaceChildren();
+    if(!r.runs.length)$("runList").append(node("p","quiet","还没有任务。"));
+    r.runs.forEach(run=>{const b=node("button","run-item"+(run.run_id===state.selected?" active":""));b.append(node("strong","",run.goal));
+      const meta=node("small");meta.append(node("span","",labels[run.status]||run.status),node("span","",run.run_id.slice(4,10)));b.append(meta);b.onclick=()=>selectRun(run.run_id);$("runList").append(b);});
+  }catch(e){console.warn("run list",e.message);}
+}
+function renderTimeline(notes){
+  const signature=JSON.stringify(notes);if(signature===state.notesKey)return;state.notesKey=signature;
+  const expanded=new Set([...$("timeline").querySelectorAll("details[open]")].map(d=>d.dataset.sequence));$("timeline").replaceChildren();
+  const titles={goal:"任务目标",decision:"下一步决定",tool_result:"执行结果",tool_rejected:"步骤被拒绝",verification_rejected:"核验未通过",question:"需要你的答复",user:"你的答复",final:"核验完成"};
+  notes.forEach(note=>{const p=note.payload;const entry=node("article",`entry ${note.kind}`);const head=node("div","entry-head");
+    let title=titles[note.kind]||note.kind;if(note.kind==="tool_result")title=p.capability_id==="file.read"?"已读取受管文件":"已完成精确替换";
+    head.append(node("span","",title),node("span","entry-seq",String(note.sequence).padStart(2,"0")));entry.append(head);
+    let body=p.text||p.error||p.reason||"";
+    if(note.kind==="decision")body=p.decision_type==="tool_call"?`${p.capability_id==="file.read"?"读取文件":"执行替换"} · ${p.reason}`:p.decision_type==="ask_user"?p.question:p.claim;
+    if(note.kind==="tool_result")body=p.source_file.split(/[\\/]/).at(-1)+(p.has_more?` · 已读至第 ${p.next_offset} 字符，后续内容可分页读取。`:"");
+    entry.append(node("div","entry-body",body));if(p.preview!==undefined)entry.append(node("pre","entry-preview",p.preview));
+    if(p.evidence_ref||p.snapshot_ref){const details=node("details");details.dataset.sequence=String(note.sequence);details.open=expanded.has(String(note.sequence));details.append(node("summary","","查看依据"),node("p","",p.evidence_ref||p.snapshot_ref));entry.append(details);}
+    $("timeline").append(entry);
   });
-  requestAnimationFrame(()=>els.timeline.scrollTop=els.timeline.scrollHeight);
 }
-
-function renderFacts(data) {
-  els.facts.textContent="";
-  const tool=(data.tool_actions||[]).at(-1);
-  const model=(data.model?.model_invocations||[]).at(-1);
-  const verify=(data.verification||[]).at(-1);
-  const facts=[];
-  if(model) facts.push(["MODEL TICKET",model.ticket_id || "—",model.state]);
-  if(tool) facts.push(["TOOL RECEIPT",tool.evidence_ref || "—",tool.outcome || tool.attempt_state]);
-  if(verify) facts.push(["VERIFICATION",verify.report_id,verify.verdict]);
-  if(data.delivery) facts.push(["DELIVERY",data.delivery.delivery_id,"SUCCEEDED"]);
-  if(!facts.length){els.facts.className="facts empty-mini";els.facts.textContent="No durable facts yet.";return}
-  els.facts.className="facts";
-  facts.forEach(([name,value,status])=>{
-    const f=el("div","fact");
-    f.append(el("strong","",`${name} · ${status||""}`),el("span","",value));
-    els.facts.append(f);
-  });
+function renderDelivery(data){const signature=JSON.stringify([data.run.run_id,data.delivery,data.acceptance.files]);if(signature===state.deliveryKey)return;state.deliveryKey=signature;
+  $("delivery").replaceChildren();show("delivery",!!data.delivery);if(!data.delivery)return;
+  $("delivery").append(node("h2","","结果已核验，可以交付。"),node("p","",data.delivery.final_text));
+  data.acceptance.files.forEach((file,index)=>{const a=node("a","artifact-link");a.href=`/api/runs/${encodeURIComponent(data.run.run_id)}/artifacts/${index}`;a.download=file.path.split(/[\\/]/).at(-1);
+    a.append(node("span","",a.download),node("span","","下载副本 ↓"));$("delivery").append(a);});
 }
-
-function renderEvents(events=[]) {
-  els.events.textContent="";
-  if(!events.length){els.events.className="events empty-mini";els.events.textContent="No events yet.";return}
-  els.events.className="events";
-  [...events].reverse().slice(0,40).forEach(ev=>{
-    const row=el("div","event");
-    row.append(el("span","n",String(ev.sequence).padStart(2,"0")));
-    const copy=el("div");
-    copy.append(el("strong","",ev.kind),el("small","",shorten(JSON.stringify(ev.payload||{}),110)));
-    row.append(copy);
-    els.events.append(row);
-  });
+function renderInspector(data){
+  const signature=data?JSON.stringify([data.agent.provider_id,data.acceptance,data.model.budgets,data.verification,data.model.events]):"empty";
+  if(signature===state.inspectorKey)return;state.inspectorKey=signature;
+  ["budgets","acceptance","facts","events"].forEach(id=>$(id).replaceChildren());
+  if(!data){$("acceptance").textContent="提交时固定文件和替换规则。";$("budgets").textContent="运行后显示实际用量。";$("facts").textContent="核对完整内容后才会交付。";$("events").textContent="还没有执行事件。";$("eventCount").textContent="00";return;}
+  const manifest=data.acceptance;
+  manifest.rules.forEach((rule,i)=>{const f=node("div","fact");f.append(node("b","",`${String(i+1).padStart(2,"0")} · ${rule.path.split(/[\\/]/).at(-1)}`),node("small","",`${JSON.stringify(rule.old_text)} → ${JSON.stringify(rule.new_text)} · ${rule.expected_count} 次`));$("acceptance").append(f);});
+  if(!manifest.rules.length)$("acceptance").textContent="此任务没有固定目标验收合同，无法核验交付。";
+  (data.model.budgets||[]).forEach(row=>{if(data.agent.provider_id==="scripted"&&row.meter.includes("tokens"))return;
+    const b=node("div","budget-row");const line=node("div","budget-line");line.append(node("span","",meterLabels[row.meter]||row.meter),node("span","",`${money(row.settled)} / ${money(row.limit_units)}`));b.append(line);
+    const track=node("div","budget-track");let available=100;for(const [key,cls]of [["settled","budget-fill"],["reserved","budget-reserved"],["unknown_held","budget-unknown"]]){const segment=node("div",cls);const percentage=Math.max(0,Math.min(available,Number(row[key])/Math.max(1,row.limit_units)*100));segment.style.width=percentage+"%";available-=percentage;track.append(segment);}b.append(track);
+    if(row.reserved||row.unknown_held)b.append(node("small","",`预留 ${money(row.reserved)} · 待核对 ${money(row.unknown_held)}`));$("budgets").append(b);});
+  const report=data.verification.at(-1);if(report){const f=node("div","fact");f.append(node("b","",report.verdict==="PASS"?"完整内容与固定目标一致":report.verdict==="FAIL"?"结果与完成标准不一致":"证据尚不充分"),node("small","",report.reason),node("small","",report.report_id));$("facts").append(f);}else $("facts").textContent="尚未进入完成核验。";
+  const events=data.model.events||[];$("eventCount").textContent=String(events.length).padStart(2,"0");[...events].reverse().slice(0,30).forEach(ev=>{const e=node("div","event");e.append(node("span","n",String(ev.sequence).padStart(2,"0")));const c=node("div");c.append(node("strong","",ev.kind),node("small","",JSON.stringify(ev.payload)));e.append(c);$("events").append(e);});
 }
-
-function renderStatus(data) {
-  state.status=data;
-  const a=data.agent||{};
-  const run=data.run||{};
-  els.empty.classList.add("hidden");
-  els.timeline.classList.remove("hidden");
-  els.runTitle.textContent=run.goal || "Agent Run";
-  els.runKicker.textContent=`${a.provider_id || "AGENT"} / ${a.model_id || ""}`;
-  els.stateBadge.textContent=a.status || run.state || "UNKNOWN";
-  els.stateBadge.className=`state-badge ${statusClass(a.status || run.state)}`;
-  renderTimeline(data.notes||[]);
-  renderBudget(data.model?.budgets || []);
-  renderFacts(data);
-  renderEvents(data.model?.events || []);
-  const waiting=a.status==="WAITING_USER";
-  els.waitingBanner.classList.toggle("hidden",!waiting);
-  els.waitingBanner.textContent=waiting ? (a.pending_question || "Agent 正在等待你的输入") : "";
-  els.modeHint.textContent=waiting ? "回答 Agent 的问题并继续" : "Enter 运行 · Shift+Enter 换行";
-  els.prompt.placeholder=waiting ? "回复 Agent…" : "给 Myth 一个明确、可验证的任务…";
-  els.send.disabled=["SUCCEEDED","BUDGET_EXHAUSTED","UNKNOWN","FAILED"].includes(a.status);
+function renderStatus(data){
+  state.status=data;const a=data.agent;const interrupted=a.status==="RUNNING"&&!data.driver_active;show("emptyState",false);show("taskForm",false);show("runView",true);
+  $("providerState").textContent=providerLabels[a.provider_id]||a.provider_id;$("providerState").className="provider-pill";
+  $("runTitle").textContent=data.run.goal;$("runKicker").textContent=a.provider_id==="scripted"?"固定规则演示":"Agent 任务";
+  $("stateBadge").textContent=labels[a.status]||a.status;$("stateBadge").className=`state-badge ${a.status.toLowerCase()}`;$("stepCount").textContent=`${a.current_step} / ${a.max_steps} STEPS`;
+  [...$("progress").children].forEach((n,i)=>n.classList.toggle("active",i===0||i===1&&a.current_step>0||i===2&&!!data.delivery));
+  const notice=a.status==="UNKNOWN"?`结果仍待核对，系统不会盲目重做。\n${a.error||""}`:interrupted?"执行已中断。可核对持久记录后继续。":a.error||"";
+  $("runNotice").textContent=notice;show("runNotice",!!notice);show("continueRun",a.status==="UNKNOWN"||interrupted);show("cancelRun",["RUNNING","UNKNOWN","WAITING_USER"].includes(a.status));
+  show("answerForm",a.status==="WAITING_USER");$("waitingBanner").textContent=a.pending_question||"";
+  renderTimeline(data.notes);renderDelivery(data);renderInspector(data);
 }
-
-async function selectRun(id) {
-  state.selected=id;
-  renderRuns();
-  try { renderStatus(await api(`/api/runs/${encodeURIComponent(id)}`)); }
-  catch(e){toast(e.message)}
+async function poll(){clearTimeout(state.timer);await refreshRuns();const id=state.selected;const generation=state.generation;
+  if(id){try{const r=await api(`/api/runs/${encodeURIComponent(id)}`);if(id===state.selected&&generation===state.generation)renderStatus(r);}catch(e){console.warn("run status",e.message);}}
+  state.timer=setTimeout(poll,document.hidden?6000:state.status?.driver_active?750:2500);
 }
-
-async function poll() {
-  clearTimeout(state.timer);
-  await refreshRuns();
-  if(state.selected){
-    try{
-      const data=await api(`/api/runs/${encodeURIComponent(state.selected)}`);
-      renderStatus(data);
-    }catch(e){console.warn(e)}
-  }
-  const active=state.status?.agent?.status==="RUNNING";
-  state.timer=setTimeout(poll,active?700:2200);
-}
-
-async function checkProvider() {
-  els.providerState.className="provider-pill";
-  els.providerState.innerHTML="<span></span> checking";
-  try{
-    const data=await api("/api/provider/check",{method:"POST",body:JSON.stringify(configPayload())});
-    els.providerState.className="provider-pill "+(data.ready?"good":"bad");
-    els.providerState.innerHTML=`<span></span> ${data.ready?"ready":"not ready"}`;
-    const models=data.details?.models;
-    els.providerDetail.textContent=Array.isArray(models)&&models.length ? `${models.length} local models` : (data.auth_type||"");
-    if(data.ready && !els.model.value.trim() && Array.isArray(models) && models[0]) els.model.value=models[0];
-    if(!data.ready) toast(data.details?.error || "Provider not ready");
-  }catch(e){
-    els.providerState.className="provider-pill bad";
-    els.providerState.innerHTML="<span></span> error";
-    toast(e.message);
-  }
-}
-
-async function submit() {
-  if(state.busy) return;
-  const text=els.prompt.value.trim();
-  if(!text) return;
-  state.busy=true; els.send.disabled=true;
-  try{
-    const waiting=state.status?.agent?.status==="WAITING_USER" && state.selected;
-    if(waiting){
-      await api(`/api/runs/${encodeURIComponent(state.selected)}/resume`,{
-        method:"POST",body:JSON.stringify(configPayload({text}))
-      });
-    }else{
-      const files=els.files.value.split(/\r?\n/).map(v=>v.trim()).filter(Boolean);
-      const data=await api("/api/runs",{
-        method:"POST",
-        body:JSON.stringify(configPayload({
-          goal:text, files,
-          max_steps:Number(els.maxSteps.value||6),
-          max_output_tokens:Number(els.maxTokens.value||1024),
-          thinking:els.thinking.value||null
-        }))
-      });
-      state.selected=data.run_id;
-      els.empty.classList.add("hidden");
-      els.timeline.classList.remove("hidden");
-    }
-    els.prompt.value="";
-    await poll();
-  }catch(e){toast(e.message)}
-  finally{
-    state.busy=false;
-    const terminal=["SUCCEEDED","BUDGET_EXHAUSTED","UNKNOWN","FAILED"].includes(state.status?.agent?.status);
-    els.send.disabled=terminal;
-  }
-}
-
-function newRun() {
-  state.selected=null;state.status=null;
-  renderRuns();
-  els.timeline.classList.add("hidden");
-  els.empty.classList.remove("hidden");
-  els.runKicker.textContent="NEW RUN";
-  els.runTitle.textContent="把意图变成可验证的执行。";
-  els.stateBadge.textContent="IDLE";
-  els.stateBadge.className="state-badge";
-  els.budgets.className="budgets empty-mini";els.budgets.textContent="No active run";
-  els.facts.className="facts empty-mini";els.facts.textContent="Ticket / Receipt / Verification will appear here.";
-  els.events.className="events empty-mini";els.events.textContent="No events yet.";
-  els.waitingBanner.classList.add("hidden");
-  els.prompt.placeholder="给 Myth 一个明确、可验证的任务…";
-  els.prompt.focus();
-}
-
-els.toggleConfig.onclick=()=>els.config.classList.toggle("open");
-els.checkProvider.onclick=checkProvider;
-els.provider.onchange=checkProvider;
-els.newRun.onclick=newRun;
-els.send.onclick=submit;
-els.prompt.addEventListener("keydown",e=>{
-  if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();submit()}
-});
-els.prompt.addEventListener("input",()=>{
-  els.prompt.style.height="auto";
-  els.prompt.style.height=Math.min(160,els.prompt.scrollHeight)+"px";
-});
-
-refreshRuns().then(()=>{checkProvider();poll()});
+$("newRun").onclick=newRun;$("start").onclick=startRun;$("demo").onclick=demo;$("addRule").onclick=()=>addRule();
+$("files").oninput=()=>document.querySelectorAll(".rule-path").forEach(s=>fileOptions(s,s.value));
+$("answerForm").onsubmit=answer;$("cancelRun").onclick=()=>control("cancel");$("continueRun").onclick=()=>control("continue");
+$("checkProvider").onclick=checkProvider;$("provider").onchange=()=>{$("model").value=$("provider").value==="scripted"?"exact-patch-demo":"";$("providerState").textContent=$("provider").value==="scripted"?"本地演示":"尚未检查";updateConfig();};
+$("maxSteps").oninput=updateConfig;$("model").onchange=updateConfig;
+$("historyToggle").onclick=()=>{const open=document.querySelector(".rail").classList.toggle("history-open");$("historyToggle").setAttribute("aria-expanded",String(open));};
+$("evidenceToggle").onclick=()=>{const open=$("inspector").classList.toggle("open");$("evidenceToggle").setAttribute("aria-expanded",String(open));};
+function closeEvidence(){$("inspector").classList.remove("open");$("evidenceToggle").setAttribute("aria-expanded","false");$("evidenceToggle").focus();}
+$("closeEvidence").onclick=closeEvidence;
+document.addEventListener("keydown",e=>{if(e.key==="Escape"&&$("inspector").classList.contains("open"))closeEvidence();});
+try{const saved=JSON.parse(localStorage.getItem("myth-settings"));if(saved&&["scripted","ollama","openai","pi-openai"].includes(saved.provider)){$("provider").value=saved.provider;$("model").value=saved.model||"";$("ollamaUrl").value=saved.ollama_url||"http://127.0.0.1:11434";}}catch{}
+addRule();updateConfig();const initial=new URL(location.href).searchParams.get("run");if(initial)selectRun(initial);poll();
