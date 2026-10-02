@@ -5,6 +5,7 @@ import uuid
 from ..conversation import chunks, rank_chunks, score_chunk
 from ..domain import canonical_json, digest_json, IdentityConflict, BudgetExceeded
 from ..decision_runtime import DecisionRuntime
+from ..strategies import RuleIntentPicker, RuleResolutionController
 
 SCHEMA="""
 CREATE TABLE IF NOT EXISTS workspace_projects(
@@ -247,16 +248,51 @@ class SqliteWorkspaceRepository:
             if session["archived"]:raise ValueError("restore the archived conversation first")
             if any(t["status"] in ACTIVE_TURN_STATUSES for t in session["turns"]):raise ValueError("本会话仍有未完成一轮，请先继续、答复或停止。")
             project=self.project(session["project_id"]) if session["project_id"] else None
-            knowledge=self.search(text,session["project_id"])
+            retrieval=self.search_report(text,session["project_id"])
+            knowledge=list(retrieval["sources"])
             for did in document_ids:
                 document=self.document(did)
                 if document["archived"]:raise ValueError("attachment was removed from the retrieval index")
                 if document["project_id"] not in {None,session["project_id"]}:raise PermissionError("attachment belongs to another project")
                 if not any(s["document_id"]==did for s in knowledge):
-                    knowledge.append({"document_id":did,"title":document["title"],"content":document["content"][:1000],"chunk_index":0,"digest":document["digest"],"citation":f"doc:{did}:0","score":0})
+                    knowledge.append({"document_id":did,"title":document["title"],"content":document["content"][:1800],"chunk_index":0,"digest":document["digest"],"citation":f"doc:{did}:0","score":0})
+            pick=RuleIntentPicker().pick(text,{
+                "project":project,
+                "sources":knowledge,
+                "attached_document_ids":document_ids,
+            })
+            plan=RuleResolutionController().choose(
+                text,
+                route=pick.route,
+                sources=knowledge,
+                attached_document_ids=document_ids,
+            )
+            projected_knowledge=[]
+            for source in knowledge[:plan.max_sources]:
+                item=dict(source)
+                if plan.resolution.value=="L0":
+                    item["content"]=item.get("content","")[:plan.max_chars_per_source]
+                elif plan.resolution.value=="L2":
+                    document=self.document(item["document_id"])
+                    chunk_index=int(item.get("chunk_index") or 0)
+                    start=max(0,chunk_index*1600-800)
+                    item["content"]=document["content"][start:start+plan.max_chars_per_source]
+                    item["source_ref"]=f"doc:{item['document_id']}@{document['digest']}"
+                    item["resolution_offset"]=start
+                item["resolution"]=plan.resolution.value
+                projected_knowledge.append(item)
             snapshot={
                 "project":project,
-                "knowledge":knowledge,
+                "knowledge":projected_knowledge,
+                "retrieval_report":retrieval["retrieval"],
+                "intent_pick":{
+                    "route":pick.route.value,
+                    "objective":pick.objective,
+                    "confidence":pick.confidence,
+                    "reason":pick.reason,
+                    "metadata":pick.metadata or {},
+                },
+                "information_resolution":plan.serializable(),
                 "attached_document_ids":list(document_ids),
                 "turn_message_start":min(30,len(session["messages"])),
                 "memory":[
@@ -280,7 +316,13 @@ class SqliteWorkspaceRepository:
             db.execute("INSERT INTO workspace_turns(run_id,session_id,request_id,entry_digest,settings_json,snapshot_json,status,max_steps) VALUES(?,?,?,?,?,?,'RUNNING',?)",(rid,sid,request_id,identity,canonical_json(settings),canonical_json(snapshot),settings["max_steps"]))
             self._message(db,sid,rid,"user",text,{})
             db.execute("UPDATE workspace_sessions SET title=CASE WHEN title='新对话' THEN ? ELSE title END,updated_at=CURRENT_TIMESTAMP WHERE id=?",(text[:40],sid))
-            self.store._event(db,rid,"ConversationTurnStarted",{"session_id":sid})
+            self.store._event(db,rid,"ConversationTurnStarted",{
+                "session_id":sid,
+                "intent_route":pick.route.value,
+                "information_resolution":plan.resolution.value,
+                "retrieval_scanned":retrieval["retrieval"]["scanned"],
+                "retrieval_matched":retrieval["retrieval"]["matched"],
+            })
         return self.turn(rid)
 
     def _message(self,db,sid,rid,role,text,metadata):
