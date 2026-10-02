@@ -559,12 +559,16 @@ class DecisionRuntime:
         return recovered
 
     def status(self, run_id: str) -> dict[str, Any]:
-        invocations = [
-            dict(row)
-            for row in self.store.db.execute(
-                "SELECT * FROM model_invocations WHERE run_id=? ORDER BY rowid", (run_id,)
-            ).fetchall()
-        ]
+        invocations = []
+        for row in self.store.db.execute(
+            "SELECT * FROM model_invocations WHERE run_id=? ORDER BY rowid", (run_id,)
+        ).fetchall():
+            item = dict(row)
+            try:
+                item["usage"] = json.loads(item.get("usage_json") or "{}")
+            except json.JSONDecodeError:
+                item["usage"] = {}
+            invocations.append(item)
         decisions = []
         for row in self.store.db.execute(
             "SELECT * FROM step_decisions WHERE run_id=? ORDER BY created_at", (run_id,)
