@@ -80,13 +80,19 @@
 
 ## Wave G — Product/UI
 
-UI 只展示 Kernel 已有的真实能力：
+v0.7 已完成第一轮 Product Shell Reset：
 
 - Chat remains center;
-- Control strip: model / thinking / steer / pause / abort;
-- right Runtime Inspector: context / memory / tools / budget / trace / recovery;
-- Projects/Knowledge become drawers, not the product center;
-- streaming, diff, artifacts and verification are inline in conversation.
+- Projects / Knowledge / Session Management 已降为 Context surface;
+- right Runtime Inspector 已接入当前真实的 Decision / Result / Budget / Context / Platform facts;
+- visual tokens / layout / components 已整体重构，不再依赖旧 CSS override 层。
+
+下一步继续补：
+
+- Control strip: model / thinking / steer / pause / resume / abort;
+- deeper Runtime Inspector: Ticket / Receipt / Verification / Recovery;
+- streaming, diff and artifacts inline in conversation;
+- Context / Memory drawers.
 
 ## P1000 boundary
 
