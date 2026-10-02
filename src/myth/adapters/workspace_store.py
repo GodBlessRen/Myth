@@ -47,12 +47,13 @@ ACTIVE_TURN_STATUSES = {"RUNNING", "UNKNOWN", "WAITING_USER", "PAUSED"}
 
 
 class SqliteWorkspaceRepository:
-    def __init__(self,runtime,*,intent_picker=None,resolution_controller=None):
+    def __init__(self,runtime,*,intent_picker=None,resolution_controller=None,resolution_policy_id=None):
         self.runtime=runtime
         self.store=runtime.store
         self.decisions=DecisionRuntime(runtime)
         self.intent_picker=intent_picker or RuleIntentPicker()
         self.resolution_controller=resolution_controller or RuleResolutionController()
+        self.resolution_policy_id=str(resolution_policy_id or "injected/default")
         self.store.db.executescript(SCHEMA)
 
     def settings(self):
@@ -314,6 +315,9 @@ class SqliteWorkspaceRepository:
                     "metadata":pick.metadata or {},
                 },
                 "information_resolution":plan.serializable(),
+                "policy_bindings":{
+                    "information_resolution":self.resolution_policy_id,
+                },
                 "attached_document_ids":list(document_ids),
                 "turn_message_start":min(30,len(session["messages"])),
                 "memory":[
