@@ -175,6 +175,10 @@ class SqliteEvolutionControl:
             raise ValueError("candidate eval policy_id must equal candidate_id")
         if baseline["suite_id"]!=tested["suite_id"] or baseline["suite_version"]!=tested["suite_version"]:
             raise ValueError("candidate and baseline must use the same suite/version")
+        if not bool(baseline.get("complete_suite")) or not bool(tested.get("complete_suite")):
+            raise ValueError("promotion evidence requires complete fixed-suite runs")
+        if int(baseline.get("suite_case_count") or 0) != int(tested.get("suite_case_count") or 0):
+            raise ValueError("baseline/candidate suite case counts differ")
 
         pairs=ledger.paired_comparisons(baseline_eval_run_id,candidate_eval_run_id)
         cost_model=SqliteCostModelRegistry(self.runtime).model(cost_model_id) if cost_model_id else None
