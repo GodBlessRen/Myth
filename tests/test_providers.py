@@ -85,7 +85,11 @@ class OpenAIProviderTests(unittest.TestCase):
                 "id": "resp_1",
                 "status": "completed",
                 "output": [{"type": "message", "content": [{"type": "output_text", "text": "{}"}]}],
-                "usage": {"input_tokens": 3, "output_tokens": 4},
+                "usage": {
+                    "input_tokens": 8,
+                    "output_tokens": 4,
+                    "input_tokens_details": {"cached_tokens": 5},
+                },
             })
 
         provider = OpenAIResponsesProvider(
@@ -100,6 +104,8 @@ class OpenAIProviderTests(unittest.TestCase):
         self.assertNotIn("max_output_tokens", captured["body"])
         self.assertNotIn("secret-token", json.dumps(result.raw))
         self.assertEqual(result.usage["model_calls"], 1)
+        self.assertEqual(result.usage["input_tokens"], 8)
+        self.assertEqual(result.usage["cached_input_tokens"], 5)
 
     def test_api_key_path_includes_max_output_tokens(self) -> None:
         captured = {}
