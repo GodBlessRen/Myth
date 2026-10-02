@@ -49,6 +49,13 @@ class SqliteEvaluationLedger:
         policy=str(policy_id or "").strip()
         if not policy or len(policy)>200:
             raise ValueError("policy_id must contain 1-200 characters")
+        result_policy=str(result.get("policy_id") or policy).strip()
+        if result_policy != policy:
+            raise ValueError("recorded policy_id must match the runner result")
+        suite_id=str(result.get("suite_id") or "").strip()
+        suite_version=int(result.get("version") or 0)
+        if not suite_id or suite_version<1:
+            raise ValueError("evaluation result requires suite id/version")
         observations=result.get("observations") or []
         if not isinstance(observations,list):
             raise ValueError("evaluation observations must be a list")
@@ -59,8 +66,8 @@ class SqliteEvaluationLedger:
                 "VALUES (?,?,?,?,?,?,?)",
                 (
                     eval_run_id,
-                    str(result.get("suite_id") or ""),
-                    int(result.get("version") or 0),
+                    suite_id,
+                    suite_version,
                     policy,
                     canonical_json(result.get("report") or {}),
                     canonical_json(result.get("release_gate") or {}),
