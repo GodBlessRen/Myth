@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "myth-runtime"
+version = "0.1.0"
+description = "A minimal durable agent runtime: proposals are probabilistic; execution and completion are governed by durable facts."
+readme = "README.md"
+requires-python = ">=3.12"
+authors = [{name = "GodBlessRen"}]
+dependencies = []
+
+[project.scripts]
+myth = "myth.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
