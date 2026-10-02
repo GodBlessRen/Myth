@@ -52,14 +52,23 @@ class LocalConversationExecution:
             metadata = frozen_pick.get("metadata") or {}
             if frozen_pick.get("route") == "deterministic" and metadata.get("kind") == "bounded_arithmetic":
                 expression = metadata["expression"]
-                value = calculate(expression)
-                decision_id = f"intent:{turn['run_id']}:{step}:arithmetic"
-                return decision_id, StepDecision(
-                    decision_type="request_completion",
-                    reason=frozen_pick.get("reason") or "deterministic intent route",
-                    claim=str(value),
-                    goal_coverage="answer",
-                )
+                try:
+                    value = calculate(expression)
+                except ValueError as exc:
+                    self.repository.record_route_fallback(
+                        turn["run_id"],
+                        step,
+                        "deterministic->agent",
+                        str(exc),
+                    )
+                else:
+                    decision_id = f"intent:{turn['run_id']}:{step}:arithmetic"
+                    return decision_id, StepDecision(
+                        decision_type="request_completion",
+                        reason=frozen_pick.get("reason") or "deterministic intent route",
+                        claim=str(value),
+                        goal_coverage="answer",
+                    )
 
         request=conversation_request(
             turn["settings"],
