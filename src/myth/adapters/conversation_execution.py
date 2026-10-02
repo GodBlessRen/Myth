@@ -13,6 +13,8 @@ from ..adapters.agent_execution import LocalAgentExecution
 from ..conversation import TOOL_CATALOG, conversation_request, calculate
 from ..domain import RecoveryRequired, exact_patch, sha256_bytes
 from ..platform.capabilities import CapabilityState, default_capabilities
+from ..models import StepDecision
+from ..strategies import RuleIntentPicker
 
 EXCLUDED={".git",".runtime",".venv","venv","node_modules","__pycache__",".aws",".ssh","secrets"}
 TEXT_SUFFIXES={
@@ -25,6 +27,7 @@ class LocalConversationExecution:
     def __init__(self,runtime,repository,capability_registry=None):
         self.runtime,self.repository=runtime,repository
         self.registry=capability_registry or default_capabilities()
+        self.intent_picker=RuleIntentPicker()
         self._lock_adapter=LocalAgentExecution(runtime,repository)
         self.receipts=runtime.runtime_dir/"conversation-receipts"
         self.receipts.mkdir(exist_ok=True)
@@ -44,6 +47,24 @@ class LocalConversationExecution:
                 "question":decision.get("question"),
                 "result":result,
             })
+        if step == 1 and not activities:
+            user_text = turn["snapshot"]["messages"][-1]["content"]
+            pick = self.intent_picker.pick(user_text, {
+                "project": turn["snapshot"].get("project"),
+                "attached_document_ids": turn["snapshot"].get("attached_document_ids") or [],
+            })
+            metadata = pick.metadata or {}
+            if pick.route.value == "deterministic" and metadata.get("kind") == "bounded_arithmetic":
+                expression = metadata["expression"]
+                value = calculate(expression)
+                decision_id = f"intent:{turn['run_id']}:{step}:arithmetic"
+                return decision_id, StepDecision(
+                    decision_type="request_completion",
+                    reason=pick.reason or "deterministic intent route",
+                    claim=str(value),
+                    goal_coverage="answer",
+                )
+
         request=conversation_request(
             turn["settings"],
             turn["snapshot"],
