@@ -204,12 +204,18 @@ class LocalConversationExecution:
         }
 
     def _read_knowledge(self,turn,args):
-        return self._resolve_knowledge(turn,{
+        value=self._resolve_knowledge(turn,{
             "document_id":args.get("document_id"),
             "resolution":"L2",
             "cursor":args.get("offset",0),
             "limit":args.get("max_chars",6000),
         })
+        # v0.11 wire compatibility: knowledge.read exposed offset/next_offset.
+        return {
+            **value,
+            "offset":value["cursor"],
+            "next_offset":value["next_cursor"],
+        }
 
     def _read_project(self,turn,args):
         _,path=self.project_path(turn,args.get("path"))
