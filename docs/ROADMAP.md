@@ -1,6 +1,6 @@
 # Myth Roadmap
 
-## 当前基线：v0.18
+## 当前基线：v0.20
 
 Myth 已经有足够多的架构合同。当前阶段不再用更多抽象掩盖真实任务失败。
 
@@ -33,6 +33,22 @@ v0.18 已经具备：
 - provider context-window hardening；
 - Eval Ledger / explicit policy release controls。
 
+## 已完成 — Recovery-first Runtime
+
+v0.20 已把真实事故升级成 Runtime 合同：
+
+- durable Execution Cursor；
+- current phase / last checkpoint / recovery state；
+- Driver Lease / generation / heartbeat；
+- lease expiry 后自动识别 abandoned RUNNING；
+- 无不确定外部效果：`INTERRUPTED -> RESUME`；
+- 有 Ticket / provider outcome 不明确：`UNKNOWN -> RECONCILE`；
+- Web 重开后可从 durable checkpoint 继续；
+- Runtime Observatory 显示 Recovery / Driver / Lease；
+- Session 显示“可恢复 / 需核对”。
+
+恢复不等于重发上一条 Prompt；恢复必须加载原 Run、原 Turn Snapshot、原 Step/Decision/Receipt facts，再从可信 checkpoint 继续。
+
 ## Next 1 — 真实任务基线
 
 建立 10 个真实日常任务，每个重复运行至少 3 次。
@@ -43,6 +59,8 @@ v0.18 已经具备：
 - human takeover；
 - wrong completion；
 - recovery success；
+- interruption -> resume success；
+- unknown -> reconcile success；
 - time to completion；
 - model calls；
 - input / output tokens；
