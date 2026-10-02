@@ -87,6 +87,10 @@ def build_parser() -> argparse.ArgumentParser:
     recover_model = sub.add_parser("recover-model", help="settle durable model receipts without repeating uncertain calls")
     recover_model.add_argument("run_id", nargs="?")
 
+    evaluate = sub.add_parser("eval", help="run a fixed local Myth evaluation suite")
+    evaluate.add_argument("--suite", default="evals/foundation-v1.json")
+    evaluate.add_argument("--case", action="append", default=[], dest="case_ids")
+
     web = sub.add_parser("web", help="start the local Myth Agent workspace")
     web.add_argument("--host", default="127.0.0.1")
     web.add_argument("--port", type=int, default=8765)
@@ -118,6 +122,11 @@ def main() -> None:
 
     if args.command == "provider-check":
         _print(_provider(args).check())
+        return
+    if args.command == "eval":
+        from .evaluation_runner import run_eval_suite
+
+        _print(run_eval_suite(args.suite, args.case_ids))
         return
     if args.command == "web":
         from .web import serve
