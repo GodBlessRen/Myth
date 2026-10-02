@@ -51,11 +51,11 @@ class ConversationWebService:
             "goal_count":len(self.goals()),
         }
 
-    @staticmethod
-    def provider(settings):
+    def provider(self,settings):
         return create_provider(
             settings["provider"],
             ollama_base_url=settings.get("ollama_url"),
+            runtime_root=str(self.root),
         )
 
     def connection(self,payload=None):

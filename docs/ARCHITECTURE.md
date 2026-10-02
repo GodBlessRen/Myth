@@ -217,6 +217,14 @@ SQLite / local execution / providers
 
 协议与厂商只能进入 Adapter 外圈。
 
+认证同样属于 Adapter 边界：
+
+- OpenAI API Key 只从环境变量读取；
+- Sign in with ChatGPT 由 Myth 自己实现 OAuth authorization-code + PKCE/OIDC；
+- OAuth secret 只进入系统安全凭据库，不进入 Runtime SQLite / Event / Artifact / Web JSON；
+- OAuth registration/profile metadata 与 Runtime execution state 分离；
+- Myth 不读取 Pi/Codex auth files，也不复用其他应用的 OAuth client identity。
+
 Core 不依赖：
 
 - OpenAI；

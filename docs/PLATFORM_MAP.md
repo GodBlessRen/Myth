@@ -66,8 +66,8 @@ Strategy 不升格成 Layer。真实任务没有暴露需求时，不继续横�
 | SQLite | usable |
 | Local Files | usable |
 | Ollama | usable |
-| OpenAI | connected |
-| Pi OAuth | connected |
+| OpenAI API Key | connected |
+| Sign in with ChatGPT | usable | Myth-owned PKCE/OIDC + secure OS credential store；不依赖 Pi/Codex auth |
 | MCP | exists |
 | A2A | planned |
 | Browser | planned |

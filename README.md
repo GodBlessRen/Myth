@@ -15,7 +15,7 @@ Long-term Goal
   -> continue the same Goal
 ```
 
-当前版本：**v0.18**
+当前版本：**v0.19**
 
 ## 现在能做什么
 
@@ -57,7 +57,7 @@ Long-term Goal
 
 ## Quick Start
 
-要求 Python 3.12+。Runtime 使用标准库，无前端构建链、CDN 或外部数据库服务。
+要求 Python 3.12+。核心 Runtime 仍以标准库为主；原生 ChatGPT OAuth 额外使用 PyJWT/cryptography 做 OIDC 验证、keyring 对接系统安全凭据库。无前端构建链、CDN 或外部数据库服务。
 
 ```bash
 python -m pip install -e .
@@ -76,7 +76,9 @@ Windows：
 http://127.0.0.1:8765/
 ```
 
-一般对话默认使用本机 Ollama。页面可配置：
+一般对话默认使用本机 Ollama；也可选择 OpenAI API Key 或 Myth 自己实现的 **Sign in with ChatGPT**。ChatGPT OAuth 不依赖 Pi/Codex 的认证文件或 CLI，Token 只进入系统安全凭据库，不进入项目 Runtime 数据库。
+
+页面可配置：
 
 - Ollama 地址；
 - 模型；
@@ -86,7 +88,7 @@ http://127.0.0.1:8765/
 - max output tokens；
 - thinking。
 
-Myth 不自动下载模型，也不保存 API 密钥。
+Myth 不自动下载模型。OpenAI API Key 只从环境变量读取；ChatGPT OAuth 凭据使用系统安全凭据库，并支持刷新、撤销和显式退出。
 
 ## 工作台
 

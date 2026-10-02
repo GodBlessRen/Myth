@@ -28,7 +28,8 @@ class PlatformSkeletonTests(unittest.TestCase):
         self.assertTrue({"goal","run","action","attempt","ticket","receipt","artifact","verification"} <= core_ids)
         self.assertTrue({"coordination","control","execution","capability","state","context","memory","personal","observability","evaluation","evolution"} <= domain_ids)
         self.assertTrue({"direct","agent_loop","workflow","routing","multi_agent","managed_agent","personal_agent"} <= strategy_ids)
-        self.assertTrue({"sqlite","local_files","ollama","openai","mcp","a2a"} <= adapter_ids)
+        self.assertTrue({"sqlite","local_files","ollama","openai","chatgpt_oauth","mcp","a2a"} <= adapter_ids)
+        self.assertNotIn("pi_oauth", adapter_ids)
 
         # There are no product-facing P0/P1000 phase labels anymore.
         for group in ("core","domains","strategies","adapters"):

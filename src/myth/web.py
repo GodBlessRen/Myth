@@ -18,6 +18,7 @@ from urllib.parse import quote, urlparse, parse_qs
 import webbrowser
 
 from .agent_runtime import AgentRuntime
+from .auth import ChatGPTAuthManager
 from .providers import create_provider
 from .runtime import MythRuntime
 from .web_workspace import ConversationWebService
@@ -32,13 +33,13 @@ class AgentWebService:
         self._active: set[str] = set()
         self._lock = threading.Lock()
         self.workspace = ConversationWebService(self.root)
+        self.chatgpt_auth = ChatGPTAuthManager(self.root)
 
-    @staticmethod
-    def _provider(payload: dict[str, Any]):
+    def _provider(self, payload: dict[str, Any]):
         return create_provider(
             str(payload.get("provider") or "ollama"),
             ollama_base_url=str(payload.get("ollama_url") or "http://127.0.0.1:11434"),
-            pi_command=str(payload.get("pi_command") or "pi"),
+            runtime_root=str(self.root),
         )
 
     def provider_check(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -49,6 +50,24 @@ class AgentWebService:
             "auth_type": status.auth_type,
             "details": status.details or {},
         }
+
+    def chatgpt_status(self) -> dict[str, Any]:
+        return {"status":self.chatgpt_auth.status().serializable(),"profiles":self.chatgpt_auth.profiles()}
+
+    def chatgpt_begin(self, redirect_uri: str, payload: dict[str, Any]) -> dict[str, Any]:
+        return self.chatgpt_auth.begin_login(redirect_uri,profile_id=payload.get("profile_id") or None)
+
+    def chatgpt_complete(self, query: str) -> dict[str, Any]:
+        status=self.chatgpt_auth.complete_callback(parse_qs(query))
+        return status.serializable()
+
+    def chatgpt_logout(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self.chatgpt_auth.logout(payload.get("profile_id") or None)
+
+    def chatgpt_select(self, payload: dict[str, Any]) -> dict[str, Any]:
+        profile_id=str(payload.get("profile_id") or "").strip()
+        if not profile_id: raise ValueError("profile_id is required")
+        return self.chatgpt_auth.select_profile(profile_id).serializable()
 
     def list_runs(self) -> list[dict[str, Any]]:
         with MythRuntime(self.root) as runtime:
@@ -141,7 +160,7 @@ class AgentWebService:
                 thinking=thinking,
                 request_id=payload.get("request_id"),
                 acceptance=payload.get("acceptance"),
-                provider_options={"ollama_url": payload.get("ollama_url", "http://127.0.0.1:11434"), "pi_command": payload.get("pi_command", "pi")},
+                provider_options={"ollama_url": payload.get("ollama_url", "http://127.0.0.1:11434")},
             )
         existing = self.status(run_id)
         if existing["agent"]["status"] == "RUNNING" and not existing["driver_active"]:
@@ -194,11 +213,12 @@ def _json_bytes(value: Any) -> bytes:
 
 def make_handler(service: AgentWebService):
     class Handler(BaseHTTPRequestHandler):
-        server_version = "MythWeb/0.18.1"
+        server_version = "MythWeb/0.19"
 
         def log_message(self, format: str, *args: object) -> None:
-            # Keep local logs useful while avoiding request bodies and credentials.
-            print(f"[myth-web] {self.address_string()} - {format % args}")
+            # Never emit query strings: OAuth callbacks contain one-time codes and state.
+            safe_path=urlparse(self.path).path
+            print(f"[myth-web] {self.address_string()} - {self.command} {safe_path}")
 
         def _send(self, status: int, body: bytes, content_type: str) -> None:
             self.send_response(status)
@@ -236,7 +256,15 @@ def make_handler(service: AgentWebService):
         def do_GET(self) -> None:
             path = urlparse(self.path).path
             try:
+                if path == "/auth/callback":
+                    self._check_host()
+                    service.chatgpt_complete(urlparse(self.path).query)
+                    body=b"Myth is connected to ChatGPT. You can close this window and return to Myth."
+                    self._send(HTTPStatus.OK,body,"text/plain; charset=utf-8")
+                    return
                 self._check_origin()
+                if path == "/api/auth/chatgpt/status":
+                    self._json(HTTPStatus.OK,service.chatgpt_status());return
                 if path == "/api/workspace" or path.startswith("/api/workspace/"):
                     parts=path.removeprefix("/api/workspace").strip("/").split("/") if path!="/api/workspace" else []
                     if len(parts)==2 and parts[0]=="artifacts" or len(parts)==3 and parts[0] in {"messages","sessions"} and parts[2]=="download":
@@ -298,6 +326,13 @@ def make_handler(service: AgentWebService):
             try:
                 self._check_origin()
                 payload = self._read_json()
+                if path == "/api/auth/chatgpt/start":
+                    redirect_uri=f"http://127.0.0.1:{self.server.server_port}/auth/callback"
+                    self._json(HTTPStatus.OK,service.chatgpt_begin(redirect_uri,payload));return
+                if path == "/api/auth/chatgpt/logout":
+                    self._json(HTTPStatus.OK,service.chatgpt_logout(payload));return
+                if path == "/api/auth/chatgpt/select":
+                    self._json(HTTPStatus.OK,service.chatgpt_select(payload));return
                 if path.startswith("/api/workspace/"):
                     parts=path.removeprefix("/api/workspace/").strip("/").split("/")
                     self._json(HTTPStatus.OK,service.workspace.post(parts,payload));return
@@ -331,11 +366,15 @@ def make_handler(service: AgentWebService):
                     {"error": f"{type(exc).__name__}: {exc}"},
                 )
 
-        def _check_origin(self):
+        def _check_host(self):
             host = self.headers.get("Host", "")
             parsed = urlparse("http://" + host)
             if parsed.hostname not in {"localhost", "127.0.0.1", "::1"} or parsed.port != self.server.server_port:
                 raise PermissionError("Host must match this local server")
+
+        def _check_origin(self):
+            self._check_host()
+            host = self.headers.get("Host", "")
             origin = self.headers.get("Origin")
             if origin and origin != "http://" + host:
                 raise PermissionError("cross-origin access is not allowed")

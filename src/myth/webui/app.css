@@ -187,3 +187,6 @@ dialog{width:min(520px,calc(100vw - 32px));border:1px solid var(--line);border-r
 .observatory-tool small{display:block;color:var(--muted);font:8px/1.45 var(--mono);margin-top:3px;overflow-wrap:anywhere}
 #inspectorGoal .context-fact span:last-child{max-width:180px}
 @media(max-width:1180px){#chatGoal{max-width:125px}}
+
+.auth-panel{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:12px 14px;margin:8px 0 14px;border:1px solid rgba(135,119,96,.18);border-radius:12px;background:rgba(255,255,255,.38)}
+.auth-panel>div:first-child{display:grid;gap:3px;min-width:0}.auth-panel strong{font-size:12px}.auth-panel small{color:var(--muted);line-height:1.45}.auth-panel .button-row{flex:0 0 auto}
