@@ -159,6 +159,120 @@ class MythRuntime:
         )
         return run_id
 
+    def prepare_patch_action(
+        self,
+        run_id: str,
+        source_path: str | Path,
+        *,
+        old_text: str,
+        new_text: str,
+        expected_count: int,
+    ) -> dict[str, Any]:
+        """Create one durable patch Action/Attempt inside an existing Agent Run.
+
+        If the run already owns a managed copy of the same plain filename, the
+        new patch starts from that managed artifact. Otherwise the original
+        allowed source file is imported as the baseline.
+        """
+
+        source = Path(source_path).resolve()
+        target_name = source.name
+        managed = self.workspaces.path_for(run_id, target_name)
+        before = managed.read_bytes() if managed.exists() else source.read_bytes()
+        plan = exact_patch(before, old_text, new_text, expected_count)
+        self.objects.put(plan.before)
+        self.objects.put(plan.after)
+        if not managed.exists():
+            self.workspaces.materialize(run_id, target_name, plan.before)
+
+        action_id = self._id("act")
+        attempt_id = self._id("att")
+        request = {
+            "kind": "file.patch_exact",
+            "run_id": run_id,
+            "source": str(source),
+            "target_name": target_name,
+            "before_digest": plan.before_digest,
+            "after_digest": plan.after_digest,
+            "old_text": old_text,
+            "new_text": new_text,
+            "expected_count": expected_count,
+        }
+        request_digest = digest_json(request)
+        envelope_digest = digest_json(
+            {
+                "run_id": run_id,
+                "action_id": action_id,
+                "attempt_id": attempt_id,
+                "request_digest": request_digest,
+                "acceptance_version": self.store.get_run(run_id)["acceptance_version"],
+            }
+        )
+        self.store.create_action_attempt(
+            action={
+                "action_id": action_id,
+                "run_id": run_id,
+                "kind": "file.patch_exact",
+                "request_digest": request_digest,
+                "target_name": target_name,
+                "before_digest": plan.before_digest,
+                "after_digest": plan.after_digest,
+                "old_text": old_text,
+                "new_text": new_text,
+                "expected_count": expected_count,
+            },
+            attempt={
+                "attempt_id": attempt_id,
+                "attempt_no": 1,
+                "envelope_digest": envelope_digest,
+            },
+            reservations={"tool_calls": 1, "write_bytes": len(plan.after)},
+        )
+        return {
+            "action_id": action_id,
+            "attempt_id": attempt_id,
+            "target_name": target_name,
+            "before_digest": plan.before_digest,
+            "after_digest": plan.after_digest,
+            "managed_file": str(managed),
+        }
+
+    def execute_patch_action(self, run_id: str) -> dict[str, Any]:
+        """Execute the latest patch Attempt but do not complete the overall Run."""
+
+        attempt = self.store.get_attempt_for_run(run_id)
+        if attempt["state"] == AttemptState.INTENT.value:
+            ticket = self.store.start_attempt(attempt["attempt_id"], self._id("tkt"))
+            attempt = self.store.get_attempt_for_run(run_id)
+        elif attempt["state"] == AttemptState.TICKETED.value:
+            raise RecoveryRequired(
+                "Attempt already has a Ticket; reconcile before dispatching it again"
+            )
+        elif attempt["state"] == AttemptState.RESOLVED.value:
+            action = self.store.get_action_for_run(run_id)
+            return {
+                "action": action,
+                "attempt": attempt,
+                "managed_file": str(self.workspaces.path_for(run_id, action["target_name"])),
+            }
+        else:
+            raise RecoveryRequired(f"Attempt is {attempt['state']}; reconcile before continuing")
+
+        receipt = self._execute_ticket(run_id, attempt, ticket, None)
+        self.store.settle_receipt(receipt, usage_known=True)
+        action = self.store.get_action_for_run(run_id)
+        return {
+            "action": action,
+            "attempt": self.store.get_attempt_for_run(run_id),
+            "receipt": {
+                "receipt_id": receipt.receipt_id,
+                "outcome": receipt.outcome.value,
+                "evidence_ref": receipt.evidence_ref,
+                "usage": receipt.usage,
+            },
+            "managed_file": str(self.workspaces.path_for(run_id, action["target_name"])),
+        }
+
     def _execute_ticket(
         self,
         run_id: str,
