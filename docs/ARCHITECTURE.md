@@ -55,7 +55,7 @@ SQLite repositories / local execution adapters
 DecisionRuntime / MythRuntime / providers / objects / workspaces
 ```
 
-`acceptance.py` contains pure verification; `conversation.py` contains pure conversation projection, lexical ranking and arithmetic. `application/` depends only on domain data and ports, with no SQL, filesystem or provider implementation. Architecture tests guard these dependencies. Existing P1/P2 runtime services remain concrete behind execution adapters; the entire repository has not completed this migration.
+`acceptance.py` contains pure verification; `conversation.py` contains pure conversation projection, lexical ranking and arithmetic. `application/` depends only on domain data and ports, with no SQL, filesystem or provider implementation. Architecture tests guard these dependencies. Existing legacy runtime services remain concrete behind execution adapters; the entire repository has not completed this migration.
 
 Ports expose transaction-sized operations rather than cursors. The repository owns state; the driver owns sequencing; execution adapters own I/O and reconciliation. Neither model output nor browser state grants authority.
 
@@ -146,7 +146,7 @@ Existing P1/P2/P3 tables remain. New additive tables:
 
 Old P3 runs lacking a contract remain inspectable; verification never fabricates acceptance for them. Automatic migration/resume of legacy in-flight runs has not been validated.
 
-v0.5 adds workspace_projects, workspace_sessions, workspace_turns, workspace_messages, workspace_steps, workspace_documents, workspace_chunks, workspace_settings and workspace_operations. These use additive CREATE TABLE IF NOT EXISTS statements; no old table is dropped. Real upgrade acceptance for legacy active runs remains planned.
+The workspace adds workspace_projects, workspace_sessions, workspace_turns, workspace_messages, workspace_steps, workspace_documents, workspace_chunks, workspace_settings and workspace_operations. These use additive CREATE TABLE IF NOT EXISTS statements; no old table is dropped. Real upgrade acceptance for legacy active runs remains planned.
 
 ## Web boundary
 
