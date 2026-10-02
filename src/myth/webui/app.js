@@ -42,7 +42,7 @@ function renderChat(session){
   $("chatProject").disabled=!!session;
   const turn=session?.turns.at(-1);
   const status=turn?.status;
-  const active=turn&&["RUNNING","UNKNOWN","WAITING_USER","PAUSED"].includes(status);
+  const active=turn&&["RUNNING","INTERRUPTED","UNKNOWN","WAITING_USER","PAUSED"].includes(status);
   const boundGoal=turn?.snapshot?.goal?.goal_id||$("chatGoal")?.value||"";
   fillGoals($("chatGoal"),boundGoal);
   if($("chatGoal"))$("chatGoal").disabled=!!active;
@@ -50,7 +50,7 @@ function renderChat(session){
   if(session)renderThread(session);
 
   const control=turn?.control||{};
-  show("turnControls",!!turn&&["RUNNING","UNKNOWN","WAITING_USER","PAUSED"].includes(status));
+  show("turnControls",!!turn&&["RUNNING","INTERRUPTED","UNKNOWN","WAITING_USER","PAUSED"].includes(status));
   show("pauseTurn",!!turn&&!control.paused&&!(control.stopped??control.aborted)&&status==="RUNNING");
   show("resumeTurn",!!turn&&control.paused&&status==="PAUSED");
   $("steerTurn").disabled=!turn||(control.stopped??control.aborted)||["COMPLETED","FAILED","CANCELLED","BUDGET_EXHAUSTED"].includes(status);
@@ -60,23 +60,27 @@ function renderChat(session){
   show("stopTurn",!!active&&!(control.stopped??control.aborted));
   show("send",!active||status==="WAITING_USER");
   $("send").disabled=state.busy;
-  $("prompt").placeholder=status==="WAITING_USER"?"回复这个问题…":status==="PAUSED"?"Run 已暂停。Resume 后继续。":"给 Myth 一个任务，或继续当前对话…";
+  $("prompt").placeholder=status==="WAITING_USER"?"回复这个问题…":status==="PAUSED"?"Run 已暂停。Resume 后继续。":status==="INTERRUPTED"?"Run 已中断；请从 durable checkpoint 继续。":"给 Myth 一个任务，或继续当前对话…";
 
   if(turn?.settings?.model)$("modelLabel").textContent=turn.settings.model;
   $("turnNotice").replaceChildren();
   show("turnNotice",false);
   if(turn){
-    const interrupted=status==="RUNNING"&&!turn.driver_active;
-    const text=status==="UNKNOWN"?turn.error:
+    const detached=status==="RUNNING"&&!turn.driver_active;
+    const lease=turn.driver_lease;
+    const leaseRemaining=lease&&!lease.expired?Math.max(0,Math.ceil(Number(lease.lease_until||0)-(Date.now()/1000))):0;
+    const text=status==="UNKNOWN"?(turn.error||"存在结果不明确的执行，必须先核对再继续。"):
+      status==="INTERRUPTED"?(turn.error||"Driver 已中断；durable checkpoint 已保留，可以继续。"):
       status==="PAUSED"?"Run 已暂停；已发出的调用仍会保留真实晚到结果。":
-      interrupted?"这一轮已中断，可以核对记录后继续。":
+      detached&&leaseRemaining>0?"执行 Driver 已断开，等待租约过期后进入安全恢复状态（约 "+leaseRemaining+" 秒）。":
+      detached?"执行 Driver 已断开；正在确认最后一个 durable checkpoint。":
       status==="WAITING_USER"?"Agent 需要你的答复，回答后继续这一轮。":turn.error;
     if(text){
       show("turnNotice",true);
-      $("turnNotice").className="turn-notice"+(["FAILED","UNKNOWN","BUDGET_EXHAUSTED"].includes(status)?" error":"");
+      $("turnNotice").className="turn-notice"+(["FAILED","UNKNOWN","BUDGET_EXHAUSTED","INTERRUPTED"].includes(status)?" error":"");
       $("turnNotice").append(el("span","",text));
-      if(status==="UNKNOWN"||interrupted){
-        const b=el("button","","核对并继续");
+      if(status==="UNKNOWN"||status==="INTERRUPTED"||(detached&&leaseRemaining===0)){
+        const b=el("button","",status==="INTERRUPTED"?"从断点继续":"核对并继续");
         b.onclick=()=>controlTurn("continue");
         $("turnNotice").append(b);
       }
@@ -122,7 +126,7 @@ function openControlDialog(){
   if(!$("controlDialog").open)$("controlDialog").showModal();
 }
 
-function renderSessions(list=state.data.sessions){const query=$("sessionSearch").value.trim().toLowerCase();$("sessionCards").replaceChildren();const matches=list.filter(s=>(s.title+" "+(s.preview||"")).toLowerCase().includes(query));if(!matches.length){empty($("sessionCards"),state.archived?"归档里还没有会话":"还没有会话","开始一个问题，讨论会自动保存。","chat",()=>newChat(),"开始对话");return;}matches.forEach(s=>{const card=el("div","session-card"),mark=el("span","session-icon");mark.append(icon("chat"));const info=el("div","session-info");info.append(el("strong","",(s.pinned?"⌑ ":"")+s.title),el("p","",s.preview||"这个会话还没有消息。"));info.onclick=()=>go("chat",s.id);const meta=el("div","session-meta");if(s.project_name)meta.append(el("span","tag",s.project_name));meta.append(el("span","",date(s.updated_at)));const b=el("button",state.archived?"text-button":"icon-button");if(state.archived){b.textContent="恢复";b.onclick=async()=>{await api(`/sessions/${s.id}`,{archived:false});await refresh();await renderSessionPage();};}else{b.append(icon("more"));b.setAttribute("aria-label",`编辑会话 ${s.title}`);b.onclick=()=>editSession(s);}card.append(mark,info,meta,b);$("sessionCards").append(card);});}
+function renderSessions(list=state.data.sessions){const query=$("sessionSearch").value.trim().toLowerCase();$("sessionCards").replaceChildren();const matches=list.filter(s=>(s.title+" "+(s.preview||"")).toLowerCase().includes(query));if(!matches.length){empty($("sessionCards"),state.archived?"归档里还没有会话":"还没有会话","开始一个问题，讨论会自动保存。","chat",()=>newChat(),"开始对话");return;}matches.forEach(s=>{const card=el("div","session-card"),mark=el("span","session-icon");mark.append(icon("chat"));const info=el("div","session-info");info.append(el("strong","",(s.pinned?"⌑ ":"")+s.title),el("p","",s.preview||"这个会话还没有消息。"));info.onclick=()=>go("chat",s.id);const meta=el("div","session-meta");if(s.project_name)meta.append(el("span","tag",s.project_name));const recovery=(state.data.recoverable_runs||[]).find(r=>r.session_id===s.id&&["INTERRUPTED","UNKNOWN"].includes(r.status));if(recovery)meta.append(el("span","tag",recovery.status==="UNKNOWN"?"需核对":"可恢复"));meta.append(el("span","",date(s.updated_at)));const b=el("button",state.archived?"text-button":"icon-button");if(state.archived){b.textContent="恢复";b.onclick=async()=>{await api(`/sessions/${s.id}`,{archived:false});await refresh();await renderSessionPage();};}else{b.append(icon("more"));b.setAttribute("aria-label",`编辑会话 ${s.title}`);b.onclick=()=>editSession(s);}card.append(mark,info,meta,b);$("sessionCards").append(card);});}
 async function renderSessionPage(){const list=state.archived?(await api("/sessions?archived=1")).sessions:state.data.sessions;state.sessionList=list;$("activeSessions").classList.toggle("selected",!state.archived);$("archivedSessions").classList.toggle("selected",state.archived);renderSessions(list);}
 function editSession(s){state.editingSession=s;$("sessionExport").href=`/api/workspace/sessions/${encodeURIComponent(s.id)}/download`;$("sessionTitleInput").value=s.title;fillProjects($("sessionProjectInput"),"独立会话",s.project_id||"");$("sessionPinned").checked=!!s.pinned;$("archiveSession").textContent=s.archived?"恢复会话":"归档会话";$("sessionDialog").showModal();}
 function renderProjects(){$("projectCards").replaceChildren();state.data.projects.forEach(p=>{const a=el("a","project-card");a.href=`#projects/${p.id}`;const mark=el("span","project-card-icon");mark.append(icon("folder"));a.append(mark,el("h2","",p.name),el("p","",p.description||"为这个项目关联文件、知识和持续的讨论。"));const foot=el("div","project-card-foot");foot.append(el("span","",`${p.session_count} 个会话 · ${p.document_count} 份资料`),el("span","","打开 ↗"));a.append(foot);$("projectCards").append(a);});const add=el("button","project-card new-project-card");add.append(icon("plus"),el("strong","","创建一个项目"));add.onclick=()=>projectDialog();$("projectCards").append(add);}
