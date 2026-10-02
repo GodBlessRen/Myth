@@ -256,6 +256,9 @@ class SqliteWorkspaceRepository:
                 if document["project_id"] not in {None,session["project_id"]}:raise PermissionError("attachment belongs to another project")
                 if not any(s["document_id"]==did for s in knowledge):
                     knowledge.append({"document_id":did,"title":document["title"],"content":document["content"][:1800],"chunk_index":0,"digest":document["digest"],"citation":f"doc:{did}:0","score":0})
+            if document_ids:
+                pinned=set(document_ids)
+                knowledge.sort(key=lambda item:(item["document_id"] not in pinned,-float(item.get("score") or 0.0)))
             pick=RuleIntentPicker().pick(text,{
                 "project":project,
                 "sources":knowledge,
@@ -268,8 +271,10 @@ class SqliteWorkspaceRepository:
                 attached_document_ids=document_ids,
             )
             projected_knowledge=[]
-            for source in knowledge[:plan.max_sources]:
+            effective_max=max(plan.max_sources,len(document_ids))
+            for source in knowledge[:effective_max]:
                 item=dict(source)
+                item["source_ref"]=f"doc:{item['document_id']}@{item['digest']}"
                 if plan.resolution.value=="L0":
                     item["content"]=item.get("content","")[:plan.max_chars_per_source]
                 elif plan.resolution.value=="L2":
