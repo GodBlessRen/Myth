@@ -33,10 +33,9 @@ def _weights(values):
 
 
 def _provider_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--provider", choices=["scripted", "ollama", "pi-openai", "openai"], required=True)
+    parser.add_argument("--provider", choices=["scripted", "ollama", "chatgpt", "openai"], required=True)
     parser.add_argument("--model", required=True)
     parser.add_argument("--ollama-url", default="http://127.0.0.1:11434")
-    parser.add_argument("--pi-command", default="pi")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -59,6 +58,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     check = sub.add_parser("provider-check", help="check local/provider authentication readiness")
     _provider_args(check)
+    auth_login = sub.add_parser("auth-login", help="sign in to ChatGPT using Myth-owned OAuth")
+    auth_login.add_argument("--profile-id")
+    auth_login.add_argument("--no-browser", action="store_true")
+    sub.add_parser("auth-status", help="show ChatGPT OAuth status without secrets")
+    auth_logout = sub.add_parser("auth-logout", help="revoke and clear the active ChatGPT OAuth session")
+    auth_logout.add_argument("--profile-id")
 
     plan = sub.add_parser("plan", help="make one durable LLM StepDecision; do not execute the proposal")
     _provider_args(plan)
@@ -165,7 +170,7 @@ def _provider(args: argparse.Namespace):
     return create_provider(
         args.provider,
         ollama_base_url=args.ollama_url,
-        pi_command=args.pi_command,
+        runtime_root=args.root,
     )
 
 
@@ -185,6 +190,20 @@ def main() -> None:
 
     if args.command == "provider-check":
         _print(_provider(args).check())
+        return
+    if args.command == "auth-login":
+        from .auth import ChatGPTAuthManager, run_loopback_login
+        status=run_loopback_login(ChatGPTAuthManager(args.root),profile_id=args.profile_id,open_browser=not args.no_browser)
+        _print(status.serializable())
+        return
+    if args.command == "auth-status":
+        from .auth import ChatGPTAuthManager
+        manager=ChatGPTAuthManager(args.root)
+        _print({"status":manager.status().serializable(),"profiles":manager.profiles()})
+        return
+    if args.command == "auth-logout":
+        from .auth import ChatGPTAuthManager
+        _print(ChatGPTAuthManager(args.root).logout(args.profile_id))
         return
     if args.command == "eval":
         from .evaluation_runner import run_eval_suite
