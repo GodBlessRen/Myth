@@ -2,6 +2,8 @@
 
 **Durable Runtime 打底、Agent Product 向上生长的本地 Agent 平台。**
 
+v0.18 转向 **Goal-first Personal Work Loop**，继续坚持“先有再优”：长期 Goal 现在保存 `current_state / progress_note / next_action / waiting_for / last_run / revision`，Conversation 在真实终态写 durable checkpoint；下一次跨会话继续同一 Goal 时，这份状态会被固定进新的 Turn Snapshot 与模型上下文。与此同时，页面第三栏被明确保留为 **Runtime Observatory**：Goal、Execution Flow、Trajectory、Token Window、Context Window、Tool Calls、Control、Budget 全部常驻可观测，不因产品化而隐藏执行事实。
+
 v0.17 转入 **Correctness / Provider Hardening**：冻结横向架构扩张，先修真实链路。Intent 快路新增 36 条对抗 case，日期/版本/分数/百分比与弱 `source/docs/文档/资料` cue 不再误直通；deterministic calculator 拒绝时记录 `RouteFallback` 并回退 Agent。Ollama 显式携带 `num_ctx` / temperature / keep_alive，本地上下文预算由窗口推导；`prompt_eval_count` 触顶被记录为已知 FAILED receipt，网络结果不明仍保持 UNKNOWN。
 
 v0.15 完成 **Evidence-driven Evolution Control Plane**：新增不可变版本化 Cost Model Registry、跨 case Gain Calibration Matrix、durable Policy Candidate Registry，以及显式 Promote / Rollback。Candidate 必须用同一 suite/version 的**完整** baseline/candidate 评测通过 Release Gate 与 Calibration Gate；局部 case 只能研究，不能发布。Active Policy 是持久指针，只在未来 Workspace/Turn admission 读取，并把 policy_id 固定进 Turn Snapshot；已运行/已创建 Turn 永不被后续 Promote 或 Rollback 改写。
@@ -25,6 +27,12 @@ v0.7 在 breadth-first 平台骨架上重做产品工作台：对话保持中心
 v0.6 开始采用 breadth-first 路线：不再只把单一功能磨深，而是先固定完整平台骨架。这一阶段完成了 breadth-first 骨架铺设；v0.9 已把它重构为 Core / Domains / Strategies / Adapters 的可组合结构。
 
 **Runtime** 视图直接展示 Core / Domains / Strategies / Adapters 与当前真正 executable 的 Capability；成熟度只描述实现程度，不授予执行权限。完整地图见 [PLATFORM_MAP](docs/PLATFORM_MAP.md)，命名与边界见 [Architecture Constitution](docs/ARCHITECTURE_CONSTITUTION.md)。
+
+## 产品不变量
+
+- **Goal continuity**：长期 Goal 的进度与下一步必须跨会话持久化；历史 Turn 的 Goal snapshot 不被未来更新倒写。
+- **Runtime observability**：第三栏不是可删除的 Debug Panel。每个有意义的 Run 必须暴露轨迹、上下文选择、Token 使用、工具调用、状态转换与验证/预算事实。
+- **Authority boundary**：Goal / Memory / Model 都不能扩大权限；工具效果仍需 Ticket/Receipt，UNKNOWN 仍需先对账。
 
 ## 启动
 
