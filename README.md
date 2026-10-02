@@ -2,7 +2,7 @@
 
 **Durable Runtime 打底、Agent Product 向上生长的本地 Agent 平台。**
 
-v0.6 开始采用 breadth-first 路线：不再只把单一功能磨深，而是先固定完整平台骨架。现有 Durable Runtime 与对话/项目/知识库继续可用；Control、Capability、Context、Memory、RAG、Workflow、SubAgent、Skills、MCP、Observability、Evaluation、Evolution 已拥有统一代码入口和成熟度标记，再逐层从 `wired` 提升到 `usable`。
+v0.7 在 breadth-first 平台骨架上重做产品工作台：对话保持中心，Projects / Knowledge 退到上下文层，右侧 Runtime Inspector 用 Decision → Authority → Result → Completion 展示当前轮的真实执行事实。视觉系统改为暖纸张 / 墨色 / 克制橙色，并直接重构 tokens / layout / components，而不是继续追加 CSS override。\n\nv0.6 开始采用 breadth-first 路线：不再只把单一功能磨深，而是先固定完整平台骨架。现有 Durable Runtime 与对话/项目/知识库继续可用；Control、Capability、Context、Memory、RAG、Workflow、SubAgent、Skills、MCP、Observability、Evaluation、Evolution 已拥有统一代码入口和成熟度标记，再逐层从 `wired` 提升到 `usable`。
 
 页面新增 **Runtime** 视图，直接展示 P0→P1000 平台地图与当前真正 executable 的 Capability；`planned` 能力不会被模型当作可执行工具。完整地图见 [PLATFORM_MAP](docs/PLATFORM_MAP.md)。
 
@@ -38,7 +38,7 @@ python -m myth.cli --root . web
 | 会话管理 | 搜索、重命名、置顶、所属项目、归档与恢复、Markdown 导出 |
 | 项目 | 创建/编辑、共同指令、关联本地目录、文件树、项目对话与专属资料 |
 | 知识库 | 导入 UTF-8 文本或粘贴内容、分块索引、共享/项目范围、关键词搜索、来源预览与移出索引 |
-| Runtime | P0→P1000 平台成熟度、Capability Registry 与执行边界 |
+| Runtime | P0→P1000 平台成熟度、Capability Registry 与执行边界；对话页右侧提供实时 Runtime Inspector |
 | 模型与设置 | Ollama 连接检查、已安装模型、输出/步数限制、思考开关 |
 
 先创建一个项目，填入本地目录并添加指令。导入一份资料，再点「开始对话」，例如：
