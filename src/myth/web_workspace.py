@@ -117,7 +117,13 @@ class ConversationWebService:
             # silently attach the same request to a different Goal.
             if goal_id:
                 workspace.personal.goal(goal_id)
-            memory=workspace.memory.search(str(text or ""),limit=6)
+            session=workspace.repository.session(sid)
+            memory=workspace.memory.search(
+                str(text or ""),
+                limit=6,
+                project_id=session.get("project_id"),
+                session_id=sid,
+            )
             turn=workspace.repository.create_turn(
                 sid,
                 text,
