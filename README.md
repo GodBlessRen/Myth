@@ -10,27 +10,92 @@ Runtime     = authorizes + persists + executes + accounts
 Verifier    = decides whether completion is proven
 ```
 
-The first milestone intentionally implements one boring task extremely carefully: import a UTF-8 text file into a managed workspace, replace an exact string a fixed number of times, survive process death around the side effect, verify the immutable expected result, and publish a Delivery.
+## Current milestones
 
-## Why this repository starts small
+### P1 — durable local effect
 
-The architecture is designed around `Run → Action → Attempt → Ticket → Receipt → Verification → Delivery`. It does **not** materialize every future concept as a service or table. Memory, RAG, multi-agent orchestration, model routing, and RSI are postponed until the execution kernel has evidence that it is correct.
+The first milestone proves one boring task carefully: import a UTF-8 text file into a managed workspace, replace an exact string a fixed number of times, survive process death around the side effect, verify the immutable expected result, and publish a Delivery.
 
-## What v0.1 already proves
+### P2 — durable model decision
 
-- stable request identity: same `request_id` + different content is rejected;
-- `Action` (business intent) and `Attempt` (execution chance) are different identities;
-- TX-Intent atomically commits the Attempt and every resource reservation;
-- a durable `StartTicket` is required before the file executor can run;
-- process death after the file write is recoverable without blindly writing again;
-- a durable receipt can be settled after restart without re-execution;
-- effect truth and usage truth are independent (`UNKNOWN_HELD` is preserved);
-- tool success cannot directly complete a Run; Delivery requires a matching PASS verification report;
-- original user files are not silently overwritten in P1.
+P2 adds provider-neutral `StepDecision` calls without letting the model bypass Runtime:
 
-See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the exact boundaries and simplifications.
+```text
+Goal
+ ↓
+Model Intent + Budget Reservation
+ ↓
+Model Ticket
+ ↓
+Ollama / OpenAI / Pi-managed ChatGPT OAuth
+ ↓
+Durable Model Receipt
+ ↓
+Usage Settlement
+ ↓
+StepDecision (proposal only)
+```
 
-## Quick start
+A model `tool_call` does **not** execute the tool and does **not** mark the Run successful. The next runtime layer will validate the proposal, create the normal tool Action/Attempt, execute it, then return to decision/verification.
+
+## Providers
+
+### Ollama — local
+
+Start Ollama and make sure your model is installed, then:
+
+```bash
+myth provider-check --provider ollama --model <model>
+myth --root . plan --provider ollama --model <model> \
+  --allow-file example.txt \
+  "replace foo with bar in example.txt"
+```
+
+The adapter uses Ollama's local `/api/chat` endpoint and requests structured JSON output. No credential is required.
+
+### OpenAI API key
+
+Set `OPENAI_API_KEY` outside the repository:
+
+```bash
+myth provider-check --provider openai --model <model>
+myth --root . plan --provider openai --model <model> "decide the next step"
+```
+
+### ChatGPT subscription through Pi OAuth
+
+Myth intentionally does **not** implement or store OpenAI refresh tokens. It delegates login/refresh/storage to the upstream Pi runtime.
+
+Install Pi:
+
+```bash
+npm install --global @earendil-works/pi-coding-agent
+```
+
+Open Pi and run:
+
+```text
+/login openai
+```
+
+Choose **Sign in with ChatGPT**. After Pi has stored the OAuth credential:
+
+```bash
+myth provider-check --provider pi-openai --model <model>
+myth --root . plan --provider pi-openai --model <model> "decide the next step"
+```
+
+At request time Myth calls Pi's public:
+
+```text
+pi auth print-bearer-token --provider openai --min-expiry 10m
+```
+
+Pi refreshes the OAuth credential under its own credential lock. Myth uses the returned bearer token only for the current request; it is not persisted in Myth SQLite, artifacts, receipts, logs, or Git.
+
+Upstream Pi: https://github.com/earendil-works/pi
+
+## P1 quick start
 
 Requires Python 3.12+.
 
@@ -45,24 +110,38 @@ Run a managed exact patch:
 myth --root . patch example.txt --old foo --new bar --count 2
 ```
 
-The verified result lives under the private local `.runtime/` directory, which is gitignored. The command returns the `run_id`, managed artifact path, budget projection, event stream, and Delivery metadata.
-
-Recovery after an interrupted run:
+Recovery after an interrupted file run:
 
 ```bash
 myth --root . recover <run_id>
 ```
 
-Inspect persisted state:
+Inspect a P2 model Run:
 
 ```bash
-myth --root . status <run_id>
+myth --root . model-status <run_id>
+myth --root . recover-model <run_id>
 ```
+
+## Properties already protected
+
+- stable request identity rejects same ID with different content;
+- `Action` and `Attempt` are separate identities;
+- TX-Intent commits an Attempt and all resource reservations atomically;
+- a durable Ticket is required before file or model I/O;
+- uncertain post-Ticket outcomes remain `UNKNOWN` rather than being blindly repeated;
+- effect truth and usage truth are independent;
+- model request/response artifacts and token usage are durable;
+- model output is a proposal, never a Receipt or completion authority;
+- file tool success cannot directly complete a Run without Verification;
+- original user files are not silently overwritten in P1.
+
+See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ## Privacy defaults
 
-This repository never requires secrets for P1. Local runtime state, SQLite databases, `.env` files, keys, and the `.runtime/` workspace are ignored by Git. Do not commit user documents or production traces unless they are intentionally sanitized test fixtures.
+Local runtime state, SQLite databases, `.env*`, keys and `.runtime/` are gitignored. P2 can send the model prompt/context to a selected remote provider. Use Ollama for content that must remain local.
 
 ## Current boundary
 
-v0.1 is intentionally a **single-machine modular monolith**. It does not claim distributed exactly-once execution, a hostile-code sandbox, arbitrary user-directory transactional updates, or a complete Agent product. Those guarantees require separate evidence and should not be inferred from the interfaces.
+Myth remains a **single-machine modular monolith**. It does not claim distributed exactly-once execution, hostile-code sandboxing, arbitrary user-directory transactions, or a complete autonomous Agent loop.
