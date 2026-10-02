@@ -43,6 +43,24 @@ class WebContractTests(unittest.TestCase):
             threading.Event().wait(.01)
         self.fail("local worker did not finish")
 
+    def test_web_worker_reenters_if_driver_returns_running_without_yield(self):
+        original=AgentRuntime.run
+        calls={"count":0}
+
+        def first_return_is_spurious(agent,run_id,provider):
+            calls["count"]+=1
+            if calls["count"]==1:
+                return agent.status(run_id)
+            return original(agent,run_id,provider)
+
+        with patch.object(AgentRuntime,"run",new=first_return_is_spurious):
+            with self.call("/api/demo",{}) as response:
+                rid=json.load(response)["run_id"]
+            status=self.settled(rid)
+
+        self.assertEqual(status["agent"]["status"],"SUCCEEDED")
+        self.assertGreaterEqual(calls["count"],2)
+
     def test_http_demo_downloads_exact_verified_bytes(self):
         with self.call("/api/demo",{}) as response:rid=json.load(response)["run_id"]
         status=self.settled(rid)
