@@ -214,7 +214,7 @@ class ConversationContinuityTests(unittest.TestCase):
 
     def test_context_failure_has_no_model_ticket_or_compiled_event(self):
         turn = self.repo.turn(self.rid)
-        turn["snapshot"]["project"] = {"instructions": "X" * 42000}
+        turn["snapshot"]["project"] = {"instructions": "X" * 70000}
         with self.runtime.store.tx() as db:
             db.execute("UPDATE workspace_turns SET snapshot_json=? WHERE run_id=?",
                        (canonical_json(turn["snapshot"]), self.rid))
