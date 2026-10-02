@@ -70,7 +70,7 @@ function renderInspectorControl(turn){
   const box=$("inspectorControl");if(!box)return;box.replaceChildren();
   if(!turn){box.append(el("div","inspector-empty","暂无 Control state"));return;}
   const control=turn.control||{};
-  [["revision",control.revision||1],["model",control.model||turn.settings?.model||"—"],["thinking",control.thinking===true?"on":control.thinking===false?"off":control.thinking||"default"],["steering",control.steering_note||"—"]].forEach(([k,v])=>{const row=el("div","context-fact");row.append(el("span","",k),el("span","",v));box.append(row);});
+  [["revision",control.revision||1],["status",(control.stopped??control.aborted)?"stopped":control.paused?"paused":"active"],["model",control.model||turn.settings?.model||"—"],["thinking",control.thinking===true?"on":control.thinking===false?"off":control.thinking||"default"],["steering",control.steering_note||"—"]].forEach(([k,v])=>{const row=el("div","context-fact");row.append(el("span","",k),el("span","",v));box.append(row);});
 }
 
 function renderInspectorContext(session,turn){
@@ -81,9 +81,16 @@ function renderInspectorContext(session,turn){
 }
 
 function renderInspectorPlatform(){
-  const box=$("inspectorPlatform");if(!box)return;box.replaceChildren();const counts={usable:0,wired:0,planned:0};
-  (state.data?.platform?.layers||[]).forEach(layer=>{if(counts[layer.state]!==undefined)counts[layer.state]++;});
-  ["usable","wired","planned"].forEach(key=>{const card=el("div",key);card.append(el("strong","",counts[key]),el("small","",key));box.append(card);});
+  const box=$("inspectorPlatform");if(!box)return;box.replaceChildren();
+  const counts={hardened:0,usable:0,connected:0,exists:0,planned:0};
+  const platform=state.data?.platform||{};
+  [...(platform.core||[]),...(platform.domains||[]),...(platform.strategies||[]),...(platform.adapters||[])].forEach(item=>{
+    const maturity=item.maturity||item.state;
+    if(counts[maturity]!==undefined)counts[maturity]++;
+  });
+  ["hardened","usable","connected","exists","planned"].forEach(key=>{
+    const card=el("div",key);card.append(el("strong","",counts[key]),el("small","",key));box.append(card);
+  });
 }
 
 function renderRuntimeInspector(session=state.session){
