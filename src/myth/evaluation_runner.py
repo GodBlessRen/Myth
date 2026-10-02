@@ -27,7 +27,8 @@ from .platform.evaluation import (
     summarize_observations,
 )
 from .runtime import MythRuntime
-from .strategies import RuleIntentPicker
+from .domains.information import InformationResolution
+from .strategies import ResolutionPlan, RuleIntentPicker, RuleResolutionController
 from .workspace import Workspace
 
 
@@ -41,15 +42,69 @@ _SETTINGS = {
 }
 
 
+class FixedResolutionController:
+    """Offline eval-only policy. Production defaults are never mutated."""
+
+    strategy_id = "information_resolution"
+
+    def __init__(self, resolution: InformationResolution):
+        self.resolution=resolution
+
+    def choose(self, text, *, route, sources, attached_document_ids=()):
+        if not sources:
+            return ResolutionPlan(InformationResolution.L0,0,0,"no admitted local source is available")
+        chars={
+            InformationResolution.L0:500,
+            InformationResolution.L1:1800,
+            InformationResolution.L2:6000,
+        }[self.resolution]
+        return ResolutionPlan(
+            self.resolution,
+            max(5,len(attached_document_ids)),
+            chars,
+            f"offline eval fixed resolution={self.resolution.value}",
+        )
+
+
 class FoundationEvalRunner:
     """Run deterministic foundation cases against real local components."""
 
-    def __init__(self, suite: EvalSuite):
+    def __init__(
+        self,
+        suite: EvalSuite,
+        *,
+        policy_id: str = "production-default",
+        intent_picker=None,
+        resolution_controller=None,
+    ):
         self.suite=suite
+        self.policy_id=str(policy_id or "").strip() or "production-default"
+        self.intent_picker=intent_picker or RuleIntentPicker()
+        self.resolution_controller=resolution_controller or RuleResolutionController()
 
     @classmethod
-    def from_path(cls, path: str | Path) -> "FoundationEvalRunner":
-        return cls(load_eval_suite(path))
+    def from_path(
+        cls,
+        path: str | Path,
+        *,
+        policy_id: str = "production-default",
+        resolution_policy: str = "default",
+    ) -> "FoundationEvalRunner":
+        controller=None
+        if resolution_policy != "default":
+            controller=FixedResolutionController(InformationResolution(resolution_policy.upper()))
+        return cls(
+            load_eval_suite(path),
+            policy_id=policy_id,
+            resolution_controller=controller,
+        )
+
+    def _workspace(self, runtime):
+        return Workspace(
+            runtime,
+            intent_picker=self.intent_picker,
+            resolution_controller=self.resolution_controller,
+        )
 
     def run(self, case_ids: Iterable[str] | None = None) -> dict:
         selected=set(case_ids or ())
@@ -65,6 +120,7 @@ class FoundationEvalRunner:
             "suite_id":self.suite.suite_id,
             "version":self.suite.version,
             "principle":self.suite.principle,
+            "policy_id":self.policy_id,
             "observations":[self._observation_dict(item) for item in observations],
             "report":asdict(report),
             "release_gate":{"passed":gate_ok,"reason":gate_reason},
@@ -88,6 +144,8 @@ class FoundationEvalRunner:
                     "no executable evaluator is registered for this fixed case",
                     {"latency_ms":round((time.perf_counter()-started)*1000,3)},
                     safety_regression=case.safety_critical,
+                    policy_id=self.policy_id,
+                    comparison_key=case.case_id,
                 )
             verdict,reason,evidence,metrics=method(case)
             metrics=dict(metrics or {})
@@ -99,6 +157,8 @@ class FoundationEvalRunner:
                 metrics,
                 tuple(evidence or ()),
                 safety_regression=case.safety_critical and verdict is not EvalVerdict.PASS,
+                policy_id=self.policy_id,
+                comparison_key=case.case_id,
             )
         except Exception as exc:
             return EvalObservation(
@@ -108,10 +168,12 @@ class FoundationEvalRunner:
                 {"latency_ms":round((time.perf_counter()-started)*1000,3)},
                 (),
                 safety_regression=case.safety_critical,
+                policy_id=self.policy_id,
+                comparison_key=case.case_id,
             )
 
     def _case_intent_arithmetic_local(self, case):
-        pick=RuleIntentPicker().pick(case.input["text"],{})
+        pick=self.intent_picker.pick(case.input["text"],{})
         answer=str(calculate((pick.metadata or {}).get("expression","")))
         ok=(
             pick.route.value==case.expected["route"]
@@ -126,7 +188,7 @@ class FoundationEvalRunner:
         )
 
     def _case_intent_ambiguous_fallback(self, case):
-        pick=RuleIntentPicker().pick(case.input["text"],{})
+        pick=self.intent_picker.pick(case.input["text"],{})
         ok=pick.route.value==case.expected["route"]
         return (
             EvalVerdict.PASS if ok else EvalVerdict.FAIL,
@@ -137,7 +199,7 @@ class FoundationEvalRunner:
 
     def _case_intent_local_retrieval_explicit(self, case):
         with tempfile.TemporaryDirectory() as tmp, MythRuntime(tmp) as runtime:
-            workspace=Workspace(runtime)
+            workspace=self._workspace(runtime)
             workspace.repository.save_settings(_SETTINGS)
             workspace.repository.import_document({
                 "title":"eval knowledge",
@@ -162,7 +224,7 @@ class FoundationEvalRunner:
 
     def _case_resolution_attached_l2(self, case):
         with tempfile.TemporaryDirectory() as tmp, MythRuntime(tmp) as runtime:
-            workspace=Workspace(runtime)
+            workspace=self._workspace(runtime)
             workspace.repository.save_settings(_SETTINGS)
             count=int(case.input["attachments"])
             docs=[
@@ -198,7 +260,7 @@ class FoundationEvalRunner:
 
     def _case_resolution_agent_l0(self, case):
         with tempfile.TemporaryDirectory() as tmp, MythRuntime(tmp) as runtime:
-            workspace=Workspace(runtime)
+            workspace=self._workspace(runtime)
             workspace.repository.save_settings(_SETTINGS)
             sid=workspace.repository.create_session()["id"]
             rid=workspace.repository.create_turn(
@@ -217,9 +279,41 @@ class FoundationEvalRunner:
                 {"retrieval_scanned":snapshot["retrieval_report"]["scanned"]},
             )
 
+    def _case_resolution_marker_presence(self, case):
+        with tempfile.TemporaryDirectory() as tmp, MythRuntime(tmp) as runtime:
+            workspace=self._workspace(runtime)
+            workspace.repository.save_settings(_SETTINGS)
+            marker=case.input["marker"]
+            document=case.input["prefix"]+marker+case.input["suffix"]
+            doc=workspace.repository.import_document({
+                "title":"resolution calibration source",
+                "content":document,
+            })
+            sid=workspace.repository.create_session()["id"]
+            rid=workspace.repository.create_turn(
+                sid,
+                f"根据资料找到 {marker}",
+                "eval-resolution-marker",
+            )["run_id"]
+            snapshot=workspace.repository.turn(rid)["snapshot"]
+            projected="\n".join(item.get("content","") for item in snapshot["knowledge"])
+            visible=marker in projected
+            expected=bool(case.expected["marker_visible"])
+            resolution=snapshot["information_resolution"]["resolution"]
+            ok=visible==expected
+            return (
+                EvalVerdict.PASS if ok else EvalVerdict.FAIL,
+                f"marker_visible={visible}, resolution={resolution}",
+                (f"doc:{doc['id']}@{doc['digest']}",),
+                {
+                    "context_chars":sum(len(item.get("content","")) for item in snapshot["knowledge"]),
+                    "retrieval_scanned":snapshot["retrieval_report"]["scanned"],
+                },
+            )
+
     def _case_knowledge_late_candidate(self, case):
         with tempfile.TemporaryDirectory() as tmp, MythRuntime(tmp) as runtime:
-            workspace=Workspace(runtime)
+            workspace=self._workspace(runtime)
             workspace.repository.save_settings(_SETTINGS)
             doc=workspace.repository.import_document({"title":"bulk","content":"seed"})
             position=int(case.input["candidate_position"])
@@ -242,7 +336,7 @@ class FoundationEvalRunner:
 
     def _case_memory_late_candidate(self, case):
         with tempfile.TemporaryDirectory() as tmp, MythRuntime(tmp) as runtime:
-            workspace=Workspace(runtime)
+            workspace=self._workspace(runtime)
             position=int(case.input["candidate_position"])
             with runtime.store.tx() as db:
                 db.executemany(
@@ -270,7 +364,7 @@ class FoundationEvalRunner:
 
     def _case_knowledge_resolution_provenance(self, case):
         with tempfile.TemporaryDirectory() as tmp, MythRuntime(tmp) as runtime:
-            workspace=Workspace(runtime)
+            workspace=self._workspace(runtime)
             workspace.repository.save_settings(_SETTINGS)
             doc=workspace.repository.import_document({
                 "title":"guide",
@@ -300,7 +394,7 @@ class FoundationEvalRunner:
             root=Path(tmp)/"project";root.mkdir()
             for i in range(3):
                 (root/f"{i}.txt").write_text("needle\n" if i==2 else "noise\n",encoding="utf-8")
-            workspace=Workspace(runtime)
+            workspace=self._workspace(runtime)
             workspace.repository.save_settings(_SETTINGS)
             project=workspace.repository.create_project({"name":"eval","root":str(root)})
             sid=workspace.repository.create_session(project_id=project["id"])["id"]
@@ -329,7 +423,7 @@ class FoundationEvalRunner:
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp)
             with MythRuntime(root) as runtime:
-                workspace=Workspace(runtime)
+                workspace=self._workspace(runtime)
                 workspace.repository.save_settings(_SETTINGS)
                 sid=workspace.repository.create_session("control")["id"]
                 turn=workspace.repository.create_turn(sid,"hello","eval-control")
@@ -342,7 +436,7 @@ class FoundationEvalRunner:
             def issue(command,payload=None):
                 try:
                     with MythRuntime(root) as runtime:
-                        workspace=Workspace(runtime)
+                        workspace=self._workspace(runtime)
                         barrier.wait(timeout=5)
                         workspace.control.command(rid,command,payload)
                 except BaseException as exc:
@@ -356,7 +450,7 @@ class FoundationEvalRunner:
             with MythRuntime(root) as runtime:
                 revisions=[
                     item["revision"]
-                    for item in Workspace(runtime).control.view(rid)["commands"]
+                    for item in self._workspace(runtime).control.view(rid)["commands"]
                 ]
             expected=list(case.expected["durable_revisions"])
             ok=not errors and revisions==expected
@@ -393,5 +487,15 @@ class FoundationEvalRunner:
             )
 
 
-def run_eval_suite(path: str | Path, case_ids: Iterable[str] | None = None) -> dict:
-    return FoundationEvalRunner.from_path(path).run(case_ids)
+def run_eval_suite(
+    path: str | Path,
+    case_ids: Iterable[str] | None = None,
+    *,
+    policy_id: str = "production-default",
+    resolution_policy: str = "default",
+) -> dict:
+    return FoundationEvalRunner.from_path(
+        path,
+        policy_id=policy_id,
+        resolution_policy=resolution_policy,
+    ).run(case_ids)

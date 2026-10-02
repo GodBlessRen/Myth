@@ -77,9 +77,24 @@ class AgentWebService:
                 with MythRuntime(self.root) as runtime:
                     agent = AgentRuntime(runtime)
                     if resume_text is None:
-                        agent.run(run_id, provider)
+                        result=agent.run(run_id, provider)
                     else:
-                        agent.resume(run_id, provider, resume_text, question_id=payload.get("question_id"))
+                        result=agent.resume(run_id, provider, resume_text, question_id=payload.get("question_id"))
+
+                    # A web worker owns driving until the durable Agent yields
+                    # (terminal / WAITING_USER / UNKNOWN). A normal driver return
+                    # with RUNNING is therefore not completion. Re-enter once
+                    # through the recovery-safe driver; if the invariant still
+                    # fails, surface UNKNOWN instead of silently dropping
+                    # driver_active while durable state claims work is running.
+                    if result["agent"]["status"]=="RUNNING":
+                        result=agent.run(run_id, provider)
+                    if result["agent"]["status"]=="RUNNING":
+                        agent.repository.block(
+                            run_id,
+                            "UNKNOWN",
+                            "web driver returned without yielding a durable non-RUNNING state",
+                        )
             except Exception as exc:
                 with MythRuntime(self.root) as runtime:
                     AgentRuntime(runtime).repository.block(run_id, "UNKNOWN", f"{type(exc).__name__}: {exc}")
@@ -179,7 +194,7 @@ def _json_bytes(value: Any) -> bytes:
 
 def make_handler(service: AgentWebService):
     class Handler(BaseHTTPRequestHandler):
-        server_version = "MythWeb/0.13"
+        server_version = "MythWeb/0.14"
 
         def log_message(self, format: str, *args: object) -> None:
             # Keep local logs useful while avoiding request bodies and credentials.

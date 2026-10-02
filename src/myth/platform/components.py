@@ -94,7 +94,7 @@ DOMAINS: tuple[ArchitectureItem, ...] = (
         "Coordination / 统筹",
         "domain",
         Maturity.USABLE,
-        "Choose how work is organized; conservative Intent Pick can bypass the Agent Loop for strict bounded arithmetic, while unmatched work falls back safely.",
+        "Choose how work is organized; conservative Intent Pick supports deterministic arithmetic and local-retrieval routing, while unmatched work falls back safely.",
         ("goal", "run"),
     ),
     ArchitectureItem(
@@ -166,7 +166,7 @@ DOMAINS: tuple[ArchitectureItem, ...] = (
         "Evaluation / 评测",
         "domain",
         Maturity.USABLE,
-        "Versioned case/observation/verdict contracts plus an executable isolated foundation suite and release gate; no automatic policy promotion.",
+        "Versioned executable suites plus a durable local Eval Ledger, paired policy comparisons and release gate; no automatic policy promotion.",
         ("observability",),
     ),
     ArchitectureItem(
@@ -174,7 +174,7 @@ DOMAINS: tuple[ArchitectureItem, ...] = (
         "Evolution / 演进",
         "domain",
         Maturity.EXISTS,
-        "Produce candidate policies; never self-publish into a live Run.",
+        "Policy candidate/promotion contract exists; paired eval evidence may inform an explicit decision, but candidates never self-publish into a live Run.",
         ("evaluation",),
     ),
 )
@@ -245,7 +245,7 @@ class MythComponents:
             for spec in self.strategies.list()
         ]
         return {
-            "version": "0.13-eval-routing",
+            "version": "0.14-gain-ledger",
             "shape": "core-domains-strategies-adapters",
             "principle": "fix facts and boundaries; keep intelligence organization pluggable",
             "core": [item.as_dict() for item in CORE],

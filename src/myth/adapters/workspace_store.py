@@ -47,10 +47,12 @@ ACTIVE_TURN_STATUSES = {"RUNNING", "UNKNOWN", "WAITING_USER", "PAUSED"}
 
 
 class SqliteWorkspaceRepository:
-    def __init__(self,runtime):
+    def __init__(self,runtime,*,intent_picker=None,resolution_controller=None):
         self.runtime=runtime
         self.store=runtime.store
         self.decisions=DecisionRuntime(runtime)
+        self.intent_picker=intent_picker or RuleIntentPicker()
+        self.resolution_controller=resolution_controller or RuleResolutionController()
         self.store.db.executescript(SCHEMA)
 
     def settings(self):
@@ -273,12 +275,12 @@ class SqliteWorkspaceRepository:
                 ]
                 remainder.sort(key=lambda item:(item["document_id"] not in pinned,-float(item.get("score") or 0.0)))
                 knowledge=representatives+remainder
-            pick=RuleIntentPicker().pick(text,{
+            pick=self.intent_picker.pick(text,{
                 "project":project,
                 "sources":knowledge,
                 "attached_document_ids":document_ids,
             })
-            plan=RuleResolutionController().choose(
+            plan=self.resolution_controller.choose(
                 text,
                 route=pick.route,
                 sources=knowledge,

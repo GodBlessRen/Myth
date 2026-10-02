@@ -1,4 +1,4 @@
-# Myth v0.13 architecture
+# Myth v0.14 architecture
 
 > Architecture Constitution: [ARCHITECTURE_CONSTITUTION.md](ARCHITECTURE_CONSTITUTION.md)  
 > Composable map: [PLATFORM_MAP.md](PLATFORM_MAP.md)
@@ -19,13 +19,13 @@ Intent Pick、Information Resolution、Information Gain、Decision、Planning、
 
 外部模型、协议和基础设施通过 Port/Adapter 接入。OpenAI、Ollama、MCP、A2A、Browser、Shell、SQLite 都不能成为 Core 依赖。
 
-在进入昂贵 Agent Loop 前，Turn admission 先固定 retrieval evidence，再做保守 Intent Pick。严格受限纯算术走 deterministic；显式资料/出处请求或强本地 lexical match 可走 `local_retrieval`；其余稳定回退 Agent Loop。Route 只选择处理策略，不授予 Ticket。随后 RuleResolutionController 在同一固定 source/digest 上选择 L0 Abstract、L1 Overview/Navigation 或 L2 Detail/Evidence，并把 route、resolution、retrieval diagnostics 固定进 Turn Snapshot、Event 与 Context Report。Information Gain 仍表示边际任务价值，不把 similarity/confidence 冒充 Gain；Information Delta 仍只记录 added/updated/removed/conflicted 变化事实。
+在进入昂贵 Agent Loop 前，Turn admission 先固定 retrieval evidence，再做保守 Intent Pick。严格受限纯算术走 deterministic；显式资料/出处请求或强本地 lexical match 可走 `local_retrieval`；其余稳定回退 Agent Loop。Route 只选择处理策略，不授予 Ticket。随后 RuleResolutionController 在同一固定 source/digest 上选择 L0 Abstract、L1 Overview/Navigation 或 L2 Detail/Evidence，并把 route、resolution、retrieval diagnostics 固定进 Turn Snapshot、Event 与 Context Report。Information Gain 仍表示边际任务价值，不把 similarity/confidence 冒充 Gain。v0.14 的 estimator 只接受同 suite/version、同 case/comparison key 的 paired EvalObservation：PASS/FAIL 提供 observed quality delta；INCONCLUSIVE/UNSUPPORTED 保持 uncalibrated。token/latency/tool/context 等成本先保持向量，只有调用者显式声明 cost weights 后才计算 weighted cost / gain-per-cost。该 estimator 当前只连接离线 Evaluation，不参与 live admission。Information Delta 仍只记录 added/updated/removed/conflicted 变化事实。
 
 代码中的 `MythComponents` 只负责装配和架构快照，不是执行 Kernel。`MythKernel` 仅作为 v0.6-v0.8 兼容别名保留。真正的执行事实仍由 `MythRuntime` / repositories / execution adapters 管理。
 
 ## Evaluation loop
 
-v0.13 新增可执行 `FoundationEvalRunner`：版本化 EvalSuite 加载后，在隔离临时 Runtime 中调用真实 Myth 组件，产生逐 case `EvalObservation`，汇总为 `EvalReport`，最后经过 `release_gate`。`foundation-v1` 作为历史固定基线保留，`foundation-v2` 增加 local retrieval 与 Resolution admission 案例。Runner 不拥有 promotion 权限；Evolution 仍必须显式 promote/rollback。
+v0.13 新增可执行 `FoundationEvalRunner`；v0.14 再加入 SQLite `Eval Ledger` 与 policy dependency injection。版本化 EvalSuite 在隔离临时 Runtime 中调用真实 Myth 组件，Observation 可按 policy_id 持久化并在同 suite/version 上做 paired comparison。`foundation-v1/v2` 保留历史固定基线，`foundation-v3` 增加 resolution-sensitive marker case，使 L0/L1/L2 候选策略可以产生真实可比较质量差异。Runner/Ledger/Gain estimator 都不拥有 promotion 权限；Evolution 仍必须显式 promote/rollback。
 
 ## Personal-Agent foundation
 
@@ -148,6 +148,8 @@ Existing P1/P2/P3 tables remain. New additive tables:
 
 | Table | Ownership |
 | --- | --- |
+| `evaluation_runs` | 版本化 suite/policy 的持久评测运行、Report 与 Release Gate |
+| `evaluation_observations` | 每个固定 case 的 Verdict / metrics / evidence / comparison key |
 | `agent_contracts` | frozen acceptance manifest |
 | `agent_settings` | provider configuration |
 | `agent_steps` | durable decision consumption cursor |

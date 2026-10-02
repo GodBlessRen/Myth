@@ -75,8 +75,8 @@ def default_strategies() -> StrategyRegistry:
         StrategySpec(
             "information_gain",
             "Information Gain",
-            StrategyState.EXISTS,
-            "Estimate marginal task value versus token/latency/tool cost before acquiring or expanding information.",
+            StrategyState.CONNECTED,
+            "Paired fixed-case eval can estimate observed quality delta and caller-weighted gain-per-cost offline; it does not yet steer live admission.",
         ),
         StrategySpec(
             "direct",

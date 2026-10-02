@@ -2,6 +2,8 @@
 
 **Durable Runtime 打底、Agent Product 向上生长的本地 Agent 平台。**
 
+v0.14 把 **Information Gain** 从概念推进到可审计的离线校准链：Eval 结果可写入本地 SQLite Ledger，baseline/candidate 必须在同一 suite/version、同一 case/comparison key 上成对比较；质量增益只来自真实 Verdict 差异，成本默认保留为 token/latency/tool/context 等向量，只有调用者显式声明非负权重时才计算 `gain_per_cost`。策略通过 Workspace composition root 注入，候选 Resolution policy 可离线评测但不会修改生产默认。新增 `foundation-v3` 的 resolution marker case，以及 `eval-history` / `eval-compare` / `gain` CLI。
+
 v0.13 把 **Eval + Intent/Resolution** 真正接成闭环：Turn admission 先固定 retrieval evidence，再做保守 Intent Pick；严格算术走 deterministic，显式/强匹配本地资料走 `local_retrieval`，其余回退 Agent Loop。`RuleResolutionController` 同时固定 L0/L1/L2，并把 route / resolution / retrieval report 写入 Turn Snapshot、Event 和 Context Report。新增可执行 `myth eval`，默认运行版本化 `foundation-v2`；评测 Runner 调用真实 Myth 组件，不自动 promote policy，Information Gain 仍保持未校准。
 
 v0.12 聚焦 **Retrieval Evidence + Eval Foundation**：Knowledge/Memory 取消排序前静默候选截断，检索结果暴露 scanned/matched/pages/exhausted；`project.search` 增加 cursor/max_files 与扫描统计；`knowledge.resolve` 把同一 document/digest 显式投影为 L0 Metadata/Excerpt、L1 Chunk Navigation、L2 Detail/Evidence；新增版本化机器可读 `evals/foundation-v1.json` 与 Case/Observation/Verdict 合同，为后续 Intent / Information Gain / Evolution 共用同一评测地基。
@@ -87,15 +89,26 @@ myth --root . agent --provider scripted --model exact-patch-demo --allow-file ex
 
 OpenAI Responses / Pi OAuth 适配器保留，远端凭据通过进程环境或 Pi 管理。本轮只实测本地 Ollama，未验证这两个远端入口。选择远端模型会向其发送选定的对话与资料。
 
-## 固定评测
+## 固定评测与 Information Gain
 
 ```bash
-myth eval
-myth eval --suite evals/foundation-v2.json
-myth eval --case intent-local-retrieval-explicit
+# 当前生产默认策略
+myth --root . eval --record --policy-id production-v0.14
+
+# 同一固定 case 做离线策略对照，不修改生产策略
+myth --root . eval --case resolution-marker-presence --resolution-policy L0 --policy-id resolution-l0 --record
+myth --root . eval --case resolution-marker-presence --resolution-policy L1 --policy-id resolution-l1 --record
+
+# 查看持久评测、做成对比较
+myth --root . eval-history
+myth --root . eval-compare <baseline_eval_run_id> <candidate_eval_run_id>
+
+# 只有显式声明成本权重才计算 gain-per-cost
+myth --root . gain <baseline_eval_run_id> <candidate_eval_run_id> resolution-marker-presence \
+  --from-resolution L0 --to-resolution L1 --weight context_chars=0.001
 ```
 
-Eval Runner 在隔离临时 Runtime 中调用真实组件，输出逐 case Observation、汇总 Report 与 Release Gate。`foundation-v1` 保持不可改写历史基线；v0.13 默认 `foundation-v2`。Release Gate 只给评测结论，不自动修改或发布策略。
+Eval Runner 在隔离临时 Runtime 中调用真实组件；`foundation-v1/v2` 保留历史基线，v0.14 默认 `foundation-v3`。Eval Ledger 持久化 suite/version/policy/Observation。Information Gain 只接受同 case 的 paired evidence；INCONCLUSIVE/UNSUPPORTED 明确保持未校准。Release Gate 与 Gain 都不自动修改或发布策略。
 
 ## 验证与架构
 

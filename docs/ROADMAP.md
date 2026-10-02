@@ -4,7 +4,7 @@
 
 “先存在再优化”仍成立，但 v0.11 开始明确第二阶段原则：**已经存在的合同优先进入真实请求链、故障链和评测链；不继续用更多抽象掩盖未闭环的能力。**
 
-## 当前基线：v0.13
+## 当前基线：v0.14
 
 已经可用：
 
@@ -27,9 +27,9 @@
 
 - Intent Pick：**connected**；strict arithmetic + conservative local_retrieval 已进入 Turn admission，未使用通用 LLM 分类器；
 - Information Resolution：**connected**；Rule Controller 在 admission 固定 L0/L1/L2，同一来源保持固定 digest；
-- Evaluation：**usable**；foundation-v1/v2 + executable Runner + Release Gate 已接通；
+- Evaluation：**usable**；foundation-v1/v2/v3 + executable Runner + durable Eval Ledger + paired policy comparison 已接通；
 - Information Delta：exists；尚未自动计算 conflict / supersede / revision delta；
-- Information Gain：exists；仍无校准 estimator，不把 similarity/confidence 当 Gain。
+- Information Gain：**connected（offline）**；paired fixed-case estimator 已接通，未进入 live admission；无 paired evidence 就保持 uncalibrated。
 
 已经存在但还需加深：
 
@@ -71,7 +71,22 @@ v0.13 已完成：
 - retrieval evidence → Intent Pick → Resolution Plan → frozen Turn Snapshot；
 - route/resolution/retrieval diagnostics 进入 Event 与 Context Report。
 
-## Next — Evaluation depth before Information Gain
+## 已完成 — Paired Evaluation + Information Gain foundation
+
+v0.14 已完成：
+
+- Eval Observation 持久化到本地 Ledger；
+- 同 suite/version + 同 case/comparison key 的 baseline/candidate 成对比较；
+- Workspace 策略依赖注入，Eval 可替换 Intent/Resolution policy 而不污染生产默认；
+- foundation-v3 增加 resolution-sensitive marker case；
+- Information Gain 的 quality delta 只来自 paired Verdict；
+- cost 默认保持向量；只有显式 cost weights 才产生 weighted cost / gain-per-cost；
+- INCONCLUSIVE / UNSUPPORTED pairing 明确保持 uncalibrated；
+- `eval-history` / `eval-compare` / `gain` CLI。
+
+## Next — Gain calibration depth before live policy use
+
+
 
 继续扩固定真实任务集，作为 Gain / Evolution 的共同地基：
 
@@ -145,8 +160,9 @@ Trigger 只创建工作机会，不绕过 Control / Ticket。跨项目 Memory �
 - 在当前 deterministic/local_retrieval 之上，只增加可用 fixed eval 证明的 ask-user / local direct-answer 路径；
 - Resolution Controller 下一步从静态规则升级为 eval-calibrated policy，但必须保留 fallback；
 - Information Delta 接入 Memory revision / conflict / supersede；
-- Information Gain estimator 只从固定 eval 数据校准；
-- 支持 expected gain per token / latency / tool cost；
+- 扩大 paired eval 到 ordinary QA / local retrieval / multi-step read / artifact / recovery；
+- 为 token / latency / tool / context 成本建立**显式、版本化** cost model，而不是硬编码权重；
+- 只有跨足够 fixed cases 稳定后，才允许 Gain 影响 Resolution Controller；
 - 不把 similarity、confidence 或 relevance score 直接命名为 Information Gain。
 
 ## Next — Interop
