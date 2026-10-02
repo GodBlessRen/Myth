@@ -2,7 +2,7 @@
 
 **Durable Runtime 打底、Agent Product 向上生长的本地 Agent 平台。**
 
-v0.7 在 breadth-first 平台骨架上重做产品工作台：对话保持中心，Projects / Knowledge 退到上下文层，右侧 Runtime Inspector 用 Decision → Authority → Result → Completion 展示当前轮的真实执行事实。视觉系统改为暖纸张 / 墨色 / 克制橙色，并直接重构 tokens / layout / components，而不是继续追加 CSS override。\n\nv0.6 开始采用 breadth-first 路线：不再只把单一功能磨深，而是先固定完整平台骨架。现有 Durable Runtime 与对话/项目/知识库继续可用；Control、Capability、Context、Memory、RAG、Workflow、SubAgent、Skills、MCP、Observability、Evaluation、Evolution 已拥有统一代码入口和成熟度标记，再逐层从 `wired` 提升到 `usable`。
+v0.8 把 Product Control 真正接入主链：Steer / Pause / Resume / Abort / Model Switch / Thinking Switch / Compact 全部持久化并在安全点生效；Memory 变成带 revision 的本地持久层；Agent 新增 project.search / diff.preview / git.status / git.diff 四个受 Capability Registry 约束的只读编码能力。右侧 Runtime Inspector 现在直接显示 Control revision、Tool Ticket、Operation state、Budget、Memory 与 Event 数量。\n\nv0.7 在 breadth-first 平台骨架上重做产品工作台：对话保持中心，Projects / Knowledge 退到上下文层，右侧 Runtime Inspector 用 Decision → Authority → Result → Completion 展示当前轮的真实执行事实。视觉系统改为暖纸张 / 墨色 / 克制橙色，并直接重构 tokens / layout / components，而不是继续追加 CSS override。\n\nv0.6 开始采用 breadth-first 路线：不再只把单一功能磨深，而是先固定完整平台骨架。现有 Durable Runtime 与对话/项目/知识库继续可用；Control、Capability、Context、Memory、RAG、Workflow、SubAgent、Skills、MCP、Observability、Evaluation、Evolution 已拥有统一代码入口和成熟度标记，再逐层从 `wired` 提升到 `usable`。
 
 页面新增 **Runtime** 视图，直接展示 P0→P1000 平台地图与当前真正 executable 的 Capability；`planned` 能力不会被模型当作可执行工具。完整地图见 [PLATFORM_MAP](docs/PLATFORM_MAP.md)。
 
@@ -34,11 +34,11 @@ python -m myth.cli --root . web
 
 | 页面 | 已实现 |
 | --- | --- |
-| 对话 | 普通问答、多轮上下文、Markdown/代码展示、复制/保存回答、附加文本资料、停止/澄清/中断继续、工具记录与文件下载 |
+| 对话 | 普通问答、多轮上下文、Markdown/代码展示、Steer/Pause/Resume/Abort、当前轮模型/Thinking 热切换、Compact、附加资料、工具记录与文件下载 |
 | 会话管理 | 搜索、重命名、置顶、所属项目、归档与恢复、Markdown 导出 |
 | 项目 | 创建/编辑、共同指令、关联本地目录、文件树、项目对话与专属资料 |
 | 知识库 | 导入 UTF-8 文本或粘贴内容、分块索引、共享/项目范围、关键词搜索、来源预览与移出索引 |
-| Runtime | P0→P1000 平台成熟度、Capability Registry 与执行边界；对话页右侧提供实时 Runtime Inspector |
+| Runtime | P0→P1000 平台成熟度、Capability Registry 与执行边界；右侧 Inspector 展示 Control revision、Ticket、Operation、Budget、Memory、Event facts |
 | 模型与设置 | Ollama 连接检查、已安装模型、输出/步数限制、思考开关 |
 
 先创建一个项目，填入本地目录并添加指令。导入一份资料，再点「开始对话」，例如：
@@ -51,13 +51,13 @@ python -m myth.cli --root . web
 
 普通讨论也可以选择「独立对话」。文件生成成功后，回答下方出现实际下载卡片；每版下载来自固定摘要的不可变对象。任意回答可另外保存为 Markdown。
 
-文本文件上限 1 MB；每条消息最多附加 4 份资料。项目文件仅支持 UTF-8，Agent 输出到受管会话目录，项目原文件保留。没有任意 shell 或代码执行工具。模型的规划能力会影响连续工具调用，较小模型可能提前回答或生成错误参数；错误会显示在执行记录中并消耗本轮步数。
+文本文件上限 1 MB；每条消息最多附加 4 份资料。项目文件仅支持 UTF-8，Agent 输出到受管会话目录，项目原文件保留。Agent 可搜索项目、预览 Diff、读取 Git status/diff；仍没有任意 shell 或代码执行工具。模型的规划能力会影响连续工具调用，较小模型可能提前回答或生成错误参数；错误会显示在执行记录中并消耗本轮步数。
 
 ## Loop、上下文与检索
 
-对话循环是「固定入口 → 持久模型请求 → 决策校验 → 工具授权/收据 → 下一步」，可以直接回答或向用户提问。会话消息持久保存；模型接收最近 30 条历史和本轮资料，必需内容超过 42 KB 会在调用前停止。它是会话记忆，尚无自动长期记忆提炼。
+对话循环是「固定入口 → 持久模型请求 → 决策校验 → 工具授权/收据 → 下一步」，可以直接回答或向用户提问。会话消息持久保存；模型接收最近 30 条历史和本轮资料，必需内容超过 42 KB 会在调用前停止。完成的普通对话会写入本地 Episodic Memory；Semantic/Procedural/Working Memory 已有持久 revision API。下一轮会按当前用户问题做关键词召回并固定进 Turn Snapshot。
 
-知识库按 1,800 字符分块、200 字符重叠，英文词与中文双字关键词排序；本轮只检索共享资料和当前项目资料。检索结果保留文档、片段与来源标识，来源可点击查看。当前没有向量检索、重排器或 PDF/Office 解析器。
+知识库按 1,800 字符分块、200 字符重叠，英文词与中文双字关键词排序；本轮只检索共享资料和当前项目资料。检索结果保留文档、片段与来源标识，来源可点击查看。当前没有向量检索、重排器或 PDF/Office 解析器；Keyword Retrieval 仍是可复现 baseline。
 
 模型发出执行 Ticket 后结果不明，则保留 UNKNOWN 与预算占用；续跑先对账，不重复未知调用。已持久化的模型收据、文件摘要与工具结果可恢复。SQLite 保证账本事务，不把外部效果宣称为 exactly-once。
 
