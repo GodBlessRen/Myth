@@ -7,11 +7,29 @@ from ..conversation_ports import ConversationRepository, ConversationExecution
 
 
 class ConversationAgent:
-    def __init__(self, repository: ConversationRepository, execution: ConversationExecution, *, control, memory):
+    def __init__(self, repository: ConversationRepository, execution: ConversationExecution, *, control, memory, personal=None):
         self.repository = repository
         self.execution = execution
         self.control = control
         self.memory = memory
+        self.personal = personal
+
+    def _checkpoint_goal(self, run_id: str, *, status: str, summary: str = "", next_action: str = "", waiting_for: str = "") -> None:
+        if self.personal is None:
+            return
+        turn = self.repository.turn(run_id)
+        goal = turn["snapshot"].get("goal") or {}
+        goal_id = goal.get("goal_id")
+        if not goal_id:
+            return
+        self.personal.checkpoint_run(
+            goal_id,
+            run_id,
+            status=status,
+            summary=summary,
+            next_action=next_action,
+            waiting_for=waiting_for,
+        )
 
     def _gate(self, run_id: str) -> bool:
         return self.control.gate(run_id) is not None
@@ -74,6 +92,13 @@ class ConversationAgent:
                             decision.question,
                             decision_id,
                         )
+                        self._checkpoint_goal(
+                            run_id,
+                            status="WAITING_USER",
+                            summary="Agent reached a decision point that requires user input.",
+                            next_action="Resume after the user answers the pending question.",
+                            waiting_for=decision.question or "user input",
+                        )
                         return
                     else:
                         self.repository.finish_reply(run_id, step["step"], decision.claim)
@@ -83,15 +108,24 @@ class ConversationAgent:
                             completed["snapshot"]["messages"][-1]["content"],
                             decision.claim or "",
                         )
+                        self._checkpoint_goal(
+                            run_id,
+                            status="COMPLETED",
+                            summary=(decision.claim or "")[:2000],
+                            next_action="Review the result and continue the next unfinished part of this goal.",
+                        )
                         return
                 except ContextBudgetError as exc:
                     self.repository.block(run_id, "FAILED", str(exc))
+                    self._checkpoint_goal(run_id,status="FAILED",summary=str(exc),next_action="Resolve the context-budget blocker before retrying.")
                     return
                 except (DecisionValidationError, ValueError, PermissionError) as exc:
                     self.repository.reject(run_id, step["step"], str(exc))
                 except BudgetExceeded as exc:
                     self.repository.block(run_id, "BUDGET_EXHAUSTED", str(exc))
+                    self._checkpoint_goal(run_id,status="BUDGET_EXHAUSTED",summary=str(exc),next_action="Start a new admitted turn with an adjusted budget.")
                     return
                 except (RecoveryRequired, OSError, RuntimeError) as exc:
                     self.repository.block(run_id, "UNKNOWN", str(exc))
+                    self._checkpoint_goal(run_id,status="UNKNOWN",summary=str(exc),next_action="Reconcile the uncertain attempt before any replay.")
                     return
