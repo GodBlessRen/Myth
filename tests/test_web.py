@@ -11,7 +11,7 @@ from myth.web import ASSET_DIR, AgentWebService, serve
 
 class WebSurfaceTests(unittest.TestCase):
     def test_packaged_web_assets_exist(self) -> None:
-        for name in ("index.html", "app.css", "app.js"):
+        for name in ("index.html", "app.css", "app.js", "inspector.js"):
             path = ASSET_DIR / name
             self.assertTrue(path.is_file(), path)
             self.assertGreater(path.stat().st_size, 100)
