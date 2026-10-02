@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import threading
+import time
+import uuid
 
 from .runtime import MythRuntime
 from .workspace import Workspace
@@ -17,6 +19,9 @@ class ConversationWebService:
         self.root=root
         self.active=set()
         self.lock=threading.Lock()
+        self.driver_id=f"web-{uuid.uuid4().hex}"
+        self.driver_ttl=6.0
+        self.heartbeat_interval=2.0
 
     def _use(self,method,*args):
         with MythRuntime(self.root) as runtime:
@@ -49,6 +54,7 @@ class ConversationWebService:
             "memory_count":len(self.memories(limit=100)),
             "goals":self.goals(),
             "goal_count":len(self.goals()),
+            "recoverable_runs":self.recoverable_runs(),
         }
 
     def provider(self,settings):
@@ -95,6 +101,41 @@ class ConversationWebService:
             "model_calls":len(invocations),
         }
 
+    def recoverable_runs(self):
+        with MythRuntime(self.root) as runtime:
+            workspace=Workspace(runtime)
+            rows=runtime.store.db.execute(
+                "SELECT run_id,session_id,status,current_step,max_steps,error,created_at "
+                "FROM workspace_turns WHERE status IN ('RUNNING','INTERRUPTED','UNKNOWN','PAUSED','WAITING_USER') "
+                "ORDER BY rowid DESC LIMIT 50"
+            ).fetchall()
+            result=[]
+            for row in rows:
+                item=dict(row)
+                if item["status"]=="RUNNING":
+                    lease=workspace.repository.driver_lease(item["run_id"])
+                    if lease and lease["expired"]:
+                        workspace.repository.sweep_expired_driver(item["run_id"])
+                        item=dict(runtime.store.db.execute(
+                            "SELECT run_id,session_id,status,current_step,max_steps,error,created_at "
+                            "FROM workspace_turns WHERE run_id=?",(item["run_id"],)
+                        ).fetchone())
+                cursor=workspace.repository.execution_cursor(item["run_id"])
+                item["execution_cursor"]=cursor
+                item["driver_lease"]=workspace.repository.driver_lease(item["run_id"])
+                result.append(item)
+            return result
+
+    def _heartbeat_loop(self,rid,owner_id,stop_event):
+        while not stop_event.wait(self.heartbeat_interval):
+            try:
+                with MythRuntime(self.root) as runtime:
+                    workspace=Workspace(runtime)
+                    if not workspace.repository.heartbeat_driver(rid,owner_id,self.driver_ttl):
+                        return
+            except Exception:
+                return
+
     def session(self,sid):
         with MythRuntime(self.root) as runtime:
             workspace=Workspace(runtime)
@@ -102,7 +143,17 @@ class ConversationWebService:
             with self.lock:
                 active=set(self.active)
             for turn in value["turns"]:
-                turn["driver_active"]=turn["run_id"] in active
+                lease=workspace.repository.driver_lease(turn["run_id"])
+                if turn["status"]=="RUNNING" and lease and lease["expired"]:
+                    turn=workspace.repository.sweep_expired_driver(turn["run_id"])
+                    lease=workspace.repository.driver_lease(turn["run_id"])
+                turn["driver_active"]=bool(
+                    turn["run_id"] in active
+                    and lease
+                    and not lease["expired"]
+                )
+                turn["driver_lease"]=lease
+                turn["execution_cursor"]=workspace.repository.execution_cursor(turn["run_id"])
                 turn["control"]=workspace.control.view(turn["run_id"])
                 turn["operations"]=workspace.repository.operations(turn["run_id"])
                 turn["events"]=workspace.repository.events(turn["run_id"])
@@ -114,10 +165,27 @@ class ConversationWebService:
             return value
 
     def _spawn(self,rid):
+        owner_id=f"{self.driver_id}:{rid}"
         with self.lock:
-            if rid in self.active:return
+            if rid in self.active:
+                return
+        with MythRuntime(self.root) as runtime:
+            workspace=Workspace(runtime)
+            if not workspace.repository.claim_driver(rid,owner_id,self.driver_ttl):
+                return
+        with self.lock:
             self.active.add(rid)
+
+        stop_heartbeat=threading.Event()
+
         def work():
+            heartbeat=threading.Thread(
+                target=self._heartbeat_loop,
+                args=(rid,owner_id,stop_heartbeat),
+                name=f"heartbeat-{rid[:12]}",
+                daemon=True,
+            )
+            heartbeat.start()
             try:
                 with MythRuntime(self.root) as runtime:
                     workspace=Workspace(runtime)
@@ -127,20 +195,36 @@ class ConversationWebService:
             except Exception as exc:
                 with MythRuntime(self.root) as runtime:
                     workspace=Workspace(runtime)
-                    workspace.repository.block(
-                        rid,"UNKNOWN",f"{type(exc).__name__}: {exc}"
+                    interrupted=workspace.repository.interrupt(
+                        rid,
+                        f"{type(exc).__name__}: {exc}",
                     )
-                    turn=workspace.repository.turn(rid)
-                    goal_id=(turn.get("snapshot") or {}).get("goal",{}).get("goal_id")
+                    goal_id=(interrupted.get("snapshot") or {}).get("goal",{}).get("goal_id")
                     if goal_id:
                         workspace.personal.checkpoint_run(
-                            goal_id,rid,status="UNKNOWN",
+                            goal_id,
+                            rid,
+                            status=interrupted["status"],
                             summary=f"{type(exc).__name__}: {exc}",
-                            next_action="Reconcile the uncertain run before continuing.",
+                            next_action=(
+                                "Reconcile the uncertain attempt before continuing."
+                                if interrupted["status"]=="UNKNOWN"
+                                else "Resume from the last durable checkpoint."
+                            ),
                         )
             finally:
-                with self.lock:self.active.discard(rid)
+                stop_heartbeat.set()
+                heartbeat.join(timeout=1)
+                try:
+                    with MythRuntime(self.root) as runtime:
+                        Workspace(runtime).repository.release_driver(rid,owner_id)
+                except Exception:
+                    pass
+                with self.lock:
+                    self.active.discard(rid)
+
         threading.Thread(target=work,name=f"chat-{rid[:12]}",daemon=True).start()
+
 
     def send(self,sid,value):
         settings=self._use("settings")
@@ -198,10 +282,11 @@ class ConversationWebService:
             return {"run_id":rid,"status":"RUNNING"}
 
         if action=="continue":
-            if self._use("turn",rid)["status"] not in {"RUNNING","UNKNOWN"}:
+            turn=self._use("turn",rid)
+            if turn["status"] not in {"RUNNING","INTERRUPTED","UNKNOWN"}:
                 raise ValueError("turn cannot continue")
             self._spawn(rid)
-            return {"run_id":rid,"status":"RUNNING"}
+            return {"run_id":rid,"status":turn["status"]}
 
         mapping={
             "pause":ControlCommand.PAUSE,
