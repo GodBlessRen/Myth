@@ -1,13 +1,93 @@
-# 后续完善规划
+# Myth v0.6+ — Breadth-first Roadmap
 
-v0.5 已补齐本地对话、会话管理、项目、知识库与受控工具的基础工作区。下面是未完成的工作，按可用性优先推进。
+当前策略：**先让整套平台骨架存在，再把每层从 wired 推进到 usable，再优化。**
+不再用“某一块 95 分后才开始下一块”的方式推进。
 
-| 优先级 | 工作 | 验收证据 |
-| --- | --- | --- |
-| 1 | 提升真实模型连续工具调用稳定性；参数专用 schema、错误分类、截断提示、流式文本与执行状态 | 多种本地模型固定任务成功率；失败样本保留；不把模型 claim 当成文件交付 |
-| 2 | 项目文件 diff、候选编辑、用户确认应用；独立测试/编译验收；完整知识导入与导出 | 固定候选上验收；失败不污染源目录；可独立完成真实任务 |
-| 3 | 检索端口与质量基准；向量召回/重排、PDF/Office 解析；长期记忆带来源、版本和失效 | 跨项目隔离、召回率、引用正确率；过期记忆不升级为执行权限 |
-| 4 | P1/P2 继续迁入事务级端口；旧版升级、故障矩阵、孤儿对象 GC；预算配置与统计 | 各中断点重启不重复未知效果，账本/预算/下载一致 |
-| 5 | 键盘与辅助技术审计、跨浏览器测试；远端 provider 实测；按需求扩展部署 | 可复现兼容性与任务记录；明确身份、权限、配额和数据隔离 |
+完整层级见 [PLATFORM_MAP.md](PLATFORM_MAP.md)。
 
-继续保持原子事务、单一状态所有者、纯领域规则与独立适配器。任意 shell、多 Agent、自我进化和分布式执行尚无当前验收前提。
+## Wave A — Skeleton complete
+
+目标：所有长期层拥有稳定名字、接口、状态归属和最小合同测试。
+
+- Durable Runtime
+- Conversation
+- Control Plane
+- Capability Registry
+- Context Compiler
+- Memory
+- Retrieval / RAG
+- Workflow
+- SubAgent
+- Skills
+- MCP
+- Observability
+- Evaluation
+- Evolution
+- Distributed Runtime boundary
+
+验收：`MythKernel.snapshot()` 可以给出整个平台拓扑；planned 能力不会被广告为 executable。
+
+## Wave B — Product control
+
+把最影响实际 Agent 体验的骨架接入主链：
+
+1. persistent Control Command Inbox;
+2. steer / pause / resume / abort;
+3. turn 后 model / thinking switch;
+4. unified Capability Registry replaces duplicated tool catalogs;
+5. unified Context Compiler replaces conversation/exact split projection;
+6. Runtime Inspector reads durable facts rather than UI-local state.
+
+## Wave C — Capability surface
+
+按原子适配器扩展：
+
+- project.search
+- diff.preview
+- git.status / git.diff
+- test.run
+- admitted shell.exec
+- python.run
+- web.fetch / browser adapter
+
+所有真实 I/O 必须复用 Runtime admission/Ticket/Receipt/usage/recovery，不允许工具 SDK 隐藏重试。
+
+## Wave D — Context / Memory / RAG
+
+- Working / Episodic / Semantic / Procedural memory revisions;
+- memory provenance, conflict and revoke;
+- RetrievalPort;
+- lexical baseline retained;
+- optional vector / hybrid / rerank adapters;
+- token-aware ContextSnapshot and compaction.
+
+## Wave E — Workflow / SubAgent / Skills / MCP
+
+- persistent Workflow Run/Step;
+- child Run for SubAgent;
+- parent budget and capability delegation;
+- Skill loader and capability requirements;
+- MCP discovery mapped to local CapabilitySpec before admission.
+
+## Wave F — Eval / Replay / Evolution
+
+- fixed task suites;
+- PASS/FAIL/INCONCLUSIVE/UNSUPPORTED;
+- cost and token evidence separate from quality gates;
+- replay as derived data;
+- candidate policy registry;
+- explicit promote/rollback; never self-modify live Runtime.
+
+## Wave G — Product/UI
+
+UI 只展示 Kernel 已有的真实能力：
+
+- Chat remains center;
+- Control strip: model / thinking / steer / pause / abort;
+- right Runtime Inspector: context / memory / tools / budget / trace / recovery;
+- Projects/Knowledge become drawers, not the product center;
+- streaming, diff, artifacts and verification are inline in conversation.
+
+## P1000 boundary
+
+Distributed workers, leases, remote execution and multi-user authentication stay planned until a real capacity/deployment requirement exists.  The boundary exists now so future growth does not force a redesign.

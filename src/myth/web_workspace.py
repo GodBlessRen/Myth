@@ -16,8 +16,17 @@ class ConversationWebService:
     def _use(self,method,*args):
         with MythRuntime(self.root) as runtime:return getattr(Workspace(runtime).repository,method)(*args)
 
+    def platform(self):
+        with MythRuntime(self.root) as runtime:return Workspace(runtime).kernel.snapshot()
+
     def bootstrap(self):
-        return {"projects":self._use("projects"),"sessions":self._use("sessions"),"settings":self._use("settings"),"documents":self._use("documents")}
+        return {
+            "projects":self._use("projects"),
+            "sessions":self._use("sessions"),
+            "settings":self._use("settings"),
+            "documents":self._use("documents"),
+            "platform":self.platform(),
+        }
 
     @staticmethod
     def provider(settings):return create_provider(settings["provider"],ollama_base_url=settings.get("ollama_url"))
@@ -96,6 +105,7 @@ class ConversationWebService:
 
     def get(self,parts,query):
         if not parts:return self.bootstrap()
+        if parts==["platform"]:return self.platform()
         if parts==["connection"]:return self.connection()
         if parts==["sessions"]:return {"sessions":self._use("sessions",query.get("archived",["0"])[0]=="1")}
         if len(parts)==2 and parts[0]=="sessions":return self.session(parts[1])
