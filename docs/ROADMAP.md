@@ -4,7 +4,7 @@
 
 “先存在再优化”仍成立，但 v0.11 开始明确第二阶段原则：**已经存在的合同优先进入真实请求链、故障链和评测链；不继续用更多抽象掩盖未闭环的能力。**
 
-## 当前基线：v0.11
+## 当前基线：v0.12
 
 已经可用：
 
@@ -41,17 +41,24 @@
 - Evaluation；
 - Evolution。
 
-## Next — Retrieval correctness before retrieval sophistication
+## 已完成 — Retrieval correctness foundation
 
-先修“候选根本没进入集合”的问题，再谈向量库：
+v0.12 已完成：
 
-- 去掉 knowledge search 在排序前的 10,000 chunk 静默截断；
-- 为 Knowledge / Memory 建可分页候选读取；
-- project.search 改为可剪枝遍历，明确 scanned / truncated / cursor；
-- 固定 source_ref + digest 下的 L0/L1/L2 projection；
-- 保留 Keyword baseline，之后再比较 vector / hybrid / rerank。
+- Knowledge search 去掉 rank 前 10,000 chunk 静默截断；
+- Knowledge / Memory 使用可分页候选扫描并暴露 coverage diagnostics；
+- project.search 增加 cursor / max_files / scanned_files / matched_lines；
+- 同一 source_ref + digest 下接通 L0/L1/L2 projection；
+- Keyword baseline 保持不变，便于后续公平比较 vector / hybrid / rerank。
 
-目标：先区分 **recall failure** 与 **ranking failure**，避免把向量检索当万能补丁。
+因此现在可以区分 **candidate coverage failure** 与 **ranking failure**。
+
+## 已完成 — Evaluation foundation
+
+- Case / Observation / Verdict 合同；
+- PASS / FAIL / INCONCLUSIVE / UNSUPPORTED；
+- safety_regression 与 measured cost；
+- 版本化 `evals/foundation-v1.json` 固定基线。
 
 ## Next — Evaluation before smarter routing
 
