@@ -5,4 +5,4 @@ from .runtime import MythRuntime
 from .platform import MythComponents, MythKernel
 
 __all__ = ["AgentRuntime", "MythRuntime", "MythComponents", "MythKernel"]
-__version__ = "0.19.0"
+__version__ = "0.20.0"
