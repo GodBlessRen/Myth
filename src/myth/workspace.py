@@ -8,6 +8,7 @@ from .platform import MythComponents
 from .platform.control_store import SqliteControlService
 from .platform.memory_store import SqliteMemoryStore
 from .platform.evolution_store import SqliteEvolutionControl
+from .strategies import resolution_controller_from_config
 
 
 class Workspace:
@@ -26,7 +27,7 @@ class Workspace:
         self.evolution = SqliteEvolutionControl(runtime)
         if resolution_controller is None:
             active=self.evolution.active("information_resolution")
-            resolution_controller=self.evolution.controller()
+            resolution_controller=resolution_controller_from_config(active["config"])
             resolution_policy_id=active["policy_id"]
         else:
             resolution_policy_id=resolution_policy_id or "injected"
