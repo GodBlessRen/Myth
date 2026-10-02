@@ -15,6 +15,7 @@ def object_schema(properties,required=None):
 _TEXT={"type":"string"}
 _TOOL_ARGUMENTS={
     "knowledge.search":object_schema({"query":_TEXT,"limit":{"type":"integer","minimum":1,"maximum":8}},["query"]),
+    "knowledge.read":object_schema({"document_id":_TEXT,"offset":{"type":"integer","minimum":0},"max_chars":{"type":"integer","minimum":1,"maximum":12000}},["document_id"]),
     "project.list":object_schema({"path":_TEXT},[]),
     "project.read":object_schema({"path":_TEXT,"offset":{"type":"integer","minimum":0},"max_chars":{"type":"integer","minimum":1,"maximum":12000}},["path"]),
     "project.search":object_schema({"query":_TEXT,"path":_TEXT,"limit":{"type":"integer","minimum":1,"maximum":20}},["query"]),
@@ -33,6 +34,7 @@ CONVERSATION_SCHEMA={"oneOf":[
 
 TOOL_CATALOG = {
     "knowledge.search": {"query": "search question", "limit": "1-8; project + shared knowledge only"},
+    "knowledge.read": {"document_id": "document id from a citation/source", "offset": "character offset", "max_chars": "100-12000 characters; default 6000"},
     "project.list": {"path": "optional relative directory"},
     "project.read": {"path": "relative file", "offset": "character offset", "max_chars": "100-12000 characters; default 6000"},
     "project.search": {"query": "text to find", "path": "optional relative directory", "limit": "1-20 matches"},

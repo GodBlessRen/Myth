@@ -9,6 +9,7 @@ from .workspace import Workspace
 from .providers import create_provider
 from .providers.ollama import OllamaProvider
 from .platform.control import ControlCommand
+from .strategies import RuleIntentPicker
 
 
 class ConversationWebService:
@@ -102,26 +103,41 @@ class ConversationWebService:
 
     def send(self,sid,value):
         settings=self._use("settings")
-        check=self.connection(settings)
-        if not check["ready"]:
-            raise ValueError("模型服务未连接，请在设置中检查模型连接。")
-        if settings["provider"]=="ollama" and settings["model"] not in check["details"].get("models",[]):
-            raise ValueError("所选模型未安装，请选择已有 Ollama 模型。")
-
         text=value.get("text")
+        goal_id=value.get("goal_id") or None
+        pick=RuleIntentPicker().pick(str(text or ""), {})
+        if pick.route.value!="deterministic":
+            check=self.connection(settings)
+            if not check["ready"]:
+                raise ValueError("模型服务未连接，请在设置中检查模型连接。")
+            if settings["provider"]=="ollama" and settings["model"] not in check["details"].get("models",[]):
+                raise ValueError("所选模型未安装，请选择已有 Ollama 模型。")
+
         with MythRuntime(self.root) as runtime:
             workspace=Workspace(runtime)
-            memory=workspace.memory.search(str(text or ""),limit=6)
+            # Admission validates the long-lived Goal before any Run/Turn exists.
+            # Request identity also binds goal_id so idempotent retries cannot
+            # silently attach the same request to a different Goal.
+            if goal_id:
+                workspace.personal.goal(goal_id)
+            session=workspace.repository.session(sid)
+            memory=workspace.memory.search(
+                str(text or ""),
+                limit=6,
+                project_id=session.get("project_id"),
+                session_id=sid,
+            )
             turn=workspace.repository.create_turn(
                 sid,
                 text,
                 value.get("request_id"),
                 value.get("document_ids"),
                 memory_records=memory,
+                goal_id=goal_id,
             )
             workspace.control.ensure(turn["run_id"],turn["settings"])
-            if value.get("goal_id"):
-                workspace.personal.bind_run(value["goal_id"],turn["run_id"])
+            if goal_id:
+                workspace.personal.bind_run(goal_id,turn["run_id"])
         if turn["status"]=="RUNNING":self._spawn(turn["run_id"])
         return {"run_id":turn["run_id"],"session_id":sid}
 

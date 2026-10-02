@@ -1,4 +1,4 @@
-# Myth v0.10 — Composable Runtime Map
+# Myth v0.11 — Composable Runtime Map
 
 Myth 不再把架构描述成 P0 → P1000 的固定层级。
 
@@ -35,13 +35,13 @@ Domains 是同级职责，不是必须顺序经过的层。
 
 | Domain | 当前成熟度 | 当前真实能力 |
 | --- | --- | --- |
-| Coordination | usable | Direct + Agent Loop；其他组织方式可插拔 |
-| Control | usable | Steer / Pause / Resume / Stop / Model / Thinking / Compact |
+| Coordination | usable | Direct + Agent Loop；strict arithmetic Intent Pick 已接 deterministic 快路；其他组织方式可插拔 |
+| Control | usable | Steer / Pause / Resume / Stop / Model / Thinking / Compact；revision 跨连接原子分配 |
 | Execution | usable | Model、文件、检索、Diff、Git 只读执行与对账 |
 | Capability | usable | Registry + executable/planned 准入 |
 | State | usable | SQLite durable state / budget / event / command |
-| Context | usable | ContextCompiler + fixed byte budget |
-| Memory | usable | typed revision + search/revoke + episodic auto-write |
+| Context | usable | ContextCompiler + fixed byte budget + fixed-digest Knowledge L2 expansion |
+| Memory | usable | typed revision + search/revoke + scoped episodic auto-write + provenance fact_level |
 | Personal State | connected | Goal / Trigger / explicit state 持久化与 API |
 | Observability | usable | Runtime Inspector + operation/event/control projection |
 | Evaluation | exists | 固定质量门函数存在，尚未成为完整 eval pipeline |
@@ -53,7 +53,7 @@ Strategy 是 Coordination 的可替换策略，不是 Layer。
 
 | Strategy | 当前 |
 | --- | --- |
-| Intent Pick | exists |
+| Intent Pick | connected |
 | Information Resolution | exists |
 | Information Gain | exists |
 | Direct | usable |
@@ -119,8 +119,8 @@ Outbound Adapters
 
 | Concept | 当前 | 含义 |
 | --- | --- | --- |
-| Intent Pick | exists | 在 expensive reasoning 前选择 direct / local retrieval / deterministic / agent / ask-user 路径；尚未接管主请求链 |
-| Information Resolution | exists | L0 Abstract → L1 Overview → L2 Detail/Evidence；尚未物化多分辨率 Memory/Knowledge views |
+| Intent Pick | connected (narrow) | strict bounded arithmetic 已在主请求入口走 deterministic 0-model fast path；其他输入稳定回退 Agent Loop |
+| Information Resolution | exists + partial connection | L0 Abstract → L1 Overview → L2 Detail/Evidence；Knowledge 已可沿固定 document/digest 分页展开 L2，通用 L0/L1 views 尚未物化 |
 | Information Delta | exists | added / updated / removed / conflicted 的状态变化合同；尚未自动接入 Memory lifecycle |
 | Information Gain | exists | 边际任务价值及 gain-per-cost 合同；尚无校准 estimator |
 

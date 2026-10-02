@@ -13,6 +13,8 @@ from ..adapters.agent_execution import LocalAgentExecution
 from ..conversation import TOOL_CATALOG, conversation_request, calculate
 from ..domain import RecoveryRequired, exact_patch, sha256_bytes
 from ..platform.capabilities import CapabilityState, default_capabilities
+from ..models import StepDecision
+from ..strategies import RuleIntentPicker
 
 EXCLUDED={".git",".runtime",".venv","venv","node_modules","__pycache__",".aws",".ssh","secrets"}
 TEXT_SUFFIXES={
@@ -25,6 +27,7 @@ class LocalConversationExecution:
     def __init__(self,runtime,repository,capability_registry=None):
         self.runtime,self.repository=runtime,repository
         self.registry=capability_registry or default_capabilities()
+        self.intent_picker=RuleIntentPicker()
         self._lock_adapter=LocalAgentExecution(runtime,repository)
         self.receipts=runtime.runtime_dir/"conversation-receipts"
         self.receipts.mkdir(exist_ok=True)
@@ -44,6 +47,24 @@ class LocalConversationExecution:
                 "question":decision.get("question"),
                 "result":result,
             })
+        if step == 1 and not activities:
+            user_text = turn["snapshot"]["messages"][-1]["content"]
+            pick = self.intent_picker.pick(user_text, {
+                "project": turn["snapshot"].get("project"),
+                "attached_document_ids": turn["snapshot"].get("attached_document_ids") or [],
+            })
+            metadata = pick.metadata or {}
+            if pick.route.value == "deterministic" and metadata.get("kind") == "bounded_arithmetic":
+                expression = metadata["expression"]
+                value = calculate(expression)
+                decision_id = f"intent:{turn['run_id']}:{step}:arithmetic"
+                return decision_id, StepDecision(
+                    decision_type="request_completion",
+                    reason=pick.reason or "deterministic intent route",
+                    claim=str(value),
+                    goal_coverage="answer",
+                )
+
         request=conversation_request(
             turn["settings"],
             turn["snapshot"],
@@ -100,6 +121,33 @@ class LocalConversationExecution:
             })
             if len(files)>=150:break
         return {"files":files,"truncated":len(files)==150}
+
+    def _read_knowledge(self,turn,args):
+        document_id=args.get("document_id")
+        if not isinstance(document_id,str) or not document_id.strip() or len(document_id)>200:
+            raise ValueError("document_id is required")
+        document=self.repository.document(document_id)
+        project_id=(turn["snapshot"].get("project") or {}).get("id")
+        if document["project_id"] not in {None,project_id}:
+            raise PermissionError("knowledge document belongs to another project")
+        offset=args.get("offset",0);limit=args.get("max_chars",6000)
+        if type(offset) is not int or offset<0 or type(limit) is not int or not 1<=limit<=12000:
+            raise ValueError("invalid pagination")
+        text=document["content"]
+        preview=text[offset:offset+limit]
+        while len(preview.encode("utf-8"))>18000:
+            preview=preview[:len(preview)//2]
+        return {
+            "document_id":document_id,
+            "title":document["title"],
+            "content":preview,
+            "digest":document["digest"],
+            "offset":offset,
+            "next_offset":offset+len(preview),
+            "has_more":offset+len(preview)<len(text),
+            "resolution":"L2",
+            "source_ref":f"doc:{document_id}@{document['digest']}",
+        }
 
     def _read_project(self,turn,args):
         _,path=self.project_path(turn,args.get("path"))
@@ -229,6 +277,8 @@ class LocalConversationExecution:
                 (turn["snapshot"].get("project") or {}).get("id"),
                 args.get("limit",5),
             )
+        elif capability=="knowledge.read":
+            result.update(self._read_knowledge(turn,args))
         elif capability=="project.list":
             result.update(self.list_project(turn,args.get("path",".")))
         elif capability=="project.read":

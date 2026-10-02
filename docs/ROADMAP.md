@@ -2,137 +2,164 @@
 
 这里的路线不再使用 P0/P10/... 作为架构名称。
 
-“先存在再优化”的意思是：即使未来有很多 Plan，也优先把长期边界、接口和最小行为铺出来，而不是把一个局部做到极深以后才考虑其他形态。
+“先存在再优化”仍成立，但 v0.11 开始明确第二阶段原则：**已经存在的合同优先进入真实请求链、故障链和评测链；不继续用更多抽象掩盖未闭环的能力。**
 
-## 当前基线：v0.10
+## 当前基线：v0.11
 
 已经可用：
 
-- Durable Run / Action / Attempt / Ticket / Receipt；
+- Durable Run / Action / Attempt / Ticket / Receipt / Artifact / Verification；
 - Conversation + Agent Loop；
 - Steer / Pause / Resume / Stop / Model / Thinking / Compact；
+- Control revision 跨 SQLite 连接原子分配；
 - Capability Registry；
 - project.read/search、diff.preview、git.status/diff；
-- ContextCompiler；
-- typed Memory；
+- ContextCompiler + 42 KB conversation projection；
+- typed Memory + provenance / revision / revoke；
+- Episodic Memory 默认 Project / Session scope，显式 global Memory 继续可用；
+- Goal / Trigger / Personal State 持久化入口；
+- Goal 在 Run/Turn admission 前校验，goal_id 进入 request identity；
+- knowledge.search + paginated knowledge.read L2 evidence；
 - Runtime Inspector；
-- Goal / Trigger / Personal State 的持久化入口。
+- Intent Pick 的保守 deterministic 快路：严格纯算术 0 次模型调用，其他输入回退 Agent Loop。
 
-新增信息决策合同：
+信息决策当前真实状态：
 
-- Intent Pick：exists；尚未接管主请求；
-- Information Resolution：exists；尚未 materialize L0/L1/L2；
-- Information Delta：exists；尚未自动计算；
-- Information Gain：exists；尚无校准 estimator。
+- Intent Pick：**connected（narrow）**；只证明了严格算术 deterministic route，不宣称通用意图识别已完成；
+- Information Resolution：合同存在，**Knowledge L2 expansion 已接通一条真实链**；通用 L0/L1 materialized views 尚未完成；
+- Information Delta：exists；尚未自动计算 conflict / supersede / revision delta；
+- Information Gain：exists；尚无固定 eval 校准 estimator，不把 similarity 当 Gain。
 
 已经存在但还需加深：
 
 - Workflow；
-- Routing；
+- Routing / Parallel；
 - Multi-Agent；
 - Managed Agent；
 - Personal Agent；
-- Skills；
-- MCP；
+- Skills / MCP；
 - Evaluation；
 - Evolution。
 
-## Next — Execution
+## Next — Retrieval correctness before retrieval sophistication
 
-把真正高风险执行能力作为一个统一问题推进，而不是零散开放命令：
+先修“候选根本没进入集合”的问题，再谈向量库：
 
-- admitted Test;
-- bounded Shell profiles;
-- Python executor;
-- process tree + timeout;
-- stdout/stderr Artifact;
-- Ticket / Receipt / Usage / UNKNOWN / Recovery;
-- human approval where required.
+- 去掉 knowledge search 在排序前的 10,000 chunk 静默截断；
+- 为 Knowledge / Memory 建可分页候选读取；
+- project.search 改为可剪枝遍历，明确 scanned / truncated / cursor；
+- 固定 source_ref + digest 下的 L0/L1/L2 projection；
+- 保留 Keyword baseline，之后再比较 vector / hybrid / rerank。
 
-不开放模型生成任意 shell 字符串直接执行。
+目标：先区分 **recall failure** 与 **ranking failure**，避免把向量检索当万能补丁。
+
+## Next — Evaluation before smarter routing
+
+建立固定真实任务集，作为 Intent / Resolution / Gain / Evolution 的共同地基：
+
+- ordinary QA；
+- local retrieval；
+- multi-step project read；
+- clarification；
+- artifact generation；
+- pause / resume / compact / restart；
+- bounded deterministic fast path；
+- exact verification cases。
+
+记录：
+
+- PASS / FAIL / INCONCLUSIVE / UNSUPPORTED；
+- completion / error taxonomy；
+- model/tool/token/latency cost；
+- selected/dropped context；
+- source expansion depth；
+- artifacts / receipts / recovery facts。
+
+没有固定 eval，不提升 Information Gain estimator，也不自动 promotion。
 
 ## Next — Coordination
 
-让 CoordinationStrategy 真正进入主运行链：
+在同一个 Core 上逐个接真实策略，而不是复制 Runtime：
 
-- Direct;
-- Agent Loop;
-- Workflow;
-- Router;
-- Parallel;
-- Multi-Agent child Run;
-- Managed Agent via AgentPort.
+- Direct；
+- Agent Loop；
+- deterministic Intent Pick；
+- Local Retrieval route；
+- Workflow；
+- Router；
+- Parallel；
+- Multi-Agent child Run；
+- Managed Agent via AgentPort。
 
-目标是同一个 Core 承载不同组织策略，而不是为每种 Agent 复制 Runtime。
+每个 Strategy 必须有：fallback、budget、Control safe point、Ticket/Receipt 边界与 regression test。
+
+## Next — Execution
+
+高风险执行能力作为统一 executor 问题推进：
+
+- admitted Test；
+- bounded Shell profiles；
+- Python executor；
+- process tree + timeout；
+- stdout/stderr Artifact；
+- Ticket / Receipt / Usage / UNKNOWN / Recovery；
+- human approval where required。
+
+**不开放模型生成任意 shell 字符串直接执行。**
 
 ## Next — Personal Agent
 
 在现有 Goal / Trigger / Personal State 基础上继续：
 
-- Goal → many Runs;
-- EventPort;
-- Timer / Schedule / Webhook adapters;
-- explicit preferences / permissions;
-- approval gates;
-- connected account references;
-- background Run scheduler;
-- proactive notification.
+- Goal → many Runs；
+- EventPort；
+- Timer / Schedule / Webhook adapters；
+- explicit preferences / permissions；
+- approval gates；
+- connected account references；
+- background Run scheduler；
+- proactive notification。
 
-Trigger 只创建工作机会，不绕过 Control / Ticket。
-
-## Next — Interop
-
-- Skill loader;
-- MCP tool/resource adapter;
-- A2A AgentPort;
-- managed-agent adapter;
-- optional AG-UI-style interaction adapter.
-
-协议只进入 Adapter；Core 不感知协议名。
+Trigger 只创建工作机会，不绕过 Control / Ticket。跨项目 Memory 默认不共享 episode；共享必须显式。
 
 ## Next — Intent / Information
 
-- Intent Pick 接入 Input/Trigger → Coordination；
-- 先走规则 / 本地检索 / Jev / 小模型等低成本路径，必要时再升级 LLM；
-- Knowledge/Memory 生成 L0/L1/L2 materialized views；
-- Resolution Controller 决定是否升级信息分辨率；
+- 把 Intent Pick 从 strict arithmetic 扩展到 local retrieval / ask-user 等**可证明的低成本路径**；
+- Resolution Controller 决定 L0 → L1 → L2 是否升级；
 - Information Delta 接入 Memory revision / conflict / supersede；
-- Information Gain estimator 必须通过固定 eval 校准；
+- Information Gain estimator 只从固定 eval 数据校准；
 - 支持 expected gain per token / latency / tool cost；
-- 不把相似度直接当 Information Gain。
+- 不把 similarity、confidence 或 relevance score 直接命名为 Information Gain。
 
-## Next — Context / Memory / Retrieval
+## Next — Interop
 
-- memory conflict and supersede;
-- Personal State 与 Memory 的冲突边界;
-- RetrievalPort;
-- optional vector / hybrid / rerank;
-- token-aware Context budget;
-- compaction summaries as derived artifacts.
+- Skill loader；
+- MCP tool/resource adapter；
+- A2A AgentPort；
+- managed-agent adapter；
+- optional AG-UI-style interaction adapter。
 
-Keyword baseline 继续保留用于可复现评测。
+协议只进入 Adapter；Core 不感知协议名。
 
-## Next — Verification / Evaluation / Evolution
+## Next — Verification / Evolution
 
-- conversation acceptance profiles;
-- fixed eval suites;
-- replay as derived data;
-- PASS / FAIL / INCONCLUSIVE / UNSUPPORTED;
-- quality/safety gate before cost optimization;
-- candidate policy registry;
-- explicit promote / rollback.
+- conversation acceptance profiles；
+- replay as derived data；
+- quality/safety gate before cost optimization；
+- candidate policy registry；
+- explicit promote / rollback。
 
 Evolution 永远不能直接修改正在运行的 Run。
 
 ## Long horizon
 
-只有出现真实部署需求后再深化：
+只有真实部署需求出现后再深化：
 
-- distributed workers;
-- leases;
-- remote execution;
-- multi-user auth;
-- organization policy;
-- fleet scheduling.
+- distributed workers；
+- leases；
+- remote execution；
+- multi-user auth；
+- organization policy；
+- fleet scheduling。
 
 边界可以先存在，复杂实现由真实需求触发。

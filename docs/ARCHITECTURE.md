@@ -1,4 +1,4 @@
-# Myth v0.10 architecture
+# Myth v0.11 architecture
 
 > Architecture Constitution: [ARCHITECTURE_CONSTITUTION.md](ARCHITECTURE_CONSTITUTION.md)  
 > Composable map: [PLATFORM_MAP.md](PLATFORM_MAP.md)
@@ -19,7 +19,7 @@ Intent Pick、Information Resolution、Information Gain、Decision、Planning、
 
 外部模型、协议和基础设施通过 Port/Adapter 接入。OpenAI、Ollama、MCP、A2A、Browser、Shell、SQLite 都不能成为 Core 依赖。
 
-在进入昂贵 Agent Loop 前，未来的 Intent Pick 可以选择 direct / local retrieval / deterministic / agent / ask-user 等路径；当前 v0.10 只完成纯合同与 Port，尚未接管主请求链。Information Resolution 的含义固定为同一信息的 L0 Abstract → L1 Overview → L2 Detail/Evidence 渐进展开，而不是“回答充分性”。Information Gain 表示已有信息上的边际任务价值，不能把相似度直接冒充 Gain；Information Delta 只记录 added/updated/removed/conflicted 的变化事实。
+在进入昂贵 Agent Loop 前，Intent Pick 可以选择 direct / local retrieval / deterministic / agent / ask-user 等路径。v0.11 首先只接通一条可证明的 deterministic 快路：严格受限的纯算术使用本地 calculator，0 次模型调用；任何不匹配输入回退 Agent Loop。因此 Intent Pick 只标记为 `connected`，不是通用意图分类器。Information Resolution 的含义固定为同一信息的 L0 Abstract → L1 Overview → L2 Detail/Evidence 渐进展开；Knowledge 已可沿固定 document/digest 分页展开 L2，但通用 L0/L1 materialized views 尚未完成。Information Gain 表示已有信息上的边际任务价值，不能把相似度直接冒充 Gain；Information Delta 只记录 added/updated/removed/conflicted 的变化事实。
 
 代码中的 `MythComponents` 只负责装配和架构快照，不是执行 Kernel。`MythKernel` 仅作为 v0.6-v0.8 兼容别名保留。真正的执行事实仍由 `MythRuntime` / repositories / execution adapters 管理。
 
@@ -65,7 +65,7 @@ Ports expose transaction-sized operations rather than cursors. The repository ow
 
 `SqliteWorkspaceRepository` owns projects, sessions, messages, document metadata/chunks, settings, turn/step state and tool operations. `Workspace` wires this repository to `LocalConversationExecution` and `ConversationAgent`. Web workers own independent runtime connections. The repository returns data rather than SQL cursors; the use case does not import providers or databases.
 
-Turn admission fixes model/settings, project scope/instructions, retrieval results and recent 30 messages. One transaction creates the shared Run/accounts, conversation Turn/user message and session title/event. Request identity covers session, message, model settings and attachments. Duplicate retries return the original turn; conflicting identities and a second active turn are rejected. A project change affects new turns, not an already-fixed scope.
+Turn admission fixes model/settings, project scope/instructions, retrieval results and recent 30 messages. Goal identity is validated before Run/Turn creation and `goal_id` participates in request identity, so an invalid Goal cannot leave an orphan active Turn and an idempotent retry cannot silently rebind to another long-lived Goal. One transaction creates the shared Run/accounts, conversation Turn/user message and session title/event. Request identity covers session, message, model settings, attachments and optional Goal. Duplicate retries return the original turn; conflicting identities and a second active turn are rejected. A project change affects new turns, not an already-fixed scope.
 
 `workspace_steps` persists STARTED → DECIDED → DONE. A conversation-specific request key binds the model invocation to its step using the existing model ledger. The local OS run lock serializes drivers. Invalid proposals consume a step; a saved proposal/receipt is reused after restart. Ask-user decisions and current question IDs commit together; only the matching answer resumes that turn.
 
@@ -133,7 +133,10 @@ Conversation projection uses native role messages and a 42,000-byte budget measu
 
 The immutable model request carries a local-only context_report with selected/dropped/folded source references, byte usage and control revision. ConversationContextCompiled commits alongside the model Ticket; preflight failures and receipt replay do not generate a new compilation event. The Inspector projects this evidence. Compact acknowledgment checks the actual request bound to the saved decision and conditionally clears only the matching control revision, so an in-flight or replayed response cannot consume a newer request. New Turn snapshots add turn_message_start and attached_document_ids without schema changes; legacy turn boundaries are inferred from messages and legacy knowledge remains required when attachment identity is unavailable. PAUSED turns retain session ownership and must finish or stop before archival or a new turn.
 
-Knowledge is local UTF-8 text, chunked at 1,800 characters with 200 overlap. English tokens and Chinese bigrams rank shared/current-project chunks; retrieval examines at most 10,000 chunks per query and returns up to eight. Source IDs, chunk indices and immutable digests accompany results. Import metadata/chunks commit together after object publication. Archived documents are excluded from new retrieval while historical previews remain readable. No embedding model, vector database, semantic summarizer or autonomous long-term memory is implemented. Retrieval is source data, never execution authority.
+Knowledge is local UTF-8 text, chunked at 1,800 characters with 200 overlap. English tokens and Chinese bigrams rank shared/current-project chunks; retrieval currently examines at most 10,000 chunks per query and returns up to eight, so candidate truncation remains a known correctness/scale limit. Source IDs, chunk indices and immutable digests accompany results. `knowledge.read` can expand an admitted shared/current-project document by offset under the same immutable digest and labels that projection L2; cross-project reads are rejected. Import metadata/chunks commit together after object publication. Archived documents are excluded from new retrieval while historical previews remain readable. No embedding model, vector database or reranker is implemented. Retrieval is source data, never execution authority.
+
+
+Episodic Memory produced by completed conversations is now scoped: project conversations write project-scoped episodes; independent conversations write session-scoped episodes. Explicit memories may remain global or choose a scope. Recall only exposes global + current project/session records, and the context projection carries source, scope, revision and `fact_level`. `fact_level=context` explicitly means remembered context is not automatically a verified external fact. This is scope/provenance hardening, not a full conflict/supersede history engine.
 
 ## Persistence
 
