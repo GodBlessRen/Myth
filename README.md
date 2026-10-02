@@ -15,7 +15,7 @@ Long-term Goal
   -> continue the same Goal
 ```
 
-当前版本：**v0.19**
+当前版本：**v0.20**
 
 ## 现在能做什么
 
@@ -27,6 +27,7 @@ Long-term Goal
 - project.read / search、diff.preview、git.status / diff；
 - Artifact 生成与固定对象下载；
 - durable Ticket / Receipt / UNKNOWN / Recovery；
+- durable Execution Cursor + Driver Lease / Heartbeat，页面或 Driver 中断后可从 checkpoint 恢复；
 - 固定 EvalSuite、Eval Ledger、Policy Candidate / Promote / Rollback；
 - 三栏工作台，第三栏常驻 Runtime Observatory。
 
@@ -41,17 +42,22 @@ Long-term Goal
 2. **Runtime observability**
    - 第三栏不是可删除的 Debug Panel。
    - 每个有意义的 Run 必须可观察：
-     Goal / Execution Flow / Trajectory / Tokens / Cache Hit / Context / Tools / Control / Budget。
+     Goal / Execution Flow / Recovery / Trajectory / Tokens / Cache Hit / Context / Tools / Control / Budget。
 
 3. **Authority boundary**
    - Goal / Memory / Prompt / Model output 都不能扩大权限。
    - 外部效果仍受 Capability / Ticket / Receipt / Verification 约束。
 
-4. **UNKNOWN is first-class**
+4. **Interruption is recoverable**
+   - Browser / Web request / Driver 生命周期都不能等于 Run 生命周期。
+   - 每个有意义的执行阶段必须有 durable cursor / checkpoint。
+   - 安全中断进入 INTERRUPTED / RESUME；外部结果不明确才进入 UNKNOWN / RECONCILE。
+
+5. **UNKNOWN is first-class**
    - 结果不明先 reconcile，不盲目 replay。
    - 已知失败与未知结果必须分开。
 
-5. **Completion needs evidence**
+6. **Completion needs evidence**
    - 模型说“完成”只是 proposal。
    - Artifact / test / receipt / external state 才能支撑完成声明。
 
