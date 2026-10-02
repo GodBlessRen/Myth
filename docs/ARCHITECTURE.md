@@ -80,7 +80,33 @@ Decision proposal
 
 模型自述“已执行”不能代替 Receipt。
 
-## 5. UNKNOWN / recovery
+## 5. Interruption / recovery
+
+Run 生命周期不绑定 Browser、HTTP request 或 Web Driver 生命周期。
+
+Conversation Run 额外保存：
+
+- durable Execution Cursor；
+- current phase；
+- last durable checkpoint；
+- recovery state；
+- Driver Lease / generation / heartbeat。
+
+Driver heartbeat 丢失时：
+
+```text
+no uncertain external effect
+  -> INTERRUPTED
+  -> RESUME from durable checkpoint
+
+Ticket / provider call outcome uncertain
+  -> UNKNOWN
+  -> RECONCILE before replay
+```
+
+Lease 只是“谁当前负责驱动”的事实，不是执行成功证明。新的 Driver 只能在租约失效后接管，并仍要经过 normal recovery gate。
+
+## 6. UNKNOWN semantics
 
 SQLite 事务只能保证数据库自身原子性，不能把 provider / filesystem 等外部效果宣称为 exactly-once。
 
@@ -96,7 +122,7 @@ UNKNOWN 先 reconcile，不盲目重发。
 
 Provider 明确返回 context truncation 属于已知失败，不冒充 UNKNOWN。
 
-## 6. Context
+## 7. Context
 
 Conversation context 是从 durable facts 生成的 bounded projection，不是执行记录本身。
 
@@ -122,7 +148,7 @@ Ollama projection budget 与 `num_ctx` 对齐；远端 provider 使用本地 pro
 
 完整 durable history 不因 Compact / folding 被删除。
 
-## 7. Retrieval / Memory
+## 8. Retrieval / Memory
 
 Knowledge：
 
@@ -142,7 +168,7 @@ Memory：
 
 Retrieval / Memory 都不能授予执行权限。
 
-## 8. Control
+## 9. Control
 
 产品术语：
 
@@ -154,7 +180,7 @@ Stop 表示“不再调度新的工作”。
 
 它不宣称已经发出的 provider/tool effect 被撤销。晚到结果仍按真实事实记录。
 
-## 9. Exact verification path
+## 10. Exact verification path
 
 Exact-mode 是独立 use case，不把普通聊天的 COMPLETED 冒充语义验收。
 
@@ -171,7 +197,7 @@ baseline
 
 模型的 completion request 只是 claim。
 
-## 10. Evaluation / Evolution
+## 11. Evaluation / Evolution
 
 Evaluation 使用固定 versioned suite：
 
@@ -199,7 +225,7 @@ partial-suite eval 只能研究，不能发布。
 
 Evolution 不自动 Promote，也不能修改正在运行或历史 Turn。
 
-## 11. Ports / Adapters
+## 12. Ports / Adapters
 
 依赖方向：
 
@@ -235,13 +261,14 @@ Core 不依赖：
 - Shell；
 - SQLite。
 
-## 12. Persistence
+## 13. Persistence
 
 主要 durable categories：
 
 - Run / Action / Attempt；
 - Ticket / Receipt / budgets / events；
 - Conversation Session / Turn / Step / messages；
+- Execution Cursor / Driver Lease / heartbeat；
 - projects / documents / chunks；
 - Memory；
 - Goal / Goal work state / Trigger / Personal State；
@@ -251,7 +278,7 @@ Core 不依赖：
 
 Schema 以 additive migration 为主；旧 active-run upgrade 需要单独验证，不能靠 `CREATE TABLE IF NOT EXISTS` 自动宣称兼容。
 
-## 13. Web boundary
+## 14. Web boundary
 
 本地 Web 是 loopback-only single-user workspace，不是多用户安全边界。
 
@@ -263,7 +290,7 @@ History / Context | Conversation / Task | Runtime Observatory
 
 第三栏必须保持 Goal / Flow / Trajectory / Tokens / Context / Tools / Control / Budget 可观察。
 
-## 14. 当前明确不做
+## 15. 当前明确不做
 
 当前没有：
 

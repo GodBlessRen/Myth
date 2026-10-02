@@ -27,7 +27,7 @@ Myth 的开发目标不是“堆更多 Agent 抽象”，而是把一个 **可�
 
 6. **Observability 不是 Debug 附件**
    - 第三栏 Runtime Observatory 必须保留：
-     Goal / Execution Flow / Trajectory / Tokens / Cache Hit / Context / Tools / Control / Budget。
+     Goal / Execution Flow / Recovery / Trajectory / Tokens / Cache Hit / Context / Tools / Control / Budget。
    - UI 重构不能静默删除这些事实。
 
 ## 2. 当前产品主线
@@ -116,7 +116,7 @@ node --check src/myth/webui/inspector.js
 
 如果改动涉及：
 
-- Runtime / recovery：补 crash / UNKNOWN 回归；
+- Runtime / recovery：补 crash / INTERRUPTED / UNKNOWN / resume / reconcile / lease expiry 回归；
 - Intent / routing：补 adversarial cases；
 - Context / provider：补窗口、截断、usage 回归；
 - Goal / Personal：补跨 session / restart；
@@ -140,6 +140,8 @@ node --check src/myth/webui/inspector.js
 - 把相似度/置信度直接叫 Information Gain；
 - 自动 Promote policy；
 - 对 UNKNOWN 做盲 replay；
+- 把 Browser / HTTP / Driver 生命周期当成 Run 生命周期；
+- 在没有 durable checkpoint 的情况下宣称“可以恢复”；
 - 开放任意 shell 字符串执行；
 - 在 README 堆版本流水；
 - 为了 UI 简洁移除 Runtime Observatory；

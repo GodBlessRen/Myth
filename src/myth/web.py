@@ -213,7 +213,7 @@ def _json_bytes(value: Any) -> bytes:
 
 def make_handler(service: AgentWebService):
     class Handler(BaseHTTPRequestHandler):
-        server_version = "MythWeb/0.19"
+        server_version = "MythWeb/0.20"
 
         def log_message(self, format: str, *args: object) -> None:
             # Never emit query strings: OAuth callbacks contain one-time codes and state.

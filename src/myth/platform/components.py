@@ -35,7 +35,7 @@ CORE: tuple[ArchitectureItem, ...] = (
         "Run",
         "core",
         Maturity.USABLE,
-        "Durable execution lifetime and recovery boundary.",
+        "Durable execution lifetime with execution cursor, checkpoint recovery and driver lease boundary.",
     ),
     ArchitectureItem(
         "action",
@@ -158,7 +158,7 @@ DOMAINS: tuple[ArchitectureItem, ...] = (
         "Observability / 观测",
         "domain",
         Maturity.USABLE,
-        "Persistent third-column observatory projects Goal, execution flow, trajectory, token/context windows, tool calls, control and budgets without owning truth.",
+        "Persistent third-column observatory projects Goal, execution flow, recovery cursor/driver lease, trajectory, token/context windows, tool calls, control and budgets without owning truth.",
         ("state",),
     ),
     ArchitectureItem(
@@ -245,7 +245,7 @@ class MythComponents:
             for spec in self.strategies.list()
         ]
         return {
-            "version": "0.19-native-oauth",
+            "version": "0.20-recovery-first-runtime",
             "shape": "core-domains-strategies-adapters",
             "principle": "fix facts and boundaries; keep intelligence organization pluggable",
             "core": [item.as_dict() for item in CORE],

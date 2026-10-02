@@ -1,6 +1,7 @@
 """工作区持久适配器：项目、会话、消息、知识与对话执行状态的原子所有者。"""
 from __future__ import annotations
 import json
+import time
 import uuid
 from ..conversation import chunks, rank_chunks, score_chunk
 from ..domain import canonical_json, digest_json, IdentityConflict, BudgetExceeded
@@ -37,13 +38,27 @@ CREATE TABLE IF NOT EXISTS workspace_operations(
  decision_id TEXT PRIMARY KEY,run_id TEXT REFERENCES workspace_turns(run_id),capability TEXT NOT NULL,
  state TEXT NOT NULL,intent_json TEXT NOT NULL,result_json TEXT,ticket_id TEXT UNIQUE,
  reserved_bytes INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS workspace_execution_cursors(
+ run_id TEXT PRIMARY KEY REFERENCES workspace_turns(run_id),
+ step INTEGER NOT NULL DEFAULT 0,
+ phase TEXT NOT NULL,
+ checkpoint_step INTEGER NOT NULL DEFAULT 0,
+ recovery_state TEXT NOT NULL DEFAULT 'NONE',
+ detail TEXT NOT NULL DEFAULT '',
+ updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS workspace_driver_leases(
+ run_id TEXT PRIMARY KEY REFERENCES workspace_turns(run_id),
+ owner_id TEXT NOT NULL,
+ generation INTEGER NOT NULL DEFAULT 1,
+ lease_until REAL NOT NULL,
+ heartbeat_at REAL NOT NULL);
 """
 
 
 def new_id(prefix):return f"{prefix}_{uuid.uuid4().hex}"
 
 
-ACTIVE_TURN_STATUSES = {"RUNNING", "UNKNOWN", "WAITING_USER", "PAUSED"}
+ACTIVE_TURN_STATUSES = {"RUNNING", "INTERRUPTED", "UNKNOWN", "WAITING_USER", "PAUSED"}
 
 
 class SqliteWorkspaceRepository:
@@ -349,6 +364,10 @@ class SqliteWorkspaceRepository:
             db.execute("INSERT INTO runs(run_id,request_id,entry_digest,goal,acceptance_version,state) VALUES(?,?,?,?,?,'RUNNING')",(rid,request_id,identity,text,"conversation-v1"))
             for meter,limit in {"model_calls":settings["max_steps"],"input_tokens":2_000_000,"output_tokens":settings["max_steps"]*settings["max_output_tokens"],"tool_calls":settings["max_steps"],"write_bytes":4_000_000}.items():db.execute("INSERT INTO accounts(run_id,meter,limit_units) VALUES(?,?,?)",(rid,meter,limit))
             db.execute("INSERT INTO workspace_turns(run_id,session_id,request_id,entry_digest,settings_json,snapshot_json,status,max_steps) VALUES(?,?,?,?,?,?,'RUNNING',?)",(rid,sid,request_id,identity,canonical_json(settings),canonical_json(snapshot),settings["max_steps"]))
+            db.execute(
+                "INSERT INTO workspace_execution_cursors(run_id,step,phase,checkpoint_step,recovery_state,detail) VALUES(?,0,'ADMITTED',0,'NONE','Turn admitted')",
+                (rid,),
+            )
             self._message(db,sid,rid,"user",text,{})
             db.execute("UPDATE workspace_sessions SET title=CASE WHEN title='新对话' THEN ? ELSE title END,updated_at=CURRENT_TIMESTAMP WHERE id=?",(text[:40],sid))
             self.store._event(db,rid,"ConversationTurnStarted",{
@@ -364,6 +383,130 @@ class SqliteWorkspaceRepository:
     def _message(self,db,sid,rid,role,text,metadata):
         db.execute("INSERT INTO workspace_messages(id,session_id,run_id,role,content,metadata_json) VALUES(?,?,?,?,?,?)",(new_id("msg"),sid,rid,role,text,canonical_json(metadata)))
 
+    def _checkpoint(self,db,rid,step,phase,*,checkpoint_step=None,recovery_state="NONE",detail=""):
+        checkpoint_step=step if checkpoint_step is None else checkpoint_step
+        db.execute(
+            "INSERT INTO workspace_execution_cursors(run_id,step,phase,checkpoint_step,recovery_state,detail,updated_at) "
+            "VALUES(?,?,?,?,?,?,CURRENT_TIMESTAMP) "
+            "ON CONFLICT(run_id) DO UPDATE SET step=excluded.step,phase=excluded.phase,"
+            "checkpoint_step=excluded.checkpoint_step,recovery_state=excluded.recovery_state,"
+            "detail=excluded.detail,updated_at=CURRENT_TIMESTAMP",
+            (rid,int(step),str(phase),int(checkpoint_step),str(recovery_state),str(detail)[:1000]),
+        )
+
+    def execution_cursor(self,rid):
+        self.turn(rid)
+        row=self.store.db.execute(
+            "SELECT * FROM workspace_execution_cursors WHERE run_id=?",(rid,)
+        ).fetchone()
+        if row:
+            return dict(row)
+        turn=self.turn(rid)
+        completed=max(
+            [int(item["step"]) for item in turn["activities"] if item["state"]=="DONE"] or [0]
+        )
+        phase=(
+            "COMPLETED" if turn["status"]=="COMPLETED"
+            else "WAITING_USER" if turn["status"]=="WAITING_USER"
+            else "LEGACY"
+        )
+        recovery="RECONCILE" if turn["status"]=="UNKNOWN" else "RESUME" if turn["status"]=="INTERRUPTED" else "NONE"
+        return {
+            "run_id":rid,"step":int(turn["current_step"]),"phase":phase,
+            "checkpoint_step":completed,"recovery_state":recovery,
+            "detail":"Legacy cursor inferred from durable steps.","updated_at":turn["created_at"],
+        }
+
+    def claim_driver(self,rid,owner_id,ttl_seconds=12):
+        if not isinstance(owner_id,str) or not owner_id:
+            raise ValueError("owner_id is required")
+        now=time.time();lease_until=now+float(ttl_seconds)
+        with self.store.tx() as db:
+            turn=self.turn(rid)
+            if turn["status"] not in {"RUNNING","INTERRUPTED","UNKNOWN"}:
+                return False
+            old=db.execute("SELECT * FROM workspace_driver_leases WHERE run_id=?",(rid,)).fetchone()
+            if old and old["owner_id"]!=owner_id and float(old["lease_until"])>now:
+                return False
+            generation=(int(old["generation"])+1) if old and old["owner_id"]!=owner_id else (int(old["generation"]) if old else 1)
+            db.execute(
+                "INSERT INTO workspace_driver_leases(run_id,owner_id,generation,lease_until,heartbeat_at) VALUES(?,?,?,?,?) "
+                "ON CONFLICT(run_id) DO UPDATE SET owner_id=excluded.owner_id,generation=excluded.generation,"
+                "lease_until=excluded.lease_until,heartbeat_at=excluded.heartbeat_at",
+                (rid,owner_id,generation,lease_until,now),
+            )
+            self.store._event(db,rid,"DriverLeaseAcquired",{"owner_id":owner_id,"generation":generation})
+        return True
+
+    def heartbeat_driver(self,rid,owner_id,ttl_seconds=12):
+        now=time.time()
+        with self.store.tx() as db:
+            changed=db.execute(
+                "UPDATE workspace_driver_leases SET heartbeat_at=?,lease_until=? WHERE run_id=? AND owner_id=?",
+                (now,now+float(ttl_seconds),rid,owner_id),
+            )
+            return bool(changed.rowcount)
+
+    def release_driver(self,rid,owner_id):
+        with self.store.tx() as db:
+            row=db.execute("SELECT owner_id,generation FROM workspace_driver_leases WHERE run_id=?",(rid,)).fetchone()
+            if not row or row["owner_id"]!=owner_id:
+                return False
+            db.execute("DELETE FROM workspace_driver_leases WHERE run_id=?",(rid,))
+            self.store._event(db,rid,"DriverLeaseReleased",{"owner_id":owner_id,"generation":row["generation"]})
+        return True
+
+    def driver_lease(self,rid):
+        row=self.store.db.execute("SELECT * FROM workspace_driver_leases WHERE run_id=?",(rid,)).fetchone()
+        if not row:
+            return None
+        value=dict(row)
+        value["expired"]=float(value["lease_until"])<=time.time()
+        return value
+
+    def _has_uncertain_effect(self,rid):
+        models=self.decisions.status(rid)["model_invocations"]
+        if any(item["state"] in {"TICKETED","UNKNOWN"} for item in models):
+            return True
+        return any(item["state"] in {"TICKETED","UNKNOWN"} for item in self.pending_operations(rid))
+
+    def interrupt(self,rid,reason):
+        with self.store.tx() as db:
+            turn=self.turn(rid)
+            if turn["status"] not in {"RUNNING","INTERRUPTED","UNKNOWN"}:
+                return turn
+            uncertain=self._has_uncertain_effect(rid)
+            status="UNKNOWN" if uncertain else "INTERRUPTED"
+            recovery="RECONCILE" if uncertain else "RESUME"
+            if uncertain:
+                for op in self.pending_operations(rid):
+                    if op["state"]!="TICKETED":
+                        continue
+                    for meter,cost in {"tool_calls":1,"write_bytes":op["reserved_bytes"]}.items():
+                        db.execute(
+                            "UPDATE accounts SET reserved=reserved-?,unknown_held=unknown_held+? WHERE run_id=? AND meter=?",
+                            (cost,cost,rid,meter),
+                        )
+                    db.execute("UPDATE workspace_operations SET state='UNKNOWN' WHERE decision_id=?",(op["decision_id"],))
+            db.execute("UPDATE workspace_turns SET status=?,error=? WHERE run_id=?",(status,str(reason)[:2000],rid))
+            db.execute("UPDATE runs SET state='RECOVERING',control_revision=control_revision+1 WHERE run_id=?",(rid,))
+            self._checkpoint(
+                db,rid,turn["current_step"],"INTERRUPTED" if not uncertain else "OUTCOME_UNKNOWN",
+                checkpoint_step=max([int(item["step"]) for item in turn["activities"] if item["state"]=="DONE"] or [0]),
+                recovery_state=recovery,detail=reason,
+            )
+            self.store._event(db,rid,"ConversationInterrupted",{"status":status,"reason":str(reason)[:500],"recovery_state":recovery})
+        return self.turn(rid)
+
+    def sweep_expired_driver(self,rid):
+        turn=self.turn(rid)
+        if turn["status"]!="RUNNING":
+            return turn
+        lease=self.driver_lease(rid)
+        if lease is None or lease["expired"]:
+            return self.interrupt(rid,"Driver heartbeat expired; durable checkpoint preserved.")
+        return turn
+
     def turn(self,rid):
         row=self.store.db.execute("SELECT * FROM workspace_turns WHERE run_id=?",(rid,)).fetchone()
         if not row:raise KeyError(rid)
@@ -375,6 +518,8 @@ class SqliteWorkspaceRepository:
             result["snapshot"]["turn_message_start"]=max(0,len(result["snapshot"]["messages"])-count)
         result["activities"]=[{**dict(r),"decision":json.loads(r["decision_json"]) if r["decision_json"] else None,"result":json.loads(r["result_json"]) if r["result_json"] else None} for r in self.store.db.execute("SELECT * FROM workspace_steps WHERE run_id=? ORDER BY step",(rid,))]
         result["budgets"]=self.store.get_accounts(rid)
+        cursor=self.store.db.execute("SELECT * FROM workspace_execution_cursors WHERE run_id=?",(rid,)).fetchone()
+        result["execution_cursor"]=dict(cursor) if cursor else None
         return result
 
     def begin_step(self,rid):
@@ -387,6 +532,8 @@ class SqliteWorkspaceRepository:
             if number>turn["max_steps"]:return None
             db.execute("INSERT INTO workspace_steps(run_id,step,state) VALUES(?,?,'STARTED')",(rid,number))
             db.execute("UPDATE workspace_turns SET current_step=? WHERE run_id=?",(number,rid))
+            self._checkpoint(db,rid,number,"STEP_STARTED",checkpoint_step=number-1,detail=f"Step {number} started")
+            self.store._event(db,rid,"ExecutionCheckpoint",{"step":number,"phase":"STEP_STARTED","checkpoint_step":number-1})
             return {"step":number}
 
     def record_route_fallback(self,rid,step,route,reason):
@@ -406,12 +553,17 @@ class SqliteWorkspaceRepository:
             )
 
     def bind(self,rid,step,decision_id,decision):
-        with self.store.tx() as db:db.execute("UPDATE workspace_steps SET state='DECIDED',decision_id=?,decision_json=? WHERE run_id=? AND step=?",(decision_id,canonical_json(decision.serializable()),rid,step))
+        with self.store.tx() as db:
+            db.execute("UPDATE workspace_steps SET state='DECIDED',decision_id=?,decision_json=? WHERE run_id=? AND step=?",(decision_id,canonical_json(decision.serializable()),rid,step))
+            self._checkpoint(db,rid,step,"DECISION_BOUND",checkpoint_step=max(0,step-1),detail=decision.decision_type)
+            self.store._event(db,rid,"ExecutionCheckpoint",{"step":step,"phase":"DECISION_BOUND","decision_id":decision_id})
 
     def finish_tool(self,rid,step,result):
         with self.store.tx() as db:
             db.execute("UPDATE workspace_steps SET state='DONE',result_json=? WHERE run_id=? AND step=?",(canonical_json(result),rid,step))
+            self._checkpoint(db,rid,step,"TOOL_RECORDED",checkpoint_step=step,detail=result.get("capability_id") or "tool")
             self.store._event(db,rid,"ConversationToolRecorded",{"step":step,"capability":result.get("capability_id")})
+            self.store._event(db,rid,"ExecutionCheckpoint",{"step":step,"phase":"TOOL_RECORDED","checkpoint_step":step})
 
     def reject(self,rid,step,reason):self.finish_tool(rid,step,{"error":reason})
 
@@ -428,7 +580,13 @@ class SqliteWorkspaceRepository:
             db.execute("UPDATE workspace_turns SET status=?,question_id=?,error=NULL WHERE run_id=?",(status,question_id,rid))
             db.execute("UPDATE runs SET state=? WHERE run_id=?",("WAITING" if question_id else "SUCCEEDED",rid))
             db.execute("UPDATE workspace_sessions SET updated_at=CURRENT_TIMESTAMP WHERE id=?",(turn["session_id"],))
+            self._checkpoint(
+                db,rid,step,"WAITING_USER" if question_id else "COMPLETED",
+                checkpoint_step=step,recovery_state="WAIT_USER" if question_id else "NONE",
+                detail="Waiting for user input" if question_id else "Conversation answer persisted",
+            )
             self.store._event(db,rid,"ConversationAnswered",{"semantic_verification":"not_claimed","question_id":question_id})
+            self.store._event(db,rid,"ExecutionCheckpoint",{"step":step,"phase":"WAITING_USER" if question_id else "COMPLETED","checkpoint_step":step})
 
     def answer(self,rid,text,question_id):
         if not isinstance(text,str) or not text.strip() or len(text.encode("utf-8"))>16000:raise ValueError("invalid answer")
@@ -439,6 +597,7 @@ class SqliteWorkspaceRepository:
             snapshot=turn["snapshot"];snapshot["messages"].append({"role":"user","content":text})
             db.execute("UPDATE workspace_turns SET status='RUNNING',question_id=NULL,snapshot_json=? WHERE run_id=?",(canonical_json(snapshot),rid))
             db.execute("UPDATE runs SET state='RUNNING' WHERE run_id=?",(rid,))
+            self._checkpoint(db,rid,turn["current_step"],"USER_ANSWERED",checkpoint_step=turn["current_step"],detail="User answer persisted")
 
     def block(self,rid,status,reason):
         with self.store.tx() as db:
@@ -451,13 +610,26 @@ class SqliteWorkspaceRepository:
                     db.execute("UPDATE workspace_operations SET state='UNKNOWN' WHERE decision_id=?",(op["decision_id"],))
             db.execute("UPDATE workspace_turns SET status=?,error=? WHERE run_id=?",(status,reason,rid))
             db.execute("UPDATE runs SET state=?,control_revision=control_revision+1 WHERE run_id=?",("RECOVERING" if status=="UNKNOWN" else status,rid))
+            recovery="RECONCILE" if status=="UNKNOWN" else "NONE"
+            self._checkpoint(
+                db,rid,self.turn(rid)["current_step"],status,
+                checkpoint_step=max([int(item["step"]) for item in self.turn(rid)["activities"] if item["state"]=="DONE"] or [0]),
+                recovery_state=recovery,detail=reason,
+            )
             self.store._event(db,rid,"ConversationBlocked",{"status":status,"reason":reason})
 
     def reopen(self,rid):
         with self.store.tx() as db:
-            if self.turn(rid)["status"] not in {"UNKNOWN","RUNNING"}:return
+            turn=self.turn(rid)
+            if turn["status"] not in {"UNKNOWN","INTERRUPTED","RUNNING"}:return
             db.execute("UPDATE workspace_turns SET status='RUNNING',error=NULL WHERE run_id=?",(rid,))
             db.execute("UPDATE runs SET state='RUNNING' WHERE run_id=?",(rid,))
+            self._checkpoint(
+                db,rid,turn["current_step"],"RESUMED",
+                checkpoint_step=max([int(item["step"]) for item in turn["activities"] if item["state"]=="DONE"] or [0]),
+                recovery_state="NONE",detail="Run resumed from durable checkpoint",
+            )
+            self.store._event(db,rid,"ConversationResumed",{"step":turn["current_step"]})
 
     def operation(self,decision_id):
         row=self.store.db.execute("SELECT * FROM workspace_operations WHERE decision_id=?",(decision_id,)).fetchone()
@@ -475,6 +647,7 @@ class SqliteWorkspaceRepository:
                 changed=db.execute("UPDATE accounts SET reserved=reserved+? WHERE run_id=? AND meter=? AND limit_units-settled-reserved-unknown_held>=?",(cost,rid,meter,cost))
                 if not changed.rowcount:raise BudgetExceeded(f"insufficient {meter}")
             db.execute("INSERT INTO workspace_operations(decision_id,run_id,capability,state,intent_json,ticket_id,reserved_bytes) VALUES(?,?,?,'TICKETED',?,?,?)",(decision_id,rid,capability,canonical_json(intent),new_id("ctkt"),amount))
+            self._checkpoint(db,rid,self.turn(rid)["current_step"],"TOOL_TICKETED",checkpoint_step=max(0,self.turn(rid)["current_step"]-1),detail=capability)
             self.store._event(db,rid,"ConversationToolTicket",{"decision_id":decision_id,"capability":capability})
         return self.operation(decision_id)
 
@@ -486,6 +659,8 @@ class SqliteWorkspaceRepository:
             liability="unknown_held" if op["state"]=="UNKNOWN" else "reserved"
             for meter,cost in {"tool_calls":1,"write_bytes":op["reserved_bytes"]}.items():db.execute(f"UPDATE accounts SET {liability}={liability}-?,settled=settled+? WHERE run_id=? AND meter=?",(cost,cost,op["run_id"],meter))
             db.execute("UPDATE workspace_operations SET state='RESOLVED',result_json=? WHERE decision_id=?",(canonical_json(result),decision_id))
+            turn=self.turn(op["run_id"])
+            self._checkpoint(db,op["run_id"],turn["current_step"],"TOOL_SETTLED",checkpoint_step=turn["current_step"],detail=op["capability"])
         return result
 
     def pending_operations(self,rid):
