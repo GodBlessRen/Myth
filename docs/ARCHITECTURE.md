@@ -1,4 +1,10 @@
-# Myth v0.5 architecture
+# Myth v0.6 architecture
+
+## Platform skeleton
+
+v0.6 在既有持久执行与工作区之上增加 `MythKernel` 作为平台装配地图。它不取代 Runtime，也不直接执行 I/O；它固定 Control / Capabilities / Context / Memory / Retrieval / Workflow / SubAgent / Skills / MCP / Observability / Evaluation / Evolution 的长期边界，并把每层标记为 `usable / wired / planned`。
+
+`planned` 只是结构存在，不会进入 executable capability 列表。所有真实外部效果仍必须走既有准入、Ticket、Receipt、Usage、Recovery 与 Verification。平台层级详见 [PLATFORM_MAP.md](PLATFORM_MAP.md)。
 
 ## Dependency direction
 
