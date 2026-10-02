@@ -19,6 +19,8 @@ from typing import Any
 class RunState(StrEnum):
     READY = "READY"
     RUNNING = "RUNNING"
+    PAUSED = "PAUSED"
+    WAITING = "WAITING"
     VERIFYING = "VERIFYING"
     RECOVERING = "RECOVERING"
     SUCCEEDED = "SUCCEEDED"

@@ -46,3 +46,14 @@ In exact mode, request_completion is accepted only after the independent verifie
 - There is no CORS, credential, unrestricted file or shell endpoint. Project file listings use the explicitly configured root.
 - The service is unauthenticated and trusts the local OS user. A hostile local process can still invoke it; loopback and Origin checks are not a multi-user authentication system.
 - Do not expose the local server through a tunnel/reverse proxy without adding authentication, CSRF protection and a stronger multi-user authorization model first.
+
+
+## v0.8 Control Tower boundary
+
+- Steer, pause, resume, abort, model switch, thinking switch and compact are durable control commands. They affect future safe points; they do not erase an already issued Ticket or late result.
+- Abort means "stop scheduling new work". It does not claim an already-started external call was physically stopped.
+- Model switching is limited to the current Turn's existing provider. It does not grant a new provider credential.
+- Memory records are local context data with provenance/revision. Memory text never grants tool authority or expands project scope.
+- `project.search` and `diff.preview` remain inside the admitted project root and reject traversal/sensitive paths.
+- `git.status` and `git.diff` use fixed argv with `shell=False`; Myth does not expose arbitrary Git arguments or shell execution.
+- `shell.exec`, `python.run`, `test.run`, browser control and remote MCP execution remain non-executable until their own admission/recovery contracts exist.

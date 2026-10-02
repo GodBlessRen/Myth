@@ -58,13 +58,13 @@ def default_capabilities() -> CapabilityRegistry:
         ("math.calculate", "compute", "Evaluate bounded arithmetic only.", "compute"),
         ("file.read", "file", "Read fixed managed bytes in exact verification mode.", "read"),
         ("file.patch_exact", "file", "Exact replacement in the durable managed workspace.", "write"),
+        ("project.search", "file", "Search admitted project text without widening file scope.", "read"),
+        ("diff.preview", "file", "Render a bounded unified diff without writing the source file.", "read"),
+        ("git.status", "git", "Inspect repository status through fixed read-only argv.", "read"),
+        ("git.diff", "git", "Inspect repository diff through fixed read-only argv.", "read"),
     ]
     planned = [
-        ("project.search", "file", "Search project text by pattern.", "read"),
-        ("diff.preview", "file", "Render candidate changes before apply.", "read"),
         ("test.run", "execution", "Run an admitted test command in a controlled executor.", "execute"),
-        ("git.status", "git", "Inspect repository status.", "read"),
-        ("git.diff", "git", "Inspect repository diff.", "read"),
         ("shell.exec", "execution", "Execute an admitted command profile, never arbitrary by default.", "execute"),
         ("python.run", "execution", "Execute bounded Python in a controlled environment.", "execute"),
         ("web.fetch", "web", "Fetch an admitted URL with provenance.", "network"),

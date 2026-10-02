@@ -145,3 +145,19 @@ dialog{width:min(520px,calc(100vw - 32px));border:1px solid var(--line);border-r
 @media(max-width:1180px){:root{--inspector:270px}.platform-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.project-cards{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:980px){.shell{grid-template-columns:var(--sidebar) minmax(0,1fr)}.inspector{display:none}.chat-scroll,.composer-area{padding-left:max(24px,5vw);padding-right:max(24px,5vw)}}
 @media(max-width:760px){body{overflow:hidden}.shell{display:block}.sidebar{position:fixed;inset:0 auto 0 0;width:min(84vw,280px);z-index:20;transform:translateX(-102%);transition:transform .18s}.sidebar.open{transform:none}.sidebar-shade{display:block;position:fixed;inset:0;background:rgba(35,29,23,.22);z-index:19}.main{height:100dvh}.mobile-menu{display:grid}.topbar{padding:0 12px}.workspace-crumb>span:first-child,.workspace-crumb>span:nth-child(2){display:none}.model-pill{max-width:180px}.chat-scroll{padding:0 18px}.welcome{padding:8vh 0 110px}.welcome h1{font-size:39px}.suggestions{grid-template-columns:1fr;border-bottom:0}.suggestions button,.suggestions button+button{padding:13px 0;border-right:0;border-bottom:1px solid var(--line);min-height:auto}.composer-area{padding:8px 14px 12px}.send-area>span{display:none}.content-page{padding:28px 18px 60px}.page-heading{align-items:flex-start}.page-heading h1{font-size:28px}.project-cards,.platform-grid,.capability-matrix,.knowledge-stats,.project-layout,.settings-layout{grid-template-columns:1fr}.list-toolbar{align-items:stretch;flex-direction:column}.search-field{min-width:0}.session-card{grid-template-columns:30px minmax(0,1fr) auto}.session-meta{display:none}.field-with-action{grid-template-columns:1fr}.two-fields{grid-template-columns:1fr}.message.user .message-main{max-width:88%}}
+
+
+/* v0.8 Control Tower */
+.turn-controls{display:flex;align-items:center;gap:4px;padding-right:2px}
+.control-button{min-height:30px;padding:0 8px;border-radius:7px;color:#746b5f;font-size:9px;border:1px solid transparent}
+.control-button:hover{background:#eee4d7;color:var(--ink)}
+.control-button:disabled{opacity:.35}
+.danger-control:hover{background:var(--danger-soft);color:var(--danger)}
+#controlDialog form{display:grid;gap:7px}
+#controlDialog p{margin:0 0 4px;font-size:10px;line-height:1.6}
+#controlDialog .secondary{justify-self:start}
+#controlRevision{margin-right:auto;font:9px var(--mono)}
+.inspector-pulse.running{animation:control-pulse 1.7s ease-in-out infinite}
+@keyframes control-pulse{0%,100%{box-shadow:0 0 0 0 rgba(199,119,50,0)}50%{box-shadow:0 0 0 5px rgba(199,119,50,.09)}}
+@media(max-width:1180px){.turn-controls .control-button:nth-child(3),.turn-controls .control-button:nth-child(4){display:none}}
+@media(max-width:760px){.turn-controls{display:none}}

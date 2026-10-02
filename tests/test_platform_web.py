@@ -20,7 +20,7 @@ class PlatformWebTests(unittest.TestCase):
             self.assertEqual(web["executable_capabilities"],direct["executable_capabilities"])
             states={layer["id"]:layer["state"] for layer in web["layers"]}
             self.assertEqual(states["runtime"],"usable")
-            self.assertEqual(states["control"],"wired")
+            self.assertEqual(states["control"],"usable")
             self.assertEqual(states["distributed"],"planned")
             self.assertNotIn("shell.exec",web["executable_capabilities"])
 

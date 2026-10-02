@@ -27,7 +27,7 @@ class ControlSnapshot:
     paused: bool = False
     aborted: bool = False
     model: str | None = None
-    thinking: str | None = None
+    thinking: str | bool | None = None
     steering_note: str | None = None
     compact_requested: bool = False
 
@@ -57,8 +57,22 @@ class ControlPlane:
                 raise ValueError("model must be non-empty")
             update["model"] = value
         elif command is ControlCommand.SWITCH_THINKING:
-            value = None if payload is None else str(payload).strip()
-            update["thinking"] = value or None
+            if payload is None:
+                update["thinking"] = None
+            elif isinstance(payload, bool):
+                update["thinking"] = payload
+            else:
+                value = str(payload).strip().lower()
+                if value in {"true", "on"}:
+                    update["thinking"] = True
+                elif value in {"false", "off"}:
+                    update["thinking"] = False
+                elif value in {"low", "medium", "high"}:
+                    update["thinking"] = value
+                elif not value or value == "default":
+                    update["thinking"] = None
+                else:
+                    raise ValueError("thinking must be default/on/off/low/medium/high")
         elif command is ControlCommand.STEER:
             value = str(payload or "").strip()
             if not value:
