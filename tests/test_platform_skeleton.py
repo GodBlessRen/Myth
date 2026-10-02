@@ -10,6 +10,7 @@ from myth.platform.evolution import PolicyCandidate, PromotionDecision, decide_p
 from myth.platform.kernel import MythKernel
 from myth.platform.memory import MemoryCatalog, MemoryKind, MemoryRecord
 from myth.platform.workflow import WorkflowSpec, WorkflowStep, ready_steps, validate_workflow
+from myth.conversation import TOOL_CATALOG
 
 
 class PlatformSkeletonTests(unittest.TestCase):
@@ -25,6 +26,11 @@ class PlatformSkeletonTests(unittest.TestCase):
         self.assertIn("project.read", snapshot["executable_capabilities"])
         self.assertNotIn("shell.exec", snapshot["executable_capabilities"])
         self.assertEqual(kernel.capabilities.get("shell.exec").state, CapabilityState.PLANNED)
+
+    def test_existing_conversation_tools_are_registered_executable_capabilities(self):
+        kernel = MythKernel.default()
+        executable = set(kernel.capabilities.executable_ids())
+        self.assertTrue(set(TOOL_CATALOG) <= executable)
 
     def test_control_plane_has_explicit_transitions(self):
         kernel = MythKernel.default()
