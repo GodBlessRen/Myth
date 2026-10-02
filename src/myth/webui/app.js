@@ -36,15 +36,15 @@ function renderChat(session){
   $("pageTitle").textContent=session?.title||"对话";
   fillProjects($("chatProject"),"独立对话",session?.project_id||$("chatProject").value);
   $("chatProject").disabled=!!session;
-  const boundGoal=session?.turns?.at(-1)?.snapshot?.goal?.goal_id||$("chatGoal")?.value||"";
+  const turn=session?.turns.at(-1);
+  const status=turn?.status;
+  const active=turn&&["RUNNING","UNKNOWN","WAITING_USER","PAUSED"].includes(status);
+  const boundGoal=turn?.snapshot?.goal?.goal_id||$("chatGoal")?.value||"";
   fillGoals($("chatGoal"),boundGoal);
   if($("chatGoal"))$("chatGoal").disabled=!!active;
   renderAttachments();
   if(session)renderThread(session);
 
-  const turn=session?.turns.at(-1);
-  const status=turn?.status;
-  const active=turn&&["RUNNING","UNKNOWN","WAITING_USER","PAUSED"].includes(status);
   const control=turn?.control||{};
   show("turnControls",!!turn&&["RUNNING","UNKNOWN","WAITING_USER","PAUSED"].includes(status));
   show("pauseTurn",!!turn&&!control.paused&&!(control.stopped??control.aborted)&&status==="RUNNING");
