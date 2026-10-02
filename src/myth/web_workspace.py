@@ -83,6 +83,8 @@ class ConversationWebService:
                 turn["control"]=workspace.control.view(turn["run_id"])
                 turn["operations"]=workspace.repository.operations(turn["run_id"])
                 turn["events"]=workspace.repository.events(turn["run_id"])
+                goal_id=(turn.get("snapshot") or {}).get("goal",{}).get("goal_id")
+                turn["goal_current"]=workspace.personal.goal_view(goal_id) if goal_id else None
             value["artifacts"]=workspace.repository.artifacts(sid)
             return value
 
