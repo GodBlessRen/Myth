@@ -2,7 +2,7 @@
 from __future__ import annotations
 import json
 import uuid
-from ..conversation import chunks, rank_chunks
+from ..conversation import chunks, rank_chunks, score_chunk
 from ..domain import canonical_json, digest_json, IdentityConflict, BudgetExceeded
 from ..decision_runtime import DecisionRuntime
 
@@ -155,11 +155,76 @@ class SqliteWorkspaceRepository:
         with self.store.tx() as db:db.execute("UPDATE workspace_documents SET archived=1 WHERE id=?",(did,))
         return {"id":did}
 
-    def search(self,query,project_id=None,limit=5):
+    def knowledge_candidates(self,project_id=None,*,cursor=0,page_size=512):
+        """Read the next stable page of visible lexical candidates.
+
+        Cursor is the SQLite chunk rowid, not an opaque relevance score. This
+        makes candidate coverage observable and prevents a ranking-time LIMIT
+        from silently deleting later documents from the recall set.
+        """
+        if type(cursor) is not int or cursor<0:
+            raise ValueError("cursor must be a non-negative integer")
+        if type(page_size) is not int or not 1<=page_size<=2000:
+            raise ValueError("page_size must be 1-2000")
+        rows=self.store.db.execute(
+            "SELECT c.rowid AS candidate_cursor,c.document_id,c.chunk_index,c.content,"
+            "d.title,d.digest FROM workspace_chunks c "
+            "JOIN workspace_documents d ON d.id=c.document_id "
+            "WHERE c.rowid>? AND d.archived=0 AND (d.project_id IS NULL OR d.project_id=?) "
+            "ORDER BY c.rowid LIMIT ?",
+            (cursor,project_id,page_size+1),
+        ).fetchall()
+        values=[dict(row) for row in rows[:page_size]]
+        has_more=len(rows)>page_size
+        next_cursor=values[-1]["candidate_cursor"] if values else cursor
+        return {
+            "candidates":values,
+            "cursor":cursor,
+            "next_cursor":next_cursor,
+            "has_more":has_more,
+        }
+
+    def search_report(self,query,project_id=None,limit=5):
         if not isinstance(query,str) or len(query)>1000:raise ValueError("query up to 1000 characters")
         if type(limit) is not int or not 1<=limit<=8:raise ValueError("limit must be 1-8")
-        rows=self.store.db.execute("SELECT c.*,d.title,d.digest FROM workspace_chunks c JOIN workspace_documents d ON d.id=c.document_id WHERE d.archived=0 AND (d.project_id IS NULL OR d.project_id=?) LIMIT 10000",(project_id,)).fetchall()
-        return rank_chunks(query,[dict(r) for r in rows],limit)
+        cursor=0;scanned=0;matched_count=0;pages=0;top=[]
+        while True:
+            page=self.knowledge_candidates(project_id,cursor=cursor,page_size=512)
+            pages+=1
+            for item in page["candidates"]:
+                scanned+=1
+                scored=score_chunk(query,item)
+                if scored is None:continue
+                matched_count+=1
+                top.append(scored)
+                if len(top)>limit*4:
+                    top=sorted(
+                        top,
+                        key=lambda value:(-value["score"],value["document_id"],value["chunk_index"]),
+                    )[:limit]
+            cursor=page["next_cursor"]
+            if not page["has_more"]:break
+        sources=sorted(
+            top,
+            key=lambda value:(-value["score"],value["document_id"],value["chunk_index"]),
+        )[:limit]
+        for source in sources:
+            source.pop("candidate_cursor",None)
+        return {
+            "sources":sources,
+            "retrieval":{
+                "backend":"local-lexical",
+                "candidate_policy":"all-visible-chunks-v2",
+                "scanned":scanned,
+                "matched":matched_count,
+                "pages":pages,
+                "exhausted":True,
+                "truncated_before_ranking":False,
+            },
+        }
+
+    def search(self,query,project_id=None,limit=5):
+        return self.search_report(query,project_id,limit)["sources"]
 
     def create_turn(self,sid,text,request_id,document_ids=None,memory_records=None,goal_id=None):
         if not isinstance(text,str) or not text.strip() or len(text.encode("utf-8"))>16000:raise ValueError("message must contain 1-16000 UTF-8 bytes")
