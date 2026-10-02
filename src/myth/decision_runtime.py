@@ -17,6 +17,7 @@ from .artifacts import atomic_write
 from .acceptance import ContextBudgetError
 from .domain import AttemptState, BudgetExceeded, InvalidTransition, RecoveryRequired, canonical_json, digest_json
 from .models import (
+    ContextTruncated,
     DecisionValidationError,
     ModelMessage,
     ModelRequest,
@@ -289,6 +290,80 @@ class DecisionRuntime:
             atomic_write(path, encoded)
         return receipt
 
+    def _publish_failure_receipt(
+        self,
+        *,
+        attempt_id: str,
+        request_digest: str,
+        response_ref: str,
+        reason: str,
+        usage: dict[str, int],
+    ) -> dict[str, Any]:
+        receipt = {
+            "model_attempt_id": attempt_id,
+            "request_digest": request_digest,
+            "response_ref": response_ref,
+            "response_id": None,
+            "outcome": "FAILED",
+            "reason": reason,
+            "usage": usage,
+        }
+        encoded = json.dumps(receipt, ensure_ascii=False, sort_keys=True).encode("utf-8")
+        path = self._receipt_path(attempt_id)
+        if path.exists() and path.read_bytes() != encoded:
+            raise IOError("conflicting model failure receipt for the same Attempt")
+        if not path.exists():
+            atomic_write(path, encoded)
+        return receipt
+
+    def _settle_failed(self, attempt_id: str, receipt: dict[str, Any]) -> None:
+        with self.store.tx() as db:
+            row = db.execute("SELECT * FROM model_invocations WHERE model_attempt_id=?", (attempt_id,)).fetchone()
+            if row is None:
+                raise KeyError(attempt_id)
+            if row["request_digest"] != receipt["request_digest"]:
+                raise RuntimeError("model failure receipt does not match the frozen request")
+            usage = receipt.get("usage") if isinstance(receipt.get("usage"), dict) else {}
+            for reservation in db.execute(
+                "SELECT * FROM model_reservations WHERE model_attempt_id=?", (attempt_id,)
+            ).fetchall():
+                meter = str(reservation["meter"])
+                reserved = int(reservation["reserved_amount"])
+                if meter in usage:
+                    actual = int(usage[meter])
+                    if actual < 0:
+                        raise ValueError("model usage cannot be negative")
+                    db.execute(
+                        "UPDATE accounts SET reserved=reserved-?,settled=settled+? WHERE run_id=? AND meter=?",
+                        (reserved, actual, reservation["run_id"], meter),
+                    )
+                else:
+                    db.execute(
+                        "UPDATE accounts SET reserved=reserved-?,unknown_held=unknown_held+? WHERE run_id=? AND meter=?",
+                        (reserved, reserved, reservation["run_id"], meter),
+                    )
+                db.execute(
+                    "UPDATE model_reservations SET closed=1 WHERE model_attempt_id=? AND meter=?",
+                    (attempt_id, meter),
+                )
+            db.execute(
+                "UPDATE model_invocations SET state=?,outcome='FAILED',response_ref=?,usage_json=?,last_error=? "
+                "WHERE model_attempt_id=?",
+                (
+                    AttemptState.RESOLVED.value,
+                    receipt["response_ref"],
+                    canonical_json(usage),
+                    receipt["reason"],
+                    attempt_id,
+                ),
+            )
+            self._event(
+                db,
+                row["run_id"],
+                "ModelAttemptFailed",
+                {"model_attempt_id":attempt_id,"reason":receipt["reason"]},
+            )
+
     def _settle(self, attempt_id: str, receipt: dict[str, Any]) -> None:
         with self.store.tx() as db:
             row = db.execute("SELECT * FROM model_invocations WHERE model_attempt_id=?", (attempt_id,)).fetchone()
@@ -428,6 +503,19 @@ class DecisionRuntime:
         )
         try:
             result = provider.invoke(model_request)
+        except ContextTruncated as exc:
+            response_ref = self.objects.put(
+                json.dumps(exc.raw, ensure_ascii=False, sort_keys=True).encode("utf-8")
+            )
+            receipt = self._publish_failure_receipt(
+                attempt_id=attempt_id,
+                request_digest=request_digest,
+                response_ref=response_ref,
+                reason=str(exc),
+                usage=exc.usage,
+            )
+            self._settle_failed(attempt_id, receipt)
+            raise ContextBudgetError(str(exc)) from exc
         except Exception as exc:
             self._mark_unknown(attempt_id, f"provider call raised after Ticket: {type(exc).__name__}: {exc}")
             raise
