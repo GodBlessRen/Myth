@@ -28,7 +28,7 @@ CORE: tuple[ArchitectureItem, ...] = (
         "Goal",
         "core",
         Maturity.CONNECTED,
-        "Long-lived intent may own many Runs; persistence exists, autonomous scheduling does not.",
+        "Long-lived intent owns durable work state across Runs/Sessions: current state, progress, next action, waiting-for and revision. Autonomous scheduling still does not exist.",
     ),
     ArchitectureItem(
         "run",
@@ -158,7 +158,7 @@ DOMAINS: tuple[ArchitectureItem, ...] = (
         "Observability / 观测",
         "domain",
         Maturity.USABLE,
-        "Project control, budget, ticket, operation and event facts without owning truth.",
+        "Persistent third-column observatory projects Goal, execution flow, trajectory, token/context windows, tool calls, control and budgets without owning truth.",
         ("state",),
     ),
     ArchitectureItem(
@@ -245,7 +245,7 @@ class MythComponents:
             for spec in self.strategies.list()
         ]
         return {
-            "version": "0.15-evolution-control-plane",
+            "version": "0.18-goal-work-loop",
             "shape": "core-domains-strategies-adapters",
             "principle": "fix facts and boundaries; keep intelligence organization pluggable",
             "core": [item.as_dict() for item in CORE],

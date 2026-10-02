@@ -60,6 +60,68 @@ function renderExecutionSpine(turn){
   box.append(spineStep("Completion",completionDetail,completionState,completionLabel));
 }
 
+function inspectorFact(box,key,value){
+  const row=el("div","context-fact");
+  row.append(el("span","",key),el("span","",value??"—"));
+  box.append(row);
+}
+
+function renderInspectorGoal(turn){
+  const box=$("inspectorGoal");if(!box)return;box.replaceChildren();
+  const goal=turn?.goal_current||turn?.snapshot?.goal;
+  if(!goal?.goal_id){box.append(el("div","inspector-empty","暂无长期 Goal"));return;}
+  const work=goal.work||{};
+  inspectorFact(box,"Goal",goal.title||goal.goal_id);
+  inspectorFact(box,"State",work.current_state||goal.state||"—");
+  inspectorFact(box,"Progress",work.progress_note||"—");
+  inspectorFact(box,"Next",work.next_action||"—");
+  if(work.waiting_for)inspectorFact(box,"Waiting",work.waiting_for);
+  inspectorFact(box,"Revision",work.revision||"—");
+}
+
+function renderInspectorTokens(turn){
+  const box=$("inspectorTokens");if(!box)return;box.replaceChildren();
+  if(!turn){box.append(el("div","inspector-empty","暂无 Token 使用"));return;}
+  const byMeter=Object.fromEntries((turn.budgets||[]).map(row=>[row.meter,row]));
+  const input=byMeter.input_tokens||{},output=byMeter.output_tokens||{},calls=byMeter.model_calls||{};
+  inspectorFact(box,"Context window",turn.settings?.num_ctx?turn.settings.num_ctx+" tokens":"provider-managed");
+  inspectorFact(box,"Input settled",Number(input.settled||0).toLocaleString());
+  inspectorFact(box,"Output settled",Number(output.settled||0).toLocaleString());
+  inspectorFact(box,"Model calls",Number(calls.settled||0)+" / "+Number(calls.limit_units||0));
+  if(Number(input.unknown_held||0)||Number(output.unknown_held||0))inspectorFact(box,"Unknown held",Number(input.unknown_held||0)+" in · "+Number(output.unknown_held||0)+" out");
+}
+
+function renderInspectorTrajectory(turn){
+  const box=$("inspectorTrajectory");if(!box)return;box.replaceChildren();
+  const events=(turn?.events||[]).slice(-14);
+  if(!events.length){box.append(el("div","inspector-empty","暂无轨迹"));return;}
+  events.forEach(event=>{
+    const row=el("div","trajectory-row");
+    row.append(el("span","trajectory-seq","#"+event.sequence),el("strong","",event.kind));
+    const payload=event.payload||{};
+    const detail=payload.capability||payload.status||payload.intent_route||payload.model_attempt_id||payload.reason||"";
+    if(detail)row.append(el("small","",String(detail).slice(0,120)));
+    box.append(row);
+  });
+}
+
+function renderInspectorTools(turn){
+  const box=$("inspectorTools");if(!box)return;box.replaceChildren();
+  const ops=turn?.operations||[];
+  if(!ops.length){box.append(el("div","inspector-empty","暂无工具调用"));return;}
+  ops.slice(-8).forEach(op=>{
+    const row=el("div","observatory-tool");
+    const head=el("div","observatory-tool-head");
+    head.append(el("strong","",op.capability||"tool"),el("span","",op.state||""));
+    row.append(head);
+    const identity=op.ticket_id||op.decision_id;
+    if(identity)row.append(el("small","",identity));
+    if(op.result?.artifact?.name)row.append(el("small","","artifact · "+op.result.artifact.name));
+    else if(op.result?.error)row.append(el("small","",op.result.error));
+    box.append(row);
+  });
+}
+
 function renderInspectorBudgets(turn){
   const box=$("inspectorBudgets");if(!box)return;box.replaceChildren();
   const rows=turn?.budgets||[];if(!rows.length){box.append(el("div","inspector-empty","暂无运行预算"));return;}
@@ -80,7 +142,8 @@ function renderInspectorContext(session,turn){
   [["Project",project?.name||session?.project_name||"Independent"],["History",(snapshot.messages?.length||session?.messages?.length||0)+" messages"],["Knowledge",(snapshot.knowledge?.length||0)+" sources"],["Memory",(snapshot.memory?.length||0)+" records"],["Events",(turn?.events?.length||0)+""],["Step",turn?((turn.current_step||0)+" / "+(turn.max_steps||0)):"—"]].forEach(([k,v])=>{const row=el("div","context-fact");row.append(el("span","",k),el("span","",v));box.append(row);});
   const compiled=(turn?.events||[]).filter(event=>event.kind==="ConversationContextCompiled").at(-1)?.payload;
   if(compiled){
-    [["模型上下文",`${compiled.bytes_used} / ${compiled.max_bytes} bytes`],["实际选入",`${compiled.selected?.length||0} 项`],["旧记录折叠",`${compiled.folded?.length||0} 项`],["未选入",`${compiled.dropped?.length||0} 项`]].forEach(([k,v])=>{const row=el("div","context-fact");row.append(el("span","",k),el("span","",v));box.append(row);});
+    const pct=compiled.max_bytes?Math.round((compiled.bytes_used/compiled.max_bytes)*100):0;
+    [["模型上下文",compiled.bytes_used+" / "+compiled.max_bytes+" bytes · "+pct+"%"],["Token window",compiled.num_ctx?compiled.num_ctx+" tokens":"provider-managed"],["实际选入",(compiled.selected?.length||0)+" 项"],["旧记录折叠",(compiled.folded?.length||0)+" 项"],["未选入",(compiled.dropped?.length||0)+" 项"]].forEach(([k,v])=>{const row=el("div","context-fact");row.append(el("span","",k),el("span","",v));box.append(row);});
   }
 }
 
@@ -101,7 +164,7 @@ function renderRuntimeInspector(session=state.session){
   const turn=session?.turns?.at(-1)||null,[label,cls]=inspectorStatus(turn?.status||"IDLE");
   if($("inspectorState"))$("inspectorState").textContent=label;
   if($("inspectorPulse"))$("inspectorPulse").className="inspector-pulse "+cls;
-  renderExecutionSpine(turn);renderInspectorControl(turn);renderInspectorBudgets(turn);renderInspectorContext(session,turn);renderInspectorPlatform();
+  renderInspectorGoal(turn);renderExecutionSpine(turn);renderInspectorTrajectory(turn);renderInspectorTokens(turn);renderInspectorContext(session,turn);renderInspectorTools(turn);renderInspectorControl(turn);renderInspectorBudgets(turn);renderInspectorPlatform();
 }
 
 function fitPromptInspector(){const prompt=$("prompt");if(!prompt)return;prompt.style.height="auto";prompt.style.height=Math.min(160,Math.max(30,prompt.scrollHeight))+"px";}

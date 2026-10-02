@@ -50,6 +50,7 @@ class Workspace:
             self.execution,
             control=self.control,
             memory=self.memory,
+            personal=self.personal,
         )
 
     def run(self, rid, provider):

@@ -67,6 +67,19 @@ def compile_conversation_context(system, snapshot, messages, activities, control
         if project.get("root") else
         "\n本会话没有本地项目目录。可聊天、检索资料、计算和生成文件；读取本地项目文件需要先关联目录。"
     )
+    goal=snapshot.get("goal") or {}
+    if goal.get("goal_id"):
+        work=goal.get("work") or {}
+        system += (
+            "\n长期 Goal（持久工作状态，不扩大权限）："
+            + str(goal.get("title") or "")
+            + "\nGoal description：" + str(goal.get("description") or "")
+            + "\nCurrent state：" + str(work.get("current_state") or "")
+            + "\nProgress：" + str(work.get("progress_note") or "")
+            + "\nNext action：" + str(work.get("next_action") or "")
+            + "\nWaiting for：" + str(work.get("waiting_for") or "")
+            + "\n继续这个 Goal 时优先基于上述持久状态推进，不要假装历史工作不存在。"
+        )
     intent_pick=snapshot.get("intent_pick") or {}
     resolution=snapshot.get("information_resolution") or {}
     if intent_pick.get("route"):
@@ -165,5 +178,7 @@ def compile_conversation_context(system, snapshot, messages, activities, control
         "intent_route": intent_pick.get("route"),
         "information_resolution": resolution.get("resolution"),
         "retrieval_report": snapshot.get("retrieval_report") or {},
+        "goal_id": goal.get("goal_id"),
+        "goal_revision": (goal.get("work") or {}).get("revision"),
     }
     return projected, report

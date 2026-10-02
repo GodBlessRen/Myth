@@ -238,7 +238,7 @@ class SqliteWorkspaceRepository:
     def search(self,query,project_id=None,limit=5):
         return self.search_report(query,project_id,limit)["sources"]
 
-    def create_turn(self,sid,text,request_id,document_ids=None,memory_records=None,goal_id=None):
+    def create_turn(self,sid,text,request_id,document_ids=None,memory_records=None,goal_id=None,goal_context=None):
         if not isinstance(text,str) or not text.strip() or len(text.encode("utf-8"))>16000:raise ValueError("message must contain 1-16000 UTF-8 bytes")
         if not isinstance(request_id,str) or not 1<=len(request_id)<=200:raise ValueError("request_id is required")
         settings=self.settings()
@@ -342,6 +342,7 @@ class SqliteWorkspaceRepository:
                     for m in memory_records[:8]
                 ],
                 "messages":[{"role":m["role"],"content":m["content"]} for m in session["messages"][-30:]]+[{"role":"user","content":text}],
+                "goal":dict(goal_context or {}),
             }
             rid=new_id("run")
             db.execute("INSERT INTO runs(run_id,request_id,entry_digest,goal,acceptance_version,state) VALUES(?,?,?,?,?,'RUNNING')",(rid,request_id,identity,text,"conversation-v1"))
@@ -355,6 +356,7 @@ class SqliteWorkspaceRepository:
                 "information_resolution":plan.resolution.value,
                 "retrieval_scanned":retrieval["retrieval"]["scanned"],
                 "retrieval_matched":retrieval["retrieval"]["matched"],
+                "goal_id":goal_id,
             })
         return self.turn(rid)
 

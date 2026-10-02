@@ -169,3 +169,21 @@ dialog{width:min(520px,calc(100vw - 32px));border:1px solid var(--line);border-r
 .architecture-heading h2{margin:0;font-size:13px}
 .architecture-heading p{margin:0;color:var(--muted);font-size:9.5px;text-align:right;max-width:620px}
 @media(max-width:760px){.architecture-heading{display:block}.architecture-heading p{text-align:left;margin-top:5px}.platform-mini{grid-template-columns:repeat(3,1fr)}}
+
+/* v0.18 Goal-first work loop + Runtime Observatory */
+#chatGoal{max-width:170px}
+#quickGoal{width:28px;height:28px}
+.trajectory-list,.tool-observatory{display:grid;gap:0}
+.trajectory-row{display:grid;grid-template-columns:26px minmax(0,1fr);gap:2px 7px;padding:6px 0;border-bottom:1px solid rgba(135,119,96,.10)}
+.trajectory-row:last-child{border-bottom:0}
+.trajectory-seq{grid-row:1/3;font:8px var(--mono);color:#aa9f90;padding-top:2px}
+.trajectory-row strong{font:9px var(--mono);font-weight:600;overflow-wrap:anywhere}
+.trajectory-row small{color:var(--muted);font-size:8px;line-height:1.4;overflow-wrap:anywhere}
+.observatory-tool{padding:7px 0;border-bottom:1px solid rgba(135,119,96,.10)}
+.observatory-tool:last-child{border-bottom:0}
+.observatory-tool-head{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.observatory-tool-head strong{font:9px var(--mono)}
+.observatory-tool-head span{font:8px var(--mono);color:var(--muted)}
+.observatory-tool small{display:block;color:var(--muted);font:8px/1.45 var(--mono);margin-top:3px;overflow-wrap:anywhere}
+#inspectorGoal .context-fact span:last-child{max-width:180px}
+@media(max-width:1180px){#chatGoal{max-width:125px}}

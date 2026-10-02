@@ -14,13 +14,14 @@ function closeNavigation(){$("sidebar").classList.remove("open");show("sidebarSh
 function go(page,id){location.hash=id?`${page}/${encodeURIComponent(id)}`:page;closeNavigation();}
 function empty(parent,title,copy,iconName="chat",action,label){const c=el("div","empty-card");c.append(icon(iconName),el("h3","",title),el("p","",copy));if(action){const b=el("button","primary",label);b.onclick=action;c.append(b);}parent.append(c);}
 function fillProjects(select,emptyLabel,selected=""){select.replaceChildren();const first=el("option","",emptyLabel);first.value="";select.append(first);state.data.projects.forEach(p=>{const o=el("option","",p.name);o.value=p.id;select.append(o);});select.value=selected;}
+function fillGoals(select,selected=""){if(!select)return;select.replaceChildren();const first=el("option","","不绑定 Goal");first.value="";select.append(first);(state.data.goals||[]).filter(g=>g.state!=="ARCHIVED").forEach(g=>{const work=g.work||{};const label=g.title+(work.current_state?" · "+work.current_state:"");const o=el("option","",label);o.value=g.goal_id;select.append(o);});select.value=selected||"";}
 function renderSidebar(){const box=$("recentSessions");box.replaceChildren();const sessions=state.data.sessions.slice(0,9);if(!sessions.length)box.append(el("p","recent-empty","还没有对话。\n从一个问题开始吧。"));sessions.forEach(s=>{const a=el("a","recent-item"+(state.id===s.id?" active":""));a.href=`#chat/${s.id}`;if(s.pinned)a.append(el("span","pin","⌑"));a.append(document.createTextNode(s.title));a.onclick=closeNavigation;box.append(a);});document.querySelectorAll("[data-page]").forEach(a=>a.classList.toggle("active",a.dataset.page===state.page));}
 async function refresh(){state.data=await api("");renderSidebar();}
 function settingsPayload(){return {provider:$("provider").value,model:$("model").value.trim(),ollama_url:$("ollamaUrl").value.trim(),max_steps:Number($("maxSteps").value),max_output_tokens:Number($("maxTokens").value),num_ctx:Number($("numCtx").value),temperature:Number($("temperature").value),thinking:$("thinking").checked};}
 function loadSettings(){const s=state.data.settings;$("provider").value=s.provider;$("model").value=s.model;$("ollamaUrl").value=s.ollama_url;$("maxSteps").value=s.max_steps;$("maxTokens").value=s.max_output_tokens;$("numCtx").value=s.num_ctx??8192;$("temperature").value=s.temperature??0;$("thinking").checked=s.thinking===true;}
 function renderConnection(){const c=state.connection;$("connectionDot").className="connection-dot "+(c?(c.ready?"connected":"disconnected"):"");const activeModel=state.session?.turns?.at(-1)?.settings?.model;$("modelLabel").textContent=activeModel||state.data.settings.model||"连接 Ollama";show("welcomeConnection",!state.data.settings.model||c&&!c.ready);if(c){$("connectionResult").textContent=c.ready?`已连接 · ${c.details.models?.length||0} 个可用模型`:c.details.error||"未连接，请确认 Ollama 正在运行。";$("connectionResult").className="connection-result"+(c.ready?"":" bad");$("modelOptions").replaceChildren();(c.details.models||[]).forEach(m=>{const o=el("option");o.value=m;$("modelOptions").append(o);});}}
 async function checkConnection(auto=false){$("checkConnection").disabled=true;try{const payload=auto?state.data.settings:settingsPayload();state.connection=await api("/connection",payload);if(auto&&!payload.model&&state.connection.ready&&state.connection.details.models?.[0]){payload.model=state.connection.details.models[0];state.data.settings=await api("/settings",payload);loadSettings();}else if(!auto&&!$("model").value&&state.connection.details.models?.[0])$("model").value=state.connection.details.models[0];renderConnection();}catch(e){toast(e.message);}finally{$("checkConnection").disabled=false;}}
-async function newChat(projectId=null){state.session=null;state.id=null;state.threadKey="";state.attached=[];state.pending=null;go("chat");fillProjects($("chatProject"),"独立对话",projectId||"");renderChat(null);$("prompt").focus();}
+async function newChat(projectId=null){state.session=null;state.id=null;state.threadKey="";state.attached=[];state.pending=null;go("chat");fillProjects($("chatProject"),"独立对话",projectId||"");fillGoals($("chatGoal"),"");renderChat(null);$("prompt").focus();}
 
 function inline(parent,text){const pattern=/(\*\*([^*]+)\*\*|`([^`]+)`|\[doc:([^\]]+)\])/g;let last=0;for(const match of text.matchAll(pattern)){parent.append(document.createTextNode(text.slice(last,match.index)));if(match[2])parent.append(el("strong","",match[2]));else if(match[3])parent.append(el("code","",match[3]));else{const citation="doc:"+match[4];const allSources=state.session?.turns.flatMap(t=>[...t.snapshot.knowledge,...t.activities.flatMap(s=>s.result?.sources||[])])||[];const source=allSources.find(s=>s.citation===citation);const b=el("button","source-chip",source?source.title:"资料引用");b.onclick=()=>source?previewDocument(source.document_id):toast("这个引用未匹配到本轮检索来源。");parent.append(b);}last=match.index+match[0].length;}parent.append(document.createTextNode(text.slice(last)));}
 function markdown(parent,text){const pieces=text.split(/```/);pieces.forEach((part,i)=>{if(i%2){const newline=part.indexOf("\n");const language=newline>=0?part.slice(0,newline):"code";const code=newline>=0?part.slice(newline+1):part;const block=el("div","code-block"),head=el("div","code-head"),copy=el("button","","复制");copy.onclick=()=>navigator.clipboard.writeText(code).then(()=>toast("已复制代码")).catch(()=>toast("浏览器未允许剪贴板访问。"));head.append(el("span","",language),copy);block.append(head,el("pre","",code));parent.append(block);}else{let paragraph=[];function flush(){if(paragraph.length){const p=el("p");inline(p,paragraph.join("\n"));p.style.whiteSpace="pre-wrap";parent.append(p);paragraph=[];}}for(const line of part.split("\n")){if(!line.trim()){flush();continue;}const heading=line.match(/^(#{1,4})\s+(.+)$/);if(heading){flush();const h=el(heading[1].length<=2?"h2":"h3");inline(h,heading[2]);parent.append(h);}else if(/^[-*]\s+/.test(line)){flush();const p=el("p");inline(p,"• "+line.slice(2));parent.append(p);}else paragraph.push(line);}flush();}});}
@@ -35,12 +36,15 @@ function renderChat(session){
   $("pageTitle").textContent=session?.title||"对话";
   fillProjects($("chatProject"),"独立对话",session?.project_id||$("chatProject").value);
   $("chatProject").disabled=!!session;
-  renderAttachments();
-  if(session)renderThread(session);
-
   const turn=session?.turns.at(-1);
   const status=turn?.status;
   const active=turn&&["RUNNING","UNKNOWN","WAITING_USER","PAUSED"].includes(status);
+  const boundGoal=turn?.snapshot?.goal?.goal_id||$("chatGoal")?.value||"";
+  fillGoals($("chatGoal"),boundGoal);
+  if($("chatGoal"))$("chatGoal").disabled=!!active;
+  renderAttachments();
+  if(session)renderThread(session);
+
   const control=turn?.control||{};
   show("turnControls",!!turn&&["RUNNING","UNKNOWN","WAITING_USER","PAUSED"].includes(status));
   show("pauseTurn",!!turn&&!control.paused&&!(control.stopped??control.aborted)&&status==="RUNNING");
@@ -94,7 +98,7 @@ async function sendMessage(event){
             const fingerprint=JSON.stringify([sid,message,attachments.map(d=>d.id),state.data.settings]);
             if(state.pending?.fingerprint!==fingerprint)state.pending={fingerprint,id:crypto.randomUUID()};
             const requestId=state.pending.id;
-            await api(`/sessions/${sid}/messages`,{text:message,request_id:requestId,document_ids:attachments.map(d=>d.id)});
+            await api(`/sessions/${sid}/messages`,{text:message,request_id:requestId,document_ids:attachments.map(d=>d.id),goal_id:$("chatGoal")?.value||null});
             if(state.pending?.id===requestId)state.pending=null;
         }
         await refresh();
@@ -169,6 +173,8 @@ async function route(){const generation=++state.generation;const [page="chat",id
 async function poll(){clearTimeout(state.poll);if(state.page==="chat"&&state.id){try{const id=state.id,generation=state.generation;await openSession(id,generation);}catch(e){console.warn("conversation",e.message);}}state.poll=setTimeout(poll,document.hidden?6000:state.session?.turns.at(-1)?.driver_active?1000:3000);}
 
 $("newChat").onclick=()=>newChat();$("newSession").onclick=()=>newChat();$("composer").onsubmit=sendMessage;
+$("quickGoal").onclick=()=>{$("goalTitleInput").value="";$("goalDescriptionInput").value="";$("goalDialog").showModal();};
+$("goalForm").onsubmit=async e=>{e.preventDefault();try{const goal=await api("/goals",{title:$("goalTitleInput").value,description:$("goalDescriptionInput").value});$("goalDialog").close();await refresh();fillGoals($("chatGoal"),goal.goal_id);toast("长期 Goal 已创建并绑定到下一轮。");}catch(err){toast(err.message);}};
 $("prompt").onkeydown=e=>{if(e.key==="Enter"&&!e.shiftKey&&!e.isComposing){e.preventDefault();sendMessage();}};
 $("stopTurn").onclick=()=>controlTurn("stop");$("modelPill").onclick=()=>state.session?.turns.at(-1)?openControlDialog():go("settings");$("sessionMenu").onclick=()=>editSession(state.session);
 $("steerTurn").onclick=openControlDialog;
@@ -193,4 +199,4 @@ $("knowledgeForm").onsubmit=async e=>{e.preventDefault();const submit=e.target.q
 $("attachButton").onclick=()=>$("chatFiles").click();$("chatFiles").onchange=async()=>{try{if(state.attached.length+$("chatFiles").files.length>4)throw new Error("每条消息最多附加 4 份资料。");const docs=await importFiles([...$("chatFiles").files],state.session?.project_id||$("chatProject").value);state.attached.push(...docs);renderAttachments();await refresh();toast("资料已导入，将加入下一条消息的上下文。");}catch(e){toast(e.message);}finally{$("chatFiles").value="";}};
 $("checkConnection").onclick=()=>checkConnection(false);$("saveSettings").onclick=async()=>{try{state.data.settings=await api("/settings",settingsPayload());$("settingsSaved").textContent="已保存";renderConnection();toast("模型设置已保存。");}catch(e){toast(e.message);}};
 window.addEventListener("hashchange",route);document.addEventListener("keydown",e=>{if(e.key==="Escape")closeNavigation();});
-(async()=>{try{await refresh();loadSettings();await route();await checkConnection(true);poll();}catch(e){toast("工作区未连接："+e.message);}})();
+(async()=>{try{await refresh();loadSettings();fillGoals($("chatGoal"),"");await route();await checkConnection(true);poll();}catch(e){toast("工作区未连接："+e.message);}})();
