@@ -21,6 +21,14 @@ CREATE TABLE IF NOT EXISTS goals(
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS goal_runs(
+    goal_id TEXT NOT NULL REFERENCES goals(goal_id),
+    run_id TEXT NOT NULL REFERENCES runs(run_id),
+    relation TEXT NOT NULL DEFAULT 'work',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY(goal_id, run_id)
+);
+
 CREATE TABLE IF NOT EXISTS goal_triggers(
     trigger_id TEXT PRIMARY KEY NOT NULL,
     goal_id TEXT NOT NULL REFERENCES goals(goal_id),
@@ -91,6 +99,31 @@ class SqlitePersonalState:
             if not updated:
                 raise KeyError(goal_id)
         return self.goal(goal_id)
+
+    def bind_run(self, goal_id: str, run_id: str, relation: str = "work") -> dict[str, Any]:
+        self.goal(goal_id)
+        run = self.store.get_run(run_id)
+        value = str(relation or "work").strip()
+        if not value or len(value) > 80:
+            raise ValueError("goal/run relation must contain 1-80 characters")
+        with self.store.tx() as db:
+            db.execute(
+                "INSERT OR IGNORE INTO goal_runs(goal_id,run_id,relation) VALUES (?,?,?)",
+                (goal_id, run_id, value),
+            )
+        return {"goal_id": goal_id, "run_id": run["run_id"], "relation": value}
+
+    def runs(self, goal_id: str) -> list[dict[str, Any]]:
+        self.goal(goal_id)
+        return [
+            dict(row)
+            for row in self.store.db.execute(
+                "SELECT r.*,gr.relation,gr.created_at AS linked_at "
+                "FROM goal_runs gr JOIN runs r ON r.run_id=gr.run_id "
+                "WHERE gr.goal_id=? ORDER BY gr.created_at,r.rowid",
+                (goal_id,),
+            ).fetchall()
+        ]
 
     def add_trigger(
         self,
