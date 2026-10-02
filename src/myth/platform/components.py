@@ -173,8 +173,8 @@ DOMAINS: tuple[ArchitectureItem, ...] = (
         "evolution",
         "Evolution / 演进",
         "domain",
-        Maturity.EXISTS,
-        "Policy candidate/promotion contract exists; paired eval evidence may inform an explicit decision, but candidates never self-publish into a live Run.",
+        Maturity.USABLE,
+        "Durable candidate registry, full-suite release evidence, explicit promote/rollback and future-Turn active policy pointer; never auto-publishes into a live Turn.",
         ("evaluation",),
     ),
 )
@@ -245,7 +245,7 @@ class MythComponents:
             for spec in self.strategies.list()
         ]
         return {
-            "version": "0.14-gain-ledger",
+            "version": "0.15-evolution-control-plane",
             "shape": "core-domains-strategies-adapters",
             "principle": "fix facts and boundaries; keep intelligence organization pluggable",
             "core": [item.as_dict() for item in CORE],
