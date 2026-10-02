@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.20 — Recovery-first Agent Runtime
+
+- Conversation Run 新增 durable Execution Cursor：step / phase / checkpoint / recovery state。
+- Web Driver 改为 durable Lease + heartbeat，不再只依赖进程内 `active=set()`。
+- Driver 消失且没有不确定外部效果时进入 `INTERRUPTED / RESUME`。
+- 已发 Ticket / provider 调用结果不明时保持 `UNKNOWN / RECONCILE`，不盲目 replay。
+- 新 Driver 在 lease 失效后接管，并重新经过 normal recovery gate。
+- Runtime Observatory 新增 Recovery 区，显示 checkpoint、phase、Driver 与 lease。
+- Session UI 标记“可恢复 / 需核对”，支持“从断点继续”。
+- 增加跨 Runtime restart、lease expiry、safe resume、UNKNOWN no-replay 回归测试。
+
+
 ## v0.19 — Native Sign in with ChatGPT
 
 - 移除 Myth 对 Pi OAuth / Pi CLI 的认证依赖。
