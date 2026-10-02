@@ -109,8 +109,14 @@ class ConversationWebService:
             raise ValueError("所选模型未安装，请选择已有 Ollama 模型。")
 
         text=value.get("text")
+        goal_id=value.get("goal_id") or None
         with MythRuntime(self.root) as runtime:
             workspace=Workspace(runtime)
+            # Admission validates the long-lived Goal before any Run/Turn exists.
+            # Request identity also binds goal_id so idempotent retries cannot
+            # silently attach the same request to a different Goal.
+            if goal_id:
+                workspace.personal.goal(goal_id)
             memory=workspace.memory.search(str(text or ""),limit=6)
             turn=workspace.repository.create_turn(
                 sid,
@@ -118,10 +124,11 @@ class ConversationWebService:
                 value.get("request_id"),
                 value.get("document_ids"),
                 memory_records=memory,
+                goal_id=goal_id,
             )
             workspace.control.ensure(turn["run_id"],turn["settings"])
-            if value.get("goal_id"):
-                workspace.personal.bind_run(value["goal_id"],turn["run_id"])
+            if goal_id:
+                workspace.personal.bind_run(goal_id,turn["run_id"])
         if turn["status"]=="RUNNING":self._spawn(turn["run_id"])
         return {"run_id":turn["run_id"],"session_id":sid}
 
