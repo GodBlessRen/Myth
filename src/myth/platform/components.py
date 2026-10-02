@@ -134,7 +134,7 @@ DOMAINS: tuple[ArchitectureItem, ...] = (
         "Context / 上下文",
         "domain",
         Maturity.USABLE,
-        "Build bounded provenance-aware projections. Knowledge can expand a fixed source/digest to paginated L2 evidence; generalized L0/L1 materialization is not yet connected.",
+        "Build bounded provenance-aware projections. Knowledge resolves one fixed source/digest across L0 metadata, L1 chunk navigation and L2 detailed evidence.",
         ("run",),
     ),
     ArchitectureItem(
@@ -142,7 +142,7 @@ DOMAINS: tuple[ArchitectureItem, ...] = (
         "Memory / 记忆",
         "domain",
         Maturity.USABLE,
-        "Versioned working/episodic/semantic/procedural records with provenance/revoke. Episodic recall is project/session scoped and carries fact level; Information Delta is not yet a lifecycle engine.",
+        "Versioned working/episodic/semantic/procedural records with provenance/revoke. Recall scans the full visible active candidate set with project/session scope and fact level; Information Delta is not yet a lifecycle engine.",
         ("context",),
     ),
     ArchitectureItem(
@@ -166,7 +166,7 @@ DOMAINS: tuple[ArchitectureItem, ...] = (
         "Evaluation / 评测",
         "domain",
         Maturity.EXISTS,
-        "Compare quality/safety/cost with fixed suites before policy promotion.",
+        "Versioned case/observation/verdict contracts and a fixed foundation suite gate quality/safety before optimization.",
         ("observability",),
     ),
     ArchitectureItem(
@@ -245,7 +245,7 @@ class MythComponents:
             for spec in self.strategies.list()
         ]
         return {
-            "version": "0.11-runtime-closure",
+            "version": "0.12-retrieval-eval",
             "shape": "core-domains-strategies-adapters",
             "principle": "fix facts and boundaries; keep intelligence organization pluggable",
             "core": [item.as_dict() for item in CORE],
