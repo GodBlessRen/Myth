@@ -4,7 +4,7 @@
 
 “先存在再优化”仍成立，但 v0.11 开始明确第二阶段原则：**已经存在的合同优先进入真实请求链、故障链和评测链；不继续用更多抽象掩盖未闭环的能力。**
 
-## 当前基线：v0.15
+## 当前基线：v0.17
 
 已经可用：
 
@@ -14,20 +14,20 @@
 - Control revision 跨 SQLite 连接原子分配；
 - Capability Registry；
 - project.read/search、diff.preview、git.status/diff；
-- ContextCompiler + 42 KB conversation projection；
+- ContextCompiler；Ollama projection budget 由 `num_ctx - output - reserve` 推导，OpenAI/Pi 保留 42 KB 本地 projection cap；
 - typed Memory + provenance / revision / revoke；
 - Episodic Memory 默认 Project / Session scope，显式 global Memory 继续可用；
 - Goal / Trigger / Personal State 持久化入口；
 - Goal 在 Run/Turn admission 前校验，goal_id 进入 request identity；
 - knowledge.search + paginated knowledge.read L2 evidence；
 - Runtime Inspector；
-- Intent Pick 的保守 deterministic 快路：严格纯算术 0 次模型调用，其他输入回退 Agent Loop。
+- Intent Pick 的保守 deterministic 快路：日期/版本/分数/百分比等形状冲突回退 Agent；calculator 拒绝会写 `RouteFallback` 后继续模型路径。
 
 信息决策当前真实状态：
 
 - Intent Pick：**connected**；strict arithmetic + conservative local_retrieval 已进入 Turn admission，未使用通用 LLM 分类器；
 - Information Resolution：**connected + evolvable**；未来 Turn 从 durable Active Policy 读取 rule/fixed L0/L1/L2 config，并把 policy_id 固定进 snapshot；
-- Evaluation：**usable**；foundation-v1/v2/v3 + executable Runner + durable Eval Ledger + suite completeness 已接通；
+- Evaluation：**usable**；foundation-v1/v2/v3/v4 + executable Runner + durable Eval Ledger + suite completeness 已接通；v4 新增 36 条 Intent 对抗 case；
 - Evolution：**usable**；Cost Model / Calibration Matrix / Candidate Registry / explicit Promote / Rollback 已接通，不自动发布；
 - Information Delta：exists；尚未自动计算 conflict / supersede / revision delta；
 - Information Gain：**connected（offline evidence）**；paired fixed-case estimator + cross-case calibration matrix 已接通；不把 similarity/confidence 当 Gain。
@@ -42,6 +42,20 @@
 - Skills / MCP；
 - Evaluation；
 - Evolution。
+
+## 已完成 — Correctness + Provider hardening
+
+v0.16–v0.17 已完成：
+
+- Intent arithmetic grammar 收紧，日期/版本/分数/百分比不再无前缀误路由；
+- strong/weak knowledge cue 分级，弱词必须有足够 retrieval score；
+- calculator rejection 记录 `RouteFallback` 并安全回退 Agent；
+- foundation-v4：48 total cases，其中 36 条 Intent adversarial；
+- ModelRequest 增加 `num_ctx` / temperature；
+- Ollama 传递 `num_ctx` / temperature / keep_alive；
+- Ollama 本地 Context budget 与 `num_ctx` 对齐；
+- provider-confirmed truncation → durable FAILED，而非 UNKNOWN；
+- ambiguous post-Ticket transport failure 继续 UNKNOWN、不盲目重发。
 
 ## 已完成 — Retrieval correctness foundation
 
