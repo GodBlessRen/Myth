@@ -4,7 +4,7 @@ import json
 import unittest
 from unittest.mock import patch
 
-from myth.models import ModelMessage, ModelRequest, STEP_DECISION_SCHEMA
+from myth.models import ContextTruncated, ModelMessage, ModelRequest, STEP_DECISION_SCHEMA
 from myth.providers.ollama import OllamaProvider
 from myth.providers.openai import OpenAIResponsesProvider, PiBearerTokenSource
 
@@ -29,6 +29,8 @@ def request_obj() -> ModelRequest:
         messages=(ModelMessage("system", "system"), ModelMessage("user", "goal")),
         response_schema=STEP_DECISION_SCHEMA,
         max_output_tokens=128,
+        num_ctx=4096,
+        temperature=0.2,
     )
 
 
@@ -49,8 +51,27 @@ class OllamaProviderTests(unittest.TestCase):
             result = OllamaProvider().invoke(request_obj())
         self.assertEqual(captured["body"]["format"], STEP_DECISION_SCHEMA)
         self.assertEqual(captured["body"]["stream"], False)
+        self.assertEqual(captured["body"]["keep_alive"], "5m")
+        self.assertEqual(captured["body"]["options"]["num_ctx"], 4096)
+        self.assertEqual(captured["body"]["options"]["temperature"], 0.2)
         self.assertEqual(result.usage["input_tokens"], 12)
         self.assertEqual(result.usage["output_tokens"], 7)
+
+
+    def test_context_ceiling_is_reported_as_known_failure(self) -> None:
+        def fake_urlopen(req, timeout):
+            return FakeResponse({
+                "message":{"role":"assistant","content":"{}"},
+                "prompt_eval_count":4090,
+                "eval_count":2,
+            })
+
+        with patch("myth.providers.ollama.request.urlopen", side_effect=fake_urlopen):
+            with self.assertRaises(ContextTruncated) as caught:
+                OllamaProvider().invoke(request_obj())
+        self.assertEqual(caught.exception.usage["input_tokens"],4090)
+        self.assertEqual(caught.exception.usage["output_tokens"],2)
+        self.assertEqual(caught.exception.raw["prompt_eval_count"],4090)
 
 
 class OpenAIProviderTests(unittest.TestCase):
