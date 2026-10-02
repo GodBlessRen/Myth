@@ -2,6 +2,8 @@
 
 **Durable Runtime 打底、Agent Product 向上生长的本地 Agent 平台。**
 
+v0.13 把 **Eval + Intent/Resolution** 真正接成闭环：Turn admission 先固定 retrieval evidence，再做保守 Intent Pick；严格算术走 deterministic，显式/强匹配本地资料走 `local_retrieval`，其余回退 Agent Loop。`RuleResolutionController` 同时固定 L0/L1/L2，并把 route / resolution / retrieval report 写入 Turn Snapshot、Event 和 Context Report。新增可执行 `myth eval`，默认运行版本化 `foundation-v2`；评测 Runner 调用真实 Myth 组件，不自动 promote policy，Information Gain 仍保持未校准。
+
 v0.12 聚焦 **Retrieval Evidence + Eval Foundation**：Knowledge/Memory 取消排序前静默候选截断，检索结果暴露 scanned/matched/pages/exhausted；`project.search` 增加 cursor/max_files 与扫描统计；`knowledge.resolve` 把同一 document/digest 显式投影为 L0 Metadata/Excerpt、L1 Chunk Navigation、L2 Detail/Evidence；新增版本化机器可读 `evals/foundation-v1.json` 与 Case/Observation/Verdict 合同，为后续 Intent / Information Gain / Evolution 共用同一评测地基。
 
 v0.11 把 v0.10 的几项“合同”推进到真实主链：**Control revision 跨连接原子分配**；Goal 在创建 Run/Turn 前完成 admission，并进入 request identity；Episodic Memory 默认按 Project / Session 隔离并携带 `fact_level`；新增 `knowledge.read`，可从检索片段按固定 document digest 分页展开到 **L2 Detail/Evidence**；Intent Pick 首次接入一条保守快路——严格受限的纯算术直接使用本地 deterministic calculator，**0 次模型调用**，任何不确定输入立即回退现有 Agent Loop。Information Gain / Delta 仍不伪装成已校准能力。
@@ -67,7 +69,7 @@ python -m myth.cli --root . web
 
 ## Loop、上下文与检索
 
-对话入口先做保守 Intent Pick；严格受限的纯算术走本地 deterministic 快路，其余进入「固定入口 → 持久模型请求 → 决策校验 → 工具授权/收据 → 下一步」的 Agent Loop，可以直接回答或向用户提问。会话消息持久保存；最近 30 条历史作为候选，与召回资料/记忆、旧工具预览共同按 42,000 字节消息预算选入。本轮原始任务、澄清、显式附件片段和最新工具结果优先保留；Compact 只减少旧历史，完整记录仍在本地。Inspector 展示实际字节和取舍数量。必需内容超过预算会在调用前停止。完成的普通对话会写入本地 Episodic Memory：有项目时默认限制在该 Project，无项目时限制在 Session；显式 Semantic/Procedural/Working Memory 仍可作为 global 或指定 scope 持久化，并携带 provenance / revision / fact_level。v0.12 的 Memory recall 会分页扫描全部 active 且当前 scope 可见的候选，不再只看最近 500 条。下一轮召回结果固定进 Turn Snapshot。
+对话入口先固定 retrieval evidence，再做保守 Intent Pick：严格受限纯算术走 deterministic；显式要求资料/出处或本地检索强匹配时标记 `local_retrieval`；其余回退 Agent Loop。随后 Resolution Controller 固定同一来源的 L0/L1/L2 投影，整个决策写入 Turn Snapshot 后才进入「持久模型请求 → 决策校验 → 工具授权/收据 → 下一步」。会话消息持久保存；最近 30 条历史作为候选，与召回资料/记忆、旧工具预览共同按 42,000 字节消息预算选入。本轮原始任务、澄清、显式附件片段和最新工具结果优先保留；Compact 只减少旧历史，完整记录仍在本地。Inspector 展示实际字节和取舍数量。必需内容超过预算会在调用前停止。完成的普通对话会写入本地 Episodic Memory：有项目时默认限制在该 Project，无项目时限制在 Session；显式 Semantic/Procedural/Working Memory 仍可作为 global 或指定 scope 持久化，并携带 provenance / revision / fact_level。v0.12 的 Memory recall 会分页扫描全部 active 且当前 scope 可见的候选，不再只看最近 500 条。下一轮召回结果固定进 Turn Snapshot。
 
 知识库按 1,800 字符分块、200 字符重叠，英文词与中文双字关键词排序；本轮只检索共享资料和当前项目资料。v0.12 不再在排序前静默截断到前 10,000 个 chunk，而是分页扫描全部当前可见候选并返回 scanned/matched/pages/exhausted 诊断。`knowledge.resolve` 可沿同一 document/digest 在 L0/L1/L2 间渐进展开。当前没有向量检索、重排器或 PDF/Office 解析器；Keyword Retrieval 继续作为可复现 baseline。
 
@@ -84,6 +86,16 @@ myth --root . agent --provider scripted --model exact-patch-demo --allow-file ex
 对话轮次 COMPLETED 表示完成一次回答；可下载输出证明文件已实际生成，**不表示自然语言目标已通过独立语义验收**。两种完成边界分别记录，通用聊天不会借用精确替换的验收结论。
 
 OpenAI Responses / Pi OAuth 适配器保留，远端凭据通过进程环境或 Pi 管理。本轮只实测本地 Ollama，未验证这两个远端入口。选择远端模型会向其发送选定的对话与资料。
+
+## 固定评测
+
+```bash
+myth eval
+myth eval --suite evals/foundation-v2.json
+myth eval --case intent-local-retrieval-explicit
+```
+
+Eval Runner 在隔离临时 Runtime 中调用真实组件，输出逐 case Observation、汇总 Report 与 Release Gate。`foundation-v1` 保持不可改写历史基线；v0.13 默认 `foundation-v2`。Release Gate 只给评测结论，不自动修改或发布策略。
 
 ## 验证与架构
 

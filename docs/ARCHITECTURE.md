@@ -1,4 +1,4 @@
-# Myth v0.12 architecture
+# Myth v0.13 architecture
 
 > Architecture Constitution: [ARCHITECTURE_CONSTITUTION.md](ARCHITECTURE_CONSTITUTION.md)  
 > Composable map: [PLATFORM_MAP.md](PLATFORM_MAP.md)
@@ -19,9 +19,13 @@ Intent Pick、Information Resolution、Information Gain、Decision、Planning、
 
 外部模型、协议和基础设施通过 Port/Adapter 接入。OpenAI、Ollama、MCP、A2A、Browser、Shell、SQLite 都不能成为 Core 依赖。
 
-在进入昂贵 Agent Loop 前，Intent Pick 可以选择 direct / local retrieval / deterministic / agent / ask-user 等路径。v0.11 首先只接通一条可证明的 deterministic 快路：严格受限的纯算术使用本地 calculator，0 次模型调用；任何不匹配输入回退 Agent Loop。因此 Intent Pick 只标记为 `connected`，不是通用意图分类器。Information Resolution 的含义固定为同一信息的 L0 Abstract → L1 Overview → L2 Detail/Evidence 渐进展开；Knowledge 已可沿固定 document/digest 分页展开 L2，但通用 L0/L1 materialized views 尚未完成。Information Gain 表示已有信息上的边际任务价值，不能把相似度直接冒充 Gain；Information Delta 只记录 added/updated/removed/conflicted 的变化事实。
+在进入昂贵 Agent Loop 前，Turn admission 先固定 retrieval evidence，再做保守 Intent Pick。严格受限纯算术走 deterministic；显式资料/出处请求或强本地 lexical match 可走 `local_retrieval`；其余稳定回退 Agent Loop。Route 只选择处理策略，不授予 Ticket。随后 RuleResolutionController 在同一固定 source/digest 上选择 L0 Abstract、L1 Overview/Navigation 或 L2 Detail/Evidence，并把 route、resolution、retrieval diagnostics 固定进 Turn Snapshot、Event 与 Context Report。Information Gain 仍表示边际任务价值，不把 similarity/confidence 冒充 Gain；Information Delta 仍只记录 added/updated/removed/conflicted 变化事实。
 
 代码中的 `MythComponents` 只负责装配和架构快照，不是执行 Kernel。`MythKernel` 仅作为 v0.6-v0.8 兼容别名保留。真正的执行事实仍由 `MythRuntime` / repositories / execution adapters 管理。
+
+## Evaluation loop
+
+v0.13 新增可执行 `FoundationEvalRunner`：版本化 EvalSuite 加载后，在隔离临时 Runtime 中调用真实 Myth 组件，产生逐 case `EvalObservation`，汇总为 `EvalReport`，最后经过 `release_gate`。`foundation-v1` 作为历史固定基线保留，`foundation-v2` 增加 local retrieval 与 Resolution admission 案例。Runner 不拥有 promotion 权限；Evolution 仍必须显式 promote/rollback。
 
 ## Personal-Agent foundation
 

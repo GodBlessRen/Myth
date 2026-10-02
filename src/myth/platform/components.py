@@ -165,8 +165,8 @@ DOMAINS: tuple[ArchitectureItem, ...] = (
         "evaluation",
         "Evaluation / 评测",
         "domain",
-        Maturity.EXISTS,
-        "Versioned case/observation/verdict contracts and a fixed foundation suite gate quality/safety before optimization.",
+        Maturity.USABLE,
+        "Versioned case/observation/verdict contracts plus an executable isolated foundation suite and release gate; no automatic policy promotion.",
         ("observability",),
     ),
     ArchitectureItem(
@@ -245,7 +245,7 @@ class MythComponents:
             for spec in self.strategies.list()
         ]
         return {
-            "version": "0.12-retrieval-eval",
+            "version": "0.13-eval-routing",
             "shape": "core-domains-strategies-adapters",
             "principle": "fix facts and boundaries; keep intelligence organization pluggable",
             "core": [item.as_dict() for item in CORE],

@@ -70,7 +70,7 @@ class InformationSemanticsTests(unittest.TestCase):
     def test_information_strategy_maturity_matches_connected_paths(self):
         registry = default_strategies()
         self.assertEqual(registry.get("intent_pick").state, StrategyState.CONNECTED)
-        self.assertEqual(registry.get("information_resolution").state, StrategyState.EXISTS)
+        self.assertEqual(registry.get("information_resolution").state, StrategyState.CONNECTED)
         self.assertEqual(registry.get("information_gain").state, StrategyState.EXISTS)
 
 

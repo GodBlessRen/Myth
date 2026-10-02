@@ -48,19 +48,15 @@ class LocalConversationExecution:
                 "result":result,
             })
         if step == 1 and not activities:
-            user_text = turn["snapshot"]["messages"][-1]["content"]
-            pick = self.intent_picker.pick(user_text, {
-                "project": turn["snapshot"].get("project"),
-                "attached_document_ids": turn["snapshot"].get("attached_document_ids") or [],
-            })
-            metadata = pick.metadata or {}
-            if pick.route.value == "deterministic" and metadata.get("kind") == "bounded_arithmetic":
+            frozen_pick = turn["snapshot"].get("intent_pick") or {}
+            metadata = frozen_pick.get("metadata") or {}
+            if frozen_pick.get("route") == "deterministic" and metadata.get("kind") == "bounded_arithmetic":
                 expression = metadata["expression"]
                 value = calculate(expression)
                 decision_id = f"intent:{turn['run_id']}:{step}:arithmetic"
                 return decision_id, StepDecision(
                     decision_type="request_completion",
-                    reason=pick.reason or "deterministic intent route",
+                    reason=frozen_pick.get("reason") or "deterministic intent route",
                     claim=str(value),
                     goal_coverage="answer",
                 )
