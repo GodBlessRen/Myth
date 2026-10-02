@@ -289,11 +289,11 @@ class ConversationWebService:
         if len(parts)==2 and parts[0]=="sessions":return self.session(parts[1])
         if len(parts)==2 and parts[0]=="documents":return self._use("document",parts[1])
         if parts==["search"]:
-            return {"sources":self._use(
-                "search",
+            return self._use(
+                "search_report",
                 query.get("q",[""])[0],
                 query.get("project_id",[None])[0],
-            )}
+            )
         if len(parts)==3 and parts[0]=="projects" and parts[2]=="files":
             return self.project_files(parts[1],query.get("path",["."])[0])
         raise KeyError("endpoint")
