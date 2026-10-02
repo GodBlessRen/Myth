@@ -30,6 +30,21 @@ class EvalCase:
 
 
 @dataclass(frozen=True)
+class EvalSuite:
+    suite_id: str
+    version: int
+    principle: str
+    cases: tuple[EvalCase, ...]
+
+    def __post_init__(self) -> None:
+        if not self.suite_id.strip() or self.version < 1:
+            raise ValueError("eval suite id/version are required")
+        ids=[case.case_id for case in self.cases]
+        if len(ids) != len(set(ids)):
+            raise ValueError("eval suite contains duplicate case ids")
+
+
+@dataclass(frozen=True)
 class EvalObservation:
     case_id: str
     verdict: EvalVerdict
@@ -64,26 +79,31 @@ class EvalReport:
 
 
 
-def load_eval_cases(path: str | Path) -> tuple[EvalCase, ...]:
+def load_eval_suite(path: str | Path) -> EvalSuite:
     value=json.loads(Path(path).read_text(encoding="utf-8"))
     if not isinstance(value,dict) or not isinstance(value.get("cases"),list):
         raise ValueError("eval suite must contain a cases array")
     cases=[]
-    seen=set()
     for raw in value["cases"]:
         if not isinstance(raw,dict):
             raise ValueError("eval case must be an object")
-        case=EvalCase(
+        cases.append(EvalCase(
             case_id=str(raw.get("case_id") or ""),
             category=str(raw.get("category") or ""),
             input=dict(raw.get("input") or {}),
             expected=dict(raw.get("expected") or {}),
             safety_critical=bool(raw.get("safety_critical",False)),
-        )
-        if case.case_id in seen:
-            raise ValueError(f"duplicate eval case: {case.case_id}")
-        seen.add(case.case_id);cases.append(case)
-    return tuple(cases)
+        ))
+    return EvalSuite(
+        suite_id=str(value.get("suite_id") or ""),
+        version=int(value.get("version") or 0),
+        principle=str(value.get("principle") or ""),
+        cases=tuple(cases),
+    )
+
+
+def load_eval_cases(path: str | Path) -> tuple[EvalCase, ...]:
+    return load_eval_suite(path).cases
 
 
 def summarize_observations(
