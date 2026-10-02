@@ -63,8 +63,8 @@ def default_strategies() -> StrategyRegistry:
         StrategySpec(
             "intent_pick",
             "Intent Pick",
-            StrategyState.EXISTS,
-            "Pick the cheapest useful processing path before expensive reasoning; implementation may be rule/Jev/small-model/LLM/cascade.",
+            StrategyState.CONNECTED,
+            "Conservative rule baseline is connected for strict bounded arithmetic; all unmatched input falls back to the Agent Loop. Future implementations may use Jev/small-model/LLM/cascade.",
         ),
         StrategySpec(
             "information_resolution",
