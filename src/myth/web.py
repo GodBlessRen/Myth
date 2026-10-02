@@ -179,7 +179,7 @@ def _json_bytes(value: Any) -> bytes:
 
 def make_handler(service: AgentWebService):
     class Handler(BaseHTTPRequestHandler):
-        server_version = "MythWeb/0.12"
+        server_version = "MythWeb/0.13"
 
         def log_message(self, format: str, *args: object) -> None:
             # Keep local logs useful while avoiding request bodies and credentials.
