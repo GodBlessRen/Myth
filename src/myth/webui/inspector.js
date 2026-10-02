@@ -87,6 +87,15 @@ function renderInspectorTokens(turn){
   inspectorFact(box,"Context window",turn.settings?.num_ctx?turn.settings.num_ctx+" tokens":"provider-managed");
   inspectorFact(box,"Input settled",Number(input.settled||0).toLocaleString());
   inspectorFact(box,"Output settled",Number(output.settled||0).toLocaleString());
+  const modelUsage=turn.model_usage||{};
+  if(modelUsage.cache_metrics_available){
+    const inputTotal=Number(modelUsage.input_tokens||0);
+    const cached=Number(modelUsage.cached_input_tokens||0);
+    const rate=modelUsage.cache_hit_rate==null?"N/A":(Number(modelUsage.cache_hit_rate)*100).toFixed(1)+"%";
+    inspectorFact(box,"Cache hit",rate+" · "+cached.toLocaleString()+" / "+inputTotal.toLocaleString());
+  }else{
+    inspectorFact(box,"Cache hit","N/A · provider not reported");
+  }
   inspectorFact(box,"Model calls",Number(calls.settled||0)+" / "+Number(calls.limit_units||0));
   if(Number(input.unknown_held||0)||Number(output.unknown_held||0))inspectorFact(box,"Unknown held",Number(input.unknown_held||0)+" in · "+Number(output.unknown_held||0)+" out");
 }
