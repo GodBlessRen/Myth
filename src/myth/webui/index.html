@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Myth — Durable Agent Runtime</title>
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <div class="paper-noise" aria-hidden="true"></div>
+  <div class="app-shell">
+    <aside class="rail">
+      <div class="brand-row">
+        <div class="mark" aria-hidden="true"><span></span></div>
+        <div>
+          <div class="brand">myth</div>
+          <div class="micro">DURABLE AGENT RUNTIME</div>
+        </div>
+      </div>
+
+      <button id="newRun" class="new-run">
+        <span>＋</span><span>新建任务</span>
+      </button>
+
+      <div class="rail-label">RUNS</div>
+      <div id="runList" class="run-list"></div>
+
+      <div class="rail-foot">
+        <div><span class="live-dot"></span> LOCAL / PRIVATE</div>
+        <div class="micro">127.0.0.1 · no cloud UI</div>
+      </div>
+    </aside>
+
+    <main class="workspace">
+      <header class="topbar">
+        <div class="run-heading">
+          <span id="runKicker" class="kicker">NEW RUN</span>
+          <h1 id="runTitle">把意图变成可验证的执行。</h1>
+        </div>
+        <div class="top-actions">
+          <div id="providerState" class="provider-pill"><span></span> 未检查</div>
+          <button id="toggleConfig" class="icon-btn" title="模型与运行设置">⌘</button>
+        </div>
+      </header>
+
+      <section id="configPanel" class="config-panel">
+        <div class="field wide">
+          <label>Provider</label>
+          <select id="provider">
+            <option value="ollama">Ollama · Local</option>
+            <option value="pi-openai">ChatGPT OAuth · via Pi</option>
+            <option value="openai">OpenAI API Key</option>
+          </select>
+        </div>
+        <div class="field wide">
+          <label>Model</label>
+          <input id="model" placeholder="例如 qwen3:8b / gpt-5.6-sol">
+        </div>
+        <div class="field">
+          <label>Max steps</label>
+          <input id="maxSteps" type="number" min="2" max="24" value="6">
+        </div>
+        <div class="field">
+          <label>Output tokens</label>
+          <input id="maxTokens" type="number" min="64" max="32768" value="1024">
+        </div>
+        <div class="field">
+          <label>Thinking</label>
+          <select id="thinking">
+            <option value="">default</option>
+            <option value="low">low</option>
+            <option value="medium">medium</option>
+            <option value="high">high</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Ollama URL</label>
+          <input id="ollamaUrl" value="http://127.0.0.1:11434">
+        </div>
+        <div class="field span-2">
+          <label>Allowed files · 每行一个本地文件路径</label>
+          <textarea id="files" rows="2" placeholder="D:\project\example.txt"></textarea>
+        </div>
+        <div class="config-actions">
+          <button id="checkProvider" class="ghost-btn">检查 Provider</button>
+          <span id="providerDetail" class="micro"></span>
+        </div>
+      </section>
+
+      <section id="emptyState" class="empty-state">
+        <div class="folio">P3 / AGENT</div>
+        <div class="empty-copy">
+          <p class="eyebrow">PROPOSAL → AUTHORITY → EVIDENCE</p>
+          <h2>模型负责提出下一步，<br>Runtime 负责让事实留下来。</h2>
+          <p>
+            选择本地 Ollama、OpenAI API，或通过 Pi 的 ChatGPT OAuth。
+            明确允许访问的文件后，Myth 才会让 Agent 真正执行。
+          </p>
+        </div>
+        <div class="principles">
+          <div><b>01</b><span>LLM 不拥有执行权</span></div>
+          <div><b>02</b><span>Ticket 不是成功</span></div>
+          <div><b>03</b><span>Receipt 才是事实</span></div>
+        </div>
+      </section>
+
+      <section id="timeline" class="timeline hidden" aria-live="polite"></section>
+
+      <footer class="composer-wrap">
+        <div id="waitingBanner" class="waiting-banner hidden"></div>
+        <div class="composer">
+          <textarea id="prompt" rows="1" placeholder="给 Myth 一个明确、可验证的任务…"></textarea>
+          <button id="send" class="send-btn" title="运行">↑</button>
+        </div>
+        <div class="composer-meta">
+          <span id="modeHint">Enter 运行 · Shift+Enter 换行</span>
+          <span>模型输出永远只是 Proposal</span>
+        </div>
+      </footer>
+    </main>
+
+    <aside class="inspector">
+      <div class="inspector-head">
+        <div>
+          <div class="rail-label">RUNTIME EVIDENCE</div>
+          <h3>Execution Ledger</h3>
+        </div>
+        <span id="stateBadge" class="state-badge">IDLE</span>
+      </div>
+
+      <section class="metric-block">
+        <div class="section-title">BUDGET</div>
+        <div id="budgets" class="budgets empty-mini">No active run</div>
+      </section>
+
+      <section class="metric-block">
+        <div class="section-title">LATEST FACTS</div>
+        <div id="facts" class="facts empty-mini">Ticket / Receipt / Verification will appear here.</div>
+      </section>
+
+      <section class="metric-block grow">
+        <div class="section-title">EVENT STREAM</div>
+        <div id="events" class="events empty-mini">No events yet.</div>
+      </section>
+
+      <div class="inspector-foot">
+        <span class="hairline"></span>
+        <p>Evidence first. Unknown stays unknown.</p>
+      </div>
+    </aside>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+  <script src="/app.js"></script>
+</body>
+</html>
