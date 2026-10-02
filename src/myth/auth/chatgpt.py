@@ -102,20 +102,31 @@ class KeyringCredentialStore:
             numeric_priority = float(priority)
         except (TypeError, ValueError):
             numeric_priority = 0.0
+        secure_backend = any(
+            marker in identity
+            for marker in ("windows", "macos", "secretservice", "kwallet", "libsecret")
+        )
         if (
             numeric_priority <= 0
+            or not secure_backend
             or "fail" in identity
             or "plaintext" in identity
             or "null" in identity
+            or "chainer" in identity
         ):
             raise CredentialStoreUnavailable(
-                "No secure OS credential store is available. "
-                "Configure Windows Credential Manager, macOS Keychain, or a secure Secret Service backend."
+                "No directly selected secure OS credential store is available. "
+                "Configure Windows Credential Manager, macOS Keychain, Secret Service, or KWallet explicitly."
             )
         return backend
 
     def load(self, profile_id: str) -> dict[str, Any] | None:
-        raw = self._backend().get_password(self.service, profile_id)
+        try:
+            raw = self._backend().get_password(self.service, profile_id)
+        except CredentialStoreUnavailable:
+            raise
+        except Exception as exc:
+            raise CredentialStoreUnavailable("The OS credential store could not be read.") from exc
         if raw is None:
             return None
         try:
@@ -127,17 +138,26 @@ class KeyringCredentialStore:
         return value
 
     def save(self, profile_id: str, value: dict[str, Any]) -> None:
-        self._backend().set_password(
-            self.service,
-            profile_id,
-            json.dumps(value, ensure_ascii=False, separators=(",", ":")),
-        )
+        try:
+            self._backend().set_password(
+                self.service,
+                profile_id,
+                json.dumps(value, ensure_ascii=False, separators=(",", ":")),
+            )
+        except CredentialStoreUnavailable:
+            raise
+        except Exception as exc:
+            raise CredentialStoreUnavailable("The OS credential store could not save ChatGPT credentials.") from exc
 
     def delete(self, profile_id: str) -> None:
         try:
             self._backend().delete_password(self.service, profile_id)
         except PasswordDeleteError:
             pass
+        except CredentialStoreUnavailable:
+            raise
+        except Exception as exc:
+            raise CredentialStoreUnavailable("The OS credential store could not delete ChatGPT credentials.") from exc
 
 
 @dataclass(frozen=True)
@@ -540,15 +560,17 @@ class ChatGPTAuthManager:
         except error.HTTPError as exc:
             raw = exc.read()
             code = "oauth_rejected"
-            description = "OAuth endpoint rejected the request."
             try:
                 payload = json.loads(raw.decode("utf-8"))
-                if isinstance(payload, dict):
-                    code = str(payload.get("error") or code)
-                    description = str(payload.get("error_description") or payload.get("message") or description)
+                if isinstance(payload, dict) and isinstance(payload.get("error"), str):
+                    code = payload["error"][:80]
             except Exception:
                 pass
-            raise OAuthRejected(code, description[:300], status=exc.code) from exc
+            raise OAuthRejected(
+                code,
+                f"OAuth endpoint rejected the request ({exc.code}, {code}).",
+                status=exc.code,
+            ) from exc
         except error.URLError as exc:
             raise ChatGPTOAuthError("OAuth endpoint could not be reached.") from exc
         try:
