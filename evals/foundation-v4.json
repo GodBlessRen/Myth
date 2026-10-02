@@ -1,0 +1,592 @@
+{
+  "suite_id": "myth-foundation-v4",
+  "version": 4,
+  "principle": "quality and runtime safety before cost optimization",
+  "cases": [
+    {
+      "case_id": "intent-arithmetic-local",
+      "category": "intent",
+      "input": {
+        "text": "计算 2+3*4"
+      },
+      "expected": {
+        "route": "deterministic",
+        "answer": "14",
+        "model_calls": 0
+      }
+    },
+    {
+      "case_id": "intent-ambiguous-fallback",
+      "category": "intent",
+      "input": {
+        "text": "帮我分析这个计划"
+      },
+      "expected": {
+        "route": "agent"
+      }
+    },
+    {
+      "case_id": "knowledge-late-candidate",
+      "category": "retrieval",
+      "input": {
+        "query": "AFTER-CUTOFF-77",
+        "candidate_position": 10002
+      },
+      "expected": {
+        "found": true,
+        "truncated_before_ranking": false
+      }
+    },
+    {
+      "case_id": "memory-late-candidate",
+      "category": "memory",
+      "input": {
+        "query": "AFTER-MEMORY-500",
+        "candidate_position": 506
+      },
+      "expected": {
+        "found": true,
+        "truncated_before_ranking": false
+      }
+    },
+    {
+      "case_id": "knowledge-resolution-provenance",
+      "category": "information_resolution",
+      "input": {
+        "levels": [
+          "L0",
+          "L1",
+          "L2"
+        ]
+      },
+      "expected": {
+        "same_source_ref": true,
+        "same_digest": true
+      }
+    },
+    {
+      "case_id": "project-search-continuation",
+      "category": "project_search",
+      "input": {
+        "max_files": 1
+      },
+      "expected": {
+        "cursor_continuation": true,
+        "coverage_reported": true
+      }
+    },
+    {
+      "case_id": "control-revision-concurrency",
+      "category": "runtime_safety",
+      "input": {
+        "concurrent_commands": 2
+      },
+      "expected": {
+        "durable_revisions": [
+          2,
+          3
+        ]
+      },
+      "safety_critical": true
+    },
+    {
+      "case_id": "unknown-no-blind-replay",
+      "category": "runtime_safety",
+      "input": {
+        "unknown_external_result": true
+      },
+      "expected": {
+        "redispatch": false
+      },
+      "safety_critical": true
+    },
+    {
+      "case_id": "intent-local-retrieval-explicit",
+      "category": "intent",
+      "input": {
+        "text": "根据资料，SILVER-92 的发布时间是什么？",
+        "document": "Myth 的交付代号是 SILVER-92，发布时间是周五。"
+      },
+      "expected": {
+        "route": "local_retrieval",
+        "resolution": "L1"
+      }
+    },
+    {
+      "case_id": "resolution-attached-l2",
+      "category": "information_resolution",
+      "input": {
+        "attachments": 4,
+        "text": "请详细阅读这些附件原文并给出处。"
+      },
+      "expected": {
+        "route": "local_retrieval",
+        "resolution": "L2",
+        "all_attachments_preserved": true
+      }
+    },
+    {
+      "case_id": "resolution-agent-l0",
+      "category": "information_resolution",
+      "input": {
+        "text": "帮我分析一个新的产品方案。"
+      },
+      "expected": {
+        "route": "agent",
+        "resolution": "L0"
+      }
+    },
+    {
+      "case_id": "resolution-marker-presence",
+      "category": "information_gain",
+      "input": {
+        "marker": "GAIN-MARKER-42",
+        "prefix": "x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x ",
+        "suffix": " tail"
+      },
+      "expected": {
+        "marker_visible": true
+      }
+    },
+    {
+      "case_id": "intent-adv-date-iso",
+      "category": "intent_adversarial",
+      "input": {
+        "text": "2024-10-03",
+        "sources": []
+      },
+      "expected": {
+        "route": "agent"
+      }
+    },
+    {
+      "case_id": "intent-adv-date-slash",
+      "category": "intent_adversarial",
+      "input": {
+        "text": "12/31",
+        "sources": []
+      },
+      "expected": {
+        "route": "agent"
+      }
+    },
+    {
+      "case_id": "intent-adv-percent",
+      "category": "intent_adversarial",
+      "input": {
+        "text": "100%",
+        "sources": []
+      },
+      "expected": {
+        "route": "agent"
+      }
+    },
+    {
+      "case_id": "intent-adv-version",
+      "category": "intent_adversarial",
+      "input": {
+        "text": "3.12-1",
+        "sources": []
+      },
+      "expected": {
+        "route": "agent"
+      }
+    },
+    {
+      "case_id": "intent-adv-phone",
+      "category": "intent_adversarial",
+      "input": {
+        "text": "650-555-1212",
+        "sources": []
+      },
+      "expected": {
+        "route": "agent"
+      }
+    },
+    {
+      "case_id": "intent-adv-fraction",
+      "category": "intent_adversarial",
+      "input": {
+        "text": "1/2",
+        "sources": []
+      },
+      "expected": {
+        "route": "agent"
+      }
+    },
+    {
+      "case_id": "intent-adv-negative-version",
+      "category": "intent_adversarial",
+      "input": {
+        "text": "2.0-rc1",
+        "sources": []
+      },
+      "expected": {
+        "route": "agent"
+      }
+    },
+    {
+      "case_id": "intent-adv-timeish",
+      "category": "intent_adversarial",
+      "input": {
+        "text": "10-30",
+        "sources": []
+      },
+      "expected": {
+        "route": "agent"
+      }
+    },
+    {
+      "case_id": "intent-adv-source-code",
+      "category": "intent_adversarial",
+      "input": {
+        "text": "帮我看下 source code 怎么写",
+        "sources": [
+          {
+            "score": 0.1,
+            "content": "unrelated"
+          }
+        ]
+      },
+      "expected": {
+        "route": "agent"
+      }
+    },
+    {
+      "case_id": "intent-adv-doc-writing",
+      "category": "intent_adversarial",
+      "input": {
+        "text": "文档怎么写比较好",
+        "sources": [
+          {
+            "score": 0.2,
+            "content": "unrelated"
+          }
+        ]
+      },
+      "expected": {
+        "route": "agent"
+      }
+    },
+    {
+      "case_id": "intent-adv-docs-style",
+      "category": "intent_adversarial",
+      "input": {
+        "text": "docs 的排版建议是什么",
+        "sources": [
+          {
+            "score": 0,
+            "content": "unrelated"
+          }
+        ]
+      },
+      "expected": {
+        "route": "agent"
+      }
+    },
+    {
+      "case_id": "intent-adv-evidence-word",
+      "category": "intent_adversarial",
+      "input": {
+        "text": "evidence 这个词是什么意思",
+        "sources": [
+          {
+            "score": 0,
+            "content": "unrelated"
+          }
+        ]
+      },
+      "expected": {
+        "route": "agent"
+      }
+    },
+    {
+      "case_id": "intent-adv-material-word",
+      "category": "intent_adversarial",
+      "input": {
+        "text": "资料结构怎么设计",
+        "sources": [
+          {
+            "score": 0.4,
+            "content": "unrelated"
+          }
+        ]
+      },
+      "expected": {
+        "route": "agent"
+      }
+    },
+    {
+      "case_id": "intent-adv-plus",
+      "category": "intent_adversarial",
+      "input": {
+        "text": "2+3",
+        "sources": []
+      },
+      "expected": {
+        "route": "deterministic"
+      }
+    },
+    {
+      "case_id": "intent-adv-times",
+      "category": "intent_adversarial",
+      "input": {
+        "text": "6*7",
+        "sources": []
+      },
+      "expected": {
+        "route": "deterministic"
+      }
+    },
+    {
+      "case_id": "intent-adv-paren",
+      "category": "intent_adversarial",
+      "input": {
+        "text": "(18+2)*7/2",
+        "sources": []
+      },
+      "expected": {
+        "route": "deterministic"
+      }
+    },
+    {
+      "case_id": "intent-adv-prefixed-minus",
+      "category": "intent_adversarial",
+      "input": {
+        "text": "计算 2024-10-03",
+        "sources": []
+      },
+      "expected": {
+        "route": "deterministic"
+      }
+    },
+    {
+      "case_id": "intent-adv-prefixed-div",
+      "category": "intent_adversarial",
+      "input": {
+        "text": "算一下 12/31",
+        "sources": []
+      },
+      "expected": {
+        "route": "deterministic"
+      }
+    },
+    {
+      "case_id": "intent-adv-prefixed-mod",
+      "category": "intent_adversarial",
+      "input": {
+        "text": "calc 10%3",
+        "sources": []
+      },
+      "expected": {
+        "route": "deterministic"
+      }
+    },
+    {
+      "case_id": "intent-adv-prefixed-percent-tail",
+      "category": "intent_adversarial",
+      "input": {
+        "text": "计算 100%",
+        "sources": []
+      },
+      "expected": {
+        "route": "agent"
+      }
+    },
+    {
+      "case_id": "intent-adv-strong-kb",
+      "category": "intent_adversarial",
+      "input": {
+        "text": "请从知识库找答案",
+        "sources": [
+          {
+            "score": 0,
+            "content": "x"
+          }
+        ]
+      },
+      "expected": {
+        "route": "local_retrieval"
+      }
+    },
+    {
+      "case_id": "intent-adv-strong-attachment",
+      "category": "intent_adversarial",
+      "input": {
+        "text": "请查看附件并总结",
+        "sources": [
+          {
+            "score": 0,
+            "content": "x"
+          }
+        ]
+      },
+      "expected": {
+        "route": "local_retrieval"
+      }
+    },
+    {
+      "case_id": "intent-adv-strong-source",
+      "category": "intent_adversarial",
+      "input": {
+        "text": "请给出原文出处",
+        "sources": [
+          {
+            "score": 0,
+            "content": "x"
+          }
+        ]
+      },
+      "expected": {
+        "route": "local_retrieval"
+      }
+    },
+    {
+      "case_id": "intent-adv-according-material",
+      "category": "intent_adversarial",
+      "input": {
+        "text": "根据资料回答这个问题",
+        "sources": [
+          {
+            "score": 0,
+            "content": "x"
+          }
+        ]
+      },
+      "expected": {
+        "route": "local_retrieval"
+      }
+    },
+    {
+      "case_id": "intent-adv-weak-strong-score",
+      "category": "intent_adversarial",
+      "input": {
+        "text": "帮我看文档里的接口",
+        "sources": [
+          {
+            "score": 1.5,
+            "content": "api"
+          }
+        ]
+      },
+      "expected": {
+        "route": "local_retrieval"
+      }
+    },
+    {
+      "case_id": "intent-adv-no-cue-strong-score",
+      "category": "intent_adversarial",
+      "input": {
+        "text": "SILVER-92 发布时间",
+        "sources": [
+          {
+            "score": 1.8,
+            "content": "SILVER-92"
+          }
+        ]
+      },
+      "expected": {
+        "route": "local_retrieval"
+      }
+    },
+    {
+      "case_id": "intent-adv-no-source",
+      "category": "intent_adversarial",
+      "input": {
+        "text": "请查一下知识库",
+        "sources": []
+      },
+      "expected": {
+        "route": "agent"
+      }
+    },
+    {
+      "case_id": "intent-adv-empty",
+      "category": "intent_adversarial",
+      "input": {
+        "text": "hello world",
+        "sources": []
+      },
+      "expected": {
+        "route": "agent"
+      }
+    },
+    {
+      "case_id": "intent-adv-decimal",
+      "category": "intent_adversarial",
+      "input": {
+        "text": "3.1415",
+        "sources": []
+      },
+      "expected": {
+        "route": "agent"
+      }
+    },
+    {
+      "case_id": "intent-adv-scientific",
+      "category": "intent_adversarial",
+      "input": {
+        "text": "1e3",
+        "sources": []
+      },
+      "expected": {
+        "route": "agent"
+      }
+    },
+    {
+      "case_id": "intent-adv-prefixed-scientific",
+      "category": "intent_adversarial",
+      "input": {
+        "text": "计算 1e3+2",
+        "sources": []
+      },
+      "expected": {
+        "route": "deterministic"
+      }
+    },
+    {
+      "case_id": "intent-adv-double-minus",
+      "category": "intent_adversarial",
+      "input": {
+        "text": "5--2",
+        "sources": []
+      },
+      "expected": {
+        "route": "deterministic"
+      }
+    },
+    {
+      "case_id": "intent-adv-power",
+      "category": "intent_adversarial",
+      "input": {
+        "text": "2**8",
+        "sources": []
+      },
+      "expected": {
+        "route": "deterministic"
+      }
+    },
+    {
+      "case_id": "intent-adv-pathlike",
+      "category": "intent_adversarial",
+      "input": {
+        "text": "2026/10/03",
+        "sources": []
+      },
+      "expected": {
+        "route": "agent"
+      }
+    },
+    {
+      "case_id": "intent-adv-semver",
+      "category": "intent_adversarial",
+      "input": {
+        "text": "1.2.3",
+        "sources": []
+      },
+      "expected": {
+        "route": "agent"
+      }
+    }
+  ]
+}
