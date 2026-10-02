@@ -552,7 +552,7 @@
         "sources": []
       },
       "expected": {
-        "route": "deterministic"
+        "route": "agent"
       }
     },
     {
@@ -586,6 +586,17 @@
       },
       "expected": {
         "route": "agent"
+      }
+    },
+    {
+      "case_id": "intent-adv-prefixed-double-minus",
+      "category": "intent_adversarial",
+      "input": {
+        "text": "计算 5--2",
+        "sources": []
+      },
+      "expected": {
+        "route": "deterministic"
       }
     }
   ]
