@@ -161,7 +161,7 @@ class SqliteWorkspaceRepository:
         rows=self.store.db.execute("SELECT c.*,d.title,d.digest FROM workspace_chunks c JOIN workspace_documents d ON d.id=c.document_id WHERE d.archived=0 AND (d.project_id IS NULL OR d.project_id=?) LIMIT 10000",(project_id,)).fetchall()
         return rank_chunks(query,[dict(r) for r in rows],limit)
 
-    def create_turn(self,sid,text,request_id,document_ids=None,memory_records=None):
+    def create_turn(self,sid,text,request_id,document_ids=None,memory_records=None,goal_id=None):
         if not isinstance(text,str) or not text.strip() or len(text.encode("utf-8"))>16000:raise ValueError("message must contain 1-16000 UTF-8 bytes")
         if not isinstance(request_id,str) or not 1<=len(request_id)<=200:raise ValueError("request_id is required")
         settings=self.settings()
@@ -172,7 +172,7 @@ class SqliteWorkspaceRepository:
         # Request identity binds caller intent + fixed user-selected settings/attachments.
         # Retrieved Memory is an execution snapshot derived after admission; changing
         # ambient memory must not break idempotent retries of the same request_id.
-        identity=digest_json({"session_id":sid,"text":text,"settings":settings,"documents":document_ids})
+        identity=digest_json({"session_id":sid,"text":text,"settings":settings,"documents":document_ids,"goal_id":goal_id})
         with self.store.tx() as db:
             existing=db.execute("SELECT run_id,entry_digest FROM workspace_turns WHERE request_id=?",(request_id,)).fetchone()
             if existing:
