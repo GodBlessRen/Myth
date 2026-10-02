@@ -2,6 +2,8 @@
 
 **Durable Runtime 打底、Agent Product 向上生长的本地 Agent 平台。**
 
+v0.17 转入 **Correctness / Provider Hardening**：冻结横向架构扩张，先修真实链路。Intent 快路新增 36 条对抗 case，日期/版本/分数/百分比与弱 `source/docs/文档/资料` cue 不再误直通；deterministic calculator 拒绝时记录 `RouteFallback` 并回退 Agent。Ollama 显式携带 `num_ctx` / temperature / keep_alive，本地上下文预算由窗口推导；`prompt_eval_count` 触顶被记录为已知 FAILED receipt，网络结果不明仍保持 UNKNOWN。
+
 v0.15 完成 **Evidence-driven Evolution Control Plane**：新增不可变版本化 Cost Model Registry、跨 case Gain Calibration Matrix、durable Policy Candidate Registry，以及显式 Promote / Rollback。Candidate 必须用同一 suite/version 的**完整** baseline/candidate 评测通过 Release Gate 与 Calibration Gate；局部 case 只能研究，不能发布。Active Policy 是持久指针，只在未来 Workspace/Turn admission 读取，并把 policy_id 固定进 Turn Snapshot；已运行/已创建 Turn 永不被后续 Promote 或 Rollback 改写。
 
 v0.14 把 **Information Gain** 从概念推进到可审计的离线校准链：Eval 结果可写入本地 SQLite Ledger，baseline/candidate 必须在同一 suite/version、同一 case/comparison key 上成对比较；质量增益只来自真实 Verdict 差异，成本默认保留为 token/latency/tool/context 等向量，只有调用者显式声明非负权重时才计算 `gain_per_cost`。策略通过 Workspace composition root 注入，候选 Resolution policy 可离线评测但不会修改生产默认。新增 `foundation-v3` 的 resolution marker case，以及 `eval-history` / `eval-compare` / `gain` CLI。
@@ -39,7 +41,7 @@ Windows 在仓库目录运行：
 .\start-myth.ps1
 ```
 
-打开 `http://127.0.0.1:8765/`。一般对话先启动本机 Ollama；页面自动检测 `http://127.0.0.1:11434` 并选择一个已安装模型，也可在「模型与设置」改地址、模型和本轮限制。严格受限的本地算术 Intent 快路不需要模型连接。Myth 不自动下载模型，不保存 API 密钥。
+打开 `http://127.0.0.1:8765/`。一般对话先启动本机 Ollama；页面自动检测 `http://127.0.0.1:11434` 并选择一个已安装模型，也可在「模型与设置」改地址、模型、`num_ctx`、temperature 和本轮限制。严格受限的本地算术 Intent 快路不需要模型连接。Myth 不自动下载模型，不保存 API 密钥。
 
 源码入口无需安装：
 
