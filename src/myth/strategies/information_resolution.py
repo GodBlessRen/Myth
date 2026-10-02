@@ -57,7 +57,7 @@ class RuleResolutionController:
         if attached_document_ids:
             return ResolutionPlan(
                 InformationResolution.L2,
-                2,
+                max(2,len(attached_document_ids)),
                 6000,
                 "explicitly attached documents deserve detailed source projection",
             )
