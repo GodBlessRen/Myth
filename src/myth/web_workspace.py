@@ -12,6 +12,7 @@ from .providers import create_provider
 from .providers.ollama import OllamaProvider
 from .platform.control import ControlCommand
 from .strategies import RuleIntentPicker
+from .goal_scheduler import GoalScheduler
 
 
 class ConversationWebService:
@@ -22,6 +23,53 @@ class ConversationWebService:
         self.driver_id=f"web-{uuid.uuid4().hex}"
         self.driver_ttl=6.0
         self.heartbeat_interval=2.0
+        self.scheduler_stop=threading.Event()
+        self.scheduler_thread=None
+        self.scheduler_state={"running":False,"last_tick":None,"last_error":None}
+
+    def scheduler_tick(self):
+        with MythRuntime(self.root) as runtime:
+            scheduler=GoalScheduler(Workspace(runtime))
+            pending=scheduler.dispatchable_runs()
+            due=scheduler.due()
+        for rid in pending:
+            with self.lock:
+                if len(self.active)>=4:break
+            self._spawn(rid)
+        for schedule in due:
+            with self.lock:
+                if len(self.active)>=4:break
+            try:
+                check=self.connection(schedule["settings"])
+                if not check["ready"]:
+                    raise ValueError("scheduled provider is not connected")
+                if schedule["settings"]["provider"]=="ollama" and schedule["settings"]["model"] not in check["details"].get("models",[]):
+                    raise ValueError("scheduled model is not installed")
+                with MythRuntime(self.root) as runtime:
+                    rid=GoalScheduler(Workspace(runtime)).admit(schedule["schedule_id"])
+                if rid:self._spawn(rid)
+            except (ValueError,KeyError,PermissionError) as exc:
+                with MythRuntime(self.root) as runtime:
+                    GoalScheduler(Workspace(runtime)).defer(schedule["schedule_id"],str(exc))
+        self.scheduler_state={"running":bool(self.scheduler_thread and self.scheduler_thread.is_alive()),
+                              "last_tick":time.time(),"last_error":None}
+
+    def start_scheduler(self):
+        if self.scheduler_thread and self.scheduler_thread.is_alive():return
+        self.scheduler_stop.clear()
+        def work():
+            while not self.scheduler_stop.is_set():
+                try:self.scheduler_tick()
+                except Exception as exc:
+                    self.scheduler_state={"running":True,"last_tick":time.time(),"last_error":str(exc)[:1000]}
+                self.scheduler_stop.wait(2.0)
+            self.scheduler_state={**self.scheduler_state,"running":False}
+        self.scheduler_thread=threading.Thread(target=work,name="myth-goal-wakeup",daemon=True)
+        self.scheduler_thread.start()
+
+    def stop_scheduler(self):
+        self.scheduler_stop.set()
+        if self.scheduler_thread:self.scheduler_thread.join(timeout=6)
 
     def _use(self,method,*args):
         with MythRuntime(self.root) as runtime:
@@ -55,6 +103,7 @@ class ConversationWebService:
             "goals":self.goals(),
             "goal_count":len(self.goals()),
             "recoverable_runs":self.recoverable_runs(),
+            "scheduler":dict(self.scheduler_state),
         }
 
     def provider(self,settings):
@@ -171,12 +220,16 @@ class ConversationWebService:
         with self.lock:
             if rid in self.active:
                 return
-        with MythRuntime(self.root) as runtime:
-            workspace=Workspace(runtime)
-            if not workspace.repository.claim_driver(rid,owner_id,self.driver_ttl):
-                return
-        with self.lock:
             self.active.add(rid)
+        try:
+            with MythRuntime(self.root) as runtime:
+                claimed=Workspace(runtime).repository.claim_driver(rid,owner_id,self.driver_ttl)
+            if not claimed:
+                with self.lock:self.active.discard(rid)
+                return
+        except BaseException:
+            with self.lock:self.active.discard(rid)
+            raise
 
         stop_heartbeat=threading.Event()
 
@@ -265,15 +318,6 @@ class ConversationWebService:
                 goal_context=goal_context,
             )
             workspace.control.ensure(turn["run_id"],turn["settings"])
-            if goal_id:
-                workspace.personal.bind_run(goal_id,turn["run_id"])
-                workspace.personal.checkpoint_run(
-                    goal_id,
-                    turn["run_id"],
-                    status="RUNNING",
-                    summary="A new admitted Turn has started for this Goal.",
-                    next_action="Let the current Turn reach a durable checkpoint.",
-                )
         if turn["status"]=="RUNNING":self._spawn(turn["run_id"])
         return {"run_id":turn["run_id"],"session_id":sid}
 
@@ -360,11 +404,32 @@ class ConversationWebService:
 
     def goal_runs(self,goal_id):
         with MythRuntime(self.root) as runtime:
-            return Workspace(runtime).personal.runs(goal_id)
+            workspace=Workspace(runtime)
+            runs=workspace.personal.runs(goal_id)
+            for run in runs:
+                row=runtime.store.db.execute("SELECT session_id,status FROM workspace_turns WHERE run_id=?",(run["run_id"],)).fetchone()
+                if row:run.update({"session_id":row["session_id"],"turn_status":row["status"]})
+            return runs
 
     def goal(self,goal_id):
         with MythRuntime(self.root) as runtime:
             return Workspace(runtime).personal.goal_view(goal_id)
+
+    def schedules(self,goal_id=None):
+        with MythRuntime(self.root) as runtime:
+            return GoalScheduler(Workspace(runtime)).list(goal_id)
+
+    def schedule_goal(self,goal_id,value):
+        with MythRuntime(self.root) as runtime:
+            return GoalScheduler(Workspace(runtime)).create(goal_id,value)
+
+    def enable_schedule(self,schedule_id,value):
+        with MythRuntime(self.root) as runtime:
+            return GoalScheduler(Workspace(runtime)).set_enabled(schedule_id,value.get("enabled"))
+
+    def set_goal_state(self,goal_id,value):
+        with MythRuntime(self.root) as runtime:
+            return Workspace(runtime).personal.set_goal_state(goal_id,value.get("state"))
 
     def update_goal_work(self,goal_id,value):
         with MythRuntime(self.root) as runtime:
@@ -444,10 +509,14 @@ class ConversationWebService:
             )}
         if parts==["goals"]:
             return {"goals":self.goals(query.get("archived",["0"])[0]=="1")}
+        if parts==["schedules"]:
+            return {"schedules":self.schedules(),"scheduler":dict(self.scheduler_state)}
         if len(parts)==2 and parts[0]=="goals":
             return self.goal(parts[1])
         if len(parts)==3 and parts[0]=="goals" and parts[2]=="triggers":
             return {"triggers":self.goal_triggers(parts[1])}
+        if len(parts)==3 and parts[0]=="goals" and parts[2]=="schedules":
+            return {"schedules":self.schedules(parts[1])}
         if len(parts)==3 and parts[0]=="goals" and parts[2]=="runs":
             return {"runs":self.goal_runs(parts[1])}
         if parts==["personal-state"]:
@@ -471,6 +540,12 @@ class ConversationWebService:
         if parts==["connection"]:return self.connection(value)
         if parts==["memories"]:return self.remember(value)
         if parts==["goals"]:return self.create_goal(value)
+        if len(parts)==3 and parts[0]=="schedules" and parts[2]=="enabled":
+            return self.enable_schedule(parts[1],value)
+        if len(parts)==3 and parts[0]=="goals" and parts[2]=="state":
+            return self.set_goal_state(parts[1],value)
+        if len(parts)==3 and parts[0]=="goals" and parts[2]=="schedules":
+            return self.schedule_goal(parts[1],value)
         if len(parts)==3 and parts[0]=="goals" and parts[2]=="triggers":
             return self.add_goal_trigger(parts[1],value)
         if len(parts)==3 and parts[0]=="goals" and parts[2]=="work":

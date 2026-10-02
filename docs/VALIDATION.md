@@ -11,6 +11,7 @@ python -m compileall -q src tests
 python -m unittest discover -s tests -v
 node --check src/myth/webui/app.js
 node --check src/myth/webui/inspector.js
+node --check src/myth/webui/goals.js
 ```
 
 根据改动范围增加专项检查：
@@ -20,6 +21,7 @@ node --check src/myth/webui/inspector.js
 - Provider / Context → window / truncation / usage；
 - Auth / OAuth → PKCE/state/nonce、OIDC signature/audience/issuer、secure storage、refresh/revoke、callback log leakage；
 - Goal / Personal → cross-session / restart；
+- Timer / Schedule → atomic admission、跨连接争抢、commit 后进程退出、断连重试、暂停、UNKNOWN no replay；
 - UI → Runtime Observatory surface contract；
 - Evaluation / Evolution → complete-suite release evidence。
 
@@ -58,6 +60,8 @@ node --check src/myth/webui/inspector.js
 
 当前开发主线要求建立真实任务集，而不是继续用单个 happy-path 证明“可用”。
 
+固定日常任务已提供 `evals/daily-v1.json` 和 `myth task-benchmark`。默认包含 Myth 与 simple-loop 两组，每题重复三次；所有试次、失败、产物字节校验和运行数据库都会保存。使用方法见 [TASK_BENCHMARK.md](TASK_BENCHMARK.md)，本次实测见 [archive/VALIDATION_V021.md](archive/VALIDATION_V021.md)。
+
 ## 浏览器验证
 
 至少检查：
@@ -81,7 +85,7 @@ node --check src/myth/webui/inspector.js
 - 分布式 exactly-once；
 - 任意代码 / shell 安全执行；
 - 完整语义验收；
-- 后台 autonomous scheduler；
+- 脱离 Web 服务的系统常驻调度、Webhook/Email 触发；
 - 所有浏览器 / 辅助技术兼容；
 - 多周 Personal Agent 可靠性。
 

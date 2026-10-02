@@ -1,7 +1,7 @@
 """通用对话循环：Control Plane 只在安全点改变未来工作，工具效果仍走持久执行端口。"""
 
 from ..acceptance import ContextBudgetError
-from ..domain import BudgetExceeded, RecoveryRequired
+from ..domain import BudgetExceeded, RecoveryRequired, PatchContractError
 from ..models import StepDecision, DecisionValidationError
 from ..conversation_ports import ConversationRepository, ConversationExecution
 
@@ -51,6 +51,7 @@ class ConversationAgent:
                     "UNKNOWN",
                     "模型或工具已获执行凭证，但结果尚不明确；不会自动重发。",
                 )
+                self._checkpoint_goal(run_id,status="UNKNOWN",summary="Execution receipt is unresolved.",next_action="Reconcile the uncertain attempt before continuing.")
                 return
             self.repository.reopen(run_id)
 
@@ -64,6 +65,7 @@ class ConversationAgent:
                         "BUDGET_EXHAUSTED",
                         "本轮达到步数上限，可开始新一轮继续。",
                     )
+                    self._checkpoint_goal(run_id,status="BUDGET_EXHAUSTED",summary="Turn step budget exhausted.",next_action="Review the unfinished work and admit a new turn.")
                     return
                 try:
                     turn = self.repository.turn(run_id)
@@ -119,7 +121,7 @@ class ConversationAgent:
                     self.repository.block(run_id, "FAILED", str(exc))
                     self._checkpoint_goal(run_id,status="FAILED",summary=str(exc),next_action="Resolve the context-budget blocker before retrying.")
                     return
-                except (DecisionValidationError, ValueError, PermissionError) as exc:
+                except (DecisionValidationError, ValueError, PermissionError, PatchContractError) as exc:
                     self.repository.reject(run_id, step["step"], str(exc))
                 except BudgetExceeded as exc:
                     self.repository.block(run_id, "BUDGET_EXHAUSTED", str(exc))

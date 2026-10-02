@@ -189,6 +189,8 @@ Runtime Observatory 只投影现有事实：
 
 Observatory 不拥有状态，不写业务真相。
 
+定时创建的 Run 在 Goal 区显示 `GoalWakeupAdmitted` 的 schedule ID 和 due time。桌面保持第三栏；窄屏通过顶部 Runtime 按钮打开同一面板，保留 Goal、Flow、Recovery、Trajectory、Tokens/Cache、Context、Tools、Control、Budget。
+
 ## 验收问题
 
 任何 UI 改动完成后，至少能回答：

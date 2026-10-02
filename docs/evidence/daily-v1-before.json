@@ -1,0 +1,2548 @@
+{
+  "suite_id": "daily-v1",
+  "suite_digest": "db96680c9fd2577c5a92f0704e5fb59a8a47fe6dd62772f00a379a1116febc74",
+  "started_at": "2026-10-02T23:11:10.834652+00:00",
+  "provider": "ollama",
+  "model": "openbmb/minicpm5-2b:f16",
+  "settings": {
+    "provider": "ollama",
+    "model": "openbmb/minicpm5-2b:f16",
+    "ollama_url": "http://127.0.0.1:11434",
+    "max_steps": 6,
+    "max_output_tokens": 512,
+    "num_ctx": 8192,
+    "temperature": 0.0,
+    "thinking": false
+  },
+  "repeats": 3,
+  "arms": [
+    "myth",
+    "simple-loop"
+  ],
+  "kind": "real_provider",
+  "oracle_scope": "exact artifact bytes, required tools, answer tokens, unchanged originals; no broad semantic score",
+  "comparison": "intent routing ablation; same durable runtime and tools",
+  "complete_suite": true,
+  "planned_trials": 60,
+  "trials": [
+    {
+      "case_id": "arithmetic",
+      "category": "answer",
+      "arm": "myth",
+      "run_ids": [
+        "run_eb7690e6198b4450b864c361c6540b4e"
+      ],
+      "status": "COMPLETED",
+      "success": true,
+      "checks": {
+        "completed": true,
+        "answer:126": true
+      },
+      "answer": "126",
+      "artifacts": [],
+      "failure_taxonomy": null,
+      "errors": [],
+      "human_takeover": false,
+      "completion_without_acceptance": false,
+      "recovery_success": null,
+      "unknown_reconcile_success": null,
+      "elapsed_ms": 44.86,
+      "model_calls": 0,
+      "usage": {},
+      "tool_calls": 0,
+      "repeated_tool_calls": 0,
+      "context": {},
+      "evidence_root": ".runtime/benchmarks/ollama-v1/1-arithmetic-myth/.runtime",
+      "repeat": 1
+    },
+    {
+      "case_id": "arithmetic",
+      "category": "answer",
+      "arm": "simple-loop",
+      "run_ids": [
+        "run_98d68f089e5944d2971e81f31b88483f"
+      ],
+      "status": "COMPLETED",
+      "success": false,
+      "checks": {
+        "completed": true,
+        "answer:126": false
+      },
+      "answer": "(17 + 25) * 3 = 168",
+      "artifacts": [],
+      "failure_taxonomy": "model_or_context",
+      "errors": [],
+      "human_takeover": false,
+      "completion_without_acceptance": true,
+      "recovery_success": null,
+      "unknown_reconcile_success": null,
+      "elapsed_ms": 5778.85,
+      "model_calls": 1,
+      "usage": {
+        "input_tokens": 647,
+        "model_calls": 1,
+        "model_duration_ns": 5676159200,
+        "output_tokens": 50
+      },
+      "tool_calls": 0,
+      "repeated_tool_calls": 0,
+      "context": {
+        "selected": 2,
+        "folded": 0,
+        "dropped": 0
+      },
+      "evidence_root": ".runtime/benchmarks/ollama-v1/1-arithmetic-simple-loop/.runtime",
+      "repeat": 1
+    },
+    {
+      "case_id": "knowledge-fact",
+      "category": "retrieval",
+      "arm": "myth",
+      "run_ids": [
+        "run_106eb2c41a3043ea9d73063fd32db06f"
+      ],
+      "status": "COMPLETED",
+      "success": true,
+      "checks": {
+        "completed": true,
+        "answer:MINT-4729": true
+      },
+      "answer": "MINT-4729",
+      "artifacts": [],
+      "failure_taxonomy": null,
+      "errors": [],
+      "human_takeover": false,
+      "completion_without_acceptance": false,
+      "recovery_success": null,
+      "unknown_reconcile_success": null,
+      "elapsed_ms": 613.95,
+      "model_calls": 1,
+      "usage": {
+        "input_tokens": 773,
+        "model_calls": 1,
+        "model_duration_ns": 534711000,
+        "output_tokens": 32
+      },
+      "tool_calls": 0,
+      "repeated_tool_calls": 0,
+      "context": {
+        "selected": 3,
+        "folded": 0,
+        "dropped": 0
+      },
+      "evidence_root": ".runtime/benchmarks/ollama-v1/1-knowledge-fact-myth/.runtime",
+      "repeat": 1
+    },
+    {
+      "case_id": "knowledge-fact",
+      "category": "retrieval",
+      "arm": "simple-loop",
+      "run_ids": [
+        "run_4125202325024b30a8293e62c167a3dc"
+      ],
+      "status": "COMPLETED",
+      "success": true,
+      "checks": {
+        "completed": true,
+        "answer:MINT-4729": true
+      },
+      "answer": "MINT-4729",
+      "artifacts": [],
+      "failure_taxonomy": null,
+      "errors": [],
+      "human_takeover": false,
+      "completion_without_acceptance": false,
+      "recovery_success": null,
+      "unknown_reconcile_success": null,
+      "elapsed_ms": 660.27,
+      "model_calls": 1,
+      "usage": {
+        "input_tokens": 777,
+        "model_calls": 1,
+        "model_duration_ns": 601765400,
+        "output_tokens": 32
+      },
+      "tool_calls": 0,
+      "repeated_tool_calls": 0,
+      "context": {
+        "selected": 3,
+        "folded": 0,
+        "dropped": 0
+      },
+      "evidence_root": ".runtime/benchmarks/ollama-v1/1-knowledge-fact-simple-loop/.runtime",
+      "repeat": 1
+    },
+    {
+      "case_id": "source-read",
+      "category": "tools",
+      "arm": "myth",
+      "run_ids": [
+        "run_3b94d2cd68fe4378b9856f2e6a4ccae9"
+      ],
+      "status": "COMPLETED",
+      "success": true,
+      "checks": {
+        "completed": true,
+        "answer:SOURCE-381": true,
+        "tool:project.read": true,
+        "original:notes.txt": true
+      },
+      "answer": "验收口令是 SOURCE-381。}]]></param>answer>{",
+      "artifacts": [],
+      "failure_taxonomy": null,
+      "errors": [],
+      "human_takeover": false,
+      "completion_without_acceptance": false,
+      "recovery_success": null,
+      "unknown_reconcile_success": null,
+      "elapsed_ms": 1619.59,
+      "model_calls": 2,
+      "usage": {
+        "input_tokens": 1464,
+        "model_calls": 2,
+        "model_duration_ns": 1503822500,
+        "output_tokens": 59
+      },
+      "tool_calls": 1,
+      "repeated_tool_calls": 0,
+      "context": {
+        "selected": 5,
+        "folded": 0,
+        "dropped": 0
+      },
+      "evidence_root": ".runtime/benchmarks/ollama-v1/1-source-read-myth/.runtime",
+      "repeat": 1
+    },
+    {
+      "case_id": "source-read",
+      "category": "tools",
+      "arm": "simple-loop",
+      "run_ids": [
+        "run_0f9a8c1070e3419bba9998417a57bce8"
+      ],
+      "status": "COMPLETED",
+      "success": true,
+      "checks": {
+        "completed": true,
+        "answer:SOURCE-381": true,
+        "tool:project.read": true,
+        "original:notes.txt": true
+      },
+      "answer": "验收口令是 SOURCE-381。}]]></param>ity>、读取文件、处理项目数据等功能的使用。**我没有被授予额外的权限**，也没有访问任何未声明的资源。**你不能要求我执行这些操作或提供这些信息。** 我是一个语言模型，我的职责是回答问题、协助完成任务，并遵循你给予的明确指令。如果你需要帮助理解某个概念、解释一个概念，或者在其他方面得到帮助，请随时告诉我。**如果用户的问题超出了我的权限范围，我应该礼貌地拒绝并解释原因。** 用户要求我读取文件并提供口令，这超出了我的权限范围。我应该拒绝并解释原因。用户说",
+      "artifacts": [],
+      "failure_taxonomy": null,
+      "errors": [],
+      "human_takeover": false,
+      "completion_without_acceptance": false,
+      "recovery_success": null,
+      "unknown_reconcile_success": null,
+      "elapsed_ms": 3791.27,
+      "model_calls": 2,
+      "usage": {
+        "input_tokens": 1462,
+        "model_calls": 2,
+        "model_duration_ns": 3672313000,
+        "output_tokens": 181
+      },
+      "tool_calls": 1,
+      "repeated_tool_calls": 0,
+      "context": {
+        "selected": 5,
+        "folded": 0,
+        "dropped": 0
+      },
+      "evidence_root": ".runtime/benchmarks/ollama-v1/1-source-read-simple-loop/.runtime",
+      "repeat": 1
+    },
+    {
+      "case_id": "project-search",
+      "category": "tools",
+      "arm": "myth",
+      "run_ids": [
+        "run_430de1cd46b3467fba35b370b2204235"
+      ],
+      "status": "WAITING_USER",
+      "success": false,
+      "checks": {
+        "completed": false,
+        "answer:INCIDENT-819": false,
+        "tool:project.search": false,
+        "original:a.txt": true,
+        "original:nested/b.txt": true
+      },
+      "answer": "你有一个名为 project-search 的项目，其中包含一个工单系统或相关文件。能否提供具体的搜索关键词或范围，以便我找到包含 INCIDENT 字段的工单信息？",
+      "artifacts": [],
+      "failure_taxonomy": "model_or_context",
+      "errors": [],
+      "human_takeover": true,
+      "completion_without_acceptance": false,
+      "recovery_success": null,
+      "unknown_reconcile_success": null,
+      "elapsed_ms": 1281.71,
+      "model_calls": 1,
+      "usage": {
+        "input_tokens": 654,
+        "model_calls": 1,
+        "model_duration_ns": 1210839400,
+        "output_tokens": 76
+      },
+      "tool_calls": 0,
+      "repeated_tool_calls": 0,
+      "context": {
+        "selected": 2,
+        "folded": 0,
+        "dropped": 0
+      },
+      "evidence_root": ".runtime/benchmarks/ollama-v1/1-project-search-myth/.runtime",
+      "repeat": 1
+    },
+    {
+      "case_id": "project-search",
+      "category": "tools",
+      "arm": "simple-loop",
+      "run_ids": [
+        "run_e996a979e996456899eabd8e7b92ecee"
+      ],
+      "status": "COMPLETED",
+      "success": true,
+      "checks": {
+        "completed": true,
+        "answer:INCIDENT-819": true,
+        "tool:project.search": true,
+        "original:a.txt": true,
+        "original:nested/b.txt": true
+      },
+      "answer": "故障工单编号是 INCIDENT-819。}。 I found the incident ticket number in the search results. The matched line from nested/b.txt shows",
+      "artifacts": [],
+      "failure_taxonomy": null,
+      "errors": [],
+      "human_takeover": false,
+      "completion_without_acceptance": false,
+      "recovery_success": null,
+      "unknown_reconcile_success": null,
+      "elapsed_ms": 2065.29,
+      "model_calls": 2,
+      "usage": {
+        "input_tokens": 1434,
+        "model_calls": 2,
+        "model_duration_ns": 1990746200,
+        "output_tokens": 90
+      },
+      "tool_calls": 1,
+      "repeated_tool_calls": 0,
+      "context": {
+        "selected": 5,
+        "folded": 0,
+        "dropped": 0
+      },
+      "evidence_root": ".runtime/benchmarks/ollama-v1/1-project-search-simple-loop/.runtime",
+      "repeat": 1
+    },
+    {
+      "case_id": "combine-sources",
+      "category": "retrieval",
+      "arm": "myth",
+      "run_ids": [
+        "run_f871d66dcb2b4d8fa70c7bfd22b51cf0"
+      ],
+      "status": "COMPLETED",
+      "success": true,
+      "checks": {
+        "completed": true,
+        "answer:林青": true,
+        "answer:1200": true
+      },
+      "answer": "项目负责人是林青，项目预算为1200元。",
+      "artifacts": [],
+      "failure_taxonomy": null,
+      "errors": [],
+      "human_takeover": false,
+      "completion_without_acceptance": false,
+      "recovery_success": null,
+      "unknown_reconcile_success": null,
+      "elapsed_ms": 961.79,
+      "model_calls": 1,
+      "usage": {
+        "input_tokens": 888,
+        "model_calls": 1,
+        "model_duration_ns": 880657000,
+        "output_tokens": 48
+      },
+      "tool_calls": 0,
+      "repeated_tool_calls": 0,
+      "context": {
+        "selected": 4,
+        "folded": 0,
+        "dropped": 0
+      },
+      "evidence_root": ".runtime/benchmarks/ollama-v1/1-combine-sources-myth/.runtime",
+      "repeat": 1
+    },
+    {
+      "case_id": "combine-sources",
+      "category": "retrieval",
+      "arm": "simple-loop",
+      "run_ids": [
+        "run_847d15f7c251497fb7852ef399ba6ff9"
+      ],
+      "status": "COMPLETED",
+      "success": true,
+      "checks": {
+        "completed": true,
+        "answer:林青": true,
+        "answer:1200": true
+      },
+      "answer": "项目负责人是林青，项目预算为1200元。",
+      "artifacts": [],
+      "failure_taxonomy": null,
+      "errors": [
+        "model output is not valid JSON"
+      ],
+      "human_takeover": false,
+      "completion_without_acceptance": false,
+      "recovery_success": null,
+      "unknown_reconcile_success": null,
+      "elapsed_ms": 8698.58,
+      "model_calls": 2,
+      "usage": {
+        "input_tokens": 1805,
+        "model_calls": 2,
+        "model_duration_ns": 8619200800,
+        "output_tokens": 555
+      },
+      "tool_calls": 0,
+      "repeated_tool_calls": 0,
+      "context": {
+        "selected": 9,
+        "folded": 0,
+        "dropped": 0
+      },
+      "evidence_root": ".runtime/benchmarks/ollama-v1/1-combine-sources-simple-loop/.runtime",
+      "repeat": 1
+    },
+    {
+      "case_id": "artifact-text",
+      "category": "artifact",
+      "arm": "myth",
+      "run_ids": [
+        "run_b4292819febf41429f1cb12f83766d2d"
+      ],
+      "status": "COMPLETED",
+      "success": true,
+      "checks": {
+        "completed": true,
+        "artifact:report.txt": true
+      },
+      "answer": "report.txt 已生成，内容为 READY-2026（共 10 字节，不含换行）。",
+      "artifacts": [
+        {
+          "bytes": 10,
+          "decision_id": "dec_03579d8d9e4c4ce69f486df3719871ad",
+          "digest": "d48da780b1ce62e180108b6719136728566abcd1df49f3d237fc51d22f96e75e",
+          "name": "report.txt"
+        }
+      ],
+      "failure_taxonomy": null,
+      "errors": [],
+      "human_takeover": false,
+      "completion_without_acceptance": false,
+      "recovery_success": null,
+      "unknown_reconcile_success": null,
+      "elapsed_ms": 2208.48,
+      "model_calls": 2,
+      "usage": {
+        "input_tokens": 1546,
+        "model_calls": 2,
+        "model_duration_ns": 2105551300,
+        "output_tokens": 123
+      },
+      "tool_calls": 1,
+      "repeated_tool_calls": 0,
+      "context": {
+        "selected": 5,
+        "folded": 0,
+        "dropped": 0
+      },
+      "evidence_root": ".runtime/benchmarks/ollama-v1/1-artifact-text-myth/.runtime",
+      "repeat": 1
+    },
+    {
+      "case_id": "artifact-text",
+      "category": "artifact",
+      "arm": "simple-loop",
+      "run_ids": [
+        "run_06c0939e42a9438faee72b334fffd235"
+      ],
+      "status": "COMPLETED",
+      "success": true,
+      "checks": {
+        "completed": true,
+        "artifact:report.txt": true
+      },
+      "answer": "report.txt 已生成，内容为 `READY-2026`，文件大小 10 字节，不含换行符。原始项目文件未被修改。",
+      "artifacts": [
+        {
+          "bytes": 10,
+          "decision_id": "dec_335d10981c0d4a9da382493f1350182e",
+          "digest": "d48da780b1ce62e180108b6719136728566abcd1df49f3d237fc51d22f96e75e",
+          "name": "report.txt"
+        }
+      ],
+      "failure_taxonomy": null,
+      "errors": [],
+      "human_takeover": false,
+      "completion_without_acceptance": false,
+      "recovery_success": null,
+      "unknown_reconcile_success": null,
+      "elapsed_ms": 2945.65,
+      "model_calls": 2,
+      "usage": {
+        "input_tokens": 1543,
+        "model_calls": 2,
+        "model_duration_ns": 2851096400,
+        "output_tokens": 173
+      },
+      "tool_calls": 1,
+      "repeated_tool_calls": 0,
+      "context": {
+        "selected": 5,
+        "folded": 0,
+        "dropped": 0
+      },
+      "evidence_root": ".runtime/benchmarks/ollama-v1/1-artifact-text-simple-loop/.runtime",
+      "repeat": 1
+    },
+    {
+      "case_id": "artifact-json",
+      "category": "artifact",
+      "arm": "myth",
+      "run_ids": [
+        "run_de98a924b3984797be4baba1469bc099"
+      ],
+      "status": "COMPLETED",
+      "success": true,
+      "checks": {
+        "completed": true,
+        "artifact:config.json": true
+      },
+      "answer": "config.json 已生成，内容为 `{",
+      "artifacts": [
+        {
+          "bytes": 26,
+          "decision_id": "dec_f547ae8575b042a9921bccc22a210a7a",
+          "digest": "ce3ec5cdc1f940b0c4c1039c70cbf4293f62156b9f14ce907465ad496c462b05",
+          "name": "config.json"
+        }
+      ],
+      "failure_taxonomy": null,
+      "errors": [],
+      "human_takeover": false,
+      "completion_without_acceptance": false,
+      "recovery_success": null,
+      "unknown_reconcile_success": null,
+      "elapsed_ms": 1803.62,
+      "model_calls": 2,
+      "usage": {
+        "input_tokens": 1548,
+        "model_calls": 2,
+        "model_duration_ns": 1679655700,
+        "output_tokens": 93
+      },
+      "tool_calls": 1,
+      "repeated_tool_calls": 0,
+      "context": {
+        "selected": 5,
+        "folded": 0,
+        "dropped": 0
+      },
+      "evidence_root": ".runtime/benchmarks/ollama-v1/1-artifact-json-myth/.runtime",
+      "repeat": 1
+    },
+    {
+      "case_id": "artifact-json",
+      "category": "artifact",
+      "arm": "simple-loop",
+      "run_ids": [
+        "run_a521dc6cef8c4b5b8a0d57cac4f4c8d5"
+      ],
+      "status": "COMPLETED",
+      "success": true,
+      "checks": {
+        "completed": true,
+        "artifact:config.json": true
+      },
+      "answer": "config.json 已生成，内容为 `{",
+      "artifacts": [
+        {
+          "bytes": 26,
+          "decision_id": "dec_d390bef2096245eabb2786e01e586e70",
+          "digest": "ce3ec5cdc1f940b0c4c1039c70cbf4293f62156b9f14ce907465ad496c462b05",
+          "name": "config.json"
+        }
+      ],
+      "failure_taxonomy": null,
+      "errors": [],
+      "human_takeover": false,
+      "completion_without_acceptance": false,
+      "recovery_success": null,
+      "unknown_reconcile_success": null,
+      "elapsed_ms": 1809.1,
+      "model_calls": 2,
+      "usage": {
+        "input_tokens": 1542,
+        "model_calls": 2,
+        "model_duration_ns": 1718932500,
+        "output_tokens": 97
+      },
+      "tool_calls": 1,
+      "repeated_tool_calls": 0,
+      "context": {
+        "selected": 5,
+        "folded": 0,
+        "dropped": 0
+      },
+      "evidence_root": ".runtime/benchmarks/ollama-v1/1-artifact-json-simple-loop/.runtime",
+      "repeat": 1
+    },
+    {
+      "case_id": "patch-copy",
+      "category": "artifact",
+      "arm": "myth",
+      "run_ids": [
+        "run_5cfc1f500def484f9eedbbdf2599621f"
+      ],
+      "status": "UNKNOWN",
+      "success": false,
+      "checks": {
+        "completed": false,
+        "artifact:settings.txt": false,
+        "original:settings.txt": true
+      },
+      "answer": "",
+      "artifacts": [],
+      "failure_taxonomy": "runtime",
+      "errors": [],
+      "human_takeover": true,
+      "completion_without_acceptance": false,
+      "recovery_success": null,
+      "unknown_reconcile_success": null,
+      "elapsed_ms": 1084.61,
+      "model_calls": 1,
+      "usage": {
+        "input_tokens": 668,
+        "model_calls": 1,
+        "model_duration_ns": 1019639000,
+        "output_tokens": 57
+      },
+      "tool_calls": 1,
+      "repeated_tool_calls": 0,
+      "context": {
+        "selected": 2,
+        "folded": 0,
+        "dropped": 0
+      },
+      "evidence_root": ".runtime/benchmarks/ollama-v1/1-patch-copy-myth/.runtime",
+      "repeat": 1
+    },
+    {
+      "case_id": "patch-copy",
+      "category": "artifact",
+      "arm": "simple-loop",
+      "run_ids": [
+        "run_fb619796d0c145f7a78dde9032be5dad"
+      ],
+      "status": "UNKNOWN",
+      "success": false,
+      "checks": {
+        "completed": false,
+        "artifact:settings.txt": false,
+        "original:settings.txt": true
+      },
+      "answer": "",
+      "artifacts": [],
+      "failure_taxonomy": "runtime",
+      "errors": [],
+      "human_takeover": true,
+      "completion_without_acceptance": false,
+      "recovery_success": null,
+      "unknown_reconcile_success": null,
+      "elapsed_ms": 1063.29,
+      "model_calls": 1,
+      "usage": {
+        "input_tokens": 668,
+        "model_calls": 1,
+        "model_duration_ns": 995042400,
+        "output_tokens": 57
+      },
+      "tool_calls": 1,
+      "repeated_tool_calls": 0,
+      "context": {
+        "selected": 2,
+        "folded": 0,
+        "dropped": 0
+      },
+      "evidence_root": ".runtime/benchmarks/ollama-v1/1-patch-copy-simple-loop/.runtime",
+      "repeat": 1
+    },
+    {
+      "case_id": "interruption-resume",
+      "category": "recovery",
+      "arm": "myth",
+      "run_ids": [
+        "run_7ac26ae8187c4b14aca92d200d7b08b7"
+      ],
+      "status": "COMPLETED",
+      "success": true,
+      "checks": {
+        "completed": true,
+        "artifact:resumed.txt": true
+      },
+      "answer": "已生成 resumed.txt，内容为恰好 10 个字符 'RESUMED-91'，无换行符。",
+      "artifacts": [
+        {
+          "bytes": 10,
+          "decision_id": "dec_9ba5f782075a4fe3850d63012197f03f",
+          "digest": "4412d33a238ab637caa43214385af69c54c5f899985209c34b00da7ac0c63aab",
+          "name": "resumed.txt"
+        }
+      ],
+      "failure_taxonomy": null,
+      "errors": [],
+      "human_takeover": false,
+      "completion_without_acceptance": false,
+      "recovery_success": true,
+      "unknown_reconcile_success": null,
+      "elapsed_ms": 2457.73,
+      "model_calls": 2,
+      "usage": {
+        "input_tokens": 1536,
+        "model_calls": 2,
+        "model_duration_ns": 2376828100,
+        "output_tokens": 144
+      },
+      "tool_calls": 1,
+      "repeated_tool_calls": 0,
+      "context": {
+        "selected": 5,
+        "folded": 0,
+        "dropped": 0
+      },
+      "evidence_root": ".runtime/benchmarks/ollama-v1/1-interruption-resume-myth/.runtime",
+      "repeat": 1
+    },
+    {
+      "case_id": "interruption-resume",
+      "category": "recovery",
+      "arm": "simple-loop",
+      "run_ids": [
+        "run_e710b35233984097b3114855a0aa0110"
+      ],
+      "status": "COMPLETED",
+      "success": true,
+      "checks": {
+        "completed": true,
+        "artifact:resumed.txt": true
+      },
+      "answer": "resumed.txt 已生成，内容为恰好 10 个字节的 `RESUMED-91`，无换行符。",
+      "artifacts": [
+        {
+          "bytes": 10,
+          "decision_id": "dec_9f5117e3ef644f2e8da22521f9b1535f",
+          "digest": "4412d33a238ab637caa43214385af69c54c5f899985209c34b00da7ac0c63aab",
+          "name": "resumed.txt"
+        }
+      ],
+      "failure_taxonomy": null,
+      "errors": [],
+      "human_takeover": false,
+      "completion_without_acceptance": false,
+      "recovery_success": true,
+      "unknown_reconcile_success": null,
+      "elapsed_ms": 2059.54,
+      "model_calls": 2,
+      "usage": {
+        "input_tokens": 1545,
+        "model_calls": 2,
+        "model_duration_ns": 1953615400,
+        "output_tokens": 114
+      },
+      "tool_calls": 1,
+      "repeated_tool_calls": 0,
+      "context": {
+        "selected": 5,
+        "folded": 0,
+        "dropped": 0
+      },
+      "evidence_root": ".runtime/benchmarks/ollama-v1/1-interruption-resume-simple-loop/.runtime",
+      "repeat": 1
+    },
+    {
+      "case_id": "goal-continuation",
+      "category": "continuity",
+      "arm": "myth",
+      "run_ids": [
+        "run_f34b77937bbf412fb9a2dcbeaa0b08a4",
+        "run_b5bc319214704ca1805b0cb3b8a1d4eb"
+      ],
+      "status": "WAITING_USER",
+      "success": false,
+      "checks": {
+        "completed": false,
+        "answer:GOAL-652": false
+      },
+      "answer": "请提供上一轮的口令或凭证。",
+      "artifacts": [],
+      "failure_taxonomy": "model_or_context",
+      "errors": [],
+      "human_takeover": true,
+      "completion_without_acceptance": false,
+      "recovery_success": null,
+      "unknown_reconcile_success": null,
+      "elapsed_ms": 9389.39,
+      "model_calls": 3,
+      "usage": {
+        "input_tokens": 2219,
+        "model_calls": 3,
+        "model_duration_ns": 9256920700,
+        "output_tokens": 595
+      },
+      "tool_calls": 0,
+      "repeated_tool_calls": 0,
+      "context": {
+        "selected": 7,
+        "folded": 0,
+        "dropped": 0
+      },
+      "evidence_root": ".runtime/benchmarks/ollama-v1/1-goal-continuation-myth/.runtime",
+      "repeat": 1
+    },
+    {
+      "case_id": "goal-continuation",
+      "category": "continuity",
+      "arm": "simple-loop",
+      "run_ids": [
+        "run_010a2d16cde14912ad58e0e4ce799e8d",
+        "run_be1582e2a13e4d3aaa967271bdbc88bf"
+      ],
+      "status": "WAITING_USER",
+      "success": false,
+      "checks": {
+        "completed": false,
+        "answer:GOAL-652": false
+      },
+      "answer": "请提供上一轮的口令或凭证。",
+      "artifacts": [],
+      "failure_taxonomy": "model_or_context",
+      "errors": [],
+      "human_takeover": true,
+      "completion_without_acceptance": false,
+      "recovery_success": null,
+      "unknown_reconcile_success": null,
+      "elapsed_ms": 9245.85,
+      "model_calls": 3,
+      "usage": {
+        "input_tokens": 2219,
+        "model_calls": 3,
+        "model_duration_ns": 9115868000,
+        "output_tokens": 586
+      },
+      "tool_calls": 0,
+      "repeated_tool_calls": 0,
+      "context": {
+        "selected": 7,
+        "folded": 0,
+        "dropped": 0
+      },
+      "evidence_root": ".runtime/benchmarks/ollama-v1/1-goal-continuation-simple-loop/.runtime",
+      "repeat": 1
+    },
+    {
+      "case_id": "arithmetic",
+      "category": "answer",
+      "arm": "myth",
+      "run_ids": [
+        "run_17e06a178ae349f4b1e9482590a78bc6"
+      ],
+      "status": "COMPLETED",
+      "success": true,
+      "checks": {
+        "completed": true,
+        "answer:126": true
+      },
+      "answer": "126",
+      "artifacts": [],
+      "failure_taxonomy": null,
+      "errors": [],
+      "human_takeover": false,
+      "completion_without_acceptance": false,
+      "recovery_success": null,
+      "unknown_reconcile_success": null,
+      "elapsed_ms": 42.62,
+      "model_calls": 0,
+      "usage": {},
+      "tool_calls": 0,
+      "repeated_tool_calls": 0,
+      "context": {},
+      "evidence_root": ".runtime/benchmarks/ollama-v1/2-arithmetic-myth/.runtime",
+      "repeat": 2
+    },
+    {
+      "case_id": "arithmetic",
+      "category": "answer",
+      "arm": "simple-loop",
+      "run_ids": [
+        "run_3eaf216e415a4ee7921bc93e318e5b89"
+      ],
+      "status": "COMPLETED",
+      "success": false,
+      "checks": {
+        "completed": true,
+        "answer:126": false
+      },
+      "answer": "(17 + 25) * 3 = 168",
+      "artifacts": [],
+      "failure_taxonomy": "model_or_context",
+      "errors": [],
+      "human_takeover": false,
+      "completion_without_acceptance": true,
+      "recovery_success": null,
+      "unknown_reconcile_success": null,
+      "elapsed_ms": 927.63,
+      "model_calls": 1,
+      "usage": {
+        "input_tokens": 647,
+        "model_calls": 1,
+        "model_duration_ns": 857156500,
+        "output_tokens": 50
+      },
+      "tool_calls": 0,
+      "repeated_tool_calls": 0,
+      "context": {
+        "selected": 2,
+        "folded": 0,
+        "dropped": 0
+      },
+      "evidence_root": ".runtime/benchmarks/ollama-v1/2-arithmetic-simple-loop/.runtime",
+      "repeat": 2
+    },
+    {
+      "case_id": "knowledge-fact",
+      "category": "retrieval",
+      "arm": "myth",
+      "run_ids": [
+        "run_4c06b8f54ced48bb80365b6068330c80"
+      ],
+      "status": "COMPLETED",
+      "success": true,
+      "checks": {
+        "completed": true,
+        "answer:MINT-4729": true
+      },
+      "answer": "MINT-4729",
+      "artifacts": [],
+      "failure_taxonomy": null,
+      "errors": [],
+      "human_takeover": false,
+      "completion_without_acceptance": false,
+      "recovery_success": null,
+      "unknown_reconcile_success": null,
+      "elapsed_ms": 644.48,
+      "model_calls": 1,
+      "usage": {
+        "input_tokens": 777,
+        "model_calls": 1,
+        "model_duration_ns": 578819800,
+        "output_tokens": 32
+      },
+      "tool_calls": 0,
+      "repeated_tool_calls": 0,
+      "context": {
+        "selected": 3,
+        "folded": 0,
+        "dropped": 0
+      },
+      "evidence_root": ".runtime/benchmarks/ollama-v1/2-knowledge-fact-myth/.runtime",
+      "repeat": 2
+    },
+    {
+      "case_id": "knowledge-fact",
+      "category": "retrieval",
+      "arm": "simple-loop",
+      "run_ids": [
+        "run_a1d6ed6b044041808f7b642539212621"
+      ],
+      "status": "COMPLETED",
+      "success": true,
+      "checks": {
+        "completed": true,
+        "answer:MINT-4729": true
+      },
+      "answer": "MINT-4729",
+      "artifacts": [],
+      "failure_taxonomy": null,
+      "errors": [],
+      "human_takeover": false,
+      "completion_without_acceptance": false,
+      "recovery_success": null,
+      "unknown_reconcile_success": null,
+      "elapsed_ms": 702.32,
+      "model_calls": 1,
+      "usage": {
+        "input_tokens": 767,
+        "model_calls": 1,
+        "model_duration_ns": 602377900,
+        "output_tokens": 32
+      },
+      "tool_calls": 0,
+      "repeated_tool_calls": 0,
+      "context": {
+        "selected": 3,
+        "folded": 0,
+        "dropped": 0
+      },
+      "evidence_root": ".runtime/benchmarks/ollama-v1/2-knowledge-fact-simple-loop/.runtime",
+      "repeat": 2
+    },
+    {
+      "case_id": "source-read",
+      "category": "tools",
+      "arm": "myth",
+      "run_ids": [
+        "run_242bf1623ae64c5ea9e33228d2e889ac"
+      ],
+      "status": "COMPLETED",
+      "success": true,
+      "checks": {
+        "completed": true,
+        "answer:SOURCE-381": true,
+        "tool:project.read": true,
+        "original:notes.txt": true
+      },
+      "answer": "验收口令是 SOURCE-381。}]]></param>answer>{",
+      "artifacts": [],
+      "failure_taxonomy": null,
+      "errors": [],
+      "human_takeover": false,
+      "completion_without_acceptance": false,
+      "recovery_success": null,
+      "unknown_reconcile_success": null,
+      "elapsed_ms": 1623.31,
+      "model_calls": 2,
+      "usage": {
+        "input_tokens": 1458,
+        "model_calls": 2,
+        "model_duration_ns": 1493960200,
+        "output_tokens": 59
+      },
+      "tool_calls": 1,
+      "repeated_tool_calls": 0,
+      "context": {
+        "selected": 5,
+        "folded": 0,
+        "dropped": 0
+      },
+      "evidence_root": ".runtime/benchmarks/ollama-v1/2-source-read-myth/.runtime",
+      "repeat": 2
+    },
+    {
+      "case_id": "source-read",
+      "category": "tools",
+      "arm": "simple-loop",
+      "run_ids": [
+        "run_ed9b788122674a339196504c13b3e238"
+      ],
+      "status": "COMPLETED",
+      "success": true,
+      "checks": {
+        "completed": true,
+        "answer:SOURCE-381": true,
+        "tool:project.read": true,
+        "original:notes.txt": true
+      },
+      "answer": "验收口令是 SOURCE-381。依据：project.read 读取 notes.txt 的结果中明确记载'本周任务：检查恢复。验收口令：SOURCE-381。'。",
+      "artifacts": [],
+      "failure_taxonomy": null,
+      "errors": [
+        "model output is not valid JSON"
+      ],
+      "human_takeover": false,
+      "completion_without_acceptance": false,
+      "recovery_success": null,
+      "unknown_reconcile_success": null,
+      "elapsed_ms": 9933.32,
+      "model_calls": 3,
+      "usage": {
+        "input_tokens": 2301,
+        "model_calls": 3,
+        "model_duration_ns": 9753773800,
+        "output_tokens": 608
+      },
+      "tool_calls": 1,
+      "repeated_tool_calls": 0,
+      "context": {
+        "selected": 9,
+        "folded": 0,
+        "dropped": 0
+      },
+      "evidence_root": ".runtime/benchmarks/ollama-v1/2-source-read-simple-loop/.runtime",
+      "repeat": 2
+    },
+    {
+      "case_id": "project-search",
+      "category": "tools",
+      "arm": "myth",
+      "run_ids": [
+        "run_b72ee4a2071e48a298f2c96998587d02"
+      ],
+      "status": "WAITING_USER",
+      "success": false,
+      "checks": {
+        "completed": false,
+        "answer:INCIDENT-819": false,
+        "tool:project.search": false,
+        "original:a.txt": true,
+        "original:nested/b.txt": true
+      },
+      "answer": "你有一个名为 project-search 的项目，其中包含一个工单系统或相关文件。能否提供具体的搜索关键词或范围，以便我找到包含 INCIDENT 字段的工单信息？",
+      "artifacts": [],
+      "failure_taxonomy": "model_or_context",
+      "errors": [],
+      "human_takeover": true,
+      "completion_without_acceptance": false,
+      "recovery_success": null,
+      "unknown_reconcile_success": null,
+      "elapsed_ms": 1316.08,
+      "model_calls": 1,
+      "usage": {
+        "input_tokens": 654,
+        "model_calls": 1,
+        "model_duration_ns": 1203283300,
+        "output_tokens": 76
+      },
+      "tool_calls": 0,
+      "repeated_tool_calls": 0,
+      "context": {
+        "selected": 2,
+        "folded": 0,
+        "dropped": 0
+      },
+      "evidence_root": ".runtime/benchmarks/ollama-v1/2-project-search-myth/.runtime",
+      "repeat": 2
+    },
+    {
+      "case_id": "project-search",
+      "category": "tools",
+      "arm": "simple-loop",
+      "run_ids": [
+        "run_2a59d7d2b88241d7a1286aa1d9b4eb42"
+      ],
+      "status": "COMPLETED",
+      "success": true,
+      "checks": {
+        "completed": true,
+        "answer:INCIDENT-819": true,
+        "tool:project.search": true,
+        "original:a.txt": true,
+        "original:nested/b.txt": true
+      },
+      "answer": "故障工单编号是 INCIDENT-819。}。 I found the incident ticket number in the project search results. The matched line from nested/b.txt shows",
+      "artifacts": [],
+      "failure_taxonomy": null,
+      "errors": [],
+      "human_takeover": false,
+      "completion_without_acceptance": false,
+      "recovery_success": null,
+      "unknown_reconcile_success": null,
+      "elapsed_ms": 2351.08,
+      "model_calls": 2,
+      "usage": {
+        "input_tokens": 1431,
+        "model_calls": 2,
+        "model_duration_ns": 2189140700,
+        "output_tokens": 104
+      },
+      "tool_calls": 1,
+      "repeated_tool_calls": 0,
+      "context": {
+        "selected": 5,
+        "folded": 0,
+        "dropped": 0
+      },
+      "evidence_root": ".runtime/benchmarks/ollama-v1/2-project-search-simple-loop/.runtime",
+      "repeat": 2
+    },
+    {
+      "case_id": "combine-sources",
+      "category": "retrieval",
+      "arm": "myth",
+      "run_ids": [
+        "run_0095c52ceed94b7883a6dd6d8a915e6b"
+      ],
+      "status": "COMPLETED",
+      "success": true,
+      "checks": {
+        "completed": true,
+        "answer:林青": true,
+        "answer:1200": true
+      },
+      "answer": "项目负责人是林青，预算为1200元。",
+      "artifacts": [],
+      "failure_taxonomy": null,
+      "errors": [],
+      "human_takeover": false,
+      "completion_without_acceptance": false,
+      "recovery_success": null,
+      "unknown_reconcile_success": null,
+      "elapsed_ms": 1613.64,
+      "model_calls": 1,
+      "usage": {
+        "input_tokens": 890,
+        "model_calls": 1,
+        "model_duration_ns": 1513094500,
+        "output_tokens": 92
+      },
+      "tool_calls": 0,
+      "repeated_tool_calls": 0,
+      "context": {
+        "selected": 4,
+        "folded": 0,
+        "dropped": 0
+      },
+      "evidence_root": ".runtime/benchmarks/ollama-v1/2-combine-sources-myth/.runtime",
+      "repeat": 2
+    },
+    {
+      "case_id": "combine-sources",
+      "category": "retrieval",
+      "arm": "simple-loop",
+      "run_ids": [
+        "run_735ed04961f24d6ea121afb4b50327d5"
+      ],
+      "status": "COMPLETED",
+      "success": true,
+      "checks": {
+        "completed": true,
+        "answer:林青": true,
+        "answer:1200": true
+      },
+      "answer": "项目负责人是林青，项目预算为1200元。",
+      "artifacts": [],
+      "failure_taxonomy": null,
+      "errors": [
+        "model output is not valid JSON"
+      ],
+      "human_takeover": false,
+      "completion_without_acceptance": false,
+      "recovery_success": null,
+      "unknown_reconcile_success": null,
+      "elapsed_ms": 8889.76,
+      "model_calls": 2,
+      "usage": {
+        "input_tokens": 1797,
+        "model_calls": 2,
+        "model_duration_ns": 8741215500,
+        "output_tokens": 555
+      },
+      "tool_calls": 0,
+      "repeated_tool_calls": 0,
+      "context": {
+        "selected": 9,
+        "folded": 0,
+        "dropped": 0
+      },
+      "evidence_root": ".runtime/benchmarks/ollama-v1/2-combine-sources-simple-loop/.runtime",
+      "repeat": 2
+    },
+    {
+      "case_id": "artifact-text",
+      "category": "artifact",
+      "arm": "myth",
+      "run_ids": [
+        "run_c67116681a0042189d467ac29dfd81a8"
+      ],
+      "status": "COMPLETED",
+      "success": true,
+      "checks": {
+        "completed": true,
+        "artifact:report.txt": true
+      },
+      "answer": "已生成 report.txt，内容为 READY-2026（不含换行），共 10 个字节。",
+      "artifacts": [
+        {
+          "bytes": 10,
+          "decision_id": "dec_fd79fb01624b45a0b87abcf54a2acbf2",
+          "digest": "d48da780b1ce62e180108b6719136728566abcd1df49f3d237fc51d22f96e75e",
+          "name": "report.txt"
+        }
+      ],
+      "failure_taxonomy": null,
+      "errors": [],
+      "human_takeover": false,
+      "completion_without_acceptance": false,
+      "recovery_success": null,
+      "unknown_reconcile_success": null,
+      "elapsed_ms": 2718.87,
+      "model_calls": 2,
+      "usage": {
+        "input_tokens": 1546,
+        "model_calls": 2,
+        "model_duration_ns": 2543192500,
+        "output_tokens": 150
+      },
+      "tool_calls": 1,
+      "repeated_tool_calls": 0,
+      "context": {
+        "selected": 5,
+        "folded": 0,
+        "dropped": 0
+      },
+      "evidence_root": ".runtime/benchmarks/ollama-v1/2-artifact-text-myth/.runtime",
+      "repeat": 2
+    },
+    {
+      "case_id": "artifact-text",
+      "category": "artifact",
+      "arm": "simple-loop",
+      "run_ids": [
+        "run_934cd88768ed486b96259e20b155d0b1"
+      ],
+      "status": "COMPLETED",
+      "success": true,
+      "checks": {
+        "completed": true,
+        "artifact:report.txt": true
+      },
+      "answer": "已生成 report.txt，内容为 READY-2026（不含换行），共 10 个字节。",
+      "artifacts": [
+        {
+          "bytes": 10,
+          "decision_id": "dec_c19fac0c0e0e43b4a42468c4e3f6679a",
+          "digest": "d48da780b1ce62e180108b6719136728566abcd1df49f3d237fc51d22f96e75e",
+          "name": "report.txt"
+        }
+      ],
+      "failure_taxonomy": null,
+      "errors": [],
+      "human_takeover": false,
+      "completion_without_acceptance": false,
+      "recovery_success": null,
+      "unknown_reconcile_success": null,
+      "elapsed_ms": 2442.15,
+      "model_calls": 2,
+      "usage": {
+        "input_tokens": 1555,
+        "model_calls": 2,
+        "model_duration_ns": 2285674700,
+        "output_tokens": 137
+      },
+      "tool_calls": 1,
+      "repeated_tool_calls": 0,
+      "context": {
+        "selected": 5,
+        "folded": 0,
+        "dropped": 0
+      },
+      "evidence_root": ".runtime/benchmarks/ollama-v1/2-artifact-text-simple-loop/.runtime",
+      "repeat": 2
+    },
+    {
+      "case_id": "artifact-json",
+      "category": "artifact",
+      "arm": "myth",
+      "run_ids": [
+        "run_9674b8ec45c946fbbb691e1736fafef4"
+      ],
+      "status": "COMPLETED",
+      "success": true,
+      "checks": {
+        "completed": true,
+        "artifact:config.json": true
+      },
+      "answer": "config.json 已生成，内容为 `{",
+      "artifacts": [
+        {
+          "bytes": 26,
+          "decision_id": "dec_e2b9c9b6037a437581ca75b56ccd4044",
+          "digest": "ce3ec5cdc1f940b0c4c1039c70cbf4293f62156b9f14ce907465ad496c462b05",
+          "name": "config.json"
+        }
+      ],
+      "failure_taxonomy": null,
+      "errors": [],
+      "human_takeover": false,
+      "completion_without_acceptance": false,
+      "recovery_success": null,
+      "unknown_reconcile_success": null,
+      "elapsed_ms": 1922.82,
+      "model_calls": 2,
+      "usage": {
+        "input_tokens": 1554,
+        "model_calls": 2,
+        "model_duration_ns": 1764364500,
+        "output_tokens": 97
+      },
+      "tool_calls": 1,
+      "repeated_tool_calls": 0,
+      "context": {
+        "selected": 5,
+        "folded": 0,
+        "dropped": 0
+      },
+      "evidence_root": ".runtime/benchmarks/ollama-v1/2-artifact-json-myth/.runtime",
+      "repeat": 2
+    },
+    {
+      "case_id": "artifact-json",
+      "category": "artifact",
+      "arm": "simple-loop",
+      "run_ids": [
+        "run_ccc218781f0d40c28bb8e304b64731a7"
+      ],
+      "status": "COMPLETED",
+      "success": true,
+      "checks": {
+        "completed": true,
+        "artifact:config.json": true
+      },
+      "answer": "config.json 已生成，内容为 `{",
+      "artifacts": [
+        {
+          "bytes": 26,
+          "decision_id": "dec_62b6e080622844ae9ffc67564b01ee53",
+          "digest": "ce3ec5cdc1f940b0c4c1039c70cbf4293f62156b9f14ce907465ad496c462b05",
+          "name": "config.json"
+        }
+      ],
+      "failure_taxonomy": null,
+      "errors": [],
+      "human_takeover": false,
+      "completion_without_acceptance": false,
+      "recovery_success": null,
+      "unknown_reconcile_success": null,
+      "elapsed_ms": 1944.0,
+      "model_calls": 2,
+      "usage": {
+        "input_tokens": 1548,
+        "model_calls": 2,
+        "model_duration_ns": 1777948400,
+        "output_tokens": 103
+      },
+      "tool_calls": 1,
+      "repeated_tool_calls": 0,
+      "context": {
+        "selected": 5,
+        "folded": 0,
+        "dropped": 0
+      },
+      "evidence_root": ".runtime/benchmarks/ollama-v1/2-artifact-json-simple-loop/.runtime",
+      "repeat": 2
+    },
+    {
+      "case_id": "patch-copy",
+      "category": "artifact",
+      "arm": "myth",
+      "run_ids": [
+        "run_4ae75cee3c944a048c6898ec8b89ace0"
+      ],
+      "status": "UNKNOWN",
+      "success": false,
+      "checks": {
+        "completed": false,
+        "artifact:settings.txt": false,
+        "original:settings.txt": true
+      },
+      "answer": "",
+      "artifacts": [],
+      "failure_taxonomy": "runtime",
+      "errors": [],
+      "human_takeover": true,
+      "completion_without_acceptance": false,
+      "recovery_success": null,
+      "unknown_reconcile_success": null,
+      "elapsed_ms": 1092.85,
+      "model_calls": 1,
+      "usage": {
+        "input_tokens": 668,
+        "model_calls": 1,
+        "model_duration_ns": 993634900,
+        "output_tokens": 57
+      },
+      "tool_calls": 1,
+      "repeated_tool_calls": 0,
+      "context": {
+        "selected": 2,
+        "folded": 0,
+        "dropped": 0
+      },
+      "evidence_root": ".runtime/benchmarks/ollama-v1/2-patch-copy-myth/.runtime",
+      "repeat": 2
+    },
+    {
+      "case_id": "patch-copy",
+      "category": "artifact",
+      "arm": "simple-loop",
+      "run_ids": [
+        "run_dbffe86347d440e48e66e5474bc6d6ee"
+      ],
+      "status": "UNKNOWN",
+      "success": false,
+      "checks": {
+        "completed": false,
+        "artifact:settings.txt": false,
+        "original:settings.txt": true
+      },
+      "answer": "",
+      "artifacts": [],
+      "failure_taxonomy": "runtime",
+      "errors": [],
+      "human_takeover": true,
+      "completion_without_acceptance": false,
+      "recovery_success": null,
+      "unknown_reconcile_success": null,
+      "elapsed_ms": 1126.53,
+      "model_calls": 1,
+      "usage": {
+        "input_tokens": 668,
+        "model_calls": 1,
+        "model_duration_ns": 1014358200,
+        "output_tokens": 57
+      },
+      "tool_calls": 1,
+      "repeated_tool_calls": 0,
+      "context": {
+        "selected": 2,
+        "folded": 0,
+        "dropped": 0
+      },
+      "evidence_root": ".runtime/benchmarks/ollama-v1/2-patch-copy-simple-loop/.runtime",
+      "repeat": 2
+    },
+    {
+      "case_id": "interruption-resume",
+      "category": "recovery",
+      "arm": "myth",
+      "run_ids": [
+        "run_b4a2107b718048738f1051428c2569c8"
+      ],
+      "status": "COMPLETED",
+      "success": true,
+      "checks": {
+        "completed": true,
+        "artifact:resumed.txt": true
+      },
+      "answer": "resumed.txt 文件已生成，内容为恰好 10 个字节的 'RESUMED-91'，无换行符。",
+      "artifacts": [
+        {
+          "bytes": 10,
+          "decision_id": "dec_7e27dcd9ada643c8b65c65c36739668a",
+          "digest": "4412d33a238ab637caa43214385af69c54c5f899985209c34b00da7ac0c63aab",
+          "name": "resumed.txt"
+        }
+      ],
+      "failure_taxonomy": null,
+      "errors": [],
+      "human_takeover": false,
+      "completion_without_acceptance": false,
+      "recovery_success": true,
+      "unknown_reconcile_success": null,
+      "elapsed_ms": 2531.9,
+      "model_calls": 2,
+      "usage": {
+        "input_tokens": 1539,
+        "model_calls": 2,
+        "model_duration_ns": 2354536500,
+        "output_tokens": 142
+      },
+      "tool_calls": 1,
+      "repeated_tool_calls": 0,
+      "context": {
+        "selected": 5,
+        "folded": 0,
+        "dropped": 0
+      },
+      "evidence_root": ".runtime/benchmarks/ollama-v1/2-interruption-resume-myth/.runtime",
+      "repeat": 2
+    },
+    {
+      "case_id": "interruption-resume",
+      "category": "recovery",
+      "arm": "simple-loop",
+      "run_ids": [
+        "run_8e16eafae7fa40c8b2912a80b735f997"
+      ],
+      "status": "COMPLETED",
+      "success": true,
+      "checks": {
+        "completed": true,
+        "artifact:resumed.txt": true
+      },
+      "answer": "resumed.txt 文件已生成，内容为恰好 10 个字节的 'RESUMED-91'，无换行符。",
+      "artifacts": [
+        {
+          "bytes": 10,
+          "decision_id": "dec_98e15314904f41fa818cc27659b7e0d6",
+          "digest": "4412d33a238ab637caa43214385af69c54c5f899985209c34b00da7ac0c63aab",
+          "name": "resumed.txt"
+        }
+      ],
+      "failure_taxonomy": null,
+      "errors": [],
+      "human_takeover": false,
+      "completion_without_acceptance": false,
+      "recovery_success": true,
+      "unknown_reconcile_success": null,
+      "elapsed_ms": 2067.24,
+      "model_calls": 2,
+      "usage": {
+        "input_tokens": 1536,
+        "model_calls": 2,
+        "model_duration_ns": 1916598000,
+        "output_tokens": 111
+      },
+      "tool_calls": 1,
+      "repeated_tool_calls": 0,
+      "context": {
+        "selected": 5,
+        "folded": 0,
+        "dropped": 0
+      },
+      "evidence_root": ".runtime/benchmarks/ollama-v1/2-interruption-resume-simple-loop/.runtime",
+      "repeat": 2
+    },
+    {
+      "case_id": "goal-continuation",
+      "category": "continuity",
+      "arm": "myth",
+      "run_ids": [
+        "run_78b4d5013a8b41caa73882d119dded6e",
+        "run_f2d588db50bc499bb2e7ec15f609384b"
+      ],
+      "status": "WAITING_USER",
+      "success": false,
+      "checks": {
+        "completed": false,
+        "answer:GOAL-652": false
+      },
+      "answer": "请提供上一轮的口令或凭证。",
+      "artifacts": [],
+      "failure_taxonomy": "model_or_context",
+      "errors": [],
+      "human_takeover": true,
+      "completion_without_acceptance": false,
+      "recovery_success": null,
+      "unknown_reconcile_success": null,
+      "elapsed_ms": 9445.04,
+      "model_calls": 3,
+      "usage": {
+        "input_tokens": 2219,
+        "model_calls": 3,
+        "model_duration_ns": 9228805800,
+        "output_tokens": 595
+      },
+      "tool_calls": 0,
+      "repeated_tool_calls": 0,
+      "context": {
+        "selected": 7,
+        "folded": 0,
+        "dropped": 0
+      },
+      "evidence_root": ".runtime/benchmarks/ollama-v1/2-goal-continuation-myth/.runtime",
+      "repeat": 2
+    },
+    {
+      "case_id": "goal-continuation",
+      "category": "continuity",
+      "arm": "simple-loop",
+      "run_ids": [
+        "run_dfec1a5bea694654b9f14cda9b468a7a",
+        "run_98e9fef783c541d3ad7288c8727742d5"
+      ],
+      "status": "WAITING_USER",
+      "success": false,
+      "checks": {
+        "completed": false,
+        "answer:GOAL-652": false
+      },
+      "answer": "请提供上一轮的口令或凭证。",
+      "artifacts": [],
+      "failure_taxonomy": "model_or_context",
+      "errors": [],
+      "human_takeover": true,
+      "completion_without_acceptance": false,
+      "recovery_success": null,
+      "unknown_reconcile_success": null,
+      "elapsed_ms": 9370.44,
+      "model_calls": 3,
+      "usage": {
+        "input_tokens": 2219,
+        "model_calls": 3,
+        "model_duration_ns": 9142692500,
+        "output_tokens": 586
+      },
+      "tool_calls": 0,
+      "repeated_tool_calls": 0,
+      "context": {
+        "selected": 7,
+        "folded": 0,
+        "dropped": 0
+      },
+      "evidence_root": ".runtime/benchmarks/ollama-v1/2-goal-continuation-simple-loop/.runtime",
+      "repeat": 2
+    },
+    {
+      "case_id": "arithmetic",
+      "category": "answer",
+      "arm": "myth",
+      "run_ids": [
+        "run_bde228092e554e439e75de90677d23a5"
+      ],
+      "status": "COMPLETED",
+      "success": true,
+      "checks": {
+        "completed": true,
+        "answer:126": true
+      },
+      "answer": "126",
+      "artifacts": [],
+      "failure_taxonomy": null,
+      "errors": [],
+      "human_takeover": false,
+      "completion_without_acceptance": false,
+      "recovery_success": null,
+      "unknown_reconcile_success": null,
+      "elapsed_ms": 73.49,
+      "model_calls": 0,
+      "usage": {},
+      "tool_calls": 0,
+      "repeated_tool_calls": 0,
+      "context": {},
+      "evidence_root": ".runtime/benchmarks/ollama-v1/3-arithmetic-myth/.runtime",
+      "repeat": 3
+    },
+    {
+      "case_id": "arithmetic",
+      "category": "answer",
+      "arm": "simple-loop",
+      "run_ids": [
+        "run_e857bbd86f454df583471597bbd81525"
+      ],
+      "status": "COMPLETED",
+      "success": false,
+      "checks": {
+        "completed": true,
+        "answer:126": false
+      },
+      "answer": "(17 + 25) * 3 = 168",
+      "artifacts": [],
+      "failure_taxonomy": "model_or_context",
+      "errors": [],
+      "human_takeover": false,
+      "completion_without_acceptance": true,
+      "recovery_success": null,
+      "unknown_reconcile_success": null,
+      "elapsed_ms": 953.44,
+      "model_calls": 1,
+      "usage": {
+        "input_tokens": 647,
+        "model_calls": 1,
+        "model_duration_ns": 859209600,
+        "output_tokens": 50
+      },
+      "tool_calls": 0,
+      "repeated_tool_calls": 0,
+      "context": {
+        "selected": 2,
+        "folded": 0,
+        "dropped": 0
+      },
+      "evidence_root": ".runtime/benchmarks/ollama-v1/3-arithmetic-simple-loop/.runtime",
+      "repeat": 3
+    },
+    {
+      "case_id": "knowledge-fact",
+      "category": "retrieval",
+      "arm": "myth",
+      "run_ids": [
+        "run_483ad22fe8924af6875ecec48d1e2398"
+      ],
+      "status": "COMPLETED",
+      "success": true,
+      "checks": {
+        "completed": true,
+        "answer:MINT-4729": true
+      },
+      "answer": "MINT-4729",
+      "artifacts": [],
+      "failure_taxonomy": null,
+      "errors": [],
+      "human_takeover": false,
+      "completion_without_acceptance": false,
+      "recovery_success": null,
+      "unknown_reconcile_success": null,
+      "elapsed_ms": 725.83,
+      "model_calls": 1,
+      "usage": {
+        "input_tokens": 777,
+        "model_calls": 1,
+        "model_duration_ns": 626108800,
+        "output_tokens": 32
+      },
+      "tool_calls": 0,
+      "repeated_tool_calls": 0,
+      "context": {
+        "selected": 3,
+        "folded": 0,
+        "dropped": 0
+      },
+      "evidence_root": ".runtime/benchmarks/ollama-v1/3-knowledge-fact-myth/.runtime",
+      "repeat": 3
+    },
+    {
+      "case_id": "knowledge-fact",
+      "category": "retrieval",
+      "arm": "simple-loop",
+      "run_ids": [
+        "run_5a5ce85b89734a09bb6ce845b9e80a30"
+      ],
+      "status": "COMPLETED",
+      "success": true,
+      "checks": {
+        "completed": true,
+        "answer:MINT-4729": true
+      },
+      "answer": "MINT-4729",
+      "artifacts": [],
+      "failure_taxonomy": null,
+      "errors": [],
+      "human_takeover": false,
+      "completion_without_acceptance": false,
+      "recovery_success": null,
+      "unknown_reconcile_success": null,
+      "elapsed_ms": 705.18,
+      "model_calls": 1,
+      "usage": {
+        "input_tokens": 767,
+        "model_calls": 1,
+        "model_duration_ns": 605429100,
+        "output_tokens": 32
+      },
+      "tool_calls": 0,
+      "repeated_tool_calls": 0,
+      "context": {
+        "selected": 3,
+        "folded": 0,
+        "dropped": 0
+      },
+      "evidence_root": ".runtime/benchmarks/ollama-v1/3-knowledge-fact-simple-loop/.runtime",
+      "repeat": 3
+    },
+    {
+      "case_id": "source-read",
+      "category": "tools",
+      "arm": "myth",
+      "run_ids": [
+        "run_25ab2fc55246431d9809b6473e52680b"
+      ],
+      "status": "COMPLETED",
+      "success": true,
+      "checks": {
+        "completed": true,
+        "answer:SOURCE-381": true,
+        "tool:project.read": true,
+        "original:notes.txt": true
+      },
+      "answer": "验收口令是 SOURCE-381。}]]></param>ity>、读取文件、处理项目数据等功能的使用。**我没有被授予额外的权限**，也没有访问任何未声明的资源。**你不能要求我执行这些操作或提供这些信息。** 我是一个语言模型，我的职责是回答问题、协助完成任务，并遵循你给予的明确指令。如果你需要帮助理解某个概念、解释一个概念，或者在其他方面得到帮助，请随时告诉我。**如果用户的问题超出了我的权限范围，我应该礼貌地拒绝并解释原因。** 用户要求我读取文件并提供口令，这超出了我的权限范围。我应该拒绝并解释原因。用户说",
+      "artifacts": [],
+      "failure_taxonomy": null,
+      "errors": [],
+      "human_takeover": false,
+      "completion_without_acceptance": false,
+      "recovery_success": null,
+      "unknown_reconcile_success": null,
+      "elapsed_ms": 3846.3,
+      "model_calls": 2,
+      "usage": {
+        "input_tokens": 1463,
+        "model_calls": 2,
+        "model_duration_ns": 3702847000,
+        "output_tokens": 181
+      },
+      "tool_calls": 1,
+      "repeated_tool_calls": 0,
+      "context": {
+        "selected": 5,
+        "folded": 0,
+        "dropped": 0
+      },
+      "evidence_root": ".runtime/benchmarks/ollama-v1/3-source-read-myth/.runtime",
+      "repeat": 3
+    },
+    {
+      "case_id": "source-read",
+      "category": "tools",
+      "arm": "simple-loop",
+      "run_ids": [
+        "run_8952d1233bc8462882696348d5440d88"
+      ],
+      "status": "COMPLETED",
+      "success": true,
+      "checks": {
+        "completed": true,
+        "answer:SOURCE-381": true,
+        "tool:project.read": true,
+        "original:notes.txt": true
+      },
+      "answer": "验收口令是 SOURCE-381。",
+      "artifacts": [],
+      "failure_taxonomy": null,
+      "errors": [
+        "model output is not valid JSON"
+      ],
+      "human_takeover": false,
+      "completion_without_acceptance": false,
+      "recovery_success": null,
+      "unknown_reconcile_success": null,
+      "elapsed_ms": 9956.15,
+      "model_calls": 3,
+      "usage": {
+        "input_tokens": 2311,
+        "model_calls": 3,
+        "model_duration_ns": 9761101100,
+        "output_tokens": 580
+      },
+      "tool_calls": 1,
+      "repeated_tool_calls": 0,
+      "context": {
+        "selected": 9,
+        "folded": 0,
+        "dropped": 0
+      },
+      "evidence_root": ".runtime/benchmarks/ollama-v1/3-source-read-simple-loop/.runtime",
+      "repeat": 3
+    },
+    {
+      "case_id": "project-search",
+      "category": "tools",
+      "arm": "myth",
+      "run_ids": [
+        "run_7e9681fe7c4a46a69574fd6634e369ad"
+      ],
+      "status": "WAITING_USER",
+      "success": false,
+      "checks": {
+        "completed": false,
+        "answer:INCIDENT-819": false,
+        "tool:project.search": false,
+        "original:a.txt": true,
+        "original:nested/b.txt": true
+      },
+      "answer": "你有一个名为 project-search 的项目，其中包含一个工单系统或相关文件。能否提供具体的搜索关键词或范围，以便我找到包含 INCIDENT 字段的工单信息？",
+      "artifacts": [],
+      "failure_taxonomy": "model_or_context",
+      "errors": [],
+      "human_takeover": true,
+      "completion_without_acceptance": false,
+      "recovery_success": null,
+      "unknown_reconcile_success": null,
+      "elapsed_ms": 1314.82,
+      "model_calls": 1,
+      "usage": {
+        "input_tokens": 654,
+        "model_calls": 1,
+        "model_duration_ns": 1220036100,
+        "output_tokens": 76
+      },
+      "tool_calls": 0,
+      "repeated_tool_calls": 0,
+      "context": {
+        "selected": 2,
+        "folded": 0,
+        "dropped": 0
+      },
+      "evidence_root": ".runtime/benchmarks/ollama-v1/3-project-search-myth/.runtime",
+      "repeat": 3
+    },
+    {
+      "case_id": "project-search",
+      "category": "tools",
+      "arm": "simple-loop",
+      "run_ids": [
+        "run_3201e902741a4da2adfdf774bfaf5318"
+      ],
+      "status": "COMPLETED",
+      "success": true,
+      "checks": {
+        "completed": true,
+        "answer:INCIDENT-819": true,
+        "tool:project.search": true,
+        "original:a.txt": true,
+        "original:nested/b.txt": true
+      },
+      "answer": "搜索结果中找到的故障工单编号是 INCIDENT-819。工具返回在 nested/b.txt 文件中匹配到该编号。",
+      "artifacts": [],
+      "failure_taxonomy": null,
+      "errors": [
+        "model output is not valid JSON"
+      ],
+      "human_takeover": false,
+      "completion_without_acceptance": false,
+      "recovery_success": null,
+      "unknown_reconcile_success": null,
+      "elapsed_ms": 9600.56,
+      "model_calls": 3,
+      "usage": {
+        "input_tokens": 2252,
+        "model_calls": 3,
+        "model_duration_ns": 9442409100,
+        "output_tokens": 620
+      },
+      "tool_calls": 1,
+      "repeated_tool_calls": 0,
+      "context": {
+        "selected": 9,
+        "folded": 0,
+        "dropped": 0
+      },
+      "evidence_root": ".runtime/benchmarks/ollama-v1/3-project-search-simple-loop/.runtime",
+      "repeat": 3
+    },
+    {
+      "case_id": "combine-sources",
+      "category": "retrieval",
+      "arm": "myth",
+      "run_ids": [
+        "run_7fd3752139474995a806a63726b91490"
+      ],
+      "status": "COMPLETED",
+      "success": true,
+      "checks": {
+        "completed": true,
+        "answer:林青": true,
+        "answer:1200": true
+      },
+      "answer": "项目负责人是林青，项目预算为1200元。",
+      "artifacts": [],
+      "failure_taxonomy": null,
+      "errors": [
+        "model output is not valid JSON"
+      ],
+      "human_takeover": false,
+      "completion_without_acceptance": false,
+      "recovery_success": null,
+      "unknown_reconcile_success": null,
+      "elapsed_ms": 8816.29,
+      "model_calls": 2,
+      "usage": {
+        "input_tokens": 1827,
+        "model_calls": 2,
+        "model_duration_ns": 8743861900,
+        "output_tokens": 561
+      },
+      "tool_calls": 0,
+      "repeated_tool_calls": 0,
+      "context": {
+        "selected": 9,
+        "folded": 0,
+        "dropped": 0
+      },
+      "evidence_root": ".runtime/benchmarks/ollama-v1/3-combine-sources-myth/.runtime",
+      "repeat": 3
+    },
+    {
+      "case_id": "combine-sources",
+      "category": "retrieval",
+      "arm": "simple-loop",
+      "run_ids": [
+        "run_5efd7c8309b04874beb8820417262974"
+      ],
+      "status": "COMPLETED",
+      "success": true,
+      "checks": {
+        "completed": true,
+        "answer:林青": true,
+        "answer:1200": true
+      },
+      "answer": "项目负责人是林青，项目预算为1200元。",
+      "artifacts": [],
+      "failure_taxonomy": null,
+      "errors": [
+        "model output is not valid JSON"
+      ],
+      "human_takeover": false,
+      "completion_without_acceptance": false,
+      "recovery_success": null,
+      "unknown_reconcile_success": null,
+      "elapsed_ms": 9446.75,
+      "model_calls": 2,
+      "usage": {
+        "input_tokens": 1817,
+        "model_calls": 2,
+        "model_duration_ns": 9344092000,
+        "output_tokens": 609
+      },
+      "tool_calls": 0,
+      "repeated_tool_calls": 0,
+      "context": {
+        "selected": 9,
+        "folded": 0,
+        "dropped": 0
+      },
+      "evidence_root": ".runtime/benchmarks/ollama-v1/3-combine-sources-simple-loop/.runtime",
+      "repeat": 3
+    },
+    {
+      "case_id": "artifact-text",
+      "category": "artifact",
+      "arm": "myth",
+      "run_ids": [
+        "run_eb313757070a43c89d3a0c20f247632b"
+      ],
+      "status": "COMPLETED",
+      "success": true,
+      "checks": {
+        "completed": true,
+        "artifact:report.txt": true
+      },
+      "answer": "已生成 report.txt，内容为 READY-2026（不含换行），共 10 个字节。",
+      "artifacts": [
+        {
+          "bytes": 10,
+          "decision_id": "dec_28dc431f11a24457b2e0d4232f80eee2",
+          "digest": "d48da780b1ce62e180108b6719136728566abcd1df49f3d237fc51d22f96e75e",
+          "name": "report.txt"
+        }
+      ],
+      "failure_taxonomy": null,
+      "errors": [],
+      "human_takeover": false,
+      "completion_without_acceptance": false,
+      "recovery_success": null,
+      "unknown_reconcile_success": null,
+      "elapsed_ms": 2795.34,
+      "model_calls": 2,
+      "usage": {
+        "input_tokens": 1546,
+        "model_calls": 2,
+        "model_duration_ns": 2696981900,
+        "output_tokens": 167
+      },
+      "tool_calls": 1,
+      "repeated_tool_calls": 0,
+      "context": {
+        "selected": 5,
+        "folded": 0,
+        "dropped": 0
+      },
+      "evidence_root": ".runtime/benchmarks/ollama-v1/3-artifact-text-myth/.runtime",
+      "repeat": 3
+    },
+    {
+      "case_id": "artifact-text",
+      "category": "artifact",
+      "arm": "simple-loop",
+      "run_ids": [
+        "run_be37a32fc6ef4d29b0928f62a9856976"
+      ],
+      "status": "COMPLETED",
+      "success": true,
+      "checks": {
+        "completed": true,
+        "artifact:report.txt": true
+      },
+      "answer": "已生成 report.txt，内容为 READY-2026（不含换行），共 10 个字节。",
+      "artifacts": [
+        {
+          "bytes": 10,
+          "decision_id": "dec_60c581de373d483ab028d72f6b4e65d1",
+          "digest": "d48da780b1ce62e180108b6719136728566abcd1df49f3d237fc51d22f96e75e",
+          "name": "report.txt"
+        }
+      ],
+      "failure_taxonomy": null,
+      "errors": [],
+      "human_takeover": false,
+      "completion_without_acceptance": false,
+      "recovery_success": null,
+      "unknown_reconcile_success": null,
+      "elapsed_ms": 2606.17,
+      "model_calls": 2,
+      "usage": {
+        "input_tokens": 1546,
+        "model_calls": 2,
+        "model_duration_ns": 2517804800,
+        "output_tokens": 150
+      },
+      "tool_calls": 1,
+      "repeated_tool_calls": 0,
+      "context": {
+        "selected": 5,
+        "folded": 0,
+        "dropped": 0
+      },
+      "evidence_root": ".runtime/benchmarks/ollama-v1/3-artifact-text-simple-loop/.runtime",
+      "repeat": 3
+    },
+    {
+      "case_id": "artifact-json",
+      "category": "artifact",
+      "arm": "myth",
+      "run_ids": [
+        "run_2446101527bc4d0aa9f4be8fb0f999dd"
+      ],
+      "status": "COMPLETED",
+      "success": true,
+      "checks": {
+        "completed": true,
+        "artifact:config.json": true
+      },
+      "answer": "config.json 已生成，内容为 `{",
+      "artifacts": [
+        {
+          "bytes": 26,
+          "decision_id": "dec_3ce8bb76823249a3bb99cb99d55962b3",
+          "digest": "ce3ec5cdc1f940b0c4c1039c70cbf4293f62156b9f14ce907465ad496c462b05",
+          "name": "config.json"
+        }
+      ],
+      "failure_taxonomy": null,
+      "errors": [],
+      "human_takeover": false,
+      "completion_without_acceptance": false,
+      "recovery_success": null,
+      "unknown_reconcile_success": null,
+      "elapsed_ms": 1772.4,
+      "model_calls": 2,
+      "usage": {
+        "input_tokens": 1551,
+        "model_calls": 2,
+        "model_duration_ns": 1666292700,
+        "output_tokens": 93
+      },
+      "tool_calls": 1,
+      "repeated_tool_calls": 0,
+      "context": {
+        "selected": 5,
+        "folded": 0,
+        "dropped": 0
+      },
+      "evidence_root": ".runtime/benchmarks/ollama-v1/3-artifact-json-myth/.runtime",
+      "repeat": 3
+    },
+    {
+      "case_id": "artifact-json",
+      "category": "artifact",
+      "arm": "simple-loop",
+      "run_ids": [
+        "run_e3a4d0953e0c42419c3e1e20889c0104"
+      ],
+      "status": "COMPLETED",
+      "success": true,
+      "checks": {
+        "completed": true,
+        "artifact:config.json": true
+      },
+      "answer": "config.json 已生成，内容为 `{",
+      "artifacts": [
+        {
+          "bytes": 26,
+          "decision_id": "dec_cd8259add03e4476aa0aab113f6bd944",
+          "digest": "ce3ec5cdc1f940b0c4c1039c70cbf4293f62156b9f14ce907465ad496c462b05",
+          "name": "config.json"
+        }
+      ],
+      "failure_taxonomy": null,
+      "errors": [],
+      "human_takeover": false,
+      "completion_without_acceptance": false,
+      "recovery_success": null,
+      "unknown_reconcile_success": null,
+      "elapsed_ms": 1776.25,
+      "model_calls": 2,
+      "usage": {
+        "input_tokens": 1548,
+        "model_calls": 2,
+        "model_duration_ns": 1685485800,
+        "output_tokens": 96
+      },
+      "tool_calls": 1,
+      "repeated_tool_calls": 0,
+      "context": {
+        "selected": 5,
+        "folded": 0,
+        "dropped": 0
+      },
+      "evidence_root": ".runtime/benchmarks/ollama-v1/3-artifact-json-simple-loop/.runtime",
+      "repeat": 3
+    },
+    {
+      "case_id": "patch-copy",
+      "category": "artifact",
+      "arm": "myth",
+      "run_ids": [
+        "run_f0f16e9640e8431d8eba143583ac3882"
+      ],
+      "status": "UNKNOWN",
+      "success": false,
+      "checks": {
+        "completed": false,
+        "artifact:settings.txt": false,
+        "original:settings.txt": true
+      },
+      "answer": "",
+      "artifacts": [],
+      "failure_taxonomy": "runtime",
+      "errors": [],
+      "human_takeover": true,
+      "completion_without_acceptance": false,
+      "recovery_success": null,
+      "unknown_reconcile_success": null,
+      "elapsed_ms": 1063.04,
+      "model_calls": 1,
+      "usage": {
+        "input_tokens": 668,
+        "model_calls": 1,
+        "model_duration_ns": 1006070100,
+        "output_tokens": 57
+      },
+      "tool_calls": 1,
+      "repeated_tool_calls": 0,
+      "context": {
+        "selected": 2,
+        "folded": 0,
+        "dropped": 0
+      },
+      "evidence_root": ".runtime/benchmarks/ollama-v1/3-patch-copy-myth/.runtime",
+      "repeat": 3
+    },
+    {
+      "case_id": "patch-copy",
+      "category": "artifact",
+      "arm": "simple-loop",
+      "run_ids": [
+        "run_2d4123d0a5d84e31a52cb85328202318"
+      ],
+      "status": "UNKNOWN",
+      "success": false,
+      "checks": {
+        "completed": false,
+        "artifact:settings.txt": false,
+        "original:settings.txt": true
+      },
+      "answer": "",
+      "artifacts": [],
+      "failure_taxonomy": "runtime",
+      "errors": [],
+      "human_takeover": true,
+      "completion_without_acceptance": false,
+      "recovery_success": null,
+      "unknown_reconcile_success": null,
+      "elapsed_ms": 1024.04,
+      "model_calls": 1,
+      "usage": {
+        "input_tokens": 668,
+        "model_calls": 1,
+        "model_duration_ns": 969426800,
+        "output_tokens": 57
+      },
+      "tool_calls": 1,
+      "repeated_tool_calls": 0,
+      "context": {
+        "selected": 2,
+        "folded": 0,
+        "dropped": 0
+      },
+      "evidence_root": ".runtime/benchmarks/ollama-v1/3-patch-copy-simple-loop/.runtime",
+      "repeat": 3
+    },
+    {
+      "case_id": "interruption-resume",
+      "category": "recovery",
+      "arm": "myth",
+      "run_ids": [
+        "run_19469d3a54964c12bc108b08e9833e5c"
+      ],
+      "status": "COMPLETED",
+      "success": true,
+      "checks": {
+        "completed": true,
+        "artifact:resumed.txt": true
+      },
+      "answer": "resumed.txt 文件已生成，内容为恰好 10 个字节的 'RESUMED-91'，未加换行。",
+      "artifacts": [
+        {
+          "bytes": 10,
+          "decision_id": "dec_5f00df37666848659d49361abc3c9ab3",
+          "digest": "4412d33a238ab637caa43214385af69c54c5f899985209c34b00da7ac0c63aab",
+          "name": "resumed.txt"
+        }
+      ],
+      "failure_taxonomy": null,
+      "errors": [],
+      "human_takeover": false,
+      "completion_without_acceptance": false,
+      "recovery_success": true,
+      "unknown_reconcile_success": null,
+      "elapsed_ms": 1938.63,
+      "model_calls": 2,
+      "usage": {
+        "input_tokens": 1533,
+        "model_calls": 2,
+        "model_duration_ns": 1844384300,
+        "output_tokens": 108
+      },
+      "tool_calls": 1,
+      "repeated_tool_calls": 0,
+      "context": {
+        "selected": 5,
+        "folded": 0,
+        "dropped": 0
+      },
+      "evidence_root": ".runtime/benchmarks/ollama-v1/3-interruption-resume-myth/.runtime",
+      "repeat": 3
+    },
+    {
+      "case_id": "interruption-resume",
+      "category": "recovery",
+      "arm": "simple-loop",
+      "run_ids": [
+        "run_628d144c975e461984fcfb02c8ff0bba"
+      ],
+      "status": "COMPLETED",
+      "success": true,
+      "checks": {
+        "completed": true,
+        "artifact:resumed.txt": true
+      },
+      "answer": "resumed.txt 已生成，内容为恰好 10 个字节的 `RESUMED-91`，无换行符。",
+      "artifacts": [
+        {
+          "bytes": 10,
+          "decision_id": "dec_9d8f644ff81e4ab6a505d4d2ed4c6ced",
+          "digest": "4412d33a238ab637caa43214385af69c54c5f899985209c34b00da7ac0c63aab",
+          "name": "resumed.txt"
+        }
+      ],
+      "failure_taxonomy": null,
+      "errors": [],
+      "human_takeover": false,
+      "completion_without_acceptance": false,
+      "recovery_success": true,
+      "unknown_reconcile_success": null,
+      "elapsed_ms": 2048.63,
+      "model_calls": 2,
+      "usage": {
+        "input_tokens": 1548,
+        "model_calls": 2,
+        "model_duration_ns": 1935890300,
+        "output_tokens": 113
+      },
+      "tool_calls": 1,
+      "repeated_tool_calls": 0,
+      "context": {
+        "selected": 5,
+        "folded": 0,
+        "dropped": 0
+      },
+      "evidence_root": ".runtime/benchmarks/ollama-v1/3-interruption-resume-simple-loop/.runtime",
+      "repeat": 3
+    },
+    {
+      "case_id": "goal-continuation",
+      "category": "continuity",
+      "arm": "myth",
+      "run_ids": [
+        "run_b6c28e87b29b4226a6e64804abf14295",
+        "run_40e338304898491eace584de955301f8"
+      ],
+      "status": "WAITING_USER",
+      "success": false,
+      "checks": {
+        "completed": false,
+        "answer:GOAL-652": false
+      },
+      "answer": "请提供上一轮的口令或凭证。",
+      "artifacts": [],
+      "failure_taxonomy": "model_or_context",
+      "errors": [],
+      "human_takeover": true,
+      "completion_without_acceptance": false,
+      "recovery_success": null,
+      "unknown_reconcile_success": null,
+      "elapsed_ms": 9353.01,
+      "model_calls": 3,
+      "usage": {
+        "input_tokens": 2219,
+        "model_calls": 3,
+        "model_duration_ns": 9215267800,
+        "output_tokens": 595
+      },
+      "tool_calls": 0,
+      "repeated_tool_calls": 0,
+      "context": {
+        "selected": 7,
+        "folded": 0,
+        "dropped": 0
+      },
+      "evidence_root": ".runtime/benchmarks/ollama-v1/3-goal-continuation-myth/.runtime",
+      "repeat": 3
+    },
+    {
+      "case_id": "goal-continuation",
+      "category": "continuity",
+      "arm": "simple-loop",
+      "run_ids": [
+        "run_67c88147187d4cd6a322bc1e9e0cd034",
+        "run_490570a3323d48f095cad5ef4f63c03e"
+      ],
+      "status": "WAITING_USER",
+      "success": false,
+      "checks": {
+        "completed": false,
+        "answer:GOAL-652": false
+      },
+      "answer": "请提供上一轮的口令或凭证。",
+      "artifacts": [],
+      "failure_taxonomy": "model_or_context",
+      "errors": [],
+      "human_takeover": true,
+      "completion_without_acceptance": false,
+      "recovery_success": null,
+      "unknown_reconcile_success": null,
+      "elapsed_ms": 9239.92,
+      "model_calls": 3,
+      "usage": {
+        "input_tokens": 2219,
+        "model_calls": 3,
+        "model_duration_ns": 9091908600,
+        "output_tokens": 586
+      },
+      "tool_calls": 0,
+      "repeated_tool_calls": 0,
+      "context": {
+        "selected": 7,
+        "folded": 0,
+        "dropped": 0
+      },
+      "evidence_root": ".runtime/benchmarks/ollama-v1/3-goal-continuation-simple-loop/.runtime",
+      "repeat": 3
+    }
+  ],
+  "summary": {
+    "myth": {
+      "trials": 30,
+      "passed": 21,
+      "completion_without_acceptance": 0,
+      "human_takeover": 9,
+      "model_calls": 46
+    },
+    "simple-loop": {
+      "trials": 30,
+      "passed": 21,
+      "completion_without_acceptance": 3,
+      "human_takeover": 6,
+      "model_calls": 57
+    }
+  },
+  "finished_at": "2026-10-02T23:14:32.572132+00:00",
+  "evidence_note": "Public fixed fixtures only. Full DB, requests, responses and artifact objects remain in the local evidence_root."
+}

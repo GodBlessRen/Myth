@@ -78,6 +78,8 @@ function renderInspectorGoal(turn){
   inspectorFact(box,"Next",work.next_action||"—");
   if(work.waiting_for)inspectorFact(box,"Waiting",work.waiting_for);
   inspectorFact(box,"Revision",work.revision||"—");
+  const wakeup=(turn?.events||[]).find(event=>event.kind==="GoalWakeupAdmitted");
+  if(wakeup){const data=wakeup.payload||{};inspectorFact(box,"Wakeup",data.schedule_id||"timer");inspectorFact(box,"Due",data.due_at||"—");}
 }
 
 function renderInspectorRecovery(turn){

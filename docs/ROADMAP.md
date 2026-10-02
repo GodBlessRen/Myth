@@ -1,160 +1,58 @@
 # Myth Roadmap
 
-## 当前基线：v0.20
+## 当前主线
 
-Myth 已经有足够多的架构合同。当前阶段不再用更多抽象掩盖真实任务失败。
-
-产品主线只有一句：
-
-> **能否长期、可靠地替一个人推进真实工作？**
-
-## 当前黄金路径
+> 能否长期、可靠地替一个人推进真实工作？
 
 ```text
 Long-term Goal
-  -> Current State
-  -> Next Action
-  -> admitted Turn
+  -> Current State / Next Action
+  -> explicit due opportunity or user request
+  -> admitted Turn / Control
   -> Observe / Act / Verify
   -> durable checkpoint
-  -> later Session
+  -> later Session / restart
   -> continue the same Goal
 ```
 
-v0.18 已经具备：
+已有运行基线：持久 Goal/Turn、Execution Cursor/Driver Lease、UNKNOWN 核对、跨会话延续、一次性/固定间隔计划、三栏 Runtime Observatory、固定任务运行器。版本变化只记录在 CHANGELOG。
 
-- durable Goal work state；
-- 跨 Session / restart continuation；
-- Conversation outcome -> Goal checkpoint；
-- Goal checkpoint -> next Turn bounded context；
-- Runtime Observatory 常驻第三栏；
-- durable Runtime / Ticket / Receipt / UNKNOWN / Recovery；
-- Intent correctness adversarial suite；
-- provider context-window hardening；
-- Eval Ledger / explicit policy release controls。
+## Next 1 — 解决固定任务中的真实失败
 
-## 已完成 — Recovery-first Runtime
+继续用 `evals/daily-v1.json` 的完整集合，每题至少三次，同时保留 simple-loop 路由消融组。记录成功、未验收完成、人工接管代理指标、模型/工具/Token、重复工作、恢复、耗时和 Context 取舍。
 
-v0.20 已把真实事故升级成 Runtime 合同：
+优先分析模型给错工具参数、忽略已有 Goal 进度、无必要询问、完成自述与产物证据不一致。区分 Model / Context / Tool / Provider / Runtime / Product workflow；保留原始失败，不改题刷分。
 
-- durable Execution Cursor；
-- current phase / last checkpoint / recovery state；
-- Driver Lease / generation / heartbeat；
-- lease expiry 后自动识别 abandoned RUNNING；
-- 无不确定外部效果：`INTERRUPTED -> RESUME`；
-- 有 Ticket / provider outcome 不明确：`UNKNOWN -> RECONCILE`；
-- Web 重开后可从 durable checkpoint 继续；
-- Runtime Observatory 显示 Recovery / Driver / Lease；
-- Session 显示“可恢复 / 需核对”。
+## Next 2 — 受限验证执行
 
-恢复不等于重发上一条 Prompt；恢复必须加载原 Run、原 Turn Snapshot、原 Step/Decision/Receipt facts，再从可信 checkpoint 继续。
+代码类任务需要运行验证。先设计一个显式 admitted test profile，固定 argv、工作副本、timeout、process tree、stdout/stderr Artifact、Ticket/Receipt/Usage 与 UNKNOWN/recovery。
 
-## Next 1 — 真实任务基线
+`test.run` 仍为 planned。文件语法解析或一次 smoke PASS 不等于任意代码安全执行；模型不能提供任意 shell 字符串。
 
-建立 10 个真实日常任务，每个重复运行至少 3 次。
+## Next 3 — 按失败补 Tool / Context / Memory
 
-记录：
+候选包括更好的原文分页、Artifact verification、Memory conflict/supersede、项目观察与检索对照。只有固定任务或连续自用证明需要时才增加能力；先解决已经发生的问题，不先造更多 Layer。
 
-- task success；
-- human takeover；
-- wrong completion；
-- recovery success；
-- interruption -> resume success；
-- unknown -> reconcile success；
-- time to completion；
-- model calls；
-- input / output tokens；
-- tool calls；
-- repeated work；
-- selected / folded / dropped context。
+## Next 4 — 连续自用与计划故障注入
 
-同时保留一个简单 Agent Loop 对照组。
+连续自用 2–4 周，验证跨日 Goal 延续、模型断连、服务重启、长时间暂停、重复计划到期、核对后的继续。当前自动测试与小任务基线不能证明多周可靠性。
 
-目标不是刷分，而是明确失败来自：
+继续测真实 provider in-flight interruption 与 UNKNOWN reconcile，当前 daily suite 的恢复题只覆盖调用前安全中断。
 
-- Model；
-- Context；
-- Tool；
-- Runtime；
-- Product workflow。
+## 冻结横向扩张
 
-## Next 2 — 最小 Goal Wake-up
-
-先只做最小 Timer / Schedule：
-
-```text
-due Goal
-  -> wake up
-  -> create admitted Turn
-  -> run through normal Control / Ticket
-```
-
-不要先造 Scheduler Framework / Trigger DSL / Event Bus。
-
-Trigger 只创造工作机会，不能绕过 admission、Control 或 Ticket。
-
-## Next 3 — 按真实失败补能力
-
-优先级由真实任务决定。
-
-候选方向：
-
-- Retrieval baseline（必要时再引入 FTS5 / hybrid）；
-- 更好的 Context selection；
-- Memory conflict / supersede；
-- 文件/仓库观察；
-- 受限 `test.run`；
-- 更强的 Artifact verification。
-
-没有真实失败，不升级成新 Layer。
-
-## Next 4 — 受限验证执行
-
-代码类工作真正需要的是验证，而不是任意 shell。
-
-优先设计：
-
-- admitted test profile；
-- timeout；
-- process tree；
-- stdout / stderr Artifact；
-- Ticket / Receipt / Usage；
-- UNKNOWN / recovery；
-- 明确 allowlist。
-
-不开放模型直接生成任意 shell 字符串执行。
-
-## Next 5 — 连续自用
-
-连续自用 2–4 周，再决定是否深化：
-
-- Workflow；
-- Routing / Parallel；
-- Multi-Agent；
-- MCP / A2A；
-- 更复杂 Evolution；
-- adaptive Information Gain。
-
-这些目前都**冻结横向扩张**。
+Workflow、Routing/Parallel、Multi-Agent、MCP/A2A 和更复杂 Evolution 暂不作为新增架构主线。保留现有合同，先积累可比较的工作证据。
 
 ## 永久不变量
 
-- Goal / Memory / Model 不扩大权限；
-- UNKNOWN 先 reconcile，不盲 replay；
-- 完成声明必须有证据；
-- 第三栏 Runtime Observatory 不删除；
-- 历史 Turn / Receipt / Artifact 不被未来策略倒写；
-- Core 不感知模型厂商 / MCP / A2A 等协议名。
+- Goal / Memory / Model 不扩大权限。
+- Trigger 只创造机会，执行仍经过 admission、Control 和 Ticket。
+- UNKNOWN 先 reconcile，不盲 replay。
+- 完成必须有 Artifact/test/receipt/external state 证据。
+- 桌面第三栏常驻；窄屏仍有完整 Runtime 观测入口。
+- 旧 Turn/Receipt/Artifact 不被未来策略倒写。
+- Core 不感知模型厂商、MCP/A2A 等协议名。
 
-## Long Horizon
+## 长期方向
 
-只有真实部署需求出现后再推进：
-
-- distributed workers；
-- leases；
-- remote execution；
-- multi-user auth；
-- organization policy；
-- fleet scheduling。
-
-长期方向存在即可，当前不为它们提前支付复杂度。
+只有明确部署需求出现后再推进系统常驻服务、分布式 worker、远端执行、多用户授权、组织 policy 和 fleet scheduling。当前固定间隔计划不是通用 cron/Event Bus/Trigger DSL。

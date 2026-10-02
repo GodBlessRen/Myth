@@ -28,7 +28,7 @@ CORE: tuple[ArchitectureItem, ...] = (
         "Goal",
         "core",
         Maturity.CONNECTED,
-        "Long-lived intent owns durable work state across Runs/Sessions: current state, progress, next action, waiting-for and revision. Autonomous scheduling still does not exist.",
+        "Long-lived intent owns durable work state across Runs/Sessions. Explicit local timers and intervals admit bounded work while the Web service runs.",
     ),
     ArchitectureItem(
         "run",
@@ -191,7 +191,7 @@ ADAPTERS: tuple[ArchitectureItem, ...] = (
     ArchitectureItem("a2a", "A2A", "adapter", Maturity.PLANNED, "Remote Agent interoperability behind AgentPort."),
     ArchitectureItem("browser", "Browser", "adapter", Maturity.PLANNED, "Browser executor behind ExecutionPort."),
     ArchitectureItem("shell", "Shell", "adapter", Maturity.PLANNED, "Bounded command profiles behind ExecutionPort; arbitrary shell is not admitted."),
-    ArchitectureItem("timer_webhook", "Timer / Webhook", "adapter", Maturity.PLANNED, "Trigger sources behind EventPort."),
+    ArchitectureItem("timer_webhook", "Local Goal Timer", "adapter", Maturity.CONNECTED, "Explicit one-shot/interval schedules commit wakeup and Turn together. Webhook/email remain planned."),
 )
 
 

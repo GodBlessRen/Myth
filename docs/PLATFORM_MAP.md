@@ -36,7 +36,7 @@ Myth 的正式结构是：
 | State | usable | SQLite durable state / budget / event / command |
 | Context | usable | bounded projection + provider-aware context budget |
 | Memory | usable | typed revision / scope / provenance / recall |
-| Personal State | usable | Goal work state / Trigger / explicit state persistence |
+| Personal State | usable | Goal work state / explicit schedule / atomic wakeup admission / explicit state persistence |
 | Observability | usable | 第三栏 Goal / Flow / Trajectory / Tokens / Context / Tools / Control / Budget |
 | Evaluation | usable | fixed suites / Runner / Ledger / release evidence |
 | Evolution | usable | Cost Model / Candidate / Promote / Rollback；不自动发布 |

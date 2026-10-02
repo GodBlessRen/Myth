@@ -174,19 +174,25 @@ class SqlitePersonalState:
         waiting_for: str | None = None,
         progress_note: str | None = None,
         last_run_id: str | None = None,
+        expected_run_id: str | None = None,
     ) -> dict[str, Any]:
-        current = self.work_state(goal_id)
-        values = {
-            "current_state": current["current_state"] if current_state is None else str(current_state).strip(),
-            "next_action": current["next_action"] if next_action is None else str(next_action).strip(),
-            "waiting_for": current["waiting_for"] if waiting_for is None else str(waiting_for).strip(),
-            "progress_note": current["progress_note"] if progress_note is None else str(progress_note).strip(),
-            "last_run_id": current["last_run_id"] if last_run_id is None else last_run_id,
-        }
-        for key in ("current_state","next_action","waiting_for","progress_note"):
-            if len(values[key].encode("utf-8")) > 4000:
-                raise ValueError(f"{key} exceeds 4000 UTF-8 bytes")
+        self.work_state(goal_id)
         with self.store.tx() as db:
+            current = dict(db.execute("SELECT * FROM goal_work_state WHERE goal_id=?",(goal_id,)).fetchone())
+            # A late checkpoint from a finished Run cannot overwrite a newer
+            # Turn that was admitted after its reply was committed.
+            if expected_run_id is not None and current["last_run_id"] not in {None,expected_run_id}:
+                return self.goal_view(goal_id)
+            values = {
+                "current_state": current["current_state"] if current_state is None else str(current_state).strip(),
+                "next_action": current["next_action"] if next_action is None else str(next_action).strip(),
+                "waiting_for": current["waiting_for"] if waiting_for is None else str(waiting_for).strip(),
+                "progress_note": current["progress_note"] if progress_note is None else str(progress_note).strip(),
+                "last_run_id": current["last_run_id"] if last_run_id is None else last_run_id,
+            }
+            for key in ("current_state","next_action","waiting_for","progress_note"):
+                if len(values[key].encode("utf-8")) > 4000:
+                    raise ValueError(f"{key} exceeds 4000 UTF-8 bytes")
             db.execute(
                 "UPDATE goal_work_state SET current_state=?,next_action=?,waiting_for=?,progress_note=?,"
                 "last_run_id=?,revision=revision+1,updated_at=CURRENT_TIMESTAMP WHERE goal_id=?",
@@ -232,6 +238,7 @@ class SqlitePersonalState:
             waiting_for=waiting_for,
             progress_note=summary,
             last_run_id=run_id,
+            expected_run_id=run_id,
         )
 
     def add_trigger(

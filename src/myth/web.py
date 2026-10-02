@@ -289,6 +289,9 @@ def make_handler(service: AgentWebService):
                 if path == "/inspector.js":
                     self._asset("inspector.js", "text/javascript; charset=utf-8")
                     return
+                if path == "/goals.js":
+                    self._asset("goals.js", "text/javascript; charset=utf-8")
+                    return
                 if path == "/api/runs":
                     self._json(HTTPStatus.OK, {"runs": service.list_runs()})
                     return
@@ -401,6 +404,7 @@ def serve(
     display_host = f"[{host}]" if ":" in host else host
     url = f"http://{display_host}:{server.server_port}/"
     print(f"Myth Web: {url}")
+    service.workspace.start_scheduler()
     if open_browser:
         threading.Timer(0.35, lambda: webbrowser.open(url)).start()
     try:
@@ -408,4 +412,5 @@ def serve(
     except KeyboardInterrupt:
         pass
     finally:
+        service.workspace.stop_scheduler()
         server.server_close()

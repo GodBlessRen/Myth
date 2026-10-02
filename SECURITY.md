@@ -68,6 +68,6 @@ In exact mode, request_completion is accepted only after the independent verifie
 
 - Goal and Trigger are durable planning inputs, not execution authority.
 - Personal State is explicit product state for preferences/permissions; Memory is contextual knowledge. Neither can grant a Tool Ticket.
-- Trigger persistence does not imply a background scheduler exists. Timer/webhook/email adapters remain non-executable until EventPort scheduling and approval semantics are implemented.
+- Generic Trigger records remain inert. Explicit local Goal schedules can admit bounded Turns while the Web service runs; schedule identity, Goal/session admission, Control, Capability and Ticket/Receipt still apply. Webhook/email sources and OS-level scheduling remain non-executable.
 - Decision, Routing, Workflow, Multi-Agent and Managed Agent are coordination strategies. Any strategy that produces external work must still cross local Capability/Control admission and the Ticket/Receipt boundary.
 - MCP/A2A/provider metadata is adapter data. Discovery of a remote Tool or Agent never becomes local execution authority by itself.
