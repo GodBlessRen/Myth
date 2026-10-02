@@ -52,6 +52,76 @@ class EvalObservation:
     metrics: dict[str, float | int] | None = None
     evidence_refs: tuple[str, ...] = ()
     safety_regression: bool = False
+    policy_id: str | None = None
+    comparison_key: str | None = None
+
+
+@dataclass(frozen=True)
+class PairedEvalComparison:
+    case_id: str
+    comparison_key: str
+    baseline_policy_id: str
+    candidate_policy_id: str
+    baseline_verdict: EvalVerdict
+    candidate_verdict: EvalVerdict
+    observed_quality_gain: float | None
+    cost_delta: dict[str, float]
+    evidence_refs: tuple[str, ...] = ()
+
+    @property
+    def calibrated(self) -> bool:
+        return self.observed_quality_gain is not None
+
+
+def _verdict_quality(verdict: EvalVerdict) -> float | None:
+    if verdict is EvalVerdict.PASS:
+        return 1.0
+    if verdict is EvalVerdict.FAIL:
+        return 0.0
+    return None
+
+
+def compare_observations(
+    baseline: EvalObservation,
+    candidate: EvalObservation,
+) -> PairedEvalComparison:
+    if baseline.case_id != candidate.case_id:
+        raise ValueError("paired evaluation requires the same case_id")
+    baseline_key=baseline.comparison_key or baseline.case_id
+    candidate_key=candidate.comparison_key or candidate.case_id
+    if baseline_key != candidate_key:
+        raise ValueError("paired evaluation requires the same comparison_key")
+    if not baseline.policy_id or not candidate.policy_id:
+        raise ValueError("paired evaluation requires explicit policy_id values")
+
+    baseline_quality=_verdict_quality(baseline.verdict)
+    candidate_quality=_verdict_quality(candidate.verdict)
+    quality_gain=(
+        None
+        if baseline_quality is None or candidate_quality is None
+        else candidate_quality-baseline_quality
+    )
+    baseline_metrics=baseline.metrics or {}
+    candidate_metrics=candidate.metrics or {}
+    keys=set(baseline_metrics) | set(candidate_metrics)
+    cost_delta={}
+    for key in sorted(keys):
+        before=baseline_metrics.get(key)
+        after=candidate_metrics.get(key)
+        if isinstance(before,(int,float)) and isinstance(after,(int,float)):
+            cost_delta[key]=float(after)-float(before)
+
+    return PairedEvalComparison(
+        case_id=baseline.case_id,
+        comparison_key=baseline_key,
+        baseline_policy_id=baseline.policy_id,
+        candidate_policy_id=candidate.policy_id,
+        baseline_verdict=baseline.verdict,
+        candidate_verdict=candidate.verdict,
+        observed_quality_gain=quality_gain,
+        cost_delta=cost_delta,
+        evidence_refs=tuple(dict.fromkeys((*baseline.evidence_refs,*candidate.evidence_refs))),
+    )
 
 
 @dataclass(frozen=True)
