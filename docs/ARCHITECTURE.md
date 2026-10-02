@@ -1,105 +1,155 @@
-# Myth Architecture — P1 + P2
+# Myth Architecture — P1 + P2 + P3
 
 ## Runtime contract
 
 ```text
 User goal
   ↓
-Run
-  ├─ Model Action → Model Attempt → Model Ticket → Provider
-  │                                      ↓
-  │                           durable model receipt
-  │                                      ↓
-  │                               StepDecision
-  │                               (proposal only)
-  │
-  └─ Tool Action → Tool Attempt → StartTicket → managed effect
-                                         ↓
-                                   Receipt / reconcile
-                                         ↓
-                                    Verification
-                                         ↓
-                                      Delivery
+AgentRuntime
+  ↓
+Model Action → Model Attempt → Model Ticket → Provider
+                                      ↓
+                           durable model receipt
+                                      ↓
+                               StepDecision
+                      ┌────────┼───────────┐
+                  ask_user   tool_call   request_completion
+                      │          │                │
+                    pause    Policy gate       Verifier
+                                 │                │
+                           Tool Action           PASS?
+                                 ↓                │
+                           Tool Attempt           ↓
+                                 ↓             Delivery
+                           StartTicket
+                                 ↓
+                           managed effect
+                                 ↓
+                              Receipt
+                                 ↓
+                           back to model
 ```
 
-The two paths deliberately share the same ideas: stable intent, one execution opportunity, durable launch authority, durable facts, separate accounting, and recovery without blind replay.
+The architecture deliberately keeps three truths separate:
+
+1. **proposal truth** — what the model suggested;
+2. **execution truth** — what a Ticket/Receipt says happened;
+3. **completion truth** — what independent verification can prove.
+
+## P3 Agent loop
+
+`src/myth/agent_runtime.py` is the orchestration layer. It does not replace the lower layers:
+
+- Model calls still flow through `DecisionRuntime`;
+- tool calls still use P1 `Action → Attempt → Ticket → Receipt`;
+- budgets are still stored in the shared `accounts` ledger;
+- uncertain provider/tool outcomes still stop rather than silently retry.
+
+The loop is bounded by `max_steps`. Reaching the bound sets the Run to `BUDGET_EXHAUSTED`.
+
+## Tool admission
+
+P3 supports one admitted capability:
+
+```text
+file.patch_exact
+```
+
+Before creating the Tool Action, AgentRuntime validates:
+
+- capability ID;
+- argument types;
+- positive expected match count;
+- proposed path ∈ explicit `allowed_files`.
+
+A rejected proposal is recorded and returned to the next model decision without creating a Tool Ticket.
+
+## Completion verification
+
+A model completion claim must cite one or more durable `evidence_ref` values.
+
+AgentVerifier checks:
+
+```text
+cited evidence exists
+AND cited Attempt == RESOLVED/SUCCEEDED
+AND managed artifact still exists
+AND sha256(current bytes) == action.after_digest
+```
+
+Only then does P3 write an Agent verification report and Agent Delivery and set the Run to `SUCCEEDED`.
 
 ## P2 provider boundary
 
-`src/myth/providers/base.py` defines a tiny provider port:
+`src/myth/providers/base.py` defines:
 
 ```text
-check()  -> readiness only
+check()  -> readiness
 invoke() -> ModelResult
 ```
 
 Built-ins:
 
-- `OllamaProvider`: local `/api/chat`, structured schema, provider token counts.
-- `OpenAIApiKeyProvider`: OpenAI Responses API with `OPENAI_API_KEY`.
-- `PiOpenAIProvider`: OpenAI Responses API, but authentication is delegated to upstream Pi OAuth.
+- `OllamaProvider`
+- `OpenAIApiKeyProvider`
+- `PiOpenAIProvider`
 
-Pi remains the owner of browser login, refresh token, credential locking and `auth.json`. Myth consumes only a short-lived resolved bearer token. This follows the same separation used by SoL-Pi: the extension/runtime does not take ownership of Pi authentication.
+Pi remains the owner of browser login, refresh token, credential locking and `auth.json`.
 
-## StepDecision contract
+## Web architecture
 
-Exactly one of:
-
-- `tool_call` — proposal containing a capability ID and arguments;
-- `ask_user` — required information is missing;
-- `request_completion` — a claim that still requires independent verification.
-
-The provider-facing JSON schema uses a fixed object shape so Ollama and OpenAI can share one transport contract. `arguments_json` contains the tool argument object as JSON text; the Runtime parses and validates it again.
-
-## Model durability
-
-A model call is not a hidden helper call:
+`src/myth/web.py` is a thin loopback-only HTTP surface.
 
 ```text
-Prepare frozen ModelRequest
-  → TX Model Intent + all meter reservations
-  → Model Ticket
-  → provider I/O
-  → publish raw response object + local model receipt
-  → TX settle provider usage
-  → validate + commit StepDecision
+Browser
+  ↓
+local JSON API
+  ↓
+AgentWebService
+  ↓
+AgentRuntime
+  ↓
+SQLite + content-addressed objects + managed workspaces
 ```
 
-If the provider call raises after a Ticket and no durable response receipt exists, the model Attempt becomes `UNKNOWN`. P2 does not silently call the provider again because that could double-charge or produce a different decision.
+Agent execution runs in a daemon worker thread while the browser polls durable status. Each worker opens its own MythRuntime connection; the UI never owns runtime authority.
 
-If a durable response receipt exists after a crash, `recover-model` can settle it and reconstruct the StepDecision without another provider call.
-
-## Completion boundary
-
-P2 intentionally stops after StepDecision. A model `tool_call` does not yet auto-create/execute a Tool Action. This prevents a subtle but serious mistake: treating “one proposed tool finished” as “the user's overall goal is verified”.
-
-The next layer is:
-
-```text
-StepDecision(tool_call)
-  → Runtime permission/scope validation
-  → Tool Action/Attempt/Ticket
-  → tool Receipt
-  → next Model Decision or Verification
-```
+The frontend is static HTML/CSS/JS packaged inside the Python distribution. There are no CDN dependencies.
 
 ## Physical design
 
-P1 tables remain unchanged. P2 adds only three compact physical structures:
+P1:
+
+- `runs`
+- `actions`
+- `attempts`
+- `tickets`
+- `receipts`
+- `accounts` + `reservations`
+- `events`
+- `verification_reports`
+- `deliveries`
+
+P2:
 
 - `model_invocations`
 - `model_reservations`
 - `step_decisions`
 
-Logical Model Action / Attempt / Ticket / Receipt identities are still explicit even though P2 does not create a separate table for every noun.
+P3:
+
+- `agent_runs`
+- `agent_notes`
+- `agent_verification_reports`
+- `agent_deliveries`
 
 ## Explicit simplifications
 
-- one driver / one SQLite writer;
-- one model request per `plan` command;
-- no automatic model-output repair yet;
-- no multi-turn Agent loop yet;
-- no automatic tool execution from StepDecision yet;
-- no hidden SDK retry inside Myth provider adapters;
-- OAuth login UI/refresh/storage remains in Pi;
-- no distributed lease/exactly-once claim.
+- single-machine modular monolith;
+- one current Tool capability;
+- original files are not overwritten;
+- no arbitrary shell/computer-use surface;
+- no automatic repair of malformed model JSON;
+- no distributed lease/exactly-once claim;
+- Web UI is local single-user and intentionally unauthenticated because it cannot bind beyond loopback;
+- remote model content privacy depends on the selected provider.

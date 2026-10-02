@@ -1,8 +1,4 @@
-"""CLI for durable local/file execution and P2 model decisions.
-
-The CLI intentionally exposes no arbitrary shell. Provider credentials are
-resolved by their adapters and never printed by Myth.
-"""
+"""CLI for P1 file execution, P2 model decisions, and the P3 Agent loop."""
 
 from __future__ import annotations
 
@@ -10,6 +6,7 @@ import argparse
 import json
 from pathlib import Path
 
+from .agent_runtime import AgentRuntime
 from .decision_runtime import DecisionRuntime
 from .providers import create_provider
 from .runtime import MythRuntime
@@ -27,7 +24,7 @@ def _provider_args(parser: argparse.ArgumentParser) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="myth", description="Minimal durable Agent Runtime")
+    parser = argparse.ArgumentParser(prog="myth", description="Durable Agent Runtime")
     parser.add_argument("--root", default=".", help="project root containing private .runtime state")
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -56,11 +53,28 @@ def build_parser() -> argparse.ArgumentParser:
     plan.add_argument("--thinking")
     plan.add_argument("--request-id")
 
+    agent = sub.add_parser("agent", help="run the bounded durable Agent loop")
+    _provider_args(agent)
+    agent.add_argument("goal")
+    agent.add_argument("--allow-file", action="append", required=True, type=Path)
+    agent.add_argument("--max-steps", type=int, default=6)
+    agent.add_argument("--max-output-tokens", type=int, default=1024)
+    agent.add_argument("--thinking")
+    agent.add_argument("--request-id")
+
+    agent_status = sub.add_parser("agent-status", help="show Agent decisions, receipts and verification")
+    agent_status.add_argument("run_id")
+
     model_status = sub.add_parser("model-status", help="show durable model invocation and decision state")
     model_status.add_argument("run_id")
 
     recover_model = sub.add_parser("recover-model", help="settle durable model receipts without repeating uncertain calls")
     recover_model.add_argument("run_id", nargs="?")
+
+    web = sub.add_parser("web", help="start the local Myth Agent workspace")
+    web.add_argument("--host", default="127.0.0.1")
+    web.add_argument("--port", type=int, default=8765)
+    web.add_argument("--no-browser", action="store_true")
     return parser
 
 
@@ -72,12 +86,32 @@ def _provider(args: argparse.Namespace):
     )
 
 
+def _require_provider(args: argparse.Namespace):
+    provider = _provider(args)
+    status = provider.check()
+    if not status.ready:
+        raise SystemExit(
+            "provider is not ready: "
+            + json.dumps(status.details or {}, ensure_ascii=False)
+        )
+    return provider
+
+
 def main() -> None:
     args = build_parser().parse_args()
 
     if args.command == "provider-check":
-        provider = _provider(args)
-        _print(provider.check())
+        _print(_provider(args).check())
+        return
+    if args.command == "web":
+        from .web import serve
+
+        serve(
+            args.root,
+            host=args.host,
+            port=args.port,
+            open_browser=not args.no_browser,
+        )
         return
 
     with MythRuntime(args.root) as runtime:
@@ -95,13 +129,7 @@ def main() -> None:
         elif args.command == "recover":
             _print(runtime.recover(args.run_id))
         elif args.command == "plan":
-            provider = _provider(args)
-            provider_status = provider.check()
-            if not provider_status.ready:
-                raise SystemExit(
-                    "provider is not ready: "
-                    + json.dumps(provider_status.details or {}, ensure_ascii=False)
-                )
+            provider = _require_provider(args)
             decisions = DecisionRuntime(runtime)
             allowed_files = tuple(args.allow_file)
             run_id = decisions.create_goal_run(
@@ -131,6 +159,22 @@ def main() -> None:
                     "note": "proposal only: Myth has not executed any proposed tool",
                 }
             )
+        elif args.command == "agent":
+            provider = _require_provider(args)
+            agent = AgentRuntime(runtime)
+            run_id = agent.create_run(
+                goal=args.goal,
+                provider=provider,
+                model=args.model,
+                allowed_files=tuple(args.allow_file),
+                max_steps=args.max_steps,
+                max_output_tokens=args.max_output_tokens,
+                thinking=args.thinking,
+                request_id=args.request_id,
+            )
+            _print(agent.run(run_id, provider))
+        elif args.command == "agent-status":
+            _print(AgentRuntime(runtime).status(args.run_id))
         elif args.command == "model-status":
             _print(DecisionRuntime(runtime).status(args.run_id))
         elif args.command == "recover-model":

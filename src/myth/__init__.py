@@ -1,6 +1,7 @@
-"""Myth: minimal durable runtime for verifiable agent execution."""
+"""Myth: durable runtime for verifiable agent execution."""
 
+from .agent_runtime import AgentRuntime
 from .runtime import MythRuntime
 
-__all__ = ["MythRuntime"]
-__version__ = "0.2.0"
+__all__ = ["AgentRuntime", "MythRuntime"]
+__version__ = "0.3.0"
