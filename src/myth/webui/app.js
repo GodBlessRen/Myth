@@ -43,13 +43,13 @@ function renderChat(session){
   const active=turn&&["RUNNING","UNKNOWN","WAITING_USER","PAUSED"].includes(status);
   const control=turn?.control||{};
   show("turnControls",!!turn&&["RUNNING","UNKNOWN","WAITING_USER","PAUSED"].includes(status));
-  show("pauseTurn",!!turn&&!control.paused&&!control.aborted&&status==="RUNNING");
+  show("pauseTurn",!!turn&&!control.paused&&!(control.stopped??control.aborted)&&status==="RUNNING");
   show("resumeTurn",!!turn&&control.paused&&status==="PAUSED");
-  $("steerTurn").disabled=!turn||control.aborted||["COMPLETED","FAILED","CANCELLED","BUDGET_EXHAUSTED"].includes(status);
-  $("compactTurn").disabled=!turn||control.aborted||status!=="RUNNING";
-  $("abortTurn").disabled=!turn||control.aborted||["COMPLETED","FAILED","CANCELLED","BUDGET_EXHAUSTED"].includes(status);
+  $("steerTurn").disabled=!turn||(control.stopped??control.aborted)||["COMPLETED","FAILED","CANCELLED","BUDGET_EXHAUSTED"].includes(status);
+  $("compactTurn").disabled=!turn||(control.stopped??control.aborted)||status!=="RUNNING";
+  $("stopRun").disabled=!turn||(control.stopped??control.aborted)||["COMPLETED","FAILED","CANCELLED","BUDGET_EXHAUSTED"].includes(status);
 
-  show("stopTurn",!!active&&!control.aborted&&status!=="PAUSED");
+  show("stopTurn",!!active&&!(control.stopped??control.aborted)&&status!=="PAUSED");
   show("send",!active||status==="WAITING_USER");
   $("send").disabled=state.busy;
   $("prompt").placeholder=status==="WAITING_USER"?"回复这个问题…":status==="PAUSED"?"Run 已暂停。Resume 后继续。":"给 Myth 一个任务，或继续当前对话…";
@@ -130,19 +130,31 @@ async function previewDocument(did){try{const d=await api(`/documents/${did}`);$
 async function searchKnowledge(){try{const q=$("knowledgeSearch").value.trim();show("searchResults",!!q);if(!q)return;const pid=$("knowledgeProject").value;const data=await api(`/search?q=${encodeURIComponent(q)}&project_id=${encodeURIComponent(pid)}`);$("searchResults").replaceChildren();data.sources.forEach(s=>{const c=el("div","search-result"),title=el("button","text-button",`${s.title} · 片段 ${s.chunk_index+1}`);title.onclick=()=>previewDocument(s.document_id);c.append(title,el("p","",s.content));$("searchResults").append(c);});if(!data.sources.length)$("searchResults").append(el("p","empty-inline","没有找到匹配内容。试试更明确的关键词。"));}catch(e){toast(e.message);}}
 
 
+function renderArchitectureItems(parent,items){
+    parent.replaceChildren();
+    (items||[]).forEach(item=>{
+        const maturity=item.maturity||item.state||"exists";
+        const card=el("article","platform-card "+maturity);
+        const head=el("div","platform-card-head");
+        head.append(
+            el("span","platform-phase",item.kind||"component"),
+            el("span","platform-state "+maturity,maturity)
+        );
+        card.append(head,el("h2","",item.label),el("p","",item.responsibility));
+        if(item.depends_on?.length)card.append(el("small","","uses · "+item.depends_on.join(" / ")));
+        parent.append(card);
+    });
+}
+
 function renderRuntime(){
     const platform=state.data.platform;
-    const layers=$("platformLayers"),caps=$("platformCapabilities");
-    layers.replaceChildren();caps.replaceChildren();
-    if(!platform){empty(layers,"Platform snapshot unavailable","重新加载工作区后再试。","spark");return;}
-    platform.layers.forEach(layer=>{
-        const card=el("article","platform-card "+layer.state);
-        const head=el("div","platform-card-head");
-        head.append(el("span","platform-phase",layer.phase),el("span","platform-state "+layer.state,layer.state));
-        card.append(head,el("h2","",layer.label),el("p","",layer.responsibility));
-        if(layer.depends_on?.length)card.append(el("small","", "depends · "+layer.depends_on.join(" / ")));
-        layers.append(card);
-    });
+    const core=$("runtimeCore"),domains=$("platformLayers"),strategies=$("runtimeStrategies"),adapters=$("runtimeAdapters"),caps=$("platformCapabilities");
+    [core,domains,strategies,adapters,caps].forEach(node=>node.replaceChildren());
+    if(!platform){empty(domains,"Architecture snapshot unavailable","重新加载工作区后再试。","spark");return;}
+    renderArchitectureItems(core,platform.core||[]);
+    renderArchitectureItems(domains,platform.domains||[]);
+    renderArchitectureItems(strategies,platform.strategies||[]);
+    renderArchitectureItems(adapters,platform.adapters||[]);
     platform.capabilities.forEach(cap=>{
         const row=el("div","capability-row");
         const left=el("div");
@@ -158,12 +170,12 @@ async function poll(){clearTimeout(state.poll);if(state.page==="chat"&&state.id)
 
 $("newChat").onclick=()=>newChat();$("newSession").onclick=()=>newChat();$("composer").onsubmit=sendMessage;
 $("prompt").onkeydown=e=>{if(e.key==="Enter"&&!e.shiftKey&&!e.isComposing){e.preventDefault();sendMessage();}};
-$("stopTurn").onclick=()=>controlTurn("abort");$("modelPill").onclick=()=>state.session?.turns.at(-1)?openControlDialog():go("settings");$("sessionMenu").onclick=()=>editSession(state.session);
+$("stopTurn").onclick=()=>controlTurn("stop");$("modelPill").onclick=()=>state.session?.turns.at(-1)?openControlDialog():go("settings");$("sessionMenu").onclick=()=>editSession(state.session);
 $("steerTurn").onclick=openControlDialog;
 $("pauseTurn").onclick=()=>controlTurn("pause");
 $("resumeTurn").onclick=()=>controlTurn("resume");
 $("compactTurn").onclick=()=>controlTurn("compact");
-$("abortTurn").onclick=()=>controlTurn("abort");
+$("stopRun").onclick=()=>controlTurn("stop");
 $("applySteer").onclick=async()=>{const text=$("steerInput").value.trim();if(!text)return toast("Steering 不能为空。");await controlTurn("steer",{text});openControlDialog();};
 $("applyModelSwitch").onclick=async()=>{const model=$("turnModelInput").value.trim();if(!model)return toast("模型名称不能为空。");await controlTurn("switch_model",{model});openControlDialog();};
 $("applyThinkingSwitch").onclick=async()=>{await controlTurn("switch_thinking",{thinking:$("turnThinkingInput").value});openControlDialog();};

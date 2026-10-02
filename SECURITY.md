@@ -48,12 +48,21 @@ In exact mode, request_completion is accepted only after the independent verifie
 - Do not expose the local server through a tunnel/reverse proxy without adding authentication, CSRF protection and a stronger multi-user authorization model first.
 
 
-## v0.8 Control Tower boundary
+## Control / Personal-Agent boundary
 
-- Steer, pause, resume, abort, model switch, thinking switch and compact are durable control commands. They affect future safe points; they do not erase an already issued Ticket or late result.
-- Abort means "stop scheduling new work". It does not claim an already-started external call was physically stopped.
+- Steer, pause, resume, stop, model switch, thinking switch and compact are durable control commands. They affect future safe points; they do not erase an already issued Ticket or late result.
+- Stop means "stop scheduling new work". It does not claim an already-started external call was physically stopped.
 - Model switching is limited to the current Turn's existing provider. It does not grant a new provider credential.
 - Memory records are local context data with provenance/revision. Memory text never grants tool authority or expands project scope.
 - `project.search` and `diff.preview` remain inside the admitted project root and reject traversal/sensitive paths.
 - `git.status` and `git.diff` use fixed argv with `shell=False`; Myth does not expose arbitrary Git arguments or shell execution.
 - `shell.exec`, `python.run`, `test.run`, browser control and remote MCP execution remain non-executable until their own admission/recovery contracts exist.
+
+
+## v0.9 composable boundary
+
+- Goal and Trigger are durable planning inputs, not execution authority.
+- Personal State is explicit product state for preferences/permissions; Memory is contextual knowledge. Neither can grant a Tool Ticket.
+- Trigger persistence does not imply a background scheduler exists. Timer/webhook/email adapters remain non-executable until EventPort scheduling and approval semantics are implemented.
+- Decision, Routing, Workflow, Multi-Agent and Managed Agent are coordination strategies. Any strategy that produces external work must still cross local Capability/Control admission and the Ticket/Receipt boundary.
+- MCP/A2A/provider metadata is adapter data. Discovery of a remote Tool or Agent never becomes local execution authority by itself.

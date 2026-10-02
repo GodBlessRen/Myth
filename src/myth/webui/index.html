@@ -26,7 +26,7 @@
   </aside>
   <button id="sidebarShade" class="sidebar-shade hidden" aria-label="关闭导航"></button>
   <main class="main">
-    <header class="topbar"><div class="topbar-left"><button id="menuToggle" class="icon-button mobile-menu" aria-label="展开导航"><span data-icon="menu"></span></button><div class="workspace-crumb"><span>Myth</span><span>/</span><strong id="pageTitle">对话</strong></div></div><div class="topbar-right"><div id="turnControls" class="turn-controls hidden"><button id="steerTurn" class="control-button">Steer</button><button id="pauseTurn" class="control-button">Pause</button><button id="resumeTurn" class="control-button hidden">Resume</button><button id="compactTurn" class="control-button">Compact</button><button id="abortTurn" class="control-button danger-control">Abort</button></div><button id="modelPill" class="model-pill"><span id="connectionDot" class="connection-dot"></span><span id="modelLabel">连接 Ollama</span><span data-icon="chevron"></span></button><button id="sessionMenu" class="icon-button hidden" aria-label="编辑当前会话"><span data-icon="more"></span></button></div></header>
+    <header class="topbar"><div class="topbar-left"><button id="menuToggle" class="icon-button mobile-menu" aria-label="展开导航"><span data-icon="menu"></span></button><div class="workspace-crumb"><span>Myth</span><span>/</span><strong id="pageTitle">对话</strong></div></div><div class="topbar-right"><div id="turnControls" class="turn-controls hidden"><button id="steerTurn" class="control-button">Steer</button><button id="pauseTurn" class="control-button">Pause</button><button id="resumeTurn" class="control-button hidden">Resume</button><button id="compactTurn" class="control-button">Compact</button><button id="stopRun" class="control-button danger-control">Stop</button></div><button id="modelPill" class="model-pill"><span id="connectionDot" class="connection-dot"></span><span id="modelLabel">连接 Ollama</span><span data-icon="chevron"></span></button><button id="sessionMenu" class="icon-button hidden" aria-label="编辑当前会话"><span data-icon="more"></span></button></div></header>
 
     <section id="chatPage" class="chat-page page">
       <div id="chatScroll" class="chat-scroll">
@@ -62,25 +62,29 @@
     <section id="runtimePage" class="page content-page hidden">
       <div class="page-heading">
         <div>
-          
-          <h1>整栋楼先存在，再逐层加深。</h1>
-          <p>这里展示真实的平台成熟度。wired 是已经有合同和装配位置，planned 不会被 Agent 当作可执行能力。</p>
+          <h1>固定事实与边界，不固定智能怎么组织。</h1>
+          <p>Myth 不是一条必须逐层经过的流水线。Core 保持稳定；Domains 正交协作；Decision / Routing / Workflow / Multi-Agent 是可插拔 Strategy；模型、MCP、A2A、存储与执行器都留在 Adapter 外圈。</p>
         </div>
         <a class="secondary" href="#chat">回到对话</a>
       </div>
       <div class="platform-legend">
-        <span><i class="state-dot usable"></i> usable · 已有真实路径</span>
-        <span><i class="state-dot wired"></i> wired · 骨架已接线</span>
-        <span><i class="state-dot planned"></i> planned · 只定义边界</span>
+        <span><i class="state-dot hardened"></i> hardened · 已强化</span>
+        <span><i class="state-dot usable"></i> usable · 可使用</span>
+        <span><i class="state-dot connected"></i> connected · 已接通</span>
+        <span><i class="state-dot exists"></i> exists · 已存在</span>
+        <span><i class="state-dot planned"></i> planned · 仅规划</span>
       </div>
-      <div id="platformLayers" class="platform-grid"></div>
+      <section class="architecture-section"><div class="architecture-heading"><h2>Core</h2><p>Goal / Run / Action / Attempt / Ticket / Receipt / Artifact / Verification</p></div><div id="runtimeCore" class="platform-grid"></div></section>
+      <section class="architecture-section"><div class="architecture-heading"><h2>Domains</h2><p>统筹、控制、执行、能力、状态、上下文、记忆、个人状态、验证与观测是正交职责，不是上下层。</p></div><div id="platformLayers" class="platform-grid"></div></section>
+      <section class="architecture-section"><div class="architecture-heading"><h2>Strategies</h2><p>Direct、Agent Loop、Routing、Workflow、Parallel、Multi-Agent、Managed Agent、Personal Agent 可按任务组合。</p></div><div id="runtimeStrategies" class="platform-grid"></div></section>
+      <section class="architecture-section"><div class="architecture-heading"><h2>Adapters</h2><p>OpenAI / Ollama / MCP / A2A / Browser / Shell / SQLite 等通过 Ports 接入，不进入 Core。</p></div><div id="runtimeAdapters" class="platform-grid"></div></section>
       <section class="panel platform-capabilities">
         <div class="panel-heading"><div><h2>能力存在，不等于拥有执行权。</h2></div><span id="capabilityCount" class="count-badge"></span></div>
         <div id="platformCapabilities" class="capability-matrix"></div>
       </section>
     </section>
 
-    <section id="settingsPage" class="page content-page hidden"><div class="page-heading"><div><h1>让工作区，适合你。</h1><p>连接已有模型，设置每轮执行的范围。</p></div></div><div class="settings-layout"><section class="panel settings-panel"><div class="panel-heading"><h2>模型连接</h2></div><label for="provider">模型提供方</label><select id="provider"><option value="ollama">Ollama · 本地模型</option><option value="openai">OpenAI · 环境变量 API Key</option><option value="pi-openai">Pi · 已登录 OAuth</option></select><label for="ollamaUrl">Ollama 服务地址</label><input id="ollamaUrl" value="http://127.0.0.1:11434"><div class="field-with-action"><div><label for="model">模型名称</label><input id="model" list="modelOptions" placeholder="检查连接后选择本地模型"><datalist id="modelOptions"></datalist></div><button id="checkConnection" class="secondary">检查连接</button></div><div id="connectionResult" class="connection-result"></div><div class="two-fields"><div><label for="maxSteps">每轮最多步骤</label><input id="maxSteps" type="number" min="2" max="32" value="12"></div><div><label for="maxTokens">每步输出 Token</label><input id="maxTokens" type="number" min="128" max="8192" value="2048"></div></div><label class="check-label"><input id="thinking" type="checkbox">启用模型思考（需模型支持）</label><div class="settings-foot"><button id="saveSettings" class="primary">保存设置</button><span id="settingsSaved" class="muted"></span></div></section><div><section class="panel"><div class="panel-heading"><h2>Agent 可以做什么</h2><span data-icon="spark"></span></div><div class="capability-list"><div><span data-icon="chat"></span><span>多轮对话与澄清</span></div><div><span data-icon="folder"></span><span>浏览、读取项目文件</span></div><div><span data-icon="book"></span><span>检索共享和项目知识</span></div><div><span data-icon="pen"></span><span>写作、生成文件、精确修改副本</span></div><div><span data-icon="code"></span><span>执行受限数学计算</span></div></div></section><section class="panel quiet-panel"><h3>关于数据</h3><p>会话、项目与知识库保存在本机。关联目录仅供读取，修改与生成结果保存在工作区副本中。</p><p>执行可以停止、恢复和核对。模型答复仍需判断；只有文件执行结果有对应收据。</p></section></div></div></section>
+    <section id="settingsPage" class="page content-page hidden"><div class="page-heading"><div><h1>让工作区，适合你。</h1><p>连接已有模型，设置每轮执行的范围。</p></div></div><div class="settings-layout"><section class="panel settings-panel"><div class="panel-heading"><h2>模型连接</h2></div><label for="provider">模型提供方</label><select id="provider"><option value="ollama">Ollama · 本地模型</option><option value="openai">OpenAI · 环境变量 API Key</option><option value="pi-openai">Pi · 已登录 OAuth</option></select><label for="ollamaUrl">Ollama 服务地址</label><input id="ollamaUrl" value="http://127.0.0.1:11434"><div class="field-with-action"><div><label for="model">模型名称</label><input id="model" list="modelOptions" placeholder="检查连接后选择本地模型"><datalist id="modelOptions"></datalist></div><button id="checkConnection" class="secondary">检查连接</button></div><div id="connectionResult" class="connection-result"></div><div class="two-fields"><div><label for="maxSteps">每轮最多步骤</label><input id="maxSteps" type="number" min="2" max="32" value="12"></div><div><label for="maxTokens">每步输出 Token</label><input id="maxTokens" type="number" min="128" max="8192" value="2048"></div></div><label class="check-label"><input id="thinking" type="checkbox">启用模型思考（需模型支持）</label><div class="settings-foot"><button id="saveSettings" class="primary">保存设置</button><span id="settingsSaved" class="muted"></span></div></section><div><section class="panel"><div class="panel-heading"><h2>Agent 可以做什么</h2><span data-icon="spark"></span></div><div class="capability-list"><div><span data-icon="chat"></span><span>多轮对话与澄清</span></div><div><span data-icon="folder"></span><span>浏览、读取项目文件</span></div><div><span data-icon="book"></span><span>检索共享和项目知识</span></div><div><span data-icon="pen"></span><span>写作、生成文件、精确修改副本</span></div><div><span data-icon="code"></span><span>执行受限数学计算</span></div></div></section><section class="panel quiet-panel"><h3>关于数据</h3><p>会话、项目与知识库保存在本机。关联目录仅供读取，修改与生成结果保存在工作区副本中。</p><p>执行可以 Stop、Resume 和核对。模型答复仍需判断；只有文件执行结果有对应收据。</p></section></div></div></section>
   </main>
 
   <aside id="runtimeInspector" class="inspector" aria-label="Runtime Inspector">
@@ -93,7 +97,7 @@
       <section class="inspector-section"><div class="inspector-label">Control</div><div id="inspectorControl" class="context-facts"><div class="inspector-empty">暂无 Control state</div></div></section>
       <section class="inspector-section"><div class="inspector-label">Budget</div><div id="inspectorBudgets" class="budget-list"><div class="inspector-empty">暂无运行预算</div></div></section>
       <section class="inspector-section"><div class="inspector-label">Context</div><div id="inspectorContext" class="context-facts"><div class="inspector-empty">暂无活动上下文</div></div></section>
-      <section class="inspector-section"><div class="inspector-label">Platform</div><div id="inspectorPlatform" class="platform-mini"></div></section>
+      <section class="inspector-section"><div class="inspector-label">Architecture</div><div id="inspectorPlatform" class="platform-mini"></div></section>
     </div>
     <div class="inspector-foot"><span>Unknown stays unknown.</span><a href="#runtime">打开完整 Runtime</a></div>
   </aside>

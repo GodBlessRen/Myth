@@ -1,10 +1,41 @@
-# Myth v0.6 architecture
+# Myth v0.9 architecture
 
-## Platform skeleton
+> Architecture Constitution: [ARCHITECTURE_CONSTITUTION.md](ARCHITECTURE_CONSTITUTION.md)  
+> Composable map: [PLATFORM_MAP.md](PLATFORM_MAP.md)
 
-v0.6 在既有持久执行与工作区之上增加 `MythKernel` 作为平台装配地图。它不取代 Runtime，也不直接执行 I/O；它固定 Control / Capabilities / Context / Memory / Retrieval / Workflow / SubAgent / Skills / MCP / Observability / Evaluation / Evolution 的长期边界，并把每层标记为 `usable / wired / planned`。
+## Runtime shape
 
-`planned` 只是结构存在，不会进入 executable capability 列表。所有真实外部效果仍必须走既有准入、Ticket、Receipt、Usage、Recovery 与 Verification。平台层级详见 [PLATFORM_MAP.md](PLATFORM_MAP.md)。
+Myth 不再把系统建模成固定的 “Decision → Routing → Dispatch → Execution” 层级，也不再使用 P0/P10/.../P1000 作为正式架构名称。
+
+中心是稳定 Core：
+
+```text
+Goal → Run → Action → Attempt → Ticket → Receipt → Artifact → Verification
+```
+
+围绕 Core 的 Coordination / Control / Execution / Capability / State / Context / Memory / Personal State / Observability 等是**正交 Domain**。
+
+Decision、Planning、Routing、Workflow、Parallel、Multi-Agent、Managed Agent、Personal Agent 是 **Coordination Strategy**；它们可以组合、替换或完全跳过。
+
+外部模型、协议和基础设施通过 Port/Adapter 接入。OpenAI、Ollama、MCP、A2A、Browser、Shell、SQLite 都不能成为 Core 依赖。
+
+代码中的 `MythComponents` 只负责装配和架构快照，不是执行 Kernel。`MythKernel` 仅作为 v0.6-v0.8 兼容别名保留。真正的执行事实仍由 `MythRuntime` / repositories / execution adapters 管理。
+
+## Personal-Agent foundation
+
+v0.9 新增显式长期对象：
+
+- `Goal`：长期意图，可以跨多个未来 Run；
+- `Trigger`：user/timer/schedule/event/webhook/email/file-change/agent-event；
+- `Personal State`：显式 preference/permission/account-like state。
+
+Personal State 与 Memory 分离。Memory 是经历产生的上下文数据；Memory 文本不能授予权限。Trigger 当前只持久化和暴露 API，不会自动后台执行；因此该 Domain 标记为 `connected` 而不是 `usable`。
+
+## Naming
+
+产品和新代码统一使用 `Stop`。旧 `abort` API / DB 字段只为升级兼容保留。Stop 的语义是“不再调度新工作”，不是宣称已发出的外部调用被撤销。
+
+成熟度统一为 `exists / connected / usable / hardened / planned`。
 
 ## Dependency direction
 
@@ -24,7 +55,7 @@ SQLite repositories / local execution adapters
 DecisionRuntime / MythRuntime / providers / objects / workspaces
 ```
 
-`acceptance.py` contains pure verification; `conversation.py` contains pure conversation projection, lexical ranking and arithmetic. `application/` depends only on domain data and ports, with no SQL, filesystem or provider implementation. Architecture tests guard these dependencies. Existing P1/P2 runtime services remain concrete behind execution adapters; the entire repository has not completed this migration.
+`acceptance.py` contains pure verification; `conversation.py` contains pure conversation projection, lexical ranking and arithmetic. `application/` depends only on domain data and ports, with no SQL, filesystem or provider implementation. Architecture tests guard these dependencies. Existing legacy runtime services remain concrete behind execution adapters; the entire repository has not completed this migration.
 
 Ports expose transaction-sized operations rather than cursors. The repository owns state; the driver owns sequencing; execution adapters own I/O and reconciliation. Neither model output nor browser state grants authority.
 
@@ -38,7 +69,7 @@ Turn admission fixes model/settings, project scope/instructions, retrieval resul
 
 Tool output/read snapshots are published as content-addressed objects. In one transaction, a tool operation fixes result/target/digest, validates current turn authority and decision ownership, reserves tool/write budgets and issues a Ticket. Only then can a generated file be written. The execution adapter publishes a receipt and the repository settles it once. A crash after an output write can be reconciled against the fixed digest; a missing or different file remains UNKNOWN and is never blindly rewritten. Read/search/calculation results fixed in the Ticket can be recovered without rereading changed sources. Uncertain liabilities move to unknown-held; late evidence settles them once. Pre-Ticket object publication can leave orphans; GC is deferred.
 
-Conversation cancellation blocks new tool admission and final answers. Already-ticketed effects can still complete and settle their actual facts. It is not an undo operation. A normal reply commits its message and COMPLETED state atomically, with execution_verified=false. Shared Run SUCCEEDED here means a completed conversation turn, not an independently verified goal. Generated artifact cards require resolved tool operations; answer/session exports merely download existing text. Neither produces the exact-verification use case's goal delivery record.
+Conversation stop blocks new tool admission and final answers. Already-ticketed effects can still complete and settle their actual facts. It is not an undo operation. A normal reply commits its message and COMPLETED state atomically, with execution_verified=false. Shared Run SUCCEEDED here means a completed conversation turn, not an independently verified goal. Generated artifact cards require resolved tool operations; answer/session exports merely download existing text. Neither produces the exact-verification use case's goal delivery record.
 
 ## Exact-mode submission and acceptance
 
@@ -76,9 +107,9 @@ The unique decision-to-Action binding is inserted with the Action intent. Restar
 
 SQLite is atomic only for its own state. File effects and provider requests are outside DB transactions. After a Ticket, absent durable outcome means `UNKNOWN`; reserved liability remains held, and continuation never resends that uncertain operation. Late model receipts settle the appropriate reserved/unknown-held account once. Actual usage absent from a receipt remains held.
 
-## Cancellation
+## Stop semantics
 
-Cancellation commits Agent/Run control state and increments the control revision. Intents without a Ticket become `NOT_STARTED` and release reservations in that transaction. Already-ticketed operations can still complete; late outcomes remain recorded. The driver rechecks cancellation after model I/O; tool admission and delivery also check durable authority. Cancellation does not undo effects or erase accounting.
+Stop semantics commits Agent/Run control state and increments the control revision. Intents without a Ticket become `NOT_STARTED` and release reservations in that transaction. Already-ticketed operations can still complete; late outcomes remain recorded. The driver rechecks stop after model I/O; tool admission and delivery also check durable authority. Stop semantics does not undo effects or erase accounting.
 
 ## Independent goal verification and delivery
 
@@ -115,7 +146,7 @@ Existing P1/P2/P3 tables remain. New additive tables:
 
 Old P3 runs lacking a contract remain inspectable; verification never fabricates acceptance for them. Automatic migration/resume of legacy in-flight runs has not been validated.
 
-v0.5 adds workspace_projects, workspace_sessions, workspace_turns, workspace_messages, workspace_steps, workspace_documents, workspace_chunks, workspace_settings and workspace_operations. These use additive CREATE TABLE IF NOT EXISTS statements; no old table is dropped. Real upgrade acceptance for legacy active runs remains planned.
+The workspace adds workspace_projects, workspace_sessions, workspace_turns, workspace_messages, workspace_steps, workspace_documents, workspace_chunks, workspace_settings and workspace_operations. These use additive CREATE TABLE IF NOT EXISTS statements; no old table is dropped. Real upgrade acceptance for legacy active runs remains planned.
 
 ## Web boundary
 

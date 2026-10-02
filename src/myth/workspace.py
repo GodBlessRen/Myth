@@ -1,23 +1,28 @@
-"""Workspace composition root for product, control and durable execution."""
+"""Workspace composition root for product, domains and durable execution."""
 
 from .adapters.workspace_store import SqliteWorkspaceRepository
 from .adapters.conversation_execution import LocalConversationExecution
+from .adapters.personal_store import SqlitePersonalState
 from .application.conversation_agent import ConversationAgent
-from .platform import MythKernel
-from .platform.control_store import SqliteControlPlane
+from .platform import MythComponents
+from .platform.control_store import SqliteControlService
 from .platform.memory_store import SqliteMemoryStore
 
 
 class Workspace:
     def __init__(self, runtime):
-        self.kernel = MythKernel.default()
+        self.components = MythComponents.default()
+        # Compatibility alias for v0.6-v0.8 callers.
+        self.kernel = self.components
+
         self.repository = SqliteWorkspaceRepository(runtime)
-        self.control = SqliteControlPlane(runtime, self.repository)
+        self.control = SqliteControlService(runtime, self.repository)
         self.memory = SqliteMemoryStore(runtime)
+        self.personal = SqlitePersonalState(runtime)
         self.execution = LocalConversationExecution(
             runtime,
             self.repository,
-            capability_registry=self.kernel.capabilities,
+            capability_registry=self.components.capabilities,
         )
         self.agent = ConversationAgent(
             self.repository,

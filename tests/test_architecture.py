@@ -8,7 +8,7 @@ class ArchitectureTests(unittest.TestCase):
     def test_agent_core_has_no_concrete_io_dependencies(self):
         root=Path(__file__).resolve().parents[1]/"src"/"myth"
         forbidden={"sqlite3","pathlib","os","subprocess","urllib","http","socket","adapters","runtime","store","decision_runtime","providers"}
-        files=[root/"acceptance.py",root/"ports.py",root/"conversation.py",root/"conversation_ports.py",*sorted((root/"application").glob("*.py"))]
+        files=[root/"acceptance.py",root/"ports.py",root/"conversation.py",root/"conversation_ports.py",*sorted((root/"core").glob("*.py")),*sorted((root/"domains").glob("*.py")),*sorted((root/"application").glob("*.py"))]
         for source in files:
             for node in ast.walk(ast.parse(source.read_text(encoding="utf-8"))):
                 if isinstance(node,ast.Import):names=[alias.name for alias in node.names]

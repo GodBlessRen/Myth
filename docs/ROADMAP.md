@@ -1,100 +1,120 @@
-# Myth v0.6+ — Breadth-first Roadmap
+# Myth Roadmap — Breadth First, Depth Later
 
-当前策略：**先让整套平台骨架存在，再把每层从 wired 推进到 usable，再优化。**
-不再用“某一块 95 分后才开始下一块”的方式推进。
+这里的路线不再使用 P0/P10/... 作为架构名称。
 
-完整层级见 [PLATFORM_MAP.md](PLATFORM_MAP.md)。
+“先存在再优化”的意思是：即使未来有很多 Plan，也优先把长期边界、接口和最小行为铺出来，而不是把一个局部做到极深以后才考虑其他形态。
 
-## Wave A — Skeleton complete
+## 当前基线：v0.9
 
-目标：所有长期层拥有稳定名字、接口、状态归属和最小合同测试。
+已经可用：
 
-- Durable Runtime
-- Conversation
-- Control Plane
-- Capability Registry
-- Context Compiler
-- Memory
-- Retrieval / RAG
-- Workflow
-- SubAgent
-- Skills
-- MCP
-- Observability
-- Evaluation
-- Evolution
-- Distributed Runtime boundary
+- Durable Run / Action / Attempt / Ticket / Receipt；
+- Conversation + Agent Loop；
+- Steer / Pause / Resume / Stop / Model / Thinking / Compact；
+- Capability Registry；
+- project.read/search、diff.preview、git.status/diff；
+- ContextCompiler；
+- typed Memory；
+- Runtime Inspector；
+- Goal / Trigger / Personal State 的持久化入口。
 
-验收：`MythKernel.snapshot()` 可以给出整个平台拓扑；planned 能力不会被广告为 executable。
+已经存在但还需加深：
 
-## Wave B — Product control
+- Workflow；
+- Routing；
+- Multi-Agent；
+- Managed Agent；
+- Personal Agent；
+- Skills；
+- MCP；
+- Evaluation；
+- Evolution。
 
-**v0.8 已完成第一轮主链接入：**
+## Next — Execution
 
-1. persistent Control Command log + projection;
-2. steer / pause / resume / abort;
-3. turn 内 model / thinking switch;
-4. compact one-shot context control;
-5. unified Capability Registry 参与真实工具准入;
-6. ContextCompiler 接管对话历史预算裁剪;
-7. Runtime Inspector 读取 control / operation / event durable facts。
+把真正高风险执行能力作为一个统一问题推进，而不是零散开放命令：
 
-## Wave C — Capability surface
+- admitted Test;
+- bounded Shell profiles;
+- Python executor;
+- process tree + timeout;
+- stdout/stderr Artifact;
+- Ticket / Receipt / Usage / UNKNOWN / Recovery;
+- human approval where required.
 
-按原子适配器扩展：
+不开放模型生成任意 shell 字符串直接执行。
 
-- project.search ✅
-- diff.preview ✅
-- git.status / git.diff ✅
-- test.run
-- admitted shell.exec
-- python.run
-- web.fetch / browser adapter
+## Next — Coordination
 
-所有真实 I/O 必须复用 Runtime admission/Ticket/Receipt/usage/recovery，不允许工具 SDK 隐藏重试。
+让 CoordinationStrategy 真正进入主运行链：
 
-## Wave D — Context / Memory / RAG
+- Direct;
+- Agent Loop;
+- Workflow;
+- Router;
+- Parallel;
+- Multi-Agent child Run;
+- Managed Agent via AgentPort.
 
-- Working / Episodic / Semantic / Procedural memory revisions ✅ 本地持久层 + episodic auto-write;
-- memory provenance, conflict and revoke;
+目标是同一个 Core 承载不同组织策略，而不是为每种 Agent 复制 Runtime。
+
+## Next — Personal Agent
+
+在现有 Goal / Trigger / Personal State 基础上继续：
+
+- Goal → many Runs;
+- EventPort;
+- Timer / Schedule / Webhook adapters;
+- explicit preferences / permissions;
+- approval gates;
+- connected account references;
+- background Run scheduler;
+- proactive notification.
+
+Trigger 只创建工作机会，不绕过 Control / Ticket。
+
+## Next — Interop
+
+- Skill loader;
+- MCP tool/resource adapter;
+- A2A AgentPort;
+- managed-agent adapter;
+- optional AG-UI-style interaction adapter.
+
+协议只进入 Adapter；Core 不感知协议名。
+
+## Next — Context / Memory / Retrieval
+
+- memory conflict and supersede;
+- Personal State 与 Memory 的冲突边界;
 - RetrievalPort;
-- lexical baseline retained;
-- optional vector / hybrid / rerank adapters;
-- token-aware ContextSnapshot and compaction.
+- optional vector / hybrid / rerank;
+- token-aware Context budget;
+- compaction summaries as derived artifacts.
 
-## Wave E — Workflow / SubAgent / Skills / MCP
+Keyword baseline 继续保留用于可复现评测。
 
-- persistent Workflow Run/Step;
-- child Run for SubAgent;
-- parent budget and capability delegation;
-- Skill loader and capability requirements;
-- MCP discovery mapped to local CapabilitySpec before admission.
+## Next — Verification / Evaluation / Evolution
 
-## Wave F — Eval / Replay / Evolution
-
-- fixed task suites;
-- PASS/FAIL/INCONCLUSIVE/UNSUPPORTED;
-- cost and token evidence separate from quality gates;
+- conversation acceptance profiles;
+- fixed eval suites;
 - replay as derived data;
+- PASS / FAIL / INCONCLUSIVE / UNSUPPORTED;
+- quality/safety gate before cost optimization;
 - candidate policy registry;
-- explicit promote/rollback; never self-modify live Runtime.
+- explicit promote / rollback.
 
-## Wave G — Product/UI
+Evolution 永远不能直接修改正在运行的 Run。
 
-v0.7 已完成第一轮 Product Shell Reset：
+## Long horizon
 
-- Chat remains center;
-- Projects / Knowledge / Session Management 已降为 Context surface;
-- right Runtime Inspector 已接入当前真实的 Decision / Result / Budget / Context / Platform facts;
-- visual tokens / layout / components 已整体重构，不再依赖旧 CSS override 层。
+只有出现真实部署需求后再深化：
 
-下一步继续补：
+- distributed workers;
+- leases;
+- remote execution;
+- multi-user auth;
+- organization policy;
+- fleet scheduling.
 
-- Control strip: model / thinking / steer / pause / resume / abort ✅;
-- Runtime Inspector: durable Tool Ticket / Operation / Control revision ✅，下一步补完整 Receipt / Verification / Recovery;
-- streaming, diff and artifacts inline in conversation;
-- Context / Memory drawers.
-
-## P1000 boundary
-
-Distributed workers, leases, remote execution and multi-user authentication stay planned until a real capacity/deployment requirement exists.  The boundary exists now so future growth does not force a redesign.
+边界可以先存在，复杂实现由真实需求触发。

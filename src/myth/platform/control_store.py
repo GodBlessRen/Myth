@@ -1,4 +1,4 @@
-"""Persistent Control Plane for conversation Runs.
+"""Persistent Control service for conversation Runs.
 
 Commands are durable facts.  They may change future planning at safe points,
 but they never rewrite an already-issued model/tool Ticket or erase a late
@@ -11,7 +11,7 @@ import json
 import uuid
 from typing import Any
 
-from .control import ControlCommand, ControlPlane, ControlSnapshot
+from .control import ControlCommand, ControlService, ControlSnapshot
 from ..domain import canonical_json
 
 
@@ -40,12 +40,12 @@ CREATE TABLE IF NOT EXISTS workspace_control_commands(
 """
 
 
-class SqliteControlPlane:
+class SqliteControlService:
     def __init__(self, runtime, repository) -> None:
         self.runtime = runtime
         self.store = runtime.store
         self.repository = repository
-        self.machine = ControlPlane()
+        self.machine = ControlService()
         self.store.db.executescript(SCHEMA)
 
     @staticmethod
@@ -72,7 +72,7 @@ class SqliteControlPlane:
         return ControlSnapshot(
             revision=int(row["revision"]),
             paused=bool(row["paused"]),
-            aborted=bool(row["aborted"]),
+            stopped=bool(row["aborted"]),
             model=row["model"],
             thinking=json.loads(row["thinking_json"]),
             steering_note=row["steering_note"],
@@ -96,7 +96,8 @@ class SqliteControlPlane:
         return {
             "revision": snap.revision,
             "paused": snap.paused,
-            "aborted": snap.aborted,
+            "stopped": snap.stopped,
+            "aborted": snap.stopped,
             "model": snap.model,
             "thinking": snap.thinking,
             "steering_note": snap.steering_note,
@@ -141,7 +142,7 @@ class SqliteControlPlane:
             db.execute(
                 "INSERT INTO workspace_control_commands(command_id,run_id,revision,command,payload_json) "
                 "VALUES (?,?,?,?,?)",
-                (self._id(), run_id, updated.revision, kind.value, canonical_json(payload)),
+                (self._id(), run_id, updated.revision, "stop" if kind is ControlCommand.ABORT else kind.value, canonical_json(payload)),
             )
             if kind in {ControlCommand.SWITCH_MODEL, ControlCommand.SWITCH_THINKING}:
                 db.execute(
@@ -160,7 +161,7 @@ class SqliteControlPlane:
             )
 
         # Status changes are projections of the durable command.  Late model/tool
-        # receipts are still allowed to settle after pause/abort.
+        # receipts are still allowed to settle after pause/stop.
         if kind is ControlCommand.PAUSE:
             self.gate(run_id)
         elif kind is ControlCommand.RESUME:
@@ -175,7 +176,7 @@ class SqliteControlPlane:
                     )
                     db.execute("UPDATE runs SET state='RUNNING' WHERE run_id=?", (run_id,))
                     self.store._event(db, run_id, "RunResumed", {"revision": updated.revision})
-        elif kind is ControlCommand.ABORT:
+        elif kind in {ControlCommand.STOP, ControlCommand.ABORT}:
             self.gate(run_id)
 
         return self.view(run_id)
@@ -185,7 +186,7 @@ class SqliteControlPlane:
 
         snap = self._snapshot(run_id)
         turn = self.repository.turn(run_id)
-        if snap.aborted:
+        if snap.stopped:
             if turn["status"] not in {"COMPLETED", "FAILED", "CANCELLED", "BUDGET_EXHAUSTED"}:
                 self.repository.block(
                     run_id,
@@ -222,3 +223,7 @@ class SqliteControlPlane:
             self.store._event(db, run_id, "ContextCompactionConsumed", {})
 
 
+
+
+# v0.8 compatibility alias.
+SqliteControlPlane = SqliteControlService

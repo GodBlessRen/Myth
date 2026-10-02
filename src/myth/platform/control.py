@@ -1,7 +1,7 @@
-"""Pure Control Plane state machine.
+"""Pure Control domain state machine.
 
-This does not persist commands yet.  It establishes the command vocabulary and
-transition semantics that the durable repository will adopt.
+Control changes future scheduling at safe points.  It never performs model/tool
+I/O and never erases an already-issued Ticket or late Receipt.
 """
 
 from __future__ import annotations
@@ -15,6 +15,8 @@ class ControlCommand(StrEnum):
     STEER = "steer"
     PAUSE = "pause"
     RESUME = "resume"
+    STOP = "stop"
+    # Backward compatibility for v0.8 persisted/API vocabulary.
     ABORT = "abort"
     SWITCH_MODEL = "switch_model"
     SWITCH_THINKING = "switch_thinking"
@@ -25,19 +27,30 @@ class ControlCommand(StrEnum):
 class ControlSnapshot:
     revision: int = 1
     paused: bool = False
-    aborted: bool = False
+    stopped: bool = False
     model: str | None = None
     thinking: str | bool | None = None
     steering_note: str | None = None
     compact_requested: bool = False
 
+    @property
+    def aborted(self) -> bool:
+        """Compatibility alias for old callers."""
 
-class ControlPlane:
-    """Apply one explicit command without performing model/tool I/O."""
+        return self.stopped
 
-    def apply(self, state: ControlSnapshot, command: ControlCommand, payload: Any = None) -> ControlSnapshot:
-        if state.aborted:
-            raise ValueError("aborted control state is terminal")
+
+class ControlService:
+    """Apply one explicit control command without performing external I/O."""
+
+    def apply(
+        self,
+        state: ControlSnapshot,
+        command: ControlCommand,
+        payload: Any = None,
+    ) -> ControlSnapshot:
+        if state.stopped:
+            raise ValueError("stopped control state is terminal")
 
         update: dict[str, Any] = {"revision": state.revision + 1}
         if command is ControlCommand.PAUSE:
@@ -48,8 +61,8 @@ class ControlPlane:
             if not state.paused:
                 raise ValueError("run is not paused")
             update["paused"] = False
-        elif command is ControlCommand.ABORT:
-            update["aborted"] = True
+        elif command in {ControlCommand.STOP, ControlCommand.ABORT}:
+            update["stopped"] = True
             update["paused"] = False
         elif command is ControlCommand.SWITCH_MODEL:
             value = str(payload or "").strip()
@@ -83,3 +96,14 @@ class ControlPlane:
         else:
             raise ValueError(f"unsupported control command: {command}")
         return replace(state, **update)
+
+
+# Compatibility alias.  New docs/code use "Control" rather than "Control Plane".
+ControlPlane = ControlService
+
+__all__ = [
+    "ControlCommand",
+    "ControlSnapshot",
+    "ControlService",
+    "ControlPlane",
+]

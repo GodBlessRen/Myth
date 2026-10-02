@@ -23,7 +23,7 @@ class ConversationWebService:
 
     def platform(self):
         with MythRuntime(self.root) as runtime:
-            return Workspace(runtime).kernel.snapshot()
+            return Workspace(runtime).components.snapshot()
 
     def memories(self,query="",kind=None,limit=50):
         with MythRuntime(self.root) as runtime:
@@ -42,6 +42,7 @@ class ConversationWebService:
             "documents":self._use("documents"),
             "platform":self.platform(),
             "memory_count":len(self.memories(limit=100)),
+            "goal_count":len(self.goals()),
         }
 
     @staticmethod
@@ -119,6 +120,8 @@ class ConversationWebService:
                 memory_records=memory,
             )
             workspace.control.ensure(turn["run_id"],turn["settings"])
+            if value.get("goal_id"):
+                workspace.personal.bind_run(value["goal_id"],turn["run_id"])
         if turn["status"]=="RUNNING":self._spawn(turn["run_id"])
         return {"run_id":turn["run_id"],"session_id":sid}
 
@@ -137,8 +140,9 @@ class ConversationWebService:
         mapping={
             "pause":ControlCommand.PAUSE,
             "resume":ControlCommand.RESUME,
-            "abort":ControlCommand.ABORT,
-            "cancel":ControlCommand.ABORT,
+            "stop":ControlCommand.STOP,
+            "abort":ControlCommand.STOP,
+            "cancel":ControlCommand.STOP,
             "steer":ControlCommand.STEER,
             "switch_model":ControlCommand.SWITCH_MODEL,
             "switch_thinking":ControlCommand.SWITCH_THINKING,
@@ -170,6 +174,44 @@ class ConversationWebService:
                 text=value.get("text",""),
                 source_ref=value.get("source_ref") or "user",
             )
+
+    def goals(self,include_archived=False):
+        with MythRuntime(self.root) as runtime:
+            return Workspace(runtime).personal.goals(include_archived=include_archived)
+
+    def create_goal(self,value):
+        with MythRuntime(self.root) as runtime:
+            return Workspace(runtime).personal.create_goal(
+                value.get("title",""),
+                value.get("description",""),
+            )
+
+    def goal_triggers(self,goal_id):
+        with MythRuntime(self.root) as runtime:
+            return Workspace(runtime).personal.triggers(goal_id)
+
+    def goal_runs(self,goal_id):
+        with MythRuntime(self.root) as runtime:
+            return Workspace(runtime).personal.runs(goal_id)
+
+    def add_goal_trigger(self,goal_id,value):
+        with MythRuntime(self.root) as runtime:
+            return Workspace(runtime).personal.add_trigger(
+                goal_id,
+                value.get("kind","user"),
+                value.get("spec") or {},
+            )
+
+    def personal_state(self):
+        with MythRuntime(self.root) as runtime:
+            return Workspace(runtime).personal.state()
+
+    def set_personal_state(self,value):
+        key=value.get("key","")
+        with MythRuntime(self.root) as runtime:
+            workspace=Workspace(runtime)
+            workspace.personal.set_state(key,value.get("value"))
+            return {"key":key,"value":workspace.personal.state().get(key)}
 
     def revoke_memory(self,memory_id):
         with MythRuntime(self.root) as runtime:
@@ -218,6 +260,14 @@ class ConversationWebService:
                 query.get("kind",[None])[0],
                 int(query.get("limit",["50"])[0]),
             )}
+        if parts==["goals"]:
+            return {"goals":self.goals(query.get("archived",["0"])[0]=="1")}
+        if len(parts)==3 and parts[0]=="goals" and parts[2]=="triggers":
+            return {"triggers":self.goal_triggers(parts[1])}
+        if len(parts)==3 and parts[0]=="goals" and parts[2]=="runs":
+            return {"runs":self.goal_runs(parts[1])}
+        if parts==["personal-state"]:
+            return {"state":self.personal_state()}
         if parts==["sessions"]:
             return {"sessions":self._use("sessions",query.get("archived",["0"])[0]=="1")}
         if len(parts)==2 and parts[0]=="sessions":return self.session(parts[1])
@@ -236,6 +286,10 @@ class ConversationWebService:
         if parts==["settings"]:return self._use("save_settings",value)
         if parts==["connection"]:return self.connection(value)
         if parts==["memories"]:return self.remember(value)
+        if parts==["goals"]:return self.create_goal(value)
+        if len(parts)==3 and parts[0]=="goals" and parts[2]=="triggers":
+            return self.add_goal_trigger(parts[1],value)
+        if parts==["personal-state"]:return self.set_personal_state(value)
         if len(parts)==3 and parts[0]=="memories" and parts[2]=="revoke":
             return self.revoke_memory(parts[1])
         if parts==["projects"]:return self._use("create_project",value)

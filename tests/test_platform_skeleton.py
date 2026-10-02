@@ -1,53 +1,79 @@
-"""Breadth-first skeleton tests: every future layer has a real minimum contract."""
+"""Composable architecture tests: stable core, orthogonal domains and pluggable strategies."""
 
 import unittest
 
+from myth.conversation import TOOL_CATALOG
+from myth.domains.coordination import RouteTarget, StrategyState
+from myth.platform import Maturity, MythComponents
 from myth.platform.capabilities import CapabilityState
 from myth.platform.context import ContextItem
 from myth.platform.control import ControlCommand, ControlSnapshot
 from myth.platform.evaluation import EvalReport, release_gate
 from myth.platform.evolution import PolicyCandidate, PromotionDecision, decide_promotion
-from myth.platform.kernel import MythKernel
 from myth.platform.memory import MemoryCatalog, MemoryKind, MemoryRecord
 from myth.platform.workflow import WorkflowSpec, WorkflowStep, ready_steps, validate_workflow
-from myth.conversation import TOOL_CATALOG
 
 
 class PlatformSkeletonTests(unittest.TestCase):
-    def test_kernel_exposes_broad_platform_without_advertising_planned_tools(self):
-        kernel = MythKernel.default()
-        snapshot = kernel.snapshot()
-        ids = {layer["id"] for layer in snapshot["layers"]}
-        self.assertTrue({
-            "runtime","conversation","control","capabilities","context","memory",
-            "retrieval","workflow","subagents","skills","mcp","observability",
-            "evaluation","evolution","distributed",
-        } <= ids)
+    def test_architecture_has_core_domains_strategies_and_adapters(self):
+        components = MythComponents.default()
+        snapshot = components.snapshot()
+
+        self.assertEqual(snapshot["shape"], "core-domains-strategies-adapters")
+        core_ids = {item["id"] for item in snapshot["core"]}
+        domain_ids = {item["id"] for item in snapshot["domains"]}
+        strategy_ids = {item["id"] for item in snapshot["strategies"]}
+        adapter_ids = {item["id"] for item in snapshot["adapters"]}
+
+        self.assertTrue({"goal","run","action","attempt","ticket","receipt","artifact","verification"} <= core_ids)
+        self.assertTrue({"coordination","control","execution","capability","state","context","memory","personal","observability"} <= domain_ids)
+        self.assertTrue({"direct","agent_loop","workflow","routing","multi_agent","managed_agent","personal_agent"} <= strategy_ids)
+        self.assertTrue({"sqlite","local_files","ollama","openai","mcp","a2a"} <= adapter_ids)
+
+        # There are no product-facing P0/P1000 phase labels anymore.
+        for group in ("core","domains","strategies","adapters"):
+            for item in snapshot[group]:
+                self.assertNotIn("phase", item)
+
+    def test_maturity_is_descriptive_not_execution_authority(self):
+        components = MythComponents.default()
+        snapshot = components.snapshot()
+        allowed = {item.value for item in Maturity}
+        for group in ("core","domains","adapters"):
+            for item in snapshot[group]:
+                self.assertIn(item["maturity"], allowed)
+
         self.assertIn("project.read", snapshot["executable_capabilities"])
         self.assertNotIn("shell.exec", snapshot["executable_capabilities"])
-        self.assertEqual(kernel.capabilities.get("shell.exec").state, CapabilityState.PLANNED)
+        self.assertEqual(components.capabilities.get("shell.exec").state, CapabilityState.PLANNED)
 
     def test_existing_conversation_tools_are_registered_executable_capabilities(self):
-        kernel = MythKernel.default()
-        executable = set(kernel.capabilities.executable_ids())
+        components = MythComponents.default()
+        executable = set(components.capabilities.executable_ids())
         self.assertTrue(set(TOOL_CATALOG) <= executable)
 
-    def test_control_plane_has_explicit_transitions(self):
-        kernel = MythKernel.default()
+    def test_coordination_strategies_are_pluggable_not_layers(self):
+        components = MythComponents.default()
+        self.assertEqual(components.strategies.get("agent_loop").state, StrategyState.USABLE)
+        self.assertEqual(components.strategies.get("multi_agent").state, StrategyState.EXISTS)
+        self.assertEqual(RouteTarget.REMOTE_AGENT.value, "remote_agent")
+
+    def test_control_uses_stop_vocabulary_and_legacy_abort_alias(self):
+        components = MythComponents.default()
         state = ControlSnapshot()
-        state = kernel.control.apply(state, ControlCommand.STEER, "focus on runtime")
-        state = kernel.control.apply(state, ControlCommand.SWITCH_MODEL, "model-b")
-        state = kernel.control.apply(state, ControlCommand.PAUSE)
+        state = components.control.apply(state, ControlCommand.STEER, "focus on runtime")
+        state = components.control.apply(state, ControlCommand.SWITCH_MODEL, "model-b")
+        state = components.control.apply(state, ControlCommand.PAUSE)
         self.assertTrue(state.paused)
-        self.assertEqual(state.model, "model-b")
-        state = kernel.control.apply(state, ControlCommand.RESUME)
-        state = kernel.control.apply(state, ControlCommand.ABORT)
+        state = components.control.apply(state, ControlCommand.RESUME)
+        state = components.control.apply(state, ControlCommand.STOP)
+        self.assertTrue(state.stopped)
         self.assertTrue(state.aborted)
         with self.assertRaises(ValueError):
-            kernel.control.apply(state, ControlCommand.RESUME)
+            components.control.apply(state, ControlCommand.RESUME)
 
     def test_context_preserves_required_items_before_optional_depth(self):
-        frame = MythKernel.default().context.compile(
+        frame = MythComponents.default().context.compile(
             [
                 ContextItem("history:old", "x" * 30, priority=0),
                 ContextItem("goal", "GOAL", priority=100, required=True),
@@ -65,7 +91,7 @@ class PlatformSkeletonTests(unittest.TestCase):
         memory.revoke("m1", revision=2)
         self.assertEqual(memory.search("concise Chinese"), [])
 
-    def test_workflow_rejects_cycles_and_finds_ready_steps(self):
+    def test_workflow_is_a_strategy_primitive_not_a_mandatory_layer(self):
         spec = WorkflowSpec("w1", (
             WorkflowStep("read", "project.read"),
             WorkflowStep("patch", "project.patch_exact", ("read",)),
