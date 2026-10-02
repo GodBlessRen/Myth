@@ -200,6 +200,9 @@ class SqliteWorkspaceRepository:
                         "kind":m.get("kind"),
                         "text":m.get("text",""),
                         "source_ref":m.get("source_ref"),
+                        "scope_type":m.get("scope_type","global"),
+                        "scope_id":m.get("scope_id"),
+                        "fact_level":m.get("fact_level","context"),
                         "revision":m.get("revision"),
                     }
                     for m in memory_records[:8]
