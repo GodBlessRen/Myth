@@ -168,7 +168,8 @@ class DecisionRuntime:
         system = (
             "You propose exactly one next step. Myth Runtime owns permissions, budgets, execution and verification. "
             "Return only the requested JSON object. For unused fields return empty strings/lists. "
-            "A tool proposal is not proof that the tool ran."
+            "A tool proposal is not proof that the tool ran. "
+            "For request_completion, copy the exact evidence_ref strings from successful tool_result history into evidence_refs."
         )
         user = canonical_json(
             {
@@ -185,6 +186,7 @@ class DecisionRuntime:
                     "tool_call only proposes work",
                     "ask_user when required information is missing",
                     "request_completion only when supplied evidence already proves the goal",
+                    "request_completion must cite exact tool_result evidence_ref values in evidence_refs",
                 ],
             }
         )
