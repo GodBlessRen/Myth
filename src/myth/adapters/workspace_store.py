@@ -257,8 +257,22 @@ class SqliteWorkspaceRepository:
                 if not any(s["document_id"]==did for s in knowledge):
                     knowledge.append({"document_id":did,"title":document["title"],"content":document["content"][:1800],"chunk_index":0,"digest":document["digest"],"citation":f"doc:{did}:0","score":0})
             if document_ids:
+                # Guarantee at least one representative source per explicit
+                # attachment before ordinary retrieval chunks. Multiple chunks
+                # from one pinned document must not crowd out another attachment.
                 pinned=set(document_ids)
-                knowledge.sort(key=lambda item:(item["document_id"] not in pinned,-float(item.get("score") or 0.0)))
+                representatives=[]
+                for did in document_ids:
+                    candidates=[item for item in knowledge if item["document_id"]==did]
+                    if candidates:
+                        representatives.append(max(candidates,key=lambda item:float(item.get("score") or 0.0)))
+                representative_ids={(item["document_id"],item.get("chunk_index")) for item in representatives}
+                remainder=[
+                    item for item in knowledge
+                    if (item["document_id"],item.get("chunk_index")) not in representative_ids
+                ]
+                remainder.sort(key=lambda item:(item["document_id"] not in pinned,-float(item.get("score") or 0.0)))
+                knowledge=representatives+remainder
             pick=RuleIntentPicker().pick(text,{
                 "project":project,
                 "sources":knowledge,
