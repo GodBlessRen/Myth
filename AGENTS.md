@@ -143,4 +143,6 @@ node --check src/myth/webui/inspector.js
 - 开放任意 shell 字符串执行；
 - 在 README 堆版本流水；
 - 为了 UI 简洁移除 Runtime Observatory；
-- 为了“未来扩展性”增加当前没有使用者的抽象。
+- 为了“未来扩展性”增加当前没有使用者的抽象；
+- 把 OAuth token/code/verifier 写入 SQLite、Event、Artifact、Web JSON、日志或明文文件；
+- 复用其他应用的 OAuth client identity / auth file 作为 Myth 的认证实现。
