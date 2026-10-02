@@ -1,144 +1,165 @@
 # Myth
 
-**Durable Runtime 打底、Agent Product 向上生长的本地 Agent 平台。**
+**一个可持续推进真实工作的本地 Agent Runtime。**
 
-v0.18 转向 **Goal-first Personal Work Loop**，继续坚持“先有再优”：长期 Goal 现在保存 `current_state / progress_note / next_action / waiting_for / last_run / revision`，Conversation 在真实终态写 durable checkpoint；下一次跨会话继续同一 Goal 时，这份状态会被固定进新的 Turn Snapshot 与模型上下文。与此同时，页面第三栏被明确保留为 **Runtime Observatory**：Goal、Execution Flow、Trajectory、Token Window、Context Window、Tool Calls、Control、Budget 全部常驻可观测，不因产品化而隐藏执行事实。
+Myth 的中心不是“聊天 + 一堆 Agent 概念”，而是：
 
-v0.17 转入 **Correctness / Provider Hardening**：冻结横向架构扩张，先修真实链路。Intent 快路新增 36 条对抗 case，日期/版本/分数/百分比与弱 `source/docs/文档/资料` cue 不再误直通；deterministic calculator 拒绝时记录 `RouteFallback` 并回退 Agent。Ollama 显式携带 `num_ctx` / temperature / keep_alive，本地上下文预算由窗口推导；`prompt_eval_count` 触顶被记录为已知 FAILED receipt，网络结果不明仍保持 UNKNOWN。
+```text
+Long-term Goal
+  -> Current State
+  -> Next Action
+  -> admitted Turn
+  -> Observe / Act / Verify
+  -> durable checkpoint
+  -> later Session
+  -> continue the same Goal
+```
 
-v0.15 完成 **Evidence-driven Evolution Control Plane**：新增不可变版本化 Cost Model Registry、跨 case Gain Calibration Matrix、durable Policy Candidate Registry，以及显式 Promote / Rollback。Candidate 必须用同一 suite/version 的**完整** baseline/candidate 评测通过 Release Gate 与 Calibration Gate；局部 case 只能研究，不能发布。Active Policy 是持久指针，只在未来 Workspace/Turn admission 读取，并把 policy_id 固定进 Turn Snapshot；已运行/已创建 Turn 永不被后续 Promote 或 Rollback 改写。
+当前版本：**v0.18**
 
-v0.14 把 **Information Gain** 从概念推进到可审计的离线校准链：Eval 结果可写入本地 SQLite Ledger，baseline/candidate 必须在同一 suite/version、同一 case/comparison key 上成对比较；质量增益只来自真实 Verdict 差异，成本默认保留为 token/latency/tool/context 等向量，只有调用者显式声明非负权重时才计算 `gain_per_cost`。策略通过 Workspace composition root 注入，候选 Resolution policy 可离线评测但不会修改生产默认。新增 `foundation-v3` 的 resolution marker case，以及 `eval-history` / `eval-compare` / `gain` CLI。
+## 现在能做什么
 
-v0.13 把 **Eval + Intent/Resolution** 真正接成闭环：Turn admission 先固定 retrieval evidence，再做保守 Intent Pick；严格算术走 deterministic，显式/强匹配本地资料走 `local_retrieval`，其余回退 Agent Loop。`RuleResolutionController` 同时固定 L0/L1/L2，并把 route / resolution / retrieval report 写入 Turn Snapshot、Event 和 Context Report。新增可执行 `myth eval`，默认运行版本化 `foundation-v2`；评测 Runner 调用真实 Myth 组件，不自动 promote policy，Information Gain 仍保持未校准。
+- 多轮 Conversation + Agent Loop；
+- 长期 Goal 跨 Session / restart 保存进度、下一步与等待项；
+- Steer / Pause / Resume / Stop / Compact；
+- Ollama，本地上下文窗口与 `num_ctx` 对齐；
+- Knowledge / Memory 检索与 provenance；
+- project.read / search、diff.preview、git.status / diff；
+- Artifact 生成与固定对象下载；
+- durable Ticket / Receipt / UNKNOWN / Recovery；
+- 固定 EvalSuite、Eval Ledger、Policy Candidate / Promote / Rollback；
+- 三栏工作台，第三栏常驻 Runtime Observatory。
 
-v0.12 聚焦 **Retrieval Evidence + Eval Foundation**：Knowledge/Memory 取消排序前静默候选截断，检索结果暴露 scanned/matched/pages/exhausted；`project.search` 增加 cursor/max_files 与扫描统计；`knowledge.resolve` 把同一 document/digest 显式投影为 L0 Metadata/Excerpt、L1 Chunk Navigation、L2 Detail/Evidence；新增版本化机器可读 `evals/foundation-v1.json` 与 Case/Observation/Verdict 合同，为后续 Intent / Information Gain / Evolution 共用同一评测地基。
-
-v0.11 把 v0.10 的几项“合同”推进到真实主链：**Control revision 跨连接原子分配**；Goal 在创建 Run/Turn 前完成 admission，并进入 request identity；Episodic Memory 默认按 Project / Session 隔离并携带 `fact_level`；新增 `knowledge.read`，可从检索片段按固定 document digest 分页展开到 **L2 Detail/Evidence**；Intent Pick 首次接入一条保守快路——严格受限的纯算术直接使用本地 deterministic calculator，**0 次模型调用**，任何不确定输入立即回退现有 Agent Loop。Information Gain / Delta 仍不伪装成已校准能力。
-
-v0.10 新增 **Intent Pick + Information Resolution / Delta / Gain** 的纯领域合同与 Ports，明确 Intent Pick 的路径选择语义、L0 Abstract → L1 Overview → L2 Detail/Evidence 的信息分辨率、Delta 的状态变化，以及 Gain 的边际任务价值。v0.11 只连接了可证明的局部路径，不把其余合同提前标成可用。
-
-v0.9 把架构从“阶段/层级栈”重构为 **Core + Domains + Strategies + Ports/Adapters**：Goal / Run / Action / Attempt / Ticket / Receipt / Artifact / Verification 作为稳定 Core；Coordination / Control / Execution / Capability / State / Context / Memory / Personal State / Observability 作为正交 Domain；Decision / Routing / Workflow / Multi-Agent / Managed Agent / Personal Agent 作为可插拔 Strategy。新增 Goal / Trigger / Personal State 持久化入口，为长期 Personal Agent 留出真实边界；产品与新代码统一使用 Stop，旧 `abort` 仅作为升级兼容入口保留，不再作为产品术语。
-
-v0.8 把 Product Control 真正接入主链：Steer / Pause / Resume / Stop / Model Switch / Thinking Switch / Compact 全部持久化并在安全点生效；Memory 变成带 revision 的本地持久层；Agent 新增 project.search / diff.preview / git.status / git.diff 四个受 Capability Registry 约束的只读编码能力。右侧 Runtime Inspector 现在直接显示 Control revision、Tool Ticket、Operation state、Budget、Memory 与 Event 数量。
-
-v0.7 在 breadth-first 平台骨架上重做产品工作台：对话保持中心，Projects / Knowledge 退到上下文层，右侧 Runtime Inspector 用 Decision → Authority → Result → Completion 展示当前轮的真实执行事实。视觉系统改为暖纸张 / 墨色 / 克制橙色，并直接重构 tokens / layout / components，而不是继续追加 CSS override。
-
-v0.6 开始采用 breadth-first 路线：不再只把单一功能磨深，而是先固定完整平台骨架。这一阶段完成了 breadth-first 骨架铺设；v0.9 已把它重构为 Core / Domains / Strategies / Adapters 的可组合结构。
-
-**Runtime** 视图直接展示 Core / Domains / Strategies / Adapters 与当前真正 executable 的 Capability；成熟度只描述实现程度，不授予执行权限。完整地图见 [PLATFORM_MAP](docs/PLATFORM_MAP.md)，命名与边界见 [Architecture Constitution](docs/ARCHITECTURE_CONSTITUTION.md)。
+当前**没有**任意 shell、通用代码执行、后台自主调度、多用户权限或分布式 worker。
 
 ## 产品不变量
 
-- **Goal continuity**：长期 Goal 的进度与下一步必须跨会话持久化；历史 Turn 的 Goal snapshot 不被未来更新倒写。
-- **Runtime observability**：第三栏不是可删除的 Debug Panel。每个有意义的 Run 必须暴露轨迹、上下文选择、Token 使用、工具调用、状态转换与验证/预算事实。
-- **Authority boundary**：Goal / Memory / Model 都不能扩大权限；工具效果仍需 Ticket/Receipt，UNKNOWN 仍需先对账。
+1. **Goal continuity**
+   - 长期 Goal 的状态必须跨会话持久化。
+   - 历史 Turn 的 Goal snapshot 不被未来更新倒写。
 
-## 启动
+2. **Runtime observability**
+   - 第三栏不是可删除的 Debug Panel。
+   - 每个有意义的 Run 必须可观察：
+     Goal / Execution Flow / Trajectory / Tokens / Context / Tools / Control / Budget。
 
-Python 3.12+，运行时仅使用标准库，无前端构建、CDN 或数据库服务。
+3. **Authority boundary**
+   - Goal / Memory / Prompt / Model output 都不能扩大权限。
+   - 外部效果仍受 Capability / Ticket / Receipt / Verification 约束。
+
+4. **UNKNOWN is first-class**
+   - 结果不明先 reconcile，不盲目 replay。
+   - 已知失败与未知结果必须分开。
+
+5. **Completion needs evidence**
+   - 模型说“完成”只是 proposal。
+   - Artifact / test / receipt / external state 才能支撑完成声明。
+
+## Quick Start
+
+要求 Python 3.12+。Runtime 使用标准库，无前端构建链、CDN 或外部数据库服务。
 
 ```bash
 python -m pip install -e .
 myth --root . web
 ```
 
-Windows 在仓库目录运行：
+Windows：
 
 ```powershell
 .\start-myth.ps1
 ```
 
-打开 `http://127.0.0.1:8765/`。一般对话先启动本机 Ollama；页面自动检测 `http://127.0.0.1:11434` 并选择一个已安装模型，也可在「模型与设置」改地址、模型、`num_ctx`、temperature 和本轮限制。严格受限的本地算术 Intent 快路不需要模型连接。Myth 不自动下载模型，不保存 API 密钥。
-
-源码入口无需安装：
-
-```powershell
-$env:PYTHONPATH = 'src'
-python -m myth.cli --root . web
-```
-
-## 如何使用
-
-| 页面 | 已实现 |
-| --- | --- |
-| 对话 | 普通问答、多轮上下文、Markdown/代码展示、Steer/Pause/Resume/Stop、当前轮模型/Thinking 热切换、Compact、附加资料、工具记录与文件下载 |
-| 会话管理 | 搜索、重命名、置顶、所属项目、归档与恢复、Markdown 导出 |
-| 项目 | 创建/编辑、共同指令、关联本地目录、文件树、项目对话与专属资料 |
-| 知识库 | 导入 UTF-8 文本或粘贴内容、分块索引、共享/项目范围、关键词搜索、来源预览、按固定 digest 分页展开 L2 原文证据与移出索引 |
-| Runtime | Core / Domains / Strategies / Adapters 成熟度、Capability Registry 与执行边界；右侧 Inspector 展示 Control revision、Ticket、Operation、Budget、Memory、Event facts |
-| 模型与设置 | Ollama 连接检查、已安装模型、输出/步数限制、思考开关 |
-
-先创建一个项目，填入本地目录并添加指令。导入一份资料，再点「开始对话」，例如：
+打开：
 
 ```text
-根据学习约定，每天学习多久？
-请读取项目文件 README.md，概括主要功能。
-把我们的讨论整理成学习计划，生成 study-plan.md 供我下载。
+http://127.0.0.1:8765/
 ```
 
-普通讨论也可以选择「独立对话」。文件生成成功后，回答下方出现实际下载卡片；每版下载来自固定摘要的不可变对象。任意回答可另外保存为 Markdown。
+一般对话默认使用本机 Ollama。页面可配置：
 
-文本文件上限 1 MB；每条消息最多附加 4 份资料。项目文件仅支持 UTF-8，Agent 输出到受管会话目录，项目原文件保留。Agent 可搜索项目、预览 Diff、读取 Git status/diff；仍没有任意 shell 或代码执行工具。模型的规划能力会影响连续工具调用，较小模型可能提前回答或生成错误参数；错误会显示在执行记录中并消耗本轮步数。
+- Ollama 地址；
+- 模型；
+- `num_ctx`；
+- temperature；
+- max steps；
+- max output tokens；
+- thinking。
 
-## Loop、上下文与检索
+Myth 不自动下载模型，也不保存 API 密钥。
 
-对话入口先固定 retrieval evidence，再做保守 Intent Pick：严格受限纯算术走 deterministic；显式要求资料/出处或本地检索强匹配时标记 `local_retrieval`；其余回退 Agent Loop。随后 Resolution Controller 固定同一来源的 L0/L1/L2 投影，整个决策写入 Turn Snapshot 后才进入「持久模型请求 → 决策校验 → 工具授权/收据 → 下一步」。会话消息持久保存；最近 30 条历史作为候选，与召回资料/记忆、旧工具预览共同按 42,000 字节消息预算选入。本轮原始任务、澄清、显式附件片段和最新工具结果优先保留；Compact 只减少旧历史，完整记录仍在本地。Inspector 展示实际字节和取舍数量。必需内容超过预算会在调用前停止。完成的普通对话会写入本地 Episodic Memory：有项目时默认限制在该 Project，无项目时限制在 Session；显式 Semantic/Procedural/Working Memory 仍可作为 global 或指定 scope 持久化，并携带 provenance / revision / fact_level。v0.12 的 Memory recall 会分页扫描全部 active 且当前 scope 可见的候选，不再只看最近 500 条。下一轮召回结果固定进 Turn Snapshot。
+## 工作台
 
-知识库按 1,800 字符分块、200 字符重叠，英文词与中文双字关键词排序；本轮只检索共享资料和当前项目资料。v0.12 不再在排序前静默截断到前 10,000 个 chunk，而是分页扫描全部当前可见候选并返回 scanned/matched/pages/exhausted 诊断。`knowledge.resolve` 可沿同一 document/digest 在 L0/L1/L2 间渐进展开。当前没有向量检索、重排器或 PDF/Office 解析器；Keyword Retrieval 继续作为可复现 baseline。
-
-模型发出执行 Ticket 后结果不明，则保留 UNKNOWN 与预算占用；续跑先对账，不重复未知调用。已持久化的模型收据、文件摘要与工具结果可恢复。SQLite 保证账本事务，不把外部效果宣称为 exactly-once。
-
-## 精确验收模式
-
-原有文件精确替换用例继续保留在 CLI 与 `/api/runs`，要求固定完整目标摘要和独立验收，成功才生成验收交付：
-
-```bash
-myth --root . agent --provider scripted --model exact-patch-demo --allow-file examples/example.txt --acceptance examples/acceptance.json "Replace foo with bar"
+```text
+History / Context | Conversation / Task | Runtime Observatory
 ```
 
-对话轮次 COMPLETED 表示完成一次回答；可下载输出证明文件已实际生成，**不表示自然语言目标已通过独立语义验收**。两种完成边界分别记录，通用聊天不会借用精确替换的验收结论。
+左栏管理会话、项目和上下文；中栏完成工作；第三栏持续显示：
 
-OpenAI Responses / Pi OAuth 适配器保留，远端凭据通过进程环境或 Pi 管理。本轮只实测本地 Ollama，未验证这两个远端入口。选择远端模型会向其发送选定的对话与资料。
+- Goal；
+- Execution Flow；
+- Trajectory；
+- Token Window；
+- Context Window；
+- Tool Calls；
+- Control；
+- Budget。
 
-## 固定评测、Information Gain 与 Policy Evolution
+详见 [Observability Contract](docs/OBSERVABILITY.md)。
 
-```bash
-# 1) 注册显式、不可变、版本化成本模型
-myth --root . cost-model-put context-v1 --version 1 \
-  --weight context_chars=0.001 --weight tool_calls=2 \
-  --description "explicit local efficiency weights"
+## Runtime shape
 
-# 2) 创建 Candidate；当前 v0.15 只开放 information_resolution policy
-myth --root . policy-create --candidate-id resolution-rule-v2 \
-  --mode rule --change "version rule policy through evidence release"
+稳定 Core：
 
-# 或创建固定 L1 候选
-myth --root . policy-create --candidate-id resolution-fixed-l1 \
-  --mode fixed --resolution L1 --change "force local information to L1"
-
-# 3) 自动跑完整 baseline/candidate 固定 suite 并绑定 paired calibration
-myth --root . policy-evaluate resolution-rule-v2 \
-  --suite evals/foundation-v3.json --cost-model-id context-v1 --min-pairs 1
-
-# 4) 只有 ELIGIBLE Candidate 才能显式发布
-myth --root . policy-promote resolution-rule-v2
-
-# 5) 查看 Active Policy / Candidate / release history
-myth --root . policy-status
-
-# 6) 显式回滚；只影响未来 Turn
-myth --root . policy-rollback --reason "manual safety rollback"
+```text
+Goal -> Run -> Action -> Attempt -> Ticket -> Receipt -> Artifact -> Verification
 ```
 
-独立研究仍可使用 `eval` / `eval-history` / `eval-compare` / `gain`。但 **partial suite 永远不能作为 Promote 证据**。发布必须满足：同一 suite/version、完整 baseline/candidate case 集、Candidate Release Gate 通过、paired calibration 无固定 case 质量回归、baseline 仍然是当前 Active Policy。Promote 只更新 durable Active Policy pointer；每个新 Turn 把实际 policy_id 固定进 snapshot，因此已存在 Turn 不会被后续演进静默改变。
+正交 Domains：
 
-## 验证与架构
+```text
+Coordination / Control / Execution / Capability / State
+Context / Memory / Personal State / Observability
+Evaluation / Evolution
+```
+
+Intent Pick、Information Resolution、Agent Loop、Workflow、Routing、Multi-Agent 等属于可插拔 Strategy，不是固定 Layer。
+
+详细说明见 [Architecture](docs/ARCHITECTURE.md) 与 [Architecture Constitution](docs/ARCHITECTURE_CONSTITUTION.md)。
+
+## 当前开发主线
+
+暂停横向堆 Multi-Agent / A2A / 更多 Evolution 抽象。
+
+接下来优先：
+
+1. 10 个真实日常任务 × 重复运行；
+2. 根据真实失败补 Tool / Context / Memory；
+3. 最小 Timer / Schedule，只负责唤醒 due Goal；
+4. 受限 `test.run`，让代码类任务可以验证候选改动；
+5. 连续自用，再决定高级架构是否值得深化。
+
+详见 [Roadmap](docs/ROADMAP.md)。
+
+## 验证
 
 ```bash
 python -m compileall -q src tests
 python -m unittest discover -s tests -v
 node --check src/myth/webui/app.js
+node --check src/myth/webui/inspector.js
 ```
 
-领域逻辑 → 应用用例 → 事务级端口 → SQLite/本地执行/模型适配器；Workspace 负责装配，HTTP 与页面负责交互。部分早期 Durable Runtime 实现仍在逐步迁移到统一 Ports。详见 [架构](docs/ARCHITECTURE.md)、[设计](docs/DESIGN.md)、[验证](docs/VALIDATION.md)、[规划](docs/ROADMAP.md)、[整体诊断与上下文优化](docs/REVIEW_2026-10-03.md) 与 [安全边界](SECURITY.md)。
+自动测试大量使用 deterministic provider / test doubles；不能据此宣称真实模型稳定性。当前验证边界见 [VALIDATION.md](docs/VALIDATION.md)。
+
+## 文档地图
+
+- [docs/README.md](docs/README.md) — 文档导航
+- [AGENTS.md](AGENTS.md) — 开发 / Agent 工作规范
+- [CHANGELOG.md](CHANGELOG.md) — 版本演进
+- [ARCHITECTURE.md](docs/ARCHITECTURE.md) — 当前架构事实
+- [ARCHITECTURE_CONSTITUTION.md](docs/ARCHITECTURE_CONSTITUTION.md) — 稳定边界
+- [OBSERVABILITY.md](docs/OBSERVABILITY.md) — 第三栏观测合同
+- [DESIGN.md](docs/DESIGN.md) — 产品视觉与交互原则
+- [ROADMAP.md](docs/ROADMAP.md) — 下一步
+- [SECURITY.md](SECURITY.md) — 安全边界

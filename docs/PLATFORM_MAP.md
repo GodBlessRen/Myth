@@ -1,61 +1,53 @@
-# Myth v0.15 — Composable Runtime Map
+# Myth Platform Map
 
-Myth 不再把架构描述成 P0 → P1000 的固定层级。
-
-正式结构是：
+Myth 的正式结构是：
 
 ```text
-                Core
- Goal / Run / Action / Attempt
- Ticket / Receipt / Artifact / Verification
-          ↙      ↓      ↘
-      Domains  Strategies  Ports
-          ↘      ↓      ↙
-              Adapters
+                    Core
+ Goal / Run / Action / Attempt / Ticket
+ Receipt / Artifact / Verification
+          ↙          ↓          ↘
+       Domains    Strategies     Ports
+          ↘          ↓          ↙
+                  Adapters
 ```
 
 ## Core
 
-Core 固定事实与权限边界，不固定智能如何组织。
-
-| Core | 当前成熟度 | 含义 |
+| Core | 当前 | 含义 |
 | --- | --- | --- |
-| Goal | connected | 长期意图已持久化；尚未自动调度后台 Run |
+| Goal | usable | 长期意图 + durable work state，可跨 Session 继续 |
 | Run | usable | 可恢复执行生命周期 |
-| Action | usable | 原子业务意图 |
+| Action | usable | 稳定原子意图 |
 | Attempt | usable | Action 的一次执行机会 |
-| Ticket | usable | 开始执行的持久授权 |
-| Receipt | usable | 执行事实 |
-| Artifact | usable | 不可变产物/证据 |
+| Ticket | usable | effect 开始前的 durable authority |
+| Receipt | usable | 实际执行事实 |
+| Artifact | usable | 不可变产物 / evidence |
 | Verification | usable | 独立验收边界 |
 
 ## Domains
 
-Domains 是同级职责，不是必须顺序经过的层。
-
-| Domain | 当前成熟度 | 当前真实能力 |
+| Domain | 当前 | 真实能力 |
 | --- | --- | --- |
-| Coordination | usable | Direct + Agent Loop；Intent Pick 已接 deterministic + conservative local_retrieval；其他组织方式可插拔 |
-| Control | usable | Steer / Pause / Resume / Stop / Model / Thinking / Compact；revision 跨连接原子分配 |
-| Execution | usable | Model、文件、检索、Diff、Git 只读执行与对账 |
-| Capability | usable | Registry + executable/planned 准入 |
+| Coordination | usable | Direct / Agent Loop + conservative Intent Pick |
+| Control | usable | Steer / Pause / Resume / Stop / Model / Thinking / Compact |
+| Execution | usable | Model、文件、检索、Diff、Git 只读能力及对账 |
+| Capability | usable | Registry + admission |
 | State | usable | SQLite durable state / budget / event / command |
-| Context | usable | ContextCompiler + fixed byte budget + fixed-digest Knowledge L0/L1/L2 projection |
-| Memory | usable | typed revision + search/revoke + scoped episodic auto-write + full visible candidate scan + provenance fact_level |
-| Personal State | connected | Goal / Trigger / explicit state 持久化与 API |
-| Observability | usable | Runtime Inspector + operation/event/control projection |
-| Evaluation | usable | foundation-v1/v2/v3 + executable Runner + durable Eval Ledger + complete-suite release evidence + paired comparison |
-| Evolution | usable | Cost Model Registry + Calibration Matrix + durable Candidate Registry + explicit Promote/Rollback + Active Policy revision；不自动发布 |
+| Context | usable | bounded projection + provider-aware context budget |
+| Memory | usable | typed revision / scope / provenance / recall |
+| Personal State | usable | Goal work state / Trigger / explicit state persistence |
+| Observability | usable | 第三栏 Goal / Flow / Trajectory / Tokens / Context / Tools / Control / Budget |
+| Evaluation | usable | fixed suites / Runner / Ledger / release evidence |
+| Evolution | usable | Cost Model / Candidate / Promote / Rollback；不自动发布 |
 
 ## Strategies
-
-Strategy 是 Coordination 的可替换策略，不是 Layer。
 
 | Strategy | 当前 |
 | --- | --- |
 | Intent Pick | connected |
 | Information Resolution | connected |
-| Information Gain | connected |
+| Information Gain | connected, offline evidence |
 | Direct | usable |
 | Agent Loop | usable |
 | Workflow | connected |
@@ -63,9 +55,9 @@ Strategy 是 Coordination 的可替换策略，不是 Layer。
 | Parallel | exists |
 | Multi-Agent | exists |
 | Managed Agent | exists |
-| Personal Agent | exists |
+| Personal Agent | connected |
 
-以后出现新的 Agent 形态，优先新增 Strategy/Adapter，而不是修改 Core。
+Strategy 不升格成 Layer。真实任务没有暴露需求时，不继续横向深化。
 
 ## Adapters
 
@@ -79,48 +71,36 @@ Strategy 是 Coordination 的可替换策略，不是 Layer。
 | MCP | exists |
 | A2A | planned |
 | Browser | planned |
-| Shell | planned |
-| Timer / Webhook | planned |
+| bounded Test | planned |
+| arbitrary Shell | intentionally unavailable |
+| Timer / Schedule | planned minimal wake-up |
 
-MCP/A2A/模型厂商/浏览器/数据库都不能进入 Core。
-
-## 六边形规则
+## 六边形边界
 
 ```text
 Inbound Adapter
-(Chat / Timer / Webhook / Email)
-             │
-             ▼
-      Application / Domain
-             │
-           Ports
-             │
-             ▼
+(Chat / future Timer)
+       ↓
+Application / Domain
+       ↓
+      Ports
+       ↓
 Outbound Adapters
-(Model / Tool / MCP / A2A / DB / Browser)
+(Model / Tool / DB / future MCP)
 ```
 
-外部系统只能通过 Port 进入；发现一个 Tool/Agent 不等于拥有执行权限。
+发现能力不等于获得权限；外部系统只能通过 Port / admission 进入。
 
 ## 成熟度
 
-- `exists`：合同存在；
-- `connected`：接入真实装配/持久化；
-- `usable`：真实路径 + 测试可依赖；
-- `hardened`：经过更强故障/安全/规模验证；
-- `planned`：只定义边界。
+- `exists`：合同/边界存在；
+- `connected`：进入真实装配或持久路径；
+- `usable`：有真实用户路径与 regression tests；
+- `hardened`：经过故障 / 安全 / 规模强化；
+- `planned`：只保留方向，不能宣称可用。
 
-开发策略：**breadth first, depth later**。先让完整形状存在，再由测试、真实场景和瓶颈决定加深顺序。
+当前开发策略：
 
+> **真实任务优先，按失败加深。**
 
-## Information concepts
-
-这些不是新的强制 Layer。
-
-| Concept | 当前 | 含义 |
-| --- | --- | --- |
-| Intent Pick | connected | strict arithmetic 走 deterministic；显式/强匹配本地资料走 conservative local_retrieval；其余回退 Agent Loop |
-| Information Resolution | connected | Turn admission 从 durable Active Policy 构造 rule/fixed controller 并固定 policy_id；Promote/Rollback 仅影响未来 Turn |
-| Information Delta | exists | added / updated / removed / conflicted 的状态变化合同；尚未自动接入 Memory lifecycle |
-| Information Gain | connected | paired fixed-case observed quality delta + cross-case Calibration Matrix；显式 Cost Model 后可计算 gain-per-cost |
-
+不是先铺更多形状。

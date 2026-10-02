@@ -98,7 +98,7 @@ Intent Pick 不是传统单标签分类器，也不是固定 LLM 调用。
 - `agent`
 - `ask_user`
 
-当前状态：**exists**。合同和 Port 已存在，但还没有接管 `send()` 主请求链。
+当前状态：**connected**。保守规则已进入 Turn admission：严格算术可走 deterministic；显式/强匹配本地资料可走 local_retrieval；其他输入稳定回退 Agent Loop。
 
 ### Information Resolution / 信息分辨率
 
@@ -117,7 +117,7 @@ L2  Detail / Evidence
 
 原则是 Progressive Disclosure：先看低分辨率信息，只有任务需要时才升级 L0 → L1 → L2。
 
-当前状态：**exists**。纯领域合同已存在；Memory/Knowledge 尚未物化 L0/L1/L2 多分辨率视图，也没有 Resolution Controller 接入 ContextCompiler。
+当前状态：**connected**。Knowledge 支持固定 source/digest 的 L0/L1/L2 projection；Turn admission 使用 durable Active Policy 选择 Resolution，并把 policy identity 固定进 snapshot。
 
 ### Information Delta / 信息增量
 
@@ -150,7 +150,7 @@ Token / Latency / Tool Cost
 
 但当前不会伪造一个“科学”的互信息数字。Estimator 必须明确自己的语义、训练/统计来源和适用范围。
 
-当前状态：**exists**。合同与 Port 已存在；没有经过评测校准的 Gain estimator，因此数值策略尚不可用。
+当前状态：**connected（offline evidence）**。Gain 只从同 suite/version、同 case 的 paired EvalObservation 推导；成本默认保持向量，只有显式 Cost Model 才计算 gain-per-cost。它不直接控制 live admission，也不能自动 Promote policy。
 
 ## 5. 六边形边界
 
@@ -204,7 +204,24 @@ Long-lived Goal
 - Trigger 可以创建未来 Run，但 Trigger 本身不拥有执行权。
 - Background work 仍走 Action → Attempt → Ticket → Receipt。
 
-## 7. Control 规则
+## 7. Observability 规则
+
+Runtime Observatory 是产品合同，不是可选 Debug UI。
+
+必须能从 durable facts 投影：
+
+- Goal；
+- Execution Flow；
+- Trajectory；
+- Token Window；
+- Context Window；
+- Tool Calls；
+- Control；
+- Budget。
+
+Observability 只读事实，不拥有业务状态；UI 可以折叠细节，不能伪造或删除核心事实类别。
+
+## 8. Control 规则
 
 产品统一使用：
 
@@ -218,7 +235,7 @@ Stop 不声称已经发出的模型请求、工具调用或外部副作用被物
 
 旧的 `abort` API 仅为兼容 v0.8 保留，不再作为新代码和 UI 词汇。
 
-## 8. 成熟度
+## 9. 成熟度
 
 不再使用 P0/P10/.../P1000 表示架构阶段。
 
@@ -230,9 +247,9 @@ Stop 不声称已经发出的模型请求、工具调用或外部副作用被物
 - **hardened**：经过故障、安全、规模或兼容性强化。
 - **planned**：只保留明确边界，不能宣称可用。
 
-开发策略仍然是 **breadth first, depth later**：哪怕未来有很多 Plan，也优先让整体形状和接口存在，再由真实测试决定哪里加深。
+开发策略改为 **真实任务优先，按失败加深**：已有抽象先接受真实任务、故障与评测检验；没有真实瓶颈，不继续横向扩张 Layer / Strategy / Protocol。
 
-## 9. 命名门槛
+## 10. 命名门槛
 
 核心词汇冻结为：
 

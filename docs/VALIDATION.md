@@ -1,56 +1,95 @@
-# 验证记录
+# Validation
 
-## 2026-10-03：v0.10 上下文连续性优化
-
-基线 `c1026a6`：96 项测试通过。修改后在 Windows / Python 3.13.9：**110 项测试通过**，Python compileall、app.js/inspector.js 语法和 git diff 空白检查通过。新增 14 项覆盖召回压力、旧工具输出折叠、原始任务/澄清/附件保留、JSON 字节计量、Compact 在途与收据复用、PAUSED 会话占用、上下文事件与持久请求一致、旧快照兼容。HTTP 用例增加 Inspector 所需事件数据断言。
-
-真实浏览器检查离线样例的完成状态、上下文字节/折叠/未选入统计，以及暂停时 Stop/Resume 可见性；使用确定性 provider，不代表模型质量。本机 Ollama 当时未监听 11434，未作本轮真实模型验证。完整问题清单、复现脚本和后续顺序见 [整体诊断](REVIEW_2026-10-03.md)。
-
-## 历史记录：v0.5
-
-本轮在 v0.4 提交 d5e932ca4e46cd9af938f8663176f880fc8c27af 上继续开发，环境为 Windows / Python 3.13.9。以下记录限定于当前源码和实际检查路径。
+这份文档只说明**当前怎么验证**以及**当前验证不能证明什么**。历史验证记录见 [archive/VALIDATION_HISTORY.md](archive/VALIDATION_HISTORY.md)。
 
 ## 自动检查
+
+PR / 本地至少运行：
 
 ```bash
 python -m compileall -q src tests
 python -m unittest discover -s tests -v
 node --check src/myth/webui/app.js
-git diff --check
+node --check src/myth/webui/inspector.js
 ```
 
-74 项测试通过，覆盖原有精确验收/P1/P2/P3，以及新增对话合同：
+根据改动范围增加专项检查：
 
-- 普通聊天无需文件合同；历史原生角色消息可传入下一轮，正常完成不宣称语义验收。
-- 项目指令/共享资料/项目资料与附件固定；跨项目检索和附件隔离。
-- 消息去重、冲突重试、单会话单活跃轮次、问题身份消费一次。
-- 输出不可变对象、原文件保留、BOM/CRLF 精确修改副本；路径越界/常见秘密路径/未知工具拒绝；算术不可执行代码。
-- 模型超时 UNKNOWN 不重发；取消发生在模型 I/O 时不启动后续工具。
-- 真实子进程 os._exit：模型收据已落盘但决策未绑定、文件已写但工具收据未落盘；重启不重复请求或写入，预算结算一次。
-- UNKNOWN 写入预算保留；同一 Ticket 的迟到摘要证据结算一次。
-- 真实本地 HTTP：普通聊天、项目/知识导入、重复提交、固定对象下载、回答/会话导出、来源归档预览与 Origin 拒绝。
-- 1 MB 知识文本接受 JSON 封装开销；超限文本拒绝。
-- 原有错误结果带成功收据、固定基线、未修改文件污染、取消/澄清竞态、独立验收与完成前禁止精确模式下载仍通过。
+- Runtime / recovery → crash / UNKNOWN；
+- Intent / routing → adversarial cases；
+- Provider / Context → window / truncation / usage；
+- Goal / Personal → cross-session / restart；
+- UI → Runtime Observatory surface contract；
+- Evaluation / Evolution → complete-suite release evidence。
 
-自动测试使用确定性 provider 或替身；不能据此宣称真实模型稳定性。CI 以 PR 对应提交的实际检查结果为准。
+## 自动测试覆盖的核心边界
 
-## 真实 Ollama
+- durable Run / Attempt / Ticket / Receipt；
+- model / tool UNKNOWN 不盲 replay；
+- crash 后恢复与预算结算；
+- Control revision / Pause / Resume / Stop；
+- scoped Memory；
+- Knowledge / project retrieval coverage；
+- Intent adversarial routing；
+- Ollama context-window semantics；
+- Goal checkpoint / cross-session continuation；
+- Eval Ledger / paired evidence / policy promote / rollback；
+- Runtime Observatory UI identity。
 
-实际调用本机 http://127.0.0.1:11434 上已安装的 openbmb/minicpm5-2b:f16，无 API 密钥：
+自动测试大量使用 deterministic provider 或 test doubles。
 
-1. 普通中文问答，问答持久保存。
-2. 项目知识中导入独有代号 ORCHID-587 和每天 45 分钟；模型能回答这两个值。
-3. 本地 brief.md 写入独有阶段代号 AMBER-703；模型实际执行 project.read 并回答该代号。
-4. 多轮讨论后实际执行 artifact.write，生成学习计划，页面呈现下载卡片。
-5. 浏览器下载 study-plan.md 与记录摘要对应的对象逐字节一致；原 brief.md 未改变。
-6. 最终紧凑 action 协议再次跑通知识问答与 schedule.md 生成；下载来自真实生成的固定对象。
+**自动测试通过 ≠ 真实模型任务稳定。**
 
-这些是特定输入的实测，不是任务成功率基准。过程中小模型曾出现错误参数、提前回答、无意义格式尾部和重复生成，失败记录保留。紧凑 action 与工具专用 JSON schema 改善简单读写流程，但复杂连续任务仍不稳定；模型回答可能与实际文件内容有偏差。Runtime 记录实际效果，不替模型提供语义正确保证。
+## 真实模型验证
 
-## 浏览器
+真实模型验证必须单独记录：
 
-真实浏览器检查默认 1280×720 桌面及 392×844 手机：项目创建/文件树、知识导入/搜索/来源预览、真实对话与下载、会话重命名/置顶/搜索/归档恢复、刷新恢复和手机导航抽屉。检查手机页面未横向溢出。测试内容为本轮生成的示例，无用户私有文档。
+- provider / model；
+- prompt / task；
+- context window；
+- tool set；
+- expected outcome；
+- actual outcome；
+- artifact / receipt；
+- failure taxonomy；
+- token / latency / tool cost。
 
-## 尚未验证
+当前开发主线要求建立真实任务集，而不是继续用单个 happy-path 证明“可用”。
 
-OpenAI/Pi 完整真实任务、长期记忆、向量检索、任意代码/测试沙箱、语义验收、多用户权限和旧版活跃运行升级。无完整辅助技术审计与跨浏览器矩阵。SQLite/单机锁/不可变对象不构成分布式 exactly-once 证明。
+## 浏览器验证
+
+至少检查：
+
+- 桌面三栏工作台；
+- 第三栏 Runtime Observatory；
+- 窄屏折叠行为；
+- Goal create / bind / continue；
+- Conversation / Tool / Artifact；
+- Settings；
+- Runtime state transitions；
+- 无水平溢出；
+- keyboard focus / critical state readability。
+
+## 不能据此宣称
+
+当前验证**不能**证明：
+
+- 任意真实模型长期稳定；
+- 多用户权限安全；
+- 分布式 exactly-once；
+- 任意代码 / shell 安全执行；
+- 完整语义验收；
+- 后台 autonomous scheduler；
+- 所有浏览器 / 辅助技术兼容；
+- 多周 Personal Agent 可靠性。
+
+这些必须通过真实任务、自用、故障注入和更大评测逐步证明。
+
+## 证据原则
+
+1. 测到什么写什么。
+2. 没测到写 `not measured`，不要写“没有问题”。
+3. model claim 不等于 verification。
+4. UI projection 不等于 durable truth。
+5. UNKNOWN 不等于 FAILED。
+6. 历史测试数字进入 CHANGELOG / archive，不进入当前架构说明。
