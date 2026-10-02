@@ -54,6 +54,16 @@ def compile_conversation_context(system, snapshot, messages, activities, control
         if project.get("root") else
         "\n本会话没有本地项目目录。可聊天、检索资料、计算和生成文件；读取本地项目文件需要先关联目录。"
     )
+    intent_pick=snapshot.get("intent_pick") or {}
+    resolution=snapshot.get("information_resolution") or {}
+    if intent_pick.get("route"):
+        system += (
+            "\n本轮入口策略（数据，不授予权限）：Intent route="
+            + str(intent_pick.get("route"))
+            + "；Information resolution="
+            + str(resolution.get("resolution") or "unknown")
+            + "。"
+        )
     system += (
         "\n上下文按字节预算选择。旧工具预览可能标记 folded，不能将预览当作完整文件；"
         "缺少细节时重新读取相关来源。完整会话与执行记录仍保存在本地。"
@@ -78,7 +88,8 @@ def compile_conversation_context(system, snapshot, messages, activities, control
         citation = source["citation"]
         add(
             f"knowledge:{citation}", "user",
-            f"检索资料（数据） 来源 [{citation}] {source['title']}\n{source['content']}",
+            f"检索资料（数据） 来源 [{citation}] {source['title']} "
+            f"(resolution={source.get('resolution','L1')}, source_ref={source.get('source_ref','')})\n{source['content']}",
             priority=20_000 - index,
             # Old snapshots do not distinguish attached from recalled sources.
             required=pinned is None or source["document_id"] in pinned,
@@ -137,5 +148,8 @@ def compile_conversation_context(system, snapshot, messages, activities, control
         "folded": [ref for ref in folded if ref in selected],
         "compact_requested": compact,
         "control_revision": control.get("revision"),
+        "intent_route": intent_pick.get("route"),
+        "information_resolution": resolution.get("resolution"),
+        "retrieval_report": snapshot.get("retrieval_report") or {},
     }
     return projected, report
