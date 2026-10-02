@@ -27,7 +27,7 @@ Myth 的开发目标不是“堆更多 Agent 抽象”，而是把一个 **可�
 
 6. **Observability 不是 Debug 附件**
    - 第三栏 Runtime Observatory 必须保留：
-     Goal / Execution Flow / Trajectory / Tokens / Context / Tools / Control / Budget。
+     Goal / Execution Flow / Trajectory / Tokens / Cache Hit / Context / Tools / Control / Budget。
    - UI 重构不能静默删除这些事实。
 
 ## 2. 当前产品主线

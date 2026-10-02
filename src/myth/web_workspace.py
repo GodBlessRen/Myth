@@ -72,6 +72,29 @@ class ConversationWebService:
             "details":status.details or {},
         }
 
+    @staticmethod
+    def _model_usage_summary(invocations):
+        input_tokens=0
+        output_tokens=0
+        cached_input_tokens=0
+        cache_reported=False
+        for item in invocations:
+            usage=item.get("usage") if isinstance(item.get("usage"),dict) else {}
+            input_tokens+=max(0,int(usage.get("input_tokens") or 0))
+            output_tokens+=max(0,int(usage.get("output_tokens") or 0))
+            if "cached_input_tokens" in usage:
+                cache_reported=True
+                cached_input_tokens+=max(0,int(usage.get("cached_input_tokens") or 0))
+        hit_rate=(cached_input_tokens/input_tokens if cache_reported and input_tokens>0 else None)
+        return {
+            "input_tokens":input_tokens,
+            "output_tokens":output_tokens,
+            "cached_input_tokens":cached_input_tokens if cache_reported else None,
+            "cache_hit_rate":hit_rate,
+            "cache_metrics_available":cache_reported,
+            "model_calls":len(invocations),
+        }
+
     def session(self,sid):
         with MythRuntime(self.root) as runtime:
             workspace=Workspace(runtime)
@@ -83,6 +106,8 @@ class ConversationWebService:
                 turn["control"]=workspace.control.view(turn["run_id"])
                 turn["operations"]=workspace.repository.operations(turn["run_id"])
                 turn["events"]=workspace.repository.events(turn["run_id"])
+                model_state=workspace.repository.decisions.status(turn["run_id"])
+                turn["model_usage"]=self._model_usage_summary(model_state["model_invocations"])
                 goal_id=(turn.get("snapshot") or {}).get("goal",{}).get("goal_id")
                 turn["goal_current"]=workspace.personal.goal_view(goal_id) if goal_id else None
             value["artifacts"]=workspace.repository.artifacts(sid)
