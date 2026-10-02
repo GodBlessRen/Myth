@@ -55,7 +55,7 @@ class ConversationAgent:
                     else:
                         decision_id, decision = self.execution.decide(turn, step["step"], provider)
                         self.repository.bind(run_id, step["step"], decision_id, decision)
-                        self.control.consume_compaction(run_id)
+                        self.control.consume_compaction(run_id, decision_id=decision_id)
 
                     # A pause/abort arriving while the model was in flight is
                     # observed here before any newly proposed tool is launched.

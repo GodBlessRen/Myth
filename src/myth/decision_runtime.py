@@ -218,6 +218,7 @@ class DecisionRuntime:
         input_hold: int,
         output_hold: int,
         request_key: str | None = None,
+        context_report: dict[str, Any] | None = None,
     ) -> tuple[str, str]:
         action_id = self._id("mact")
         attempt_id = self._id("matt")
@@ -255,6 +256,10 @@ class DecisionRuntime:
             if request_key is not None:
                 db.execute("INSERT INTO model_request_keys VALUES (?,?)", (request_key, attempt_id))
             self._event(db, run_id, "ModelTicketGranted", {"model_attempt_id": attempt_id, "ticket_id": ticket_id})
+            if context_report is not None:
+                self._event(db, run_id, "ConversationContextCompiled", {
+                    **context_report, "model_attempt_id": attempt_id, "request_ref": request_ref,
+                })
         return attempt_id, ticket_id
 
     def _receipt_path(self, attempt_id: str) -> Path:
@@ -419,6 +424,7 @@ class DecisionRuntime:
             input_hold=len(request_bytes),
             output_hold=max_output_tokens,
             request_key=request_key,
+            context_report=model_request.context_report,
         )
         try:
             result = provider.invoke(model_request)

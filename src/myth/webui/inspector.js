@@ -78,6 +78,10 @@ function renderInspectorContext(session,turn){
   if(!session&&!turn){box.append(el("div","inspector-empty","暂无活动上下文"));return;}
   const snapshot=turn?.snapshot||{},project=snapshot.project||null;
   [["Project",project?.name||session?.project_name||"Independent"],["History",(snapshot.messages?.length||session?.messages?.length||0)+" messages"],["Knowledge",(snapshot.knowledge?.length||0)+" sources"],["Memory",(snapshot.memory?.length||0)+" records"],["Events",(turn?.events?.length||0)+""],["Step",turn?((turn.current_step||0)+" / "+(turn.max_steps||0)):"—"]].forEach(([k,v])=>{const row=el("div","context-fact");row.append(el("span","",k),el("span","",v));box.append(row);});
+  const compiled=(turn?.events||[]).filter(event=>event.kind==="ConversationContextCompiled").at(-1)?.payload;
+  if(compiled){
+    [["模型上下文",`${compiled.bytes_used} / ${compiled.max_bytes} bytes`],["实际选入",`${compiled.selected?.length||0} 项`],["旧记录折叠",`${compiled.folded?.length||0} 项`],["未选入",`${compiled.dropped?.length||0} 项`]].forEach(([k,v])=>{const row=el("div","context-fact");row.append(el("span","",k),el("span","",v));box.append(row);});
+  }
 }
 
 function renderInspectorPlatform(){

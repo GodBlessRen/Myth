@@ -49,7 +49,7 @@ function renderChat(session){
   $("compactTurn").disabled=!turn||(control.stopped??control.aborted)||status!=="RUNNING";
   $("stopRun").disabled=!turn||(control.stopped??control.aborted)||["COMPLETED","FAILED","CANCELLED","BUDGET_EXHAUSTED"].includes(status);
 
-  show("stopTurn",!!active&&!(control.stopped??control.aborted)&&status!=="PAUSED");
+  show("stopTurn",!!active&&!(control.stopped??control.aborted));
   show("send",!active||status==="WAITING_USER");
   $("send").disabled=state.busy;
   $("prompt").placeholder=status==="WAITING_USER"?"回复这个问题…":status==="PAUSED"?"Run 已暂停。Resume 后继续。":"给 Myth 一个任务，或继续当前对话…";

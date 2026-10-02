@@ -211,16 +211,34 @@ class SqliteControlService:
             return "PAUSED"
         return None
 
-    def consume_compaction(self, run_id: str) -> None:
-        if not self._snapshot(run_id).compact_requested:
-            return
+    def consume_compaction(self, run_id: str, *, decision_id: str | None = None) -> None:
+        if decision_id is not None:
+            row = self.store.db.execute(
+                "SELECT m.request_ref FROM step_decisions d JOIN model_invocations m "
+                "ON m.model_attempt_id=d.model_attempt_id WHERE d.decision_id=? AND m.run_id=?",
+                (decision_id, run_id),
+            ).fetchone()
+            if row is None:
+                return
+            request = json.loads(self.runtime.objects.get(row["request_ref"]))
+            report = request.get("context_report") or {}
+            if not report.get("compact_requested"):
+                return
+            revision = report.get("control_revision")
+        else:
+            # Compatibility for explicit/manual acknowledgment. The Agent always
+            # supplies a decision so replay cannot consume a newer command.
+            revision = self._snapshot(run_id).revision
         with self.store.tx() as db:
-            db.execute(
+            changed = db.execute(
                 "UPDATE workspace_control_projection SET compact_requested=0,"
-                "updated_at=CURRENT_TIMESTAMP WHERE run_id=?",
-                (run_id,),
+                "updated_at=CURRENT_TIMESTAMP WHERE run_id=? AND revision=? AND compact_requested=1",
+                (run_id, revision),
             )
-            self.store._event(db, run_id, "ContextCompactionConsumed", {})
+            if changed.rowcount:
+                self.store._event(db, run_id, "ContextCompactionConsumed", {
+                    "revision": revision, "decision_id": decision_id,
+                })
 
 
 

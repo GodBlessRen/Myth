@@ -42,6 +42,9 @@ CREATE TABLE IF NOT EXISTS workspace_operations(
 def new_id(prefix):return f"{prefix}_{uuid.uuid4().hex}"
 
 
+ACTIVE_TURN_STATUSES = {"RUNNING", "UNKNOWN", "WAITING_USER", "PAUSED"}
+
+
 class SqliteWorkspaceRepository:
     def __init__(self,runtime):
         self.runtime=runtime
@@ -122,7 +125,7 @@ class SqliteWorkspaceRepository:
 
     def update_session(self,sid,value):
         old=self.session(sid)
-        if any(t["status"] in {"RUNNING","UNKNOWN","WAITING_USER"} for t in old["turns"]) and value.get("archived"):raise ValueError("stop the active turn before archiving")
+        if any(t["status"] in ACTIVE_TURN_STATUSES for t in old["turns"]) and value.get("archived"):raise ValueError("stop the active turn before archiving")
         pid=value.get("project_id",old["project_id"])
         if pid:self.project(pid)
         with self.store.tx() as db:db.execute("UPDATE workspace_sessions SET title=?,project_id=?,pinned=?,archived=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",(str(value.get("title",old["title"])).strip()[:100] or "新对话",pid,int(bool(value.get("pinned",old["pinned"]))),int(bool(value.get("archived",old["archived"]))),sid))
@@ -177,7 +180,7 @@ class SqliteWorkspaceRepository:
                 return self.turn(existing["run_id"])
             session=self.session(sid)
             if session["archived"]:raise ValueError("restore the archived conversation first")
-            if any(t["status"] in {"RUNNING","UNKNOWN","WAITING_USER"} for t in session["turns"]):raise ValueError("本会话仍有未完成一轮，请先继续、答复或停止。")
+            if any(t["status"] in ACTIVE_TURN_STATUSES for t in session["turns"]):raise ValueError("本会话仍有未完成一轮，请先继续、答复或停止。")
             project=self.project(session["project_id"]) if session["project_id"] else None
             knowledge=self.search(text,session["project_id"])
             for did in document_ids:
@@ -189,6 +192,8 @@ class SqliteWorkspaceRepository:
             snapshot={
                 "project":project,
                 "knowledge":knowledge,
+                "attached_document_ids":list(document_ids),
+                "turn_message_start":min(30,len(session["messages"])),
                 "memory":[
                     {
                         "memory_id":m.get("memory_id"),
@@ -217,6 +222,11 @@ class SqliteWorkspaceRepository:
         row=self.store.db.execute("SELECT * FROM workspace_turns WHERE run_id=?",(rid,)).fetchone()
         if not row:raise KeyError(rid)
         result=dict(row);result["settings"]=json.loads(result.pop("settings_json"));result["snapshot"]=json.loads(result.pop("snapshot_json"))
+        if "turn_message_start" not in result["snapshot"]:
+            # Legacy snapshots contain recent history followed by this turn's
+            # task/questions/answers. Infer the boundary without rewriting DBs.
+            count=self.store.db.execute("SELECT count(*) FROM workspace_messages WHERE run_id=?",(rid,)).fetchone()[0]
+            result["snapshot"]["turn_message_start"]=max(0,len(result["snapshot"]["messages"])-count)
         result["activities"]=[{**dict(r),"decision":json.loads(r["decision_json"]) if r["decision_json"] else None,"result":json.loads(r["result_json"]) if r["result_json"] else None} for r in self.store.db.execute("SELECT * FROM workspace_steps WHERE run_id=? ORDER BY step",(rid,))]
         result["budgets"]=self.store.get_accounts(rid)
         return result
