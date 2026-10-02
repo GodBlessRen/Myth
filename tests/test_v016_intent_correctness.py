@@ -102,7 +102,7 @@ class IntentCorrectnessTests(unittest.TestCase):
                 "deterministic->agent",
             )
             events=workspace.repository.events(rid)
-            fallback=[item for item in events if item["event_type"]=="RouteFallback"]
+            fallback=[item for item in events if item["kind"]=="RouteFallback"]
             self.assertEqual(len(fallback),1)
             self.assertIn("synthetic calculator rejection",fallback[0]["payload"]["reason"])
 
