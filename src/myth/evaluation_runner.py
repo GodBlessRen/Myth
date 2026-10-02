@@ -135,6 +135,88 @@ class FoundationEvalRunner:
             {"cost":0},
         )
 
+    def _case_intent_local_retrieval_explicit(self, case):
+        with tempfile.TemporaryDirectory() as tmp, MythRuntime(tmp) as runtime:
+            workspace=Workspace(runtime)
+            workspace.repository.save_settings(_SETTINGS)
+            workspace.repository.import_document({
+                "title":"eval knowledge",
+                "content":case.input["document"],
+            })
+            sid=workspace.repository.create_session()["id"]
+            rid=workspace.repository.create_turn(
+                sid,
+                case.input["text"],
+                "eval-local-retrieval",
+            )["run_id"]
+            snapshot=workspace.repository.turn(rid)["snapshot"]
+            route=snapshot["intent_pick"]["route"]
+            resolution=snapshot["information_resolution"]["resolution"]
+            ok=route==case.expected["route"] and resolution==case.expected["resolution"]
+            return (
+                EvalVerdict.PASS if ok else EvalVerdict.FAIL,
+                f"route={route}, resolution={resolution}",
+                tuple(item["source_ref"] for item in snapshot["knowledge"]),
+                {"retrieval_scanned":snapshot["retrieval_report"]["scanned"]},
+            )
+
+    def _case_resolution_attached_l2(self, case):
+        with tempfile.TemporaryDirectory() as tmp, MythRuntime(tmp) as runtime:
+            workspace=Workspace(runtime)
+            workspace.repository.save_settings(_SETTINGS)
+            count=int(case.input["attachments"])
+            docs=[
+                workspace.repository.import_document({
+                    "title":f"attachment {index}",
+                    "content":f"ATTACH-{index} "+("detail "*400),
+                })
+                for index in range(count)
+            ]
+            sid=workspace.repository.create_session()["id"]
+            rid=workspace.repository.create_turn(
+                sid,
+                case.input["text"],
+                "eval-attached-l2",
+                document_ids=[item["id"] for item in docs],
+            )["run_id"]
+            snapshot=workspace.repository.turn(rid)["snapshot"]
+            ids={item["document_id"] for item in snapshot["knowledge"]}
+            all_preserved={item["id"] for item in docs} <= ids
+            route=snapshot["intent_pick"]["route"]
+            resolution=snapshot["information_resolution"]["resolution"]
+            ok=(
+                route==case.expected["route"]
+                and resolution==case.expected["resolution"]
+                and all_preserved==case.expected["all_attachments_preserved"]
+            )
+            return (
+                EvalVerdict.PASS if ok else EvalVerdict.FAIL,
+                f"route={route}, resolution={resolution}, all_attachments={all_preserved}",
+                tuple(item["source_ref"] for item in snapshot["knowledge"]),
+                {"attachments":count},
+            )
+
+    def _case_resolution_agent_l0(self, case):
+        with tempfile.TemporaryDirectory() as tmp, MythRuntime(tmp) as runtime:
+            workspace=Workspace(runtime)
+            workspace.repository.save_settings(_SETTINGS)
+            sid=workspace.repository.create_session()["id"]
+            rid=workspace.repository.create_turn(
+                sid,
+                case.input["text"],
+                "eval-agent-l0",
+            )["run_id"]
+            snapshot=workspace.repository.turn(rid)["snapshot"]
+            route=snapshot["intent_pick"]["route"]
+            resolution=snapshot["information_resolution"]["resolution"]
+            ok=route==case.expected["route"] and resolution==case.expected["resolution"]
+            return (
+                EvalVerdict.PASS if ok else EvalVerdict.FAIL,
+                f"route={route}, resolution={resolution}",
+                (),
+                {"retrieval_scanned":snapshot["retrieval_report"]["scanned"]},
+            )
+
     def _case_knowledge_late_candidate(self, case):
         with tempfile.TemporaryDirectory() as tmp, MythRuntime(tmp) as runtime:
             workspace=Workspace(runtime)
