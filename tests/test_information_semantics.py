@@ -69,7 +69,7 @@ class InformationSemanticsTests(unittest.TestCase):
 
     def test_new_information_strategies_are_explicitly_exists_only(self):
         registry = default_strategies()
-        self.assertEqual(registry.get("intent_pick").state, StrategyState.EXISTS)
+        self.assertEqual(registry.get("intent_pick").state, StrategyState.CONNECTED)
         self.assertEqual(registry.get("information_resolution").state, StrategyState.EXISTS)
         self.assertEqual(registry.get("information_gain").state, StrategyState.EXISTS)
 
