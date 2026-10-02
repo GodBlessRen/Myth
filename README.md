@@ -1,8 +1,6 @@
 # Myth
 
-**Myth is a minimal durable Agent Runtime, not another tool-calling loop.**
-
-The core rule is simple:
+**Myth is a durable Agent Runtime: the model proposes, the Runtime authorizes, and verification decides completion.**
 
 ```text
 Agent / LLM = proposes
@@ -10,138 +8,191 @@ Runtime     = authorizes + persists + executes + accounts
 Verifier    = decides whether completion is proven
 ```
 
-## Current milestones
+## P3 — the Agent actually runs
 
-### P1 — durable local effect
-
-The first milestone proves one boring task carefully: import a UTF-8 text file into a managed workspace, replace an exact string a fixed number of times, survive process death around the side effect, verify the immutable expected result, and publish a Delivery.
-
-### P2 — durable model decision
-
-P2 adds provider-neutral `StepDecision` calls without letting the model bypass Runtime:
+Myth now has a bounded single-agent loop:
 
 ```text
 Goal
  ↓
-Model Intent + Budget Reservation
+Model Intent → Model Ticket → LLM
  ↓
-Model Ticket
- ↓
-Ollama / OpenAI / Pi-managed ChatGPT OAuth
- ↓
-Durable Model Receipt
- ↓
-Usage Settlement
- ↓
-StepDecision (proposal only)
+StepDecision
+ ├─ ask_user ───────────────→ pause / resume
+ ├─ tool_call
+ │    ↓
+ │  Runtime scope + argument validation
+ │    ↓
+ │  Tool Action → Attempt → Ticket → file effect → Receipt
+ │    ↓
+ │  back to the model
+ │
+ └─ request_completion
+      ↓
+    AgentVerifier
+      ↓
+ Receipt + evidence_ref + current digest all agree?
+      ↓
+    Agent Delivery
 ```
 
-A model `tool_call` does **not** execute the tool and does **not** mark the Run successful. The next runtime layer will validate the proposal, create the normal tool Action/Attempt, execute it, then return to decision/verification.
+A tool proposal cannot widen file scope. A tool success cannot finish the user goal. A model completion claim is accepted only when independent verification binds it to durable tool evidence.
 
-## Providers
+### Current executable capability
 
-### Ollama — local
+P3 intentionally starts with one real tool:
 
-Start Ollama and make sure your model is installed, then:
+- `file.patch_exact` — exact UTF-8 replacement inside a managed workspace.
 
-```bash
-myth provider-check --provider ollama --model <model>
-myth --root . plan --provider ollama --model <model> \
-  --allow-file example.txt \
-  "replace foo with bar in example.txt"
-```
+The original user file is not overwritten. The verified artifact lives under the private `.runtime/workspaces/<run_id>/` tree.
 
-The adapter uses Ollama's local `/api/chat` endpoint and requests structured JSON output. No credential is required.
-
-### OpenAI API key
-
-Set `OPENAI_API_KEY` outside the repository:
-
-```bash
-myth provider-check --provider openai --model <model>
-myth --root . plan --provider openai --model <model> "decide the next step"
-```
-
-### ChatGPT subscription through Pi OAuth
-
-Myth intentionally does **not** implement or store OpenAI refresh tokens. It delegates login/refresh/storage to the upstream Pi runtime.
-
-Install Pi:
-
-```bash
-npm install --global @earendil-works/pi-coding-agent
-```
-
-Open Pi and run:
-
-```text
-/login openai
-```
-
-Choose **Sign in with ChatGPT**. After Pi has stored the OAuth credential:
-
-```bash
-myth provider-check --provider pi-openai --model <model>
-myth --root . plan --provider pi-openai --model <model> "decide the next step"
-```
-
-At request time Myth calls Pi's public:
-
-```text
-pi auth print-bearer-token --provider openai --min-expiry 10m
-```
-
-Pi refreshes the OAuth credential under its own credential lock. Myth uses the returned bearer token only for the current request; it is not persisted in Myth SQLite, artifacts, receipts, logs, or Git.
-
-Upstream Pi: https://github.com/earendil-works/pi
-
-## P1 quick start
+## Start the local Web UI
 
 Requires Python 3.12+.
 
 ```bash
 python -m pip install -e .
-python -m unittest discover -s tests -v
+myth --root . web
 ```
 
-Run a managed exact patch:
+Myth opens:
 
-```bash
-myth --root . patch example.txt --old foo --new bar --count 2
+```text
+http://127.0.0.1:8765/
 ```
 
-Recovery after an interrupted file run:
+The Web UI is local-only by design. It has three surfaces:
+
+- **Runs** — previous Agent runs;
+- **Agent workspace** — goal, decisions, tool results, clarification and final answer;
+- **Execution Ledger** — budget, Model Ticket, Tool Receipt, verification and durable events.
+
+No CDN or frontend framework is required.
+
+## Run the Agent from CLI
+
+### Ollama
 
 ```bash
-myth --root . recover <run_id>
+myth provider-check --provider ollama --model <model>
+
+myth --root . agent \
+  --provider ollama \
+  --model <model> \
+  --allow-file ./example.txt \
+  "Replace foo with bar in example.txt"
 ```
 
-Inspect a P2 model Run:
+### OpenAI API key
+
+Set `OPENAI_API_KEY` outside the repository, then:
 
 ```bash
+myth --root . agent \
+  --provider openai \
+  --model <model> \
+  --allow-file ./example.txt \
+  "Replace foo with bar in example.txt"
+```
+
+### ChatGPT subscription through Pi OAuth
+
+Install Pi:
+
+```bash
+npm install --global @earendil-works/pi-coding-agent
+pi
+```
+
+Inside Pi:
+
+```text
+/login openai
+```
+
+Choose **Sign in with ChatGPT**. Myth then resolves a short-lived bearer token through Pi at request time:
+
+```text
+pi auth print-bearer-token --provider openai --min-expiry 10m
+```
+
+Run:
+
+```bash
+myth --root . agent \
+  --provider pi-openai \
+  --model <model> \
+  --allow-file ./example.txt \
+  "Replace foo with bar in example.txt"
+```
+
+Myth never reads or writes Pi's `auth.json`; Pi remains the credential owner.
+
+## Lower-level commands
+
+P1 exact patch:
+
+```bash
+myth --root . patch example.txt --old foo --new bar --count 1
+```
+
+P2 proposal-only model decision:
+
+```bash
+myth --root . plan --provider ollama --model <model> \
+  --allow-file example.txt \
+  "decide the next step"
+```
+
+Inspect:
+
+```bash
+myth --root . agent-status <run_id>
 myth --root . model-status <run_id>
 myth --root . recover-model <run_id>
 ```
 
-## Properties already protected
+## Providers
+
+- **Ollama** — local `/api/chat`, structured JSON decision output.
+- **OpenAI** — Responses API using `OPENAI_API_KEY`.
+- **Pi OpenAI** — Responses API using Pi-managed ChatGPT OAuth.
+
+For content that must stay local, use Ollama.
+
+## Design system
+
+The P3 Web UI is original Myth code. Its visual system borrows principles, not source code, from:
+
+- `video-shotcraft`: paper / ink / amber focus discipline and motion timing;
+- `gc-minimal-zine-poster`: negative space and micro-editorial hierarchy;
+- `frontend-slides`: grid-breaking editorial composition and restrained reveal motion;
+- `lieflat-charts`: dense but legible runtime metrics;
+- GSAP: timeline/easing principles. P3 uses native CSS/JS and does not vendor GSAP.
+
+See [`docs/DESIGN.md`](docs/DESIGN.md).
+
+## Properties protected
 
 - stable request identity rejects same ID with different content;
-- `Action` and `Attempt` are separate identities;
-- TX-Intent commits an Attempt and all resource reservations atomically;
-- a durable Ticket is required before file or model I/O;
-- uncertain post-Ticket outcomes remain `UNKNOWN` rather than being blindly repeated;
-- effect truth and usage truth are independent;
-- model request/response artifacts and token usage are durable;
-- model output is a proposal, never a Receipt or completion authority;
-- file tool success cannot directly complete a Run without Verification;
-- original user files are not silently overwritten in P1.
+- Model and Tool work both require durable Tickets;
+- uncertain post-Ticket outcomes stay `UNKNOWN` rather than being blindly repeated;
+- model usage and tool usage are budgeted independently;
+- model output is proposal data, never a Receipt;
+- model-proposed paths are constrained to the explicit `allowed_files` set;
+- the only current tool is exact patch; there is no arbitrary shell;
+- tool success cannot directly complete an Agent Run;
+- completion requires durable evidence plus current artifact digest agreement;
+- local Web binds only to loopback.
 
-See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+## Tests
 
-## Privacy defaults
+```bash
+python -m unittest discover -s tests -v
+```
 
-Local runtime state, SQLite databases, `.env*`, keys and `.runtime/` are gitignored. P2 can send the model prompt/context to a selected remote provider. Use Ollama for content that must remain local.
+CI also compiles the package and runs hard process crash/recovery tests.
 
 ## Current boundary
 
-Myth remains a **single-machine modular monolith**. It does not claim distributed exactly-once execution, hostile-code sandboxing, arbitrary user-directory transactions, or a complete autonomous Agent loop.
+Myth remains a **single-machine modular monolith**. It does not claim a hostile-code sandbox, distributed exactly-once execution, unrestricted computer use, or general-purpose autonomous coding yet. P3 proves one real Agent loop before adding broader capabilities.
