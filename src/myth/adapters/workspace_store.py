@@ -378,6 +378,22 @@ class SqliteWorkspaceRepository:
             db.execute("UPDATE workspace_turns SET current_step=? WHERE run_id=?",(number,rid))
             return {"step":number}
 
+    def record_route_fallback(self,rid,step,route,reason):
+        with self.store.tx() as db:
+            turn=self.turn(rid)
+            snapshot=turn["snapshot"]
+            fallbacks=list(snapshot.get("route_fallbacks") or [])
+            fallbacks.append({"step":step,"route":route,"reason":reason})
+            snapshot["route_fallbacks"]=fallbacks[-8:]
+            db.execute(
+                "UPDATE workspace_turns SET snapshot_json=? WHERE run_id=?",
+                (canonical_json(snapshot),rid),
+            )
+            self.store._event(
+                db,rid,"RouteFallback",
+                {"step":step,"route":route,"reason":reason},
+            )
+
     def bind(self,rid,step,decision_id,decision):
         with self.store.tx() as db:db.execute("UPDATE workspace_steps SET state='DECIDED',decision_id=?,decision_json=? WHERE run_id=? AND step=?",(decision_id,canonical_json(decision.serializable()),rid,step))
 

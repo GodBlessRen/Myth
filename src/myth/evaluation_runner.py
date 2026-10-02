@@ -123,6 +123,8 @@ class FoundationEvalRunner:
         started=time.perf_counter()
         try:
             method=getattr(self,f"_case_{case.case_id.replace('-','_')}",None)
+            if method is None and case.category=="intent_adversarial":
+                method=self._case_intent_adversarial
             if method is None:
                 return EvalObservation(
                     case.case_id,
@@ -157,6 +159,18 @@ class FoundationEvalRunner:
                 policy_id=self.policy_id,
                 comparison_key=case.case_id,
             )
+
+    def _case_intent_adversarial(self, case):
+        context={"sources":list(case.input.get("sources") or [])}
+        pick=self.intent_picker.pick(case.input["text"],context)
+        expected=case.expected["route"]
+        ok=pick.route.value==expected
+        return (
+            EvalVerdict.PASS if ok else EvalVerdict.FAIL,
+            f"route={pick.route.value}, expected={expected}",
+            ("strategy:intent_pick",),
+            {"cost":0},
+        )
 
     def _case_intent_arithmetic_local(self, case):
         pick=self.intent_picker.pick(case.input["text"],{})

@@ -104,7 +104,7 @@ def build_parser() -> argparse.ArgumentParser:
     recover_model.add_argument("run_id", nargs="?")
 
     evaluate = sub.add_parser("eval", help="run a fixed local Myth evaluation suite")
-    evaluate.add_argument("--suite", default="evals/foundation-v3.json")
+    evaluate.add_argument("--suite", default="evals/foundation-v4.json")
     evaluate.add_argument("--case", action="append", default=[], dest="case_ids")
     evaluate.add_argument("--policy-id", default="production-default")
     evaluate.add_argument("--resolution-policy", choices=["default","L0","L1","L2"], default="default")
@@ -142,7 +142,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     policy_eval = sub.add_parser("policy-evaluate", help="run baseline/candidate eval and attach calibration evidence")
     policy_eval.add_argument("candidate_id")
-    policy_eval.add_argument("--suite", default="evals/foundation-v3.json")
+    policy_eval.add_argument("--suite", default="evals/foundation-v4.json")
     policy_eval.add_argument("--cost-model-id")
     policy_eval.add_argument("--min-pairs", type=int, default=1)
 
