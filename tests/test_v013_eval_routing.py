@@ -138,7 +138,7 @@ class EvalRoutingTests(unittest.TestCase):
         self.assertEqual(domains["evaluation"]["maturity"],Maturity.USABLE.value)
         strategies={item["id"]:item for item in snapshot["strategies"]}
         self.assertEqual(strategies["information_resolution"]["maturity"],"connected")
-        self.assertEqual(strategies["information_gain"]["maturity"],"exists")
+        self.assertEqual(strategies["information_gain"]["maturity"],"connected")
 
 
 if __name__=="__main__":
