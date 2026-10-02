@@ -152,7 +152,7 @@ function renderRuntime(){
     [core,domains,strategies,adapters,caps].forEach(node=>node.replaceChildren());
     if(!platform){empty(domains,"Architecture snapshot unavailable","重新加载工作区后再试。","spark");return;}
     renderArchitectureItems(core,platform.core||[]);
-    renderArchitectureItems(domains,platform.domains||platform.layers||[]);
+    renderArchitectureItems(domains,platform.domains||[]);
     renderArchitectureItems(strategies,platform.strategies||[]);
     renderArchitectureItems(adapters,platform.adapters||[]);
     platform.capabilities.forEach(cap=>{
@@ -175,7 +175,7 @@ $("steerTurn").onclick=openControlDialog;
 $("pauseTurn").onclick=()=>controlTurn("pause");
 $("resumeTurn").onclick=()=>controlTurn("resume");
 $("compactTurn").onclick=()=>controlTurn("compact");
-$("abortTurn").onclick=()=>controlTurn("abort");
+$("stopRun").onclick=()=>controlTurn("stop");
 $("applySteer").onclick=async()=>{const text=$("steerInput").value.trim();if(!text)return toast("Steering 不能为空。");await controlTurn("steer",{text});openControlDialog();};
 $("applyModelSwitch").onclick=async()=>{const model=$("turnModelInput").value.trim();if(!model)return toast("模型名称不能为空。");await controlTurn("switch_model",{model});openControlDialog();};
 $("applyThinkingSwitch").onclick=async()=>{await controlTurn("switch_thinking",{thinking:$("turnThinkingInput").value});openControlDialog();};
