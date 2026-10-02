@@ -527,7 +527,7 @@ class RuntimeStore:
 
     def get_attempt_for_run(self, run_id: str) -> dict[str, Any]:
         row = self.db.execute(
-            "SELECT * FROM attempts WHERE run_id=? ORDER BY attempt_no DESC LIMIT 1", (run_id,)
+            "SELECT * FROM attempts WHERE run_id=? ORDER BY rowid DESC LIMIT 1", (run_id,)
         ).fetchone()
         if row is None:
             raise KeyError(f"no attempt for {run_id}")
