@@ -15,7 +15,20 @@ from .models import ModelMessage
 from .platform.context import ContextCompiler, ContextItem
 
 
-CONVERSATION_BYTES = 42_000
+DEFAULT_NUM_CTX = 8192
+CONTEXT_RESERVE_TOKENS = 512
+BYTES_PER_TOKEN_BUDGET = 2
+
+
+def conversation_budget_bytes(num_ctx: int | None, max_output_tokens: int) -> int:
+    window = num_ctx if type(num_ctx) is int else DEFAULT_NUM_CTX
+    available = window - int(max_output_tokens) - CONTEXT_RESERVE_TOKENS
+    if available <= 0:
+        raise ContextBudgetError(
+            f"num_ctx={window} leaves no input budget after output={max_output_tokens} and reserve={CONTEXT_RESERVE_TOKENS}"
+        )
+    return available * BYTES_PER_TOKEN_BUDGET
+
 
 
 def _fold_activity(activity):
@@ -42,7 +55,7 @@ def _fold_activity(activity):
     return {**activity, "result": result}, bool(folded)
 
 
-def compile_conversation_context(system, snapshot, messages, activities, control=None):
+def compile_conversation_context(system, snapshot, messages, activities, control=None, *, max_bytes=None):
     control = control or {}
     compact = bool(control.get("compact_requested"))
     project = snapshot.get("project") or {}
@@ -133,10 +146,11 @@ def compile_conversation_context(system, snapshot, messages, activities, control
             required=latest or bool((activity.get("result") or {}).get("artifact")),
         )
 
+    budget = int(max_bytes) if max_bytes is not None else conversation_budget_bytes(DEFAULT_NUM_CTX, 2048)
     try:
-        frame = ContextCompiler().compile(items, max_bytes=CONVERSATION_BYTES)
+        frame = ContextCompiler().compile(items, max_bytes=budget)
     except ValueError as exc:
-        raise ContextBudgetError(f"required conversation context exceeds {CONVERSATION_BYTES} bytes: {exc}") from exc
+        raise ContextBudgetError(f"required conversation context exceeds {budget} bytes: {exc}") from exc
     selected = {item.source_ref for item in frame.items}
     projected = tuple(message for ref, message in candidates if ref in selected)
     report = {
