@@ -111,7 +111,7 @@ class EvalRoutingTests(unittest.TestCase):
         self.assertEqual(snapshot["knowledge"],[])
 
     def test_quick_eval_runner_executes_fixed_cases_and_release_gate(self):
-        suite=Path(__file__).resolve().parents[1]/"evals"/"foundation-v1.json"
+        suite=Path(__file__).resolve().parents[1]/"evals"/"foundation-v2.json"
         result=FoundationEvalRunner.from_path(suite).run([
             "intent-arithmetic-local",
             "intent-ambiguous-fallback",
@@ -122,8 +122,10 @@ class EvalRoutingTests(unittest.TestCase):
         self.assertTrue(all(item["verdict"]=="PASS" for item in result["observations"]))
 
     def test_foundation_suite_has_executable_handler_for_every_fixed_case(self):
-        suite=Path(__file__).resolve().parents[1]/"evals"/"foundation-v1.json"
+        suite=Path(__file__).resolve().parents[1]/"evals"/"foundation-v2.json"
         runner=FoundationEvalRunner.from_path(suite)
+        self.assertEqual(runner.suite.version,2)
+        self.assertEqual(len(runner.suite.cases),11)
         for case in runner.suite.cases:
             self.assertTrue(
                 hasattr(runner,f"_case_{case.case_id.replace('-','_')}"),
