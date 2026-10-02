@@ -81,3 +81,46 @@ class RuleResolutionController:
             500,
             "general Agent route receives lightweight source previews by default",
         )
+
+
+class FixedResolutionController:
+    """Explicit fixed policy used by offline eval or a promoted durable policy."""
+
+    strategy_id = "information_resolution"
+
+    def __init__(self, resolution: InformationResolution):
+        self.resolution=InformationResolution(resolution)
+
+    def choose(
+        self,
+        text: str,
+        *,
+        route: IntentRoute,
+        sources: list[dict[str, Any]] | tuple[dict[str, Any], ...],
+        attached_document_ids: list[str] | tuple[str, ...] = (),
+    ) -> ResolutionPlan:
+        if not sources:
+            return ResolutionPlan(InformationResolution.L0,0,0,"no admitted local source is available")
+        chars={
+            InformationResolution.L0:500,
+            InformationResolution.L1:1800,
+            InformationResolution.L2:6000,
+        }[self.resolution]
+        return ResolutionPlan(
+            self.resolution,
+            max(5,len(attached_document_ids)),
+            chars,
+            f"fixed promoted/eval resolution={self.resolution.value}",
+        )
+
+
+def resolution_controller_from_config(config: dict[str, Any] | None):
+    """Build a controller from a small, versionable policy config."""
+    value=dict(config or {"mode":"rule"})
+    mode=str(value.get("mode") or "rule")
+    if mode=="rule":
+        return RuleResolutionController()
+    if mode=="fixed":
+        raw=str(value.get("resolution") or "").upper()
+        return FixedResolutionController(InformationResolution(raw))
+    raise ValueError("unsupported information_resolution policy mode")
