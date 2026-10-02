@@ -133,7 +133,7 @@ class ConversationContinuityTests(unittest.TestCase):
         self.runtime = MythRuntime(Path(self.temp.name))
         self.workspace = Workspace(self.runtime)
         self.repo = self.workspace.repository
-        self.repo.save_settings(SETTINGS)
+        self.repo.save_settings({**SETTINGS,"num_ctx":32768})
         self.sid = self.repo.create_session()["id"]
         self.rid = self.repo.create_turn(self.sid, "read then answer", "first")["run_id"]
 
