@@ -1,4 +1,7 @@
-"""Shared product/runtime contracts for the breadth-first platform skeleton."""
+"""Architecture metadata for Myth's composable runtime.
+
+These are descriptive maturity records, not mandatory execution layers.
+"""
 
 from __future__ import annotations
 
@@ -6,27 +9,35 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 
-class LayerState(StrEnum):
+class Maturity(StrEnum):
+    EXISTS = "exists"
+    CONNECTED = "connected"
     USABLE = "usable"
-    WIRED = "wired"
+    HARDENED = "hardened"
     PLANNED = "planned"
 
 
 @dataclass(frozen=True)
-class PlatformLayer:
-    phase: str
-    layer_id: str
+class ArchitectureItem:
+    item_id: str
     label: str
-    state: LayerState
+    kind: str
+    maturity: Maturity
     responsibility: str
     depends_on: tuple[str, ...] = ()
 
     def as_dict(self) -> dict[str, object]:
         return {
-            "phase": self.phase,
-            "id": self.layer_id,
+            "id": self.item_id,
             "label": self.label,
-            "state": self.state.value,
+            "kind": self.kind,
+            "maturity": self.maturity.value,
             "responsibility": self.responsibility,
             "depends_on": list(self.depends_on),
         }
+
+
+# Backward-compatible names for older imports.  New code should use
+# Maturity/ArchitectureItem and should not model Myth as a strict layer stack.
+LayerState = Maturity
+PlatformLayer = ArchitectureItem
