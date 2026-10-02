@@ -64,13 +64,13 @@ def default_strategies() -> StrategyRegistry:
             "intent_pick",
             "Intent Pick",
             StrategyState.CONNECTED,
-            "Conservative rule baseline is connected for strict bounded arithmetic; all unmatched input falls back to the Agent Loop. Future implementations may use Jev/small-model/LLM/cascade.",
+            "Conservative cascade routes strict arithmetic locally and explicit/strong admitted knowledge through local retrieval; unmatched input falls back to the Agent Loop.",
         ),
         StrategySpec(
             "information_resolution",
             "Information Resolution",
-            StrategyState.EXISTS,
-            "Choose how far to expand the same information from L0 abstract to L1 overview to L2 detailed evidence.",
+            StrategyState.CONNECTED,
+            "Rule controller is connected at Turn admission: Agent defaults to L0, local retrieval uses L1, and explicit/deep source requests or attachments use L2 under one fixed digest.",
         ),
         StrategySpec(
             "information_gain",
