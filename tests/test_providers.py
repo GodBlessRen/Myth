@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 from myth.models import ContextTruncated, ModelMessage, ModelRequest, STEP_DECISION_SCHEMA
 from myth.providers.ollama import OllamaProvider
-from myth.providers.openai import OpenAIResponsesProvider, PiBearerTokenSource
+from myth.providers.openai import OpenAIResponsesProvider
 
 
 class FakeResponse:
@@ -21,6 +21,20 @@ class FakeResponse:
 
     def read(self) -> bytes:
         return self.payload
+
+
+class FakeStreamResponse:
+    def __init__(self, events):
+        self.lines=[("data: "+json.dumps(event)+"\n").encode() for event in events]
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self,*_):
+        return False
+
+    def __iter__(self):
+        return iter(self.lines)
 
 
 def request_obj() -> ModelRequest:
@@ -75,37 +89,52 @@ class OllamaProviderTests(unittest.TestCase):
 
 
 class OpenAIProviderTests(unittest.TestCase):
-    def test_subscription_omits_max_output_tokens_and_does_not_persist_token(self) -> None:
+    def test_chatgpt_plan_streams_and_does_not_persist_token(self) -> None:
         captured = {}
+        completed={
+            "id":"resp_1",
+            "status":"completed",
+            "output":[{"type":"message","content":[{"type":"output_text","text":"{}"}]}],
+            "usage":{"input_tokens":8,"output_tokens":4,"input_tokens_details":{"cached_tokens":5}},
+        }
 
         def fake_urlopen(req, timeout):
             captured["auth"] = req.headers.get("Authorization") or req.headers.get("authorization")
             captured["body"] = json.loads(req.data)
-            return FakeResponse({
-                "id": "resp_1",
-                "status": "completed",
-                "output": [{"type": "message", "content": [{"type": "output_text", "text": "{}"}]}],
-                "usage": {
-                    "input_tokens": 8,
-                    "output_tokens": 4,
-                    "input_tokens_details": {"cached_tokens": 5},
-                },
-            })
+            return FakeStreamResponse([
+                {"type":"response.output_text.delta","delta":"{}"},
+                {"type":"response.completed","response":completed},
+            ])
 
         provider = OpenAIResponsesProvider(
-            provider_id="pi-openai",
+            provider_id="chatgpt",
             token_supplier=lambda: "secret-token",
-            subscription_token=True,
+            chatgpt_plan=True,
             auth_type="oauth",
         )
         with patch("myth.providers.openai.request.urlopen", side_effect=fake_urlopen):
             result = provider.invoke(request_obj())
         self.assertEqual(captured["auth"], "Bearer secret-token")
+        self.assertTrue(captured["body"]["stream"])
+        self.assertFalse(captured["body"]["store"])
         self.assertNotIn("max_output_tokens", captured["body"])
         self.assertNotIn("secret-token", json.dumps(result.raw))
-        self.assertEqual(result.usage["model_calls"], 1)
         self.assertEqual(result.usage["input_tokens"], 8)
         self.assertEqual(result.usage["cached_input_tokens"], 5)
+
+    def test_chatgpt_plan_requires_completed_terminal_event(self) -> None:
+        provider = OpenAIResponsesProvider(
+            provider_id="chatgpt",
+            token_supplier=lambda: "secret-token",
+            chatgpt_plan=True,
+            auth_type="oauth",
+        )
+        with patch(
+            "myth.providers.openai.request.urlopen",
+            return_value=FakeStreamResponse([{"type":"response.output_text.delta","delta":"partial"}]),
+        ):
+            with self.assertRaisesRegex(RuntimeError,"without response.completed"):
+                provider.invoke(request_obj())
 
     def test_api_key_path_includes_max_output_tokens(self) -> None:
         captured = {}
@@ -121,21 +150,8 @@ class OpenAIProviderTests(unittest.TestCase):
         provider = OpenAIResponsesProvider(
             provider_id="openai",
             token_supplier=lambda: "sk-test",
-            subscription_token=False,
+            chatgpt_plan=False,
         )
         with patch("myth.providers.openai.request.urlopen", side_effect=fake_urlopen):
             provider.invoke(request_obj())
         self.assertEqual(captured["body"]["max_output_tokens"], 128)
-
-
-class PiTokenSourceTests(unittest.TestCase):
-    @patch("myth.providers.openai.subprocess.run")
-    def test_token_is_requested_through_public_pi_cli(self, run) -> None:
-        run.return_value.returncode = 0
-        run.return_value.stdout = "oauth-token\n"
-        run.return_value.stderr = ""
-        source = PiBearerTokenSource(pi_command="pi")
-        self.assertEqual(source.token(), "oauth-token")
-        args = run.call_args.args[0]
-        self.assertEqual(args[:4], ["pi", "auth", "print-bearer-token", "--provider"])
-        self.assertIn("--min-expiry", args)
