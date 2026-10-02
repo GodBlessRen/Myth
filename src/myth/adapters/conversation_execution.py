@@ -101,6 +101,33 @@ class LocalConversationExecution:
             if len(files)>=150:break
         return {"files":files,"truncated":len(files)==150}
 
+    def _read_knowledge(self,turn,args):
+        document_id=args.get("document_id")
+        if not isinstance(document_id,str) or not document_id.strip() or len(document_id)>200:
+            raise ValueError("document_id is required")
+        document=self.repository.document(document_id)
+        project_id=(turn["snapshot"].get("project") or {}).get("id")
+        if document["project_id"] not in {None,project_id}:
+            raise PermissionError("knowledge document belongs to another project")
+        offset=args.get("offset",0);limit=args.get("max_chars",6000)
+        if type(offset) is not int or offset<0 or type(limit) is not int or not 1<=limit<=12000:
+            raise ValueError("invalid pagination")
+        text=document["content"]
+        preview=text[offset:offset+limit]
+        while len(preview.encode("utf-8"))>18000:
+            preview=preview[:len(preview)//2]
+        return {
+            "document_id":document_id,
+            "title":document["title"],
+            "content":preview,
+            "digest":document["digest"],
+            "offset":offset,
+            "next_offset":offset+len(preview),
+            "has_more":offset+len(preview)<len(text),
+            "resolution":"L2",
+            "source_ref":f"doc:{document_id}@{document['digest']}",
+        }
+
     def _read_project(self,turn,args):
         _,path=self.project_path(turn,args.get("path"))
         if not path.is_file() or path.stat().st_size>1_000_000:
@@ -229,6 +256,8 @@ class LocalConversationExecution:
                 (turn["snapshot"].get("project") or {}).get("id"),
                 args.get("limit",5),
             )
+        elif capability=="knowledge.read":
+            result.update(self._read_knowledge(turn,args))
         elif capability=="project.list":
             result.update(self.list_project(turn,args.get("path",".")))
         elif capability=="project.read":
