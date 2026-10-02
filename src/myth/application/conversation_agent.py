@@ -39,7 +39,7 @@ class ConversationAgent:
             turn = self.repository.turn(run_id)
             if turn["status"] == "PAUSED":
                 return
-            if turn["status"] not in {"RUNNING", "UNKNOWN"}:
+            if turn["status"] not in {"RUNNING", "INTERRUPTED", "UNKNOWN"}:
                 return
             if provider.provider_id != turn["settings"]["provider"]:
                 raise ValueError("provider differs from fixed turn")
