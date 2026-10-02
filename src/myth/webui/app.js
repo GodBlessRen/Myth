@@ -71,7 +71,31 @@ async function importFiles(files,pid){const results=[];for(const f of files){con
 async function previewDocument(did){try{const d=await api(`/documents/${did}`);$("previewTitle").textContent=d.title;$("previewMeta").textContent=`${bytes(d.bytes)} · 保存在本机`;$("previewContent").textContent=d.content;$("documentDialog").showModal();}catch(e){toast(e.message);}}
 async function searchKnowledge(){try{const q=$("knowledgeSearch").value.trim();show("searchResults",!!q);if(!q)return;const pid=$("knowledgeProject").value;const data=await api(`/search?q=${encodeURIComponent(q)}&project_id=${encodeURIComponent(pid)}`);$("searchResults").replaceChildren();data.sources.forEach(s=>{const c=el("div","search-result"),title=el("button","text-button",`${s.title} · 片段 ${s.chunk_index+1}`);title.onclick=()=>previewDocument(s.document_id);c.append(title,el("p","",s.content));$("searchResults").append(c);});if(!data.sources.length)$("searchResults").append(el("p","empty-inline","没有找到匹配内容。试试更明确的关键词。"));}catch(e){toast(e.message);}}
 
-async function route(){const generation=++state.generation;const [page="chat",id]=location.hash.slice(1).split("/");state.page=["chat","sessions","projects","knowledge","settings"].includes(page)?page:"chat";state.id=id?decodeURIComponent(id):null;state.threadKey="";state.session=null;const view=state.page==="projects"&&id?"project":state.page;["chat","sessions","projects","project","knowledge","settings"].forEach(p=>show(p+"Page",p===view));$("pageTitle").textContent={chat:"对话",sessions:"会话管理",projects:"项目",knowledge:"知识库",settings:"模型与设置"}[state.page];show("sessionMenu",false);renderSidebar();try{if(state.page==="chat"){if(state.id)await openSession(state.id,generation);else{fillProjects($("chatProject"),"独立对话",$("chatProject").value);renderChat(null);}}else if(state.page==="sessions")await renderSessionPage();else if(state.page==="projects")id?await renderProject(id):renderProjects();else if(state.page==="knowledge")renderKnowledge();else{loadSettings();renderConnection();}}catch(e){toast(e.message);}}
+
+function renderRuntime(){
+    const platform=state.data.platform;
+    const layers=$("platformLayers"),caps=$("platformCapabilities");
+    layers.replaceChildren();caps.replaceChildren();
+    if(!platform){empty(layers,"Platform snapshot unavailable","重新加载工作区后再试。","spark");return;}
+    platform.layers.forEach(layer=>{
+        const card=el("article","platform-card "+layer.state);
+        const head=el("div","platform-card-head");
+        head.append(el("span","platform-phase",layer.phase),el("span","platform-state "+layer.state,layer.state));
+        card.append(head,el("h2","",layer.label),el("p","",layer.responsibility));
+        if(layer.depends_on?.length)card.append(el("small","", "depends · "+layer.depends_on.join(" / ")));
+        layers.append(card);
+    });
+    platform.capabilities.forEach(cap=>{
+        const row=el("div","capability-row");
+        const left=el("div");
+        left.append(el("strong","",cap.id),el("small","",cap.family+" · "+cap.risk));
+        row.append(left,el("span","platform-state "+cap.state,cap.state));
+        caps.append(row);
+    });
+    $("capabilityCount").textContent=(platform.executable_capabilities?.length||0)+" executable";
+}
+
+async function route(){const generation=++state.generation;const [page="chat",id]=location.hash.slice(1).split("/");state.page=["chat","runtime","sessions","projects","knowledge","settings"].includes(page)?page:"chat";state.id=id?decodeURIComponent(id):null;state.threadKey="";state.session=null;const view=state.page==="projects"&&id?"project":state.page;["chat","runtime","sessions","projects","project","knowledge","settings"].forEach(p=>show(p+"Page",p===view));$("pageTitle").textContent={chat:"对话",runtime:"Runtime",sessions:"会话管理",projects:"项目",knowledge:"知识库",settings:"模型与设置"}[state.page];show("sessionMenu",false);renderSidebar();try{if(state.page==="chat"){if(state.id)await openSession(state.id,generation);else{fillProjects($("chatProject"),"独立对话",$("chatProject").value);renderChat(null);}}else if(state.page==="runtime")renderRuntime();else if(state.page==="sessions")await renderSessionPage();else if(state.page==="projects")id?await renderProject(id):renderProjects();else if(state.page==="knowledge")renderKnowledge();else{loadSettings();renderConnection();}}catch(e){toast(e.message);}}
 async function poll(){clearTimeout(state.poll);if(state.page==="chat"&&state.id){try{const id=state.id,generation=state.generation;await openSession(id,generation);}catch(e){console.warn("conversation",e.message);}}state.poll=setTimeout(poll,document.hidden?6000:state.session?.turns.at(-1)?.driver_active?1000:3000);}
 
 $("newChat").onclick=()=>newChat();$("newSession").onclick=()=>newChat();$("composer").onsubmit=sendMessage;
