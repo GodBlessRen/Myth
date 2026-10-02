@@ -12,6 +12,7 @@ from enum import StrEnum
 class Maturity(StrEnum):
     EXISTS = "exists"
     CONNECTED = "connected"
+    WIRED = "connected"  # v0.6-v0.8 compatibility alias; do not use in new UI/docs.
     USABLE = "usable"
     HARDENED = "hardened"
     PLANNED = "planned"
