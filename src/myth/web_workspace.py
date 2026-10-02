@@ -47,6 +47,7 @@ class ConversationWebService:
             "documents":self._use("documents"),
             "platform":self.platform(),
             "memory_count":len(self.memories(limit=100)),
+            "goals":self.goals(),
             "goal_count":len(self.goals()),
         }
 
