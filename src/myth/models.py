@@ -19,6 +19,19 @@ class DecisionValidationError(ValueError):
     """The model response is syntactically valid JSON but not a valid decision."""
 
 
+class ProviderKnownFailure(RuntimeError):
+    """Provider returned enough evidence to classify the attempt as FAILED, not UNKNOWN."""
+
+    def __init__(self, message: str, *, usage: dict[str, int] | None = None, raw: dict[str, Any] | None = None):
+        super().__init__(message)
+        self.usage = dict(usage or {})
+        self.raw = dict(raw or {})
+
+
+class ContextTruncated(ProviderKnownFailure):
+    """Provider reports that the admitted prompt reached the configured context ceiling."""
+
+
 @dataclass(frozen=True)
 class ModelMessage:
     role: Literal["system", "user", "assistant"]
@@ -32,6 +45,8 @@ class ModelRequest:
     response_schema: dict[str, Any]
     max_output_tokens: int = 1024
     thinking: str | bool | None = None
+    num_ctx: int | None = None
+    temperature: float = 0.0
     # Local projection evidence; provider adapters transmit only their supported
     # fields. This report travels with the immutable request for replay/auditing.
     context_report: dict[str, Any] | None = None
@@ -43,6 +58,10 @@ class ModelRequest:
             raise ValueError("messages must not be empty")
         if type(self.max_output_tokens) is not int or self.max_output_tokens <= 0:
             raise ValueError("max_output_tokens must be a positive integer")
+        if self.num_ctx is not None and (type(self.num_ctx) is not int or self.num_ctx < 1024):
+            raise ValueError("num_ctx must be None or an integer >= 1024")
+        if not isinstance(self.temperature, (int, float)) or not 0.0 <= float(self.temperature) <= 2.0:
+            raise ValueError("temperature must be between 0 and 2")
 
     def serializable(self) -> dict[str, Any]:
         return {
@@ -51,6 +70,8 @@ class ModelRequest:
             "response_schema": self.response_schema,
             "max_output_tokens": self.max_output_tokens,
             "thinking": self.thinking,
+            "num_ctx": self.num_ctx,
+            "temperature": float(self.temperature),
             **({"context_report": self.context_report} if self.context_report is not None else {}),
         }
 
