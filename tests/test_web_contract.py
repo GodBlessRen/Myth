@@ -1,11 +1,13 @@
 """真实本地 HTTP 合同：入口去重、交付下载、跨站拒绝和完成前禁止下载。"""
 from http.server import ThreadingHTTPServer
+import io
 import json
 from pathlib import Path
 import tempfile
 import threading
 import time
 import unittest
+from contextlib import redirect_stdout
 from urllib import error, request
 from unittest.mock import patch
 from test_workspace import ChatProvider, decision
@@ -84,6 +86,35 @@ class WebContractTests(unittest.TestCase):
         with self.call("/api/runs",payload) as response:self.assertEqual(json.load(response)["run_id"],rid)
         self.assertEqual(len(self.service.list_runs()),1)
         self.assertEqual(len(self.service.status(rid)["model"]["model_invocations"]),3)
+
+    def test_chatgpt_oauth_start_uses_exact_loopback_callback(self):
+        captured={}
+        def begin(redirect_uri,payload):
+            captured["redirect_uri"]=redirect_uri
+            return {"auth_url":"https://auth.openai.com/example","expires_in":600,"return_to":redirect_uri}
+        with patch.object(self.service,"chatgpt_begin",side_effect=begin):
+            with self.call("/api/auth/chatgpt/start",{}) as response:
+                value=json.load(response)
+        self.assertEqual(
+            captured["redirect_uri"],
+            f"http://127.0.0.1:{self.server.server_port}/auth/callback",
+        )
+        self.assertEqual(value["return_to"],captured["redirect_uri"])
+
+    def test_oauth_callback_query_is_never_written_to_web_log(self):
+        secret_code="oauth-code-must-not-log"
+        secret_state="oauth-state-must-not-log"
+        output=io.StringIO()
+        with patch.object(self.service,"chatgpt_complete",return_value={"ready":True}),redirect_stdout(output):
+            with request.urlopen(
+                self.url+f"/auth/callback?code={secret_code}&state={secret_state}",
+                timeout=5,
+            ) as response:
+                self.assertEqual(response.status,200)
+        logged=output.getvalue()
+        self.assertIn("/auth/callback",logged)
+        self.assertNotIn(secret_code,logged)
+        self.assertNotIn(secret_state,logged)
 
     def test_cross_origin_and_rebound_host_are_rejected(self):
         for path,payload,headers in [("/api/demo",{}, {"Origin":"https://evil.invalid"}),
