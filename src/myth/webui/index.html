@@ -1,59 +1,68 @@
 <!doctype html>
 <html lang="zh-CN">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"><title>Myth · 你的 Agent 工作区</title><link rel="stylesheet" href="/app.css"></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"><meta name="theme-color" content="#f6f2ea"><title>Myth · Agent Workbench</title><link rel="stylesheet" href="/app.css"></head>
 <body>
 <div class="shell">
   <aside id="sidebar" class="sidebar" aria-label="主导航">
-    <a class="brand" href="#chat"><span class="brand-symbol" aria-hidden="true">m</span><span>myth<span class="brand-dot">.</span></span><span class="brand-caption">WORKSPACE</span></a>
-    <button id="newChat" class="new-chat"><span data-icon="plus"></span>新建对话<span class="keyhint">＋</span></button>
-    <nav class="navigation">
-      <a href="#chat" data-page="chat"><span data-icon="chat"></span>对话<span class="nav-end">↗</span></a>
-      <a href="#runtime" data-page="runtime"><span data-icon="spark"></span>Runtime</a>
-      <a href="#sessions" data-page="sessions"><span data-icon="history"></span>会话管理</a>
-      <a href="#projects" data-page="projects"><span data-icon="folder"></span>项目</a>
-      <a href="#knowledge" data-page="knowledge"><span data-icon="book"></span>知识库</a>
-    </nav>
-    <div class="recent-heading"><span>最近对话</span><a href="#sessions" aria-label="全部会话">全部 →</a></div>
+    <a class="brand" href="#chat"><span class="brand-symbol" aria-hidden="true">m</span><span>myth<span class="brand-dot">.</span></span></a>
+    <button id="newChat" class="new-chat"><span data-icon="plus"></span>新建对话</button>
+    <div class="nav-section primary-nav">
+  <nav class="navigation" aria-label="主要功能">
+    <a href="#chat" data-page="chat"><span data-icon="chat"></span><span>对话</span></a>
+    <a href="#runtime" data-page="runtime"><span data-icon="spark"></span><span>Runtime</span></a>
+  </nav>
+</div>
+<div class="sidebar-context">
+  <span class="sidebar-label">上下文</span>
+  <nav class="navigation secondary-nav" aria-label="上下文与资料">
+    <a href="#projects" data-page="projects"><span data-icon="folder"></span><span>项目</span></a>
+    <a href="#knowledge" data-page="knowledge"><span data-icon="book"></span><span>知识库</span></a>
+    <a href="#sessions" data-page="sessions"><span data-icon="history"></span><span>会话管理</span></a>
+  </nav>
+</div>
+    <div class="recent-heading"><span>最近对话</span><a href="#sessions" aria-label="全部会话">查看全部</a></div>
     <div id="recentSessions" class="recent-sessions"></div>
-    <div class="sidebar-bottom"><a href="#settings" data-page="settings" class="settings-link"><span data-icon="settings"></span>模型与设置</a><div class="local-profile"><span class="profile-avatar">R</span><div><strong>本地工作区</strong><small>文件与会话保存在本机</small></div><span class="local-dot"></span></div></div>
+    <div class="sidebar-bottom"><a href="#settings" data-page="settings" class="settings-link"><span data-icon="settings"></span>模型与设置</a><div class="local-profile"><span class="local-dot"></span><div><strong>Local workspace</strong><small>数据留在本机</small></div></div></div>
   </aside>
   <button id="sidebarShade" class="sidebar-shade hidden" aria-label="关闭导航"></button>
   <main class="main">
-    <header class="topbar"><div class="topbar-left"><button id="menuToggle" class="icon-button mobile-menu" aria-label="展开导航"><span data-icon="menu"></span></button><span class="crumb-home">工作区</span><span class="crumb-divider">/</span><span id="pageTitle">对话</span></div><div class="topbar-right"><button id="modelPill" class="model-pill"><span id="connectionDot" class="connection-dot"></span><span id="modelLabel">连接 Ollama</span><span data-icon="chevron"></span></button><button id="sessionMenu" class="icon-button hidden" aria-label="编辑当前会话"><span data-icon="more"></span></button></div></header>
+    <header class="topbar"><div class="topbar-left"><button id="menuToggle" class="icon-button mobile-menu" aria-label="展开导航"><span data-icon="menu"></span></button><div class="workspace-crumb"><span>Myth</span><span>/</span><strong id="pageTitle">对话</strong></div></div><div class="topbar-right"><button id="modelPill" class="model-pill"><span id="connectionDot" class="connection-dot"></span><span id="modelLabel">连接 Ollama</span><span data-icon="chevron"></span></button><button id="sessionMenu" class="icon-button hidden" aria-label="编辑当前会话"><span data-icon="more"></span></button></div></header>
 
     <section id="chatPage" class="chat-page page">
       <div id="chatScroll" class="chat-scroll">
         <div id="welcome" class="welcome">
-          <div class="welcome-orbit" aria-hidden="true"><div class="orbit-circle"></div><div class="orbit-core">✳</div><i></i><i></i><i></i></div>
-          <div class="welcome-eyebrow">A LITTLE CLARITY. A LOT OF POSSIBILITY.</div>
-          <h1>把想法，变成<span>下一步。</span></h1>
-          <p>一个能对话、读资料、处理项目的 Agent。<br>从问题开始，让工作自然发生。</p>
-          <div class="suggestions"><button data-suggestion="请帮我把一个想法拆成清晰的行动计划。先问我两个关键问题。"><span data-icon="spark"></span><strong>梳理一个想法</strong><small>把模糊的问题，拆成下一步</small><b>↗</b></button><button data-action="projects"><span data-icon="code"></span><strong>分析一个项目</strong><small>关联本地目录，理解文件与代码</small><b>↗</b></button><button data-action="knowledge"><span data-icon="book"></span><strong>基于资料回答</strong><small>导入知识，带着来源讨论</small><b>↗</b></button><button data-suggestion="请为我起草一份方案。先确认目标、读者和约束，再生成可下载的 Markdown 文件。"><span data-icon="pen"></span><strong>写一份方案</strong><small>讨论、修改，再生成文件</small><b>↗</b></button></div>
-          <div id="welcomeConnection" class="welcome-connection hidden"><span data-icon="info"></span><span>连接本地模型后即可开始。</span><a href="#settings">设置模型 →</a></div>
-        </div>
-        <div id="thread" class="thread hidden"></div>
+  <div class="welcome-mark" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
+  <h1>把任务交给 Myth。<br><em>过程与证据，都看得见。</em></h1>
+  <p>对话是入口，Runtime 是底座。你可以直接讨论，也可以关联项目、资料和受控工具。</p>
+  <div class="suggestions">
+    <button data-suggestion="请帮我把一个模糊想法整理成可执行计划。先指出最关键的不确定性。"><strong>梳理任务</strong><small>从模糊目标到下一步</small></button>
+    <button data-action="projects"><strong>理解项目</strong><small>读取本地文件与项目上下文</small></button>
+    <button data-action="knowledge"><strong>基于资料回答</strong><small>检索本地知识并保留来源</small></button>
+  </div>
+  <div id="welcomeConnection" class="welcome-connection hidden"><span data-icon="info"></span><span>模型还未连接。</span><a href="#settings">打开设置</a></div>
+</div>
+<div id="thread" class="thread hidden"></div>
       </div>
       <div class="composer-area">
         <div id="turnNotice" class="turn-notice hidden" role="status"></div>
         <div id="attachmentChips" class="attachment-chips"></div>
-        <form id="composer" class="composer"><textarea id="prompt" rows="2" aria-label="消息" placeholder="问一个问题，或者交给我一件事…"></textarea><div class="composer-bottom"><div class="composer-options"><button id="attachButton" type="button" class="icon-button" aria-label="附加文本资料"><span data-icon="clip"></span></button><label class="project-select-label"><span data-icon="folder"></span><select id="chatProject" aria-label="对话所属项目"><option value="">独立对话</option></select></label><span class="agent-mode"><span data-icon="spark"></span>Agent</span></div><div class="send-area"><span id="inputHint">Enter 发送 · Shift + Enter 换行</span><button id="stopTurn" type="button" class="stop-button hidden" aria-label="停止当前轮次">■</button><button id="send" type="submit" class="send-button" aria-label="发送消息"><span data-icon="arrow"></span></button></div></div></form>
-        <div class="composer-caption"><span class="tiny-shield" aria-hidden="true">◇</span>本地 Ollama · 项目原文件保留 · 生成结果可下载</div>
+        <form id="composer" class="composer"><textarea id="prompt" rows="1" aria-label="消息" placeholder="给 Myth 一个任务，或继续当前对话…"></textarea><div class="composer-bottom"><div class="composer-options"><button id="attachButton" type="button" class="icon-button" aria-label="附加文本资料"><span data-icon="clip"></span></button><label class="project-select-label"><span data-icon="folder"></span><select id="chatProject" aria-label="对话所属项目"><option value="">独立对话</option></select></label><span class="agent-mode"><span class="agent-dot"></span>Agent</span></div><div class="send-area"><span id="inputHint">Enter 发送</span><button id="stopTurn" type="button" class="stop-button hidden" aria-label="停止当前轮次">■</button><button id="send" type="submit" class="send-button" aria-label="发送消息"><span data-icon="arrow"></span></button></div></div></form>
         <input id="chatFiles" type="file" accept=".txt,.md,.py,.json,.csv,.yaml,.yml,.html,.js,.ts" multiple hidden>
       </div>
     </section>
 
-    <section id="sessionsPage" class="page content-page hidden"><div class="page-heading"><div><div class="section-eyebrow">CONVERSATIONS</div><h1>每次思考，都有来处。</h1><p>回到之前的讨论，接着往前。</p></div><button id="newSession" class="primary"><span data-icon="plus"></span>新建对话</button></div><div class="list-toolbar"><div class="tab-group"><button id="activeSessions" class="selected">全部会话</button><button id="archivedSessions">已归档</button></div><div class="search-field"><span data-icon="search"></span><input id="sessionSearch" placeholder="搜索会话…" aria-label="搜索会话"></div></div><div id="sessionCards" class="session-cards"></div></section>
+    <section id="sessionsPage" class="page content-page hidden"><div class="page-heading"><div><h1>每次思考，都有来处。</h1><p>回到之前的讨论，接着往前。</p></div><button id="newSession" class="primary"><span data-icon="plus"></span>新建对话</button></div><div class="list-toolbar"><div class="tab-group"><button id="activeSessions" class="selected">全部会话</button><button id="archivedSessions">已归档</button></div><div class="search-field"><span data-icon="search"></span><input id="sessionSearch" placeholder="搜索会话…" aria-label="搜索会话"></div></div><div id="sessionCards" class="session-cards"></div></section>
 
-    <section id="projectsPage" class="page content-page hidden"><div class="page-heading"><div><div class="section-eyebrow">PROJECTS</div><h1>把相关的工作，放在一起。</h1><p>统一指令、文件和资料，让对话保持上下文。</p></div><button id="createProject" class="primary"><span data-icon="plus"></span>新建项目</button></div><div id="projectCards" class="project-cards"></div></section>
-    <section id="projectPage" class="page content-page hidden"><a href="#projects" class="back-link">← 所有项目</a><div class="page-heading"><div><div class="section-eyebrow">PROJECT WORKSPACE</div><h1 id="projectName"></h1><p id="projectDescription"></p></div><div class="button-row"><button id="editProject" class="secondary">编辑项目</button><button id="projectChat" class="primary"><span data-icon="chat"></span>开始对话</button></div></div><div class="project-layout"><div><section class="panel"><div class="panel-heading"><h2>项目指令</h2><span data-icon="spark"></span></div><p id="projectInstructions" class="pre-text"></p></section><section class="panel"><div class="panel-heading"><h2>项目会话</h2><span id="projectSessionCount" class="count-badge"></span></div><div id="projectSessions"></div></section></div><div><section class="panel"><div class="panel-heading"><h2>本地文件</h2><span data-icon="folder"></span></div><p id="projectRoot" class="muted path-label"></p><div id="projectFiles"></div></section><section class="panel"><div class="panel-heading"><h2>项目资料</h2><button id="projectImport" class="text-button">＋ 添加</button></div><div id="projectDocuments"></div></section></div></div></section>
+    <section id="projectsPage" class="page content-page hidden"><div class="page-heading"><div><h1>把相关的工作，放在一起。</h1><p>统一指令、文件和资料，让对话保持上下文。</p></div><button id="createProject" class="primary"><span data-icon="plus"></span>新建项目</button></div><div id="projectCards" class="project-cards"></div></section>
+    <section id="projectPage" class="page content-page hidden"><a href="#projects" class="back-link">← 所有项目</a><div class="page-heading"><div><h1 id="projectName"></h1><p id="projectDescription"></p></div><div class="button-row"><button id="editProject" class="secondary">编辑项目</button><button id="projectChat" class="primary"><span data-icon="chat"></span>开始对话</button></div></div><div class="project-layout"><div><section class="panel"><div class="panel-heading"><h2>项目指令</h2><span data-icon="spark"></span></div><p id="projectInstructions" class="pre-text"></p></section><section class="panel"><div class="panel-heading"><h2>项目会话</h2><span id="projectSessionCount" class="count-badge"></span></div><div id="projectSessions"></div></section></div><div><section class="panel"><div class="panel-heading"><h2>本地文件</h2><span data-icon="folder"></span></div><p id="projectRoot" class="muted path-label"></p><div id="projectFiles"></div></section><section class="panel"><div class="panel-heading"><h2>项目资料</h2><button id="projectImport" class="text-button">＋ 添加</button></div><div id="projectDocuments"></div></section></div></div></section>
 
-    <section id="knowledgePage" class="page content-page hidden"><div class="page-heading"><div><div class="section-eyebrow">KNOWLEDGE</div><h1>给回答，多一点依据。</h1><p>导入文本与 Markdown，自动分块，在对话中检索并引用。</p></div><button id="importKnowledge" class="primary"><span data-icon="plus"></span>导入资料</button></div><div class="knowledge-stats" id="knowledgeStats"></div><div class="list-toolbar"><select id="knowledgeProject" aria-label="知识库项目范围"><option value="">共享资料</option></select><div class="search-field"><span data-icon="search"></span><input id="knowledgeSearch" placeholder="检索知识内容…" aria-label="检索知识内容"></div><button id="searchKnowledge" class="secondary">检索</button></div><div id="searchResults" class="hidden"></div><div id="documentList" class="document-list"></div></section>
+    <section id="knowledgePage" class="page content-page hidden"><div class="page-heading"><div><h1>给回答，多一点依据。</h1><p>导入文本与 Markdown，自动分块，在对话中检索并引用。</p></div><button id="importKnowledge" class="primary"><span data-icon="plus"></span>导入资料</button></div><div class="knowledge-stats" id="knowledgeStats"></div><div class="list-toolbar"><select id="knowledgeProject" aria-label="知识库项目范围"><option value="">共享资料</option></select><div class="search-field"><span data-icon="search"></span><input id="knowledgeSearch" placeholder="检索知识内容…" aria-label="检索知识内容"></div><button id="searchKnowledge" class="secondary">检索</button></div><div id="searchResults" class="hidden"></div><div id="documentList" class="document-list"></div></section>
 
 
     <section id="runtimePage" class="page content-page hidden">
       <div class="page-heading">
         <div>
-          <div class="section-eyebrow">MYTH KERNEL / P0 → P1000</div>
+          
           <h1>整栋楼先存在，再逐层加深。</h1>
           <p>这里展示真实的平台成熟度。wired 是已经有合同和装配位置，planned 不会被 Agent 当作可执行能力。</p>
         </div>
@@ -66,17 +75,31 @@
       </div>
       <div id="platformLayers" class="platform-grid"></div>
       <section class="panel platform-capabilities">
-        <div class="panel-heading"><div><div class="section-eyebrow">CAPABILITY REGISTRY</div><h2>能力存在，不等于拥有执行权。</h2></div><span id="capabilityCount" class="count-badge"></span></div>
+        <div class="panel-heading"><div><h2>能力存在，不等于拥有执行权。</h2></div><span id="capabilityCount" class="count-badge"></span></div>
         <div id="platformCapabilities" class="capability-matrix"></div>
       </section>
     </section>
 
-    <section id="settingsPage" class="page content-page hidden"><div class="page-heading"><div><div class="section-eyebrow">PREFERENCES</div><h1>让工作区，适合你。</h1><p>连接已有模型，设置每轮执行的范围。</p></div></div><div class="settings-layout"><section class="panel settings-panel"><div class="panel-heading"><h2>模型连接</h2><span class="tag">LOCAL FIRST</span></div><label for="provider">模型提供方</label><select id="provider"><option value="ollama">Ollama · 本地模型</option><option value="openai">OpenAI · 环境变量 API Key</option><option value="pi-openai">Pi · 已登录 OAuth</option></select><label for="ollamaUrl">Ollama 服务地址</label><input id="ollamaUrl" value="http://127.0.0.1:11434"><div class="field-with-action"><div><label for="model">模型名称</label><input id="model" list="modelOptions" placeholder="检查连接后选择本地模型"><datalist id="modelOptions"></datalist></div><button id="checkConnection" class="secondary">检查连接</button></div><div id="connectionResult" class="connection-result"></div><div class="two-fields"><div><label for="maxSteps">每轮最多步骤</label><input id="maxSteps" type="number" min="2" max="32" value="12"></div><div><label for="maxTokens">每步输出 Token</label><input id="maxTokens" type="number" min="128" max="8192" value="2048"></div></div><label class="check-label"><input id="thinking" type="checkbox">启用模型思考（需模型支持）</label><div class="settings-foot"><button id="saveSettings" class="primary">保存设置</button><span id="settingsSaved" class="muted"></span></div></section><div><section class="panel"><div class="panel-heading"><h2>Agent 可以做什么</h2><span data-icon="spark"></span></div><div class="capability-list"><div><span data-icon="chat"></span><span>多轮对话与澄清</span></div><div><span data-icon="folder"></span><span>浏览、读取项目文件</span></div><div><span data-icon="book"></span><span>检索共享和项目知识</span></div><div><span data-icon="pen"></span><span>写作、生成文件、精确修改副本</span></div><div><span data-icon="code"></span><span>执行受限数学计算</span></div></div></section><section class="panel quiet-panel"><h3>关于数据</h3><p>会话、项目与知识库保存在本机。关联目录仅供读取，修改与生成结果保存在工作区副本中。</p><p>执行可以停止、恢复和核对。模型答复仍需判断；只有文件执行结果有对应收据。</p></section></div></div></section>
+    <section id="settingsPage" class="page content-page hidden"><div class="page-heading"><div><h1>让工作区，适合你。</h1><p>连接已有模型，设置每轮执行的范围。</p></div></div><div class="settings-layout"><section class="panel settings-panel"><div class="panel-heading"><h2>模型连接</h2></div><label for="provider">模型提供方</label><select id="provider"><option value="ollama">Ollama · 本地模型</option><option value="openai">OpenAI · 环境变量 API Key</option><option value="pi-openai">Pi · 已登录 OAuth</option></select><label for="ollamaUrl">Ollama 服务地址</label><input id="ollamaUrl" value="http://127.0.0.1:11434"><div class="field-with-action"><div><label for="model">模型名称</label><input id="model" list="modelOptions" placeholder="检查连接后选择本地模型"><datalist id="modelOptions"></datalist></div><button id="checkConnection" class="secondary">检查连接</button></div><div id="connectionResult" class="connection-result"></div><div class="two-fields"><div><label for="maxSteps">每轮最多步骤</label><input id="maxSteps" type="number" min="2" max="32" value="12"></div><div><label for="maxTokens">每步输出 Token</label><input id="maxTokens" type="number" min="128" max="8192" value="2048"></div></div><label class="check-label"><input id="thinking" type="checkbox">启用模型思考（需模型支持）</label><div class="settings-foot"><button id="saveSettings" class="primary">保存设置</button><span id="settingsSaved" class="muted"></span></div></section><div><section class="panel"><div class="panel-heading"><h2>Agent 可以做什么</h2><span data-icon="spark"></span></div><div class="capability-list"><div><span data-icon="chat"></span><span>多轮对话与澄清</span></div><div><span data-icon="folder"></span><span>浏览、读取项目文件</span></div><div><span data-icon="book"></span><span>检索共享和项目知识</span></div><div><span data-icon="pen"></span><span>写作、生成文件、精确修改副本</span></div><div><span data-icon="code"></span><span>执行受限数学计算</span></div></div></section><section class="panel quiet-panel"><h3>关于数据</h3><p>会话、项目与知识库保存在本机。关联目录仅供读取，修改与生成结果保存在工作区副本中。</p><p>执行可以停止、恢复和核对。模型答复仍需判断；只有文件执行结果有对应收据。</p></section></div></div></section>
   </main>
+
+  <aside id="runtimeInspector" class="inspector" aria-label="Runtime Inspector">
+    <div class="inspector-head">
+      <div><span class="inspector-title">Runtime</span><strong id="inspectorState">IDLE</strong></div>
+      <span id="inspectorPulse" class="inspector-pulse"></span>
+    </div>
+    <div class="inspector-scroll">
+      <section class="inspector-section"><div class="inspector-label">Execution spine</div><div id="executionSpine" class="execution-spine"><div class="spine-empty">开始一个任务后，这里显示决策与执行事实。</div></div></section>
+      <section class="inspector-section"><div class="inspector-label">Budget</div><div id="inspectorBudgets" class="budget-list"><div class="inspector-empty">暂无运行预算</div></div></section>
+      <section class="inspector-section"><div class="inspector-label">Context</div><div id="inspectorContext" class="context-facts"><div class="inspector-empty">暂无活动上下文</div></div></section>
+      <section class="inspector-section"><div class="inspector-label">Platform</div><div id="inspectorPlatform" class="platform-mini"></div></section>
+    </div>
+    <div class="inspector-foot"><span>Unknown stays unknown.</span><a href="#runtime">打开完整 Runtime</a></div>
+  </aside>
 </div>
 <dialog id="projectDialog"><form id="projectForm"><div class="dialog-heading"><h2 id="projectDialogTitle">新建项目</h2><button type="button" data-close="projectDialog" class="icon-button" aria-label="关闭项目表单">×</button></div><p class="muted">为相关工作提供同一份上下文。</p><label for="projectNameInput">项目名称</label><input id="projectNameInput" required maxlength="100" placeholder="例如：Myth 产品开发"><label for="projectDescriptionInput">简介</label><input id="projectDescriptionInput" placeholder="这个项目要做什么"><label for="projectRootInput">本地目录 <span class="muted">选填，赋予文件读取范围</span></label><input id="projectRootInput" placeholder="C:\projects\myth"><label for="projectInstructionsInput">项目指令</label><textarea id="projectInstructionsInput" rows="5" placeholder="例如：使用中文回答，先理解代码，再提出修改建议。"></textarea><div class="dialog-foot"><button type="button" data-close="projectDialog" class="secondary">取消</button><button type="submit" class="primary">保存项目</button></div></form></dialog>
 <dialog id="knowledgeDialog"><form id="knowledgeForm"><div class="dialog-heading"><h2>导入知识</h2><button type="button" data-close="knowledgeDialog" class="icon-button" aria-label="关闭知识表单">×</button></div><label class="upload-zone" for="knowledgeFile"><span data-icon="upload"></span><strong>选择文本文件</strong><small>TXT / MD / 代码 / JSON · 每个文件最多 1 MB</small><input id="knowledgeFile" type="file" accept=".txt,.md,.py,.json,.csv,.yaml,.yml,.html,.js,.ts" multiple></label><label for="documentTitle">资料名称</label><input id="documentTitle" required placeholder="例如：产品需求说明"><label for="documentProject">保存到</label><select id="documentProject"><option value="">共享知识库</option></select><label for="documentContent">内容 <span class="muted">也可以直接粘贴</span></label><textarea id="documentContent" rows="7" required placeholder="在这里粘贴你的资料…"></textarea><div class="dialog-foot"><button type="button" data-close="knowledgeDialog" class="secondary">取消</button><button type="submit" class="primary">导入并索引</button></div></form></dialog>
 <dialog id="sessionDialog"><form id="sessionForm"><div class="dialog-heading"><h2>会话设置</h2><button type="button" data-close="sessionDialog" class="icon-button" aria-label="关闭会话设置">×</button></div><label for="sessionTitleInput">会话名称</label><input id="sessionTitleInput" required maxlength="100"><label for="sessionProjectInput">所属项目</label><select id="sessionProjectInput"><option value="">独立会话</option></select><label class="check-label"><input id="sessionPinned" type="checkbox">置顶会话</label><div class="dialog-foot"><button id="archiveSession" type="button" class="text-button danger">归档会话</button><a id="sessionExport" class="text-button" download="myth-conversation.md">导出会话 ↗</a><button type="submit" class="primary">保存</button></div></form></dialog>
 <dialog id="documentDialog" class="document-dialog"><div class="dialog-heading"><h2 id="previewTitle"></h2><button type="button" data-close="documentDialog" class="icon-button" aria-label="关闭资料预览">×</button></div><div id="previewMeta" class="muted"></div><pre id="previewContent"></pre></dialog>
-<div id="toast" class="toast hidden" role="alert"></div><script src="/app.js"></script>
+<div id="toast" class="toast hidden" role="alert"></div><script src="/app.js"></script><script src="/inspector.js"></script>
 </body></html>
