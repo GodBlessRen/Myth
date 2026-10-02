@@ -212,6 +212,7 @@ class SqlitePersonalState:
             "COMPLETED": "READY",
             "WAITING_USER": "WAITING",
             "PAUSED": "PAUSED",
+            "INTERRUPTED": "INTERRUPTED",
             "UNKNOWN": "RECONCILE",
             "FAILED": "BLOCKED",
             "BUDGET_EXHAUSTED": "BLOCKED",
@@ -223,7 +224,7 @@ class SqlitePersonalState:
             current_state=mapping.get(status, status),
             next_action=next_action or (
                 "Continue from the latest durable checkpoint."
-                if status in {"COMPLETED","PAUSED","CANCELLED"}
+                if status in {"COMPLETED","PAUSED","CANCELLED","INTERRUPTED"}
                 else "Reconcile the latest run before continuing."
                 if status=="UNKNOWN"
                 else ""
