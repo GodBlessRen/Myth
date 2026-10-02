@@ -9,7 +9,7 @@ description = "A composable runtime for durable agents with pluggable intent and
 readme = "README.md"
 requires-python = ">=3.12"
 authors = [{name = "GodBlessRen"}]
-dependencies = []
+dependencies = ["cryptography>=43"]
 
 [project.scripts]
 myth = "myth.cli:main"
