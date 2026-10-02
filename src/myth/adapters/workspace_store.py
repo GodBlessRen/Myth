@@ -166,8 +166,10 @@ class SqliteWorkspaceRepository:
         document_ids=document_ids or []
         memory_records=memory_records or []
         if not isinstance(document_ids,list) or len(document_ids)>4 or any(not isinstance(d,str) for d in document_ids):raise ValueError("attach at most four document ids")
-        memory_identity=[{"memory_id":m.get("memory_id"),"revision":m.get("revision")} for m in memory_records]
-        identity=digest_json({"session_id":sid,"text":text,"settings":settings,"documents":document_ids,"memory":memory_identity})
+        # Request identity binds caller intent + fixed user-selected settings/attachments.
+        # Retrieved Memory is an execution snapshot derived after admission; changing
+        # ambient memory must not break idempotent retries of the same request_id.
+        identity=digest_json({"session_id":sid,"text":text,"settings":settings,"documents":document_ids})
         with self.store.tx() as db:
             existing=db.execute("SELECT run_id,entry_digest FROM workspace_turns WHERE request_id=?",(request_id,)).fetchone()
             if existing:
