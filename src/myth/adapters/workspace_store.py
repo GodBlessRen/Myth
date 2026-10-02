@@ -62,12 +62,13 @@ class SqliteWorkspaceRepository:
             value=json.loads(row[0])
             value.setdefault("num_ctx",8192)
             value.setdefault("temperature",0.0)
+            if value.get("provider")=="pi-openai": value["provider"]="chatgpt"
             return value
         return {"provider":"ollama","model":"","ollama_url":"http://127.0.0.1:11434","max_steps":12,"max_output_tokens":2048,"thinking":False,"num_ctx":8192,"temperature":0.0}
 
     def save_settings(self,value):
         provider=value.get("provider","ollama")
-        if provider not in {"ollama","openai","pi-openai"}:raise ValueError("unsupported model provider")
+        if provider not in {"ollama","openai","chatgpt"}:raise ValueError("unsupported model provider")
         from urllib.parse import urlparse
         endpoint=str(value.get("ollama_url","http://127.0.0.1:11434")).rstrip("/")
         parsed=urlparse(endpoint)
