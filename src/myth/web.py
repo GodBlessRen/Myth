@@ -12,6 +12,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 from pathlib import Path
 import threading
+import socket
 from typing import Any
 from urllib.parse import urlparse
 import webbrowser
@@ -232,7 +233,12 @@ def serve(
     if host not in {"127.0.0.1", "localhost", "::1"}:
         raise ValueError("Myth Web binds to loopback only; use a reverse proxy after adding authentication")
     service = AgentWebService(root)
-    server = ThreadingHTTPServer((host, port), make_handler(service))
+    server_type = ThreadingHTTPServer
+    if ":" in host:
+        class IPv6ThreadingHTTPServer(ThreadingHTTPServer):
+            address_family = socket.AF_INET6
+        server_type = IPv6ThreadingHTTPServer
+    server = server_type((host, port), make_handler(service))
     url = f"http://{host}:{port}/"
     print(f"Myth Web: {url}")
     if open_browser:
