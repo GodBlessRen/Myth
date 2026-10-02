@@ -259,7 +259,11 @@ async function submit() {
     els.prompt.value="";
     await poll();
   }catch(e){toast(e.message)}
-  finally{state.busy=false;els.send.disabled=false}
+  finally{
+    state.busy=false;
+    const terminal=["SUCCEEDED","BUDGET_EXHAUSTED","UNKNOWN","FAILED"].includes(state.status?.agent?.status);
+    els.send.disabled=terminal;
+  }
 }
 
 function newRun() {
