@@ -1,63 +1,110 @@
-# Myth v0.6 — Breadth-first Platform Map
+# Myth v0.9 — Composable Runtime Map
 
-这次不再按「做完一小块再想下一块」推进，而是先固定整套平台的最终形状，再逐层把 `wired` 升级为 `usable`。
+Myth 不再把架构描述成 P0 → P1000 的固定层级。
 
-## 状态语义
-
-- **usable**：已有真实用户路径与测试，当前可以依赖。
-- **wired**：接口、状态/数据合同、装配位置和最小行为已经存在，但尚未完整接入产品主链。
-- **planned**：只定义边界，不对模型或用户宣称可执行。
-
-## P0 → P1000
-
-| Phase | Layer | 当前 | 下一轮深化 |
-| --- | --- | --- | --- |
-| P0 | Durable Runtime | usable | 继续把旧 P1/P2 状态迁入事务级端口 |
-| P10 | Conversation | usable | Streaming / message branch / richer artifacts |
-| P20 | Control Plane | wired | 持久 Command Inbox + steer/pause/resume/abort/model/thinking |
-| P30 | Capability Registry | wired | 所有工具通过统一 ToolSpec/authority admission |
-| P40 | Context Compiler | wired | 替换 conversation/exact 两套上下文拼装 |
-| P50 | Memory | wired | SQLite revisions + Working/Episodic/Semantic/Procedural |
-| P60 | Retrieval/RAG | wired | RetrievalPort + lexical baseline + vector/hybrid optional adapters |
-| P70 | Workflow | wired | Workflow Run / Step persistence and resumable DAG execution |
-| P80 | SubAgent | wired | child Run + parent budget/capability delegation |
-| P90 | Skills | wired | skill loader/registry + context injection + capability requirements |
-| P100 | MCP | wired | connected server adapter + MCP tool → CapabilitySpec mapping |
-| P110 | Observability | wired | Runtime Inspector projections: trace/token/cost/context/tool/recovery |
-| P120 | Evaluation | wired | fixed task suites + quality gates + cost reports |
-| P130 | Evolution | wired | candidate policy registry + replay/eval + explicit promotion |
-| P1000 | Distributed Runtime | planned | only after a real worker/multi-user need exists |
-
-## Product rule
+正式结构是：
 
 ```text
-Conversation / UI
-        ↓
-    MythKernel
-        ↓
-Control + Context + Memory + Retrieval
-        ↓
-Decision / Workflow / SubAgent
-        ↓
-Capability Registry
-        ↓
-Durable Runtime
-Action → Attempt → Ticket → Receipt → Verification → Delivery
-        ↓
-Observability → Evaluation → Evolution
+                Core
+ Goal / Run / Action / Attempt
+ Ticket / Receipt / Artifact / Verification
+          ↙      ↓      ↘
+      Domains  Strategies  Ports
+          ↘      ↓      ↙
+              Adapters
 ```
 
-The bottom Runtime remains the authority.  Registry, Skill, MCP, Workflow,
-SubAgent, Memory and Evolution layers can propose or organize work; none may
-turn discovery metadata into execution permission.
+## Core
 
-## Breadth-first implementation rule
+Core 固定事实与权限边界，不固定智能如何组织。
 
-Every new layer must first satisfy four things:
+| Core | 当前成熟度 | 含义 |
+| --- | --- | --- |
+| Goal | connected | 长期意图已持久化；尚未自动调度后台 Run |
+| Run | usable | 可恢复执行生命周期 |
+| Action | usable | 原子业务意图 |
+| Attempt | usable | Action 的一次执行机会 |
+| Ticket | usable | 开始执行的持久授权 |
+| Receipt | usable | 执行事实 |
+| Artifact | usable | 不可变产物/证据 |
+| Verification | usable | 独立验收边界 |
 
-1. it has a named owner and stable contract;
-2. it has a minimal deterministic behavior test;
-3. its current maturity is explicit;
-4. it cannot bypass the durable Runtime.
+## Domains
 
-Only after the complete skeleton exists do we optimize depth, UI and model behavior.
+Domains 是同级职责，不是必须顺序经过的层。
+
+| Domain | 当前成熟度 | 当前真实能力 |
+| --- | --- | --- |
+| Coordination | usable | Direct + Agent Loop；其他组织方式可插拔 |
+| Control | usable | Steer / Pause / Resume / Stop / Model / Thinking / Compact |
+| Execution | usable | Model、文件、检索、Diff、Git 只读执行与对账 |
+| Capability | usable | Registry + executable/planned 准入 |
+| State | usable | SQLite durable state / budget / event / command |
+| Context | usable | ContextCompiler + fixed byte budget |
+| Memory | usable | typed revision + search/revoke + episodic auto-write |
+| Personal State | connected | Goal / Trigger / explicit state 持久化与 API |
+| Observability | usable | Runtime Inspector + operation/event/control projection |
+| Evaluation | exists | 固定质量门函数存在，尚未成为完整 eval pipeline |
+| Evolution | exists | candidate/promotion contract 存在，不自动发布 |
+
+## Strategies
+
+Strategy 是 Coordination 的可替换策略，不是 Layer。
+
+| Strategy | 当前 |
+| --- | --- |
+| Direct | usable |
+| Agent Loop | usable |
+| Workflow | connected |
+| Routing | exists |
+| Parallel | exists |
+| Multi-Agent | exists |
+| Managed Agent | exists |
+| Personal Agent | exists |
+
+以后出现新的 Agent 形态，优先新增 Strategy/Adapter，而不是修改 Core。
+
+## Adapters
+
+| Adapter | 当前 |
+| --- | --- |
+| SQLite | usable |
+| Local Files | usable |
+| Ollama | usable |
+| OpenAI | connected |
+| Pi OAuth | connected |
+| MCP | exists |
+| A2A | planned |
+| Browser | planned |
+| Shell | planned |
+| Timer / Webhook | planned |
+
+MCP/A2A/模型厂商/浏览器/数据库都不能进入 Core。
+
+## 六边形规则
+
+```text
+Inbound Adapter
+(Chat / Timer / Webhook / Email)
+             │
+             ▼
+      Application / Domain
+             │
+           Ports
+             │
+             ▼
+Outbound Adapters
+(Model / Tool / MCP / A2A / DB / Browser)
+```
+
+外部系统只能通过 Port 进入；发现一个 Tool/Agent 不等于拥有执行权限。
+
+## 成熟度
+
+- `exists`：合同存在；
+- `connected`：接入真实装配/持久化；
+- `usable`：真实路径 + 测试可依赖；
+- `hardened`：经过更强故障/安全/规模验证；
+- `planned`：只定义边界。
+
+开发策略：**breadth first, depth later**。先让完整形状存在，再由测试、真实场景和瓶颈决定加深顺序。
