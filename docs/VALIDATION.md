@@ -18,6 +18,7 @@ node --check src/myth/webui/inspector.js
 - Runtime / recovery → crash / UNKNOWN；
 - Intent / routing → adversarial cases；
 - Provider / Context → window / truncation / usage；
+- Auth / OAuth → PKCE/state/nonce、OIDC signature/audience/issuer、secure storage、refresh/revoke、callback log leakage；
 - Goal / Personal → cross-session / restart；
 - UI → Runtime Observatory surface contract；
 - Evaluation / Evolution → complete-suite release evidence。
@@ -32,6 +33,7 @@ node --check src/myth/webui/inspector.js
 - Knowledge / project retrieval coverage；
 - Intent adversarial routing；
 - Ollama context-window semantics；
+- Myth-owned ChatGPT OAuth protocol/security invariants；
 - Goal checkpoint / cross-session continuation；
 - Eval Ledger / paired evidence / policy promote / rollback；
 - Runtime Observatory UI identity。
