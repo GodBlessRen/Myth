@@ -63,7 +63,7 @@ python -m myth.cli --root . web
 
 ## Loop、上下文与检索
 
-对话循环是「固定入口 → 持久模型请求 → 决策校验 → 工具授权/收据 → 下一步」，可以直接回答或向用户提问。会话消息持久保存；模型接收最近 30 条历史和本轮资料，必需内容超过 42 KB 会在调用前停止。完成的普通对话会写入本地 Episodic Memory；Semantic/Procedural/Working Memory 已有持久 revision API。下一轮会按当前用户问题做关键词召回并固定进 Turn Snapshot。
+对话循环是「固定入口 → 持久模型请求 → 决策校验 → 工具授权/收据 → 下一步」，可以直接回答或向用户提问。会话消息持久保存；最近 30 条历史作为候选，与召回资料/记忆、旧工具预览共同按 42,000 字节消息预算选入。本轮原始任务、澄清、显式附件片段和最新工具结果优先保留；Compact 只减少旧历史，完整记录仍在本地。Inspector 展示实际字节和取舍数量。必需内容超过预算会在调用前停止。完成的普通对话会写入本地 Episodic Memory；Semantic/Procedural/Working Memory 已有持久 revision API。下一轮会按当前用户问题做关键词召回并固定进 Turn Snapshot。
 
 知识库按 1,800 字符分块、200 字符重叠，英文词与中文双字关键词排序；本轮只检索共享资料和当前项目资料。检索结果保留文档、片段与来源标识，来源可点击查看。当前没有向量检索、重排器或 PDF/Office 解析器；Keyword Retrieval 仍是可复现 baseline。
 
@@ -89,4 +89,4 @@ python -m unittest discover -s tests -v
 node --check src/myth/webui/app.js
 ```
 
-领域逻辑 → 应用用例 → 事务级端口 → SQLite/本地执行/模型适配器；Workspace 负责装配，HTTP 与页面负责交互。部分早期 Durable Runtime 实现仍在逐步迁移到统一 Ports。详见 [架构](docs/ARCHITECTURE.md)、[设计](docs/DESIGN.md)、[验证](docs/VALIDATION.md)、[规划](docs/ROADMAP.md) 与 [安全边界](SECURITY.md)。
+领域逻辑 → 应用用例 → 事务级端口 → SQLite/本地执行/模型适配器；Workspace 负责装配，HTTP 与页面负责交互。部分早期 Durable Runtime 实现仍在逐步迁移到统一 Ports。详见 [架构](docs/ARCHITECTURE.md)、[设计](docs/DESIGN.md)、[验证](docs/VALIDATION.md)、[规划](docs/ROADMAP.md)、[整体诊断与上下文优化](docs/REVIEW_2026-10-03.md) 与 [安全边界](SECURITY.md)。

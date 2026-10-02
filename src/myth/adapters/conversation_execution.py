@@ -37,10 +37,9 @@ class LocalConversationExecution:
             if not item.get("decision") and not item.get("result"):continue
             decision=item.get("decision") or {}
             result=dict(item.get("result") or {})
-            if item["step"]<step-1 and isinstance(result.get("content"),str):
-                result["content"]=result["content"][:800]+"\n[older preview folded]"
             activities.append({
                 "step":item["step"],
+                "decision_id":item.get("decision_id"),
                 "capability":decision.get("capability_id"),
                 "question":decision.get("question"),
                 "result":result,

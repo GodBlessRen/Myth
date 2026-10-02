@@ -112,6 +112,10 @@ class WebContractTests(unittest.TestCase):
         self.assertEqual(session["turns"][-1]["status"],"COMPLETED")
         self.assertEqual(len(session["messages"]),2)
         self.assertEqual(len(provider.calls),1)
+        contexts=[e["payload"] for e in session["turns"][-1]["events"] if e["kind"]=="ConversationContextCompiled"]
+        self.assertEqual(len(contexts),1)
+        self.assertEqual(contexts[0]["bytes_used"],provider.calls[0].context_report["bytes_used"])
+        self.assertIn("message:0",contexts[0]["selected"])
         with self.call(f"/api/workspace/messages/{session['messages'][-1]['id']}/download") as response:self.assertEqual(response.read(),"这是回答。".encode())
         with self.call(f"/api/workspace/sessions/{sid}/download") as response:self.assertIn("普通问题".encode(),response.read())
         self.workspace_json(f"/sessions/{sid}",{"title":"重要会话","pinned":True})

@@ -32,6 +32,9 @@ class ModelRequest:
     response_schema: dict[str, Any]
     max_output_tokens: int = 1024
     thinking: str | bool | None = None
+    # Local projection evidence; provider adapters transmit only their supported
+    # fields. This report travels with the immutable request for replay/auditing.
+    context_report: dict[str, Any] | None = None
 
     def __post_init__(self) -> None:
         if not self.model.strip():
@@ -48,6 +51,7 @@ class ModelRequest:
             "response_schema": self.response_schema,
             "max_output_tokens": self.max_output_tokens,
             "thinking": self.thinking,
+            **({"context_report": self.context_report} if self.context_report is not None else {}),
         }
 
 
