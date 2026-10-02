@@ -29,22 +29,23 @@
 
 ## Wave B — Product control
 
-把最影响实际 Agent 体验的骨架接入主链：
+**v0.8 已完成第一轮主链接入：**
 
-1. persistent Control Command Inbox;
+1. persistent Control Command log + projection;
 2. steer / pause / resume / abort;
-3. turn 后 model / thinking switch;
-4. unified Capability Registry replaces duplicated tool catalogs;
-5. unified Context Compiler replaces conversation/exact split projection;
-6. Runtime Inspector reads durable facts rather than UI-local state.
+3. turn 内 model / thinking switch;
+4. compact one-shot context control;
+5. unified Capability Registry 参与真实工具准入;
+6. ContextCompiler 接管对话历史预算裁剪;
+7. Runtime Inspector 读取 control / operation / event durable facts。
 
 ## Wave C — Capability surface
 
 按原子适配器扩展：
 
-- project.search
-- diff.preview
-- git.status / git.diff
+- project.search ✅
+- diff.preview ✅
+- git.status / git.diff ✅
 - test.run
 - admitted shell.exec
 - python.run
@@ -54,7 +55,7 @@
 
 ## Wave D — Context / Memory / RAG
 
-- Working / Episodic / Semantic / Procedural memory revisions;
+- Working / Episodic / Semantic / Procedural memory revisions ✅ 本地持久层 + episodic auto-write;
 - memory provenance, conflict and revoke;
 - RetrievalPort;
 - lexical baseline retained;
@@ -89,8 +90,8 @@ v0.7 已完成第一轮 Product Shell Reset：
 
 下一步继续补：
 
-- Control strip: model / thinking / steer / pause / resume / abort;
-- deeper Runtime Inspector: Ticket / Receipt / Verification / Recovery;
+- Control strip: model / thinking / steer / pause / resume / abort ✅;
+- Runtime Inspector: durable Tool Ticket / Operation / Control revision ✅，下一步补完整 Receipt / Verification / Recovery;
 - streaming, diff and artifacts inline in conversation;
 - Context / Memory drawers.
 
