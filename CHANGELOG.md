@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.19 — Native Sign in with ChatGPT
+
+- 移除 Myth 对 Pi OAuth / Pi CLI 的认证依赖。
+- 按 OpenAI OSS Sign in with ChatGPT 合同实现动态 client registration、PKCE S256、state、OIDC nonce 与 exact loopback callback。
+- ID token 验证 signature / issuer / audience / expiry / nonce；返回 client_id 与注册身份绑定。
+- access / refresh / ID token 只进入系统安全凭据库；无明文凭据文件 fallback。
+- refresh token rotation 跨线程/进程串行；logout 尝试远端 revoke 并始终清除本地凭据。
+- ChatGPT plan Responses 使用 `store:false + stream:true`，只在 `response.completed` 后确认成功。
+- Web/CLI 新增 login / status / logout；callback query 不进入本地日志。
+- 旧 `pi-openai` 设置迁移为 `chatgpt`，旧 durable Run 会收到明确迁移错误。
+
+
 ## v0.18.1 — Cache Observability
 
 - OpenAI Responses 的 provider-reported cached input tokens 写入 durable model usage。
