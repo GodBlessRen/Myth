@@ -4,7 +4,7 @@ function inspectorStatus(status){
   const value=String(status||"IDLE").toUpperCase();
   if(["COMPLETED","SUCCEEDED"].includes(value))return [value,"success"];
   if(["RUNNING","WAITING_USER","RECOVERING","PAUSED"].includes(value))return [value,"running"];
-  if(value==="UNKNOWN")return [value,"unknown"];
+  if(["INTERRUPTED","RECOVERY_REQUIRED","RECONCILING","UNKNOWN"].includes(value))return [value,"unknown"];
   if(["FAILED","CANCELLED","BUDGET_EXHAUSTED"].includes(value))return [value,"danger"];
   return [value,""];
 }
@@ -55,7 +55,8 @@ function renderExecutionSpine(turn){
   if(turn.status==="COMPLETED"){completionDetail="Conversation answer completed. Semantic goal verification is not claimed.";completionState="done";completionLabel="ANSWERED";}
   else if(turn.status==="WAITING_USER"){completionDetail="Agent is waiting for user input.";completionState="active";completionLabel="USER";}
   else if(turn.status==="PAUSED"){completionDetail="Paused at a safe point. Existing Tickets remain factual.";completionState="active";completionLabel="PAUSED";}
-  else if(turn.status==="UNKNOWN"){completionDetail=turn.error||"Execution outcome is uncertain and must be reconciled.";completionState="unknown";completionLabel="UNKNOWN";}
+  else if(turn.status==="INTERRUPTED"){completionDetail=turn.error||"Driver stopped at a recoverable checkpoint.";completionState="unknown";completionLabel="RESUME";}
+  else if(turn.status==="UNKNOWN"){completionDetail=turn.error||"Execution outcome is uncertain and must be reconciled.";completionState="unknown";completionLabel="RECONCILE";}
   else if(["FAILED","CANCELLED","BUDGET_EXHAUSTED"].includes(turn.status)){completionDetail=turn.error||turn.status;completionState="unknown";completionLabel=turn.status;}
   box.append(spineStep("Completion",completionDetail,completionState,completionLabel));
 }
@@ -77,6 +78,25 @@ function renderInspectorGoal(turn){
   inspectorFact(box,"Next",work.next_action||"—");
   if(work.waiting_for)inspectorFact(box,"Waiting",work.waiting_for);
   inspectorFact(box,"Revision",work.revision||"—");
+}
+
+function renderInspectorRecovery(turn){
+  const box=$("inspectorRecovery");if(!box)return;box.replaceChildren();
+  if(!turn){box.append(el("div","inspector-empty","暂无恢复状态"));return;}
+  const cursor=turn.execution_cursor||{};
+  const lease=turn.driver_lease||null;
+  inspectorFact(box,"Phase",cursor.phase||"—");
+  inspectorFact(box,"Cursor","step "+Number(cursor.step||0)+" · checkpoint "+Number(cursor.checkpoint_step||0));
+  inspectorFact(box,"Recovery",cursor.recovery_state||"NONE");
+  if(cursor.detail)inspectorFact(box,"Detail",String(cursor.detail).slice(0,180));
+  if(lease){
+    const remaining=Math.max(0,Math.ceil(Number(lease.lease_until||0)-(Date.now()/1000)));
+    inspectorFact(box,"Driver",lease.expired?"expired":turn.driver_active?"active":"detached");
+    inspectorFact(box,"Lease",lease.expired?"expired":remaining+"s remaining");
+    inspectorFact(box,"Generation",lease.generation||1);
+  }else{
+    inspectorFact(box,"Driver",turn.driver_active?"active":"none");
+  }
 }
 
 function renderInspectorTokens(turn){
@@ -173,7 +193,7 @@ function renderRuntimeInspector(session=state.session){
   const turn=session?.turns?.at(-1)||null,[label,cls]=inspectorStatus(turn?.status||"IDLE");
   if($("inspectorState"))$("inspectorState").textContent=label;
   if($("inspectorPulse"))$("inspectorPulse").className="inspector-pulse "+cls;
-  renderInspectorGoal(turn);renderExecutionSpine(turn);renderInspectorTrajectory(turn);renderInspectorTokens(turn);renderInspectorContext(session,turn);renderInspectorTools(turn);renderInspectorControl(turn);renderInspectorBudgets(turn);renderInspectorPlatform();
+  renderInspectorGoal(turn);renderExecutionSpine(turn);renderInspectorRecovery(turn);renderInspectorTrajectory(turn);renderInspectorTokens(turn);renderInspectorContext(session,turn);renderInspectorTools(turn);renderInspectorControl(turn);renderInspectorBudgets(turn);renderInspectorPlatform();
 }
 
 function fitPromptInspector(){const prompt=$("prompt");if(!prompt)return;prompt.style.height="auto";prompt.style.height=Math.min(160,Math.max(30,prompt.scrollHeight))+"px";}
