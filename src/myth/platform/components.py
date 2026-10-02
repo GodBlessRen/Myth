@@ -94,7 +94,7 @@ DOMAINS: tuple[ArchitectureItem, ...] = (
         "Coordination / 统筹",
         "domain",
         Maturity.USABLE,
-        "Choose how work is organized: direct, loop, workflow, routing, delegation or parallelism.",
+        "Choose how work is organized; Intent Pick and information strategies may select cheaper paths before an Agent Loop.",
         ("goal", "run"),
     ),
     ArchitectureItem(
@@ -134,7 +134,7 @@ DOMAINS: tuple[ArchitectureItem, ...] = (
         "Context / 上下文",
         "domain",
         Maturity.USABLE,
-        "Build bounded provenance-aware projections without rewriting durable history.",
+        "Build bounded provenance-aware projections. Information Resolution L0/L1/L2 contracts exist, but progressive materialized views are not yet connected.",
         ("run",),
     ),
     ArchitectureItem(
@@ -142,7 +142,7 @@ DOMAINS: tuple[ArchitectureItem, ...] = (
         "Memory / 记忆",
         "domain",
         Maturity.USABLE,
-        "Versioned working/episodic/semantic/procedural records with provenance and revoke.",
+        "Versioned working/episodic/semantic/procedural records with provenance/revoke. Information Delta is defined but not yet computed as a lifecycle engine.",
         ("context",),
     ),
     ArchitectureItem(
@@ -245,7 +245,7 @@ class MythComponents:
             for spec in self.strategies.list()
         ]
         return {
-            "version": "0.9-composable",
+            "version": "0.10-information",
             "shape": "core-domains-strategies-adapters",
             "principle": "fix facts and boundaries; keep intelligence organization pluggable",
             "core": [item.as_dict() for item in CORE],
