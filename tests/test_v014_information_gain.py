@@ -163,6 +163,17 @@ class InformationGainTests(unittest.TestCase):
                 EvalObservation("a",EvalVerdict.PASS,"ok",policy_id="p2",comparison_key="different"),
             )
 
+    def test_eval_ledger_rejects_policy_label_mismatch(self):
+        result=FoundationEvalRunner.from_path(
+            self.suite,
+            policy_id="actual-policy",
+            resolution_policy="L0",
+        ).run(["resolution-marker-presence"])
+        with MythRuntime(self.root) as runtime:
+            ledger=SqliteEvaluationLedger(runtime)
+            with self.assertRaises(ValueError):
+                ledger.record(result,policy_id="forged-policy")
+
 
 if __name__=="__main__":
     unittest.main()
