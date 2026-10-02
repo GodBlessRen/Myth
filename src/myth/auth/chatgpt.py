@@ -705,6 +705,17 @@ class ChatGPTAuthManager:
             result.append({"slug": slug, "display_name": str(display)})
         return result
 
+    def _revoke_refresh_token(self, refresh_token: str, client_id: str) -> None:
+        body=parse.urlencode({"token":refresh_token,"token_type_hint":"refresh_token","client_id":client_id}).encode("utf-8")
+        req=request.Request(REVOCATION_ENDPOINT,data=body,method="POST",headers={"content-type":"application/x-www-form-urlencoded","user-agent":"myth-runtime/0.19"})
+        try:
+            with request.urlopen(req,timeout=self.timeout) as response:
+                response.read()
+        except error.HTTPError as exc:
+            raise ChatGPTOAuthError(f"Remote ChatGPT session revocation failed ({exc.code}).") from exc
+        except error.URLError as exc:
+            raise ChatGPTOAuthError("Remote ChatGPT session revocation could not be confirmed.") from exc
+
     def logout(self, profile_id: str | None = None) -> dict[str, Any]:
         profile_id = profile_id or self._active_profile_id()
         if not profile_id:
@@ -716,14 +727,7 @@ class ChatGPTAuthManager:
             client_id = stored.get("client_id")
             if isinstance(refresh_token, str) and refresh_token and isinstance(client_id, str) and client_id:
                 try:
-                    self._form_request(
-                        REVOCATION_ENDPOINT,
-                        {
-                            "token": refresh_token,
-                            "token_type_hint": "refresh_token",
-                            "client_id": client_id,
-                        },
-                    )
+                    self._revoke_refresh_token(refresh_token, client_id)
                 except ChatGPTOAuthError:
                     remote_revoked = False
             self.credentials.delete(profile_id)
