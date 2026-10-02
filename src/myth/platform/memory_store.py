@@ -121,6 +121,102 @@ class SqliteMemoryStore:
         args = (limit,)
         return [dict(row) for row in self.store.db.execute(sql, args).fetchall()]
 
+    def candidates(
+        self,
+        *,
+        cursor: int = 0,
+        page_size: int = 200,
+        project_id: str | None = None,
+        session_id: str | None = None,
+        kinds: Iterable[str | MemoryKind] | None = None,
+    ) -> dict:
+        if type(cursor) is not int or cursor < 0:
+            raise ValueError("cursor must be a non-negative integer")
+        if type(page_size) is not int or not 1 <= page_size <= 500:
+            raise ValueError("page_size must be 1-500")
+        allowed = None
+        if kinds is not None:
+            allowed = {
+                item.value if isinstance(item, MemoryKind) else MemoryKind(str(item)).value
+                for item in kinds
+            }
+        rows = self.store.db.execute(
+            "SELECT rowid AS candidate_cursor,* FROM workspace_memories "
+            "WHERE active=1 AND rowid>? ORDER BY rowid LIMIT ?",
+            (cursor, page_size + 1),
+        ).fetchall()
+        values=[]
+        for row in rows[:page_size]:
+            item=dict(row)
+            if allowed and item["kind"] not in allowed:
+                continue
+            scope=item.get("scope_type") or "global"
+            scope_id=item.get("scope_id")
+            visible=(
+                scope=="global"
+                or (scope=="project" and project_id is not None and scope_id==project_id)
+                or (scope=="session" and session_id is not None and scope_id==session_id)
+            )
+            if visible:
+                values.append(item)
+        raw=list(rows[:page_size])
+        next_cursor=int(raw[-1]["candidate_cursor"]) if raw else cursor
+        return {
+            "candidates":values,
+            "cursor":cursor,
+            "next_cursor":next_cursor,
+            "has_more":len(rows)>page_size,
+            "scanned":len(raw),
+        }
+
+    def search_report(
+        self,
+        query: str,
+        *,
+        kinds: Iterable[str | MemoryKind] | None = None,
+        limit: int = 6,
+        project_id: str | None = None,
+        session_id: str | None = None,
+    ) -> dict:
+        if type(limit) is not int or not 1 <= limit <= 20:
+            raise ValueError("limit must be 1-20")
+        query_terms=_terms(str(query))
+        scored=[];cursor=0;scanned=0;visible=0;matched=0;pages=0
+        while True:
+            page=self.candidates(
+                cursor=cursor,
+                page_size=200,
+                project_id=project_id,
+                session_id=session_id,
+                kinds=kinds,
+            )
+            pages+=1;scanned+=page["scanned"]
+            for item in page["candidates"]:
+                visible+=1
+                score=len(query_terms & _terms(item["text"]))
+                if not query_terms or score:
+                    matched+=1
+                    scored.append((score,int(item["candidate_cursor"]),item))
+            cursor=page["next_cursor"]
+            if not page["has_more"]:break
+        scored.sort(key=lambda item:(-item[0],-item[1],item[2]["memory_id"]))
+        results=[]
+        for _,_,item in scored[:limit]:
+            value=dict(item);value.pop("candidate_cursor",None);results.append(value)
+        return {
+            "memories":results,
+            "retrieval":{
+                "backend":"memory-lexical",
+                "candidate_policy":"all-visible-active-memories-v2",
+                "scanned":scanned,
+                "visible":visible,
+                "matched":matched,
+                "pages":pages,
+                "exhausted":True,
+                "truncated_before_ranking":False,
+            },
+        }
+
     def search(
         self,
         query: str,
@@ -130,33 +226,13 @@ class SqliteMemoryStore:
         project_id: str | None = None,
         session_id: str | None = None,
     ) -> list[dict]:
-        if type(limit) is not int or not 1 <= limit <= 20:
-            raise ValueError("limit must be 1-20")
-        allowed = None
-        if kinds is not None:
-            allowed = {
-                item.value if isinstance(item, MemoryKind) else MemoryKind(str(item)).value
-                for item in kinds
-            }
-        query_terms = _terms(str(query))
-        scored: list[tuple[int, int, dict]] = []
-        for index, row in enumerate(self.list(active_only=True, limit=500)):
-            if allowed and row["kind"] not in allowed:
-                continue
-            scope = row.get("scope_type") or "global"
-            scope_id = row.get("scope_id")
-            visible = (
-                scope == "global"
-                or (scope == "project" and project_id is not None and scope_id == project_id)
-                or (scope == "session" and session_id is not None and scope_id == session_id)
-            )
-            if not visible:
-                continue
-            score = len(query_terms & _terms(row["text"]))
-            if not query_terms or score:
-                scored.append((score, -index, row))
-        scored.sort(key=lambda item: (-item[0], -item[1], item[2]["memory_id"]))
-        return [row for _, _, row in scored[:limit]]
+        return self.search_report(
+            query,
+            kinds=kinds,
+            limit=limit,
+            project_id=project_id,
+            session_id=session_id,
+        )["memories"]
 
     def revoke(self, memory_id: str) -> dict:
         current = self.get(memory_id)
