@@ -31,7 +31,7 @@ class ModelRequest:
     messages: tuple[ModelMessage, ...]
     response_schema: dict[str, Any]
     max_output_tokens: int = 1024
-    thinking: str | None = None
+    thinking: str | bool | None = None
 
     def __post_init__(self) -> None:
         if not self.model.strip():
@@ -144,6 +144,11 @@ def parse_step_decision(text: str) -> StepDecision:
     if not isinstance(value, dict):
         raise DecisionValidationError("model output must be a JSON object")
 
+    # 本地对话 wire 使用简短 action；统一投影到同一个领域决策，权限不从 wire 推导。
+    if "action" in value and "decision_type" not in value:
+        action=_text(value["action"],"action")
+        value={**value,"decision_type":"request_completion" if action=="reply" else "ask_user" if action=="ask" else "tool_call","capability_id":action,"goal_coverage":"answer"}
+
     decision_type = _text(value.get("decision_type"), "decision_type")
     if decision_type not in {"tool_call", "ask_user", "request_completion"}:
         raise DecisionValidationError(f"unsupported decision_type: {decision_type}")
@@ -158,11 +163,14 @@ def parse_step_decision(text: str) -> StepDecision:
         capability_id = _text(value.get("capability_id"), "capability_id")
         if not capability_id:
             raise DecisionValidationError("tool_call requires capability_id")
-        arguments_json = _text(value.get("arguments_json"), "arguments_json")
-        try:
-            arguments = json.loads(arguments_json)
-        except json.JSONDecodeError as exc:
-            raise DecisionValidationError("arguments_json must contain valid JSON") from exc
+        if "arguments" in value:
+            arguments = value["arguments"]
+        else:
+            arguments_json = _text(value.get("arguments_json"), "arguments_json")
+            try:
+                arguments = json.loads(arguments_json)
+            except json.JSONDecodeError as exc:
+                raise DecisionValidationError("arguments_json must contain valid JSON") from exc
         if not isinstance(arguments, dict):
             raise DecisionValidationError("tool_call arguments must decode to an object")
         return StepDecision(

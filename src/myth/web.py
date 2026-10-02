@@ -14,12 +14,13 @@ from pathlib import Path
 import threading
 import socket
 from typing import Any
-from urllib.parse import quote, urlparse
+from urllib.parse import quote, urlparse, parse_qs
 import webbrowser
 
 from .agent_runtime import AgentRuntime
 from .providers import create_provider
 from .runtime import MythRuntime
+from .web_workspace import ConversationWebService
 
 
 ASSET_DIR = Path(__file__).with_name("webui")
@@ -30,6 +31,7 @@ class AgentWebService:
         self.root = Path(root).resolve()
         self._active: set[str] = set()
         self._lock = threading.Lock()
+        self.workspace = ConversationWebService(self.root)
 
     @staticmethod
     def _provider(payload: dict[str, Any]):
@@ -177,7 +179,7 @@ def _json_bytes(value: Any) -> bytes:
 
 def make_handler(service: AgentWebService):
     class Handler(BaseHTTPRequestHandler):
-        server_version = "MythWeb/0.4"
+        server_version = "MythWeb/0.5"
 
         def log_message(self, format: str, *args: object) -> None:
             # Keep local logs useful while avoiding request bodies and credentials.
@@ -201,8 +203,9 @@ def make_handler(service: AgentWebService):
             if self.headers.get("Content-Type", "").split(";")[0].strip() != "application/json":
                 raise ValueError("Content-Type must be application/json")
             length = int(self.headers.get("Content-Length") or 0)
-            if length <= 0 or length > 1_000_000:
-                raise ValueError("request body must be between 1 byte and 1 MB")
+            limit=7_000_000 if urlparse(self.path).path=="/api/workspace/documents" else 1_000_000
+            if length <= 0 or length > limit:
+                raise ValueError(f"request body must be between 1 byte and {limit} bytes")
             value = json.loads(self.rfile.read(length).decode("utf-8"))
             if not isinstance(value, dict):
                 raise ValueError("JSON body must be an object")
@@ -219,6 +222,18 @@ def make_handler(service: AgentWebService):
             path = urlparse(self.path).path
             try:
                 self._check_origin()
+                if path == "/api/workspace" or path.startswith("/api/workspace/"):
+                    parts=path.removeprefix("/api/workspace").strip("/").split("/") if path!="/api/workspace" else []
+                    if len(parts)==2 and parts[0]=="artifacts" or len(parts)==3 and parts[0] in {"messages","sessions"} and parts[2]=="download":
+                        name,data=service.workspace.artifact(parts[1]) if parts[0]=="artifacts" else service.workspace.export(parts[0],parts[1])
+                        self.send_response(HTTPStatus.OK)
+                        self.send_header("Content-Type","application/octet-stream")
+                        self.send_header("Content-Length",str(len(data)))
+                        self.send_header("X-Content-Type-Options","nosniff")
+                        self.send_header("Cache-Control","no-store")
+                        self.send_header("Content-Disposition","attachment; filename*=UTF-8''"+quote(name))
+                        self.end_headers();self.wfile.write(data);return
+                    self._json(HTTPStatus.OK,service.workspace.get(parts,parse_qs(urlparse(self.path).query)));return
                 if path == "/":
                     self._asset("index.html", "text/html; charset=utf-8")
                     return
@@ -265,6 +280,9 @@ def make_handler(service: AgentWebService):
             try:
                 self._check_origin()
                 payload = self._read_json()
+                if path.startswith("/api/workspace/"):
+                    parts=path.removeprefix("/api/workspace/").strip("/").split("/")
+                    self._json(HTTPStatus.OK,service.workspace.post(parts,payload));return
                 if path == "/api/demo":
                     self._json(HTTPStatus.ACCEPTED, service.demo())
                     return

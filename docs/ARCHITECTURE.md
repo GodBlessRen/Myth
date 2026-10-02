@@ -1,28 +1,40 @@
-# Myth v0.4 architecture
+# Myth v0.5 architecture
 
 ## Dependency direction
 
-This is a single-machine modular monolith. The Agent slice now follows a hexagonal boundary:
+This is a single-machine modular monolith. Both the conversation and exact-verification use cases follow a hexagonal boundary:
 
 ```text
 CLI / Web (inbound adapters)
           ↓
-AgentRuntime (composition facade)
+Workspace / AgentRuntime (composition facades)
           ↓
-AgentDriver (application use case)
+ConversationAgent / AgentDriver (application use cases)
           ↓
-AgentRepository / AgentExecution (ports)
+ConversationRepository + ConversationExecution / Agent ports
           ↑ implementation
-SqliteAgentRepository / LocalAgentExecution (outbound adapters)
+SQLite repositories / local execution adapters
           ↓
 DecisionRuntime / MythRuntime / providers / objects / workspaces
 ```
 
-`acceptance.py` contains pure domain verification and context projection. `application/` depends only on the domain, decision data and ports; it imports no SQL, filesystem or provider implementation. The architectural test protects this direction. P1/P2 remain existing concrete runtime services behind the execution adapter; the entire repository has not yet completed this migration.
+`acceptance.py` contains pure verification; `conversation.py` contains pure conversation projection, lexical ranking and arithmetic. `application/` depends only on domain data and ports, with no SQL, filesystem or provider implementation. Architecture tests guard these dependencies. Existing P1/P2 runtime services remain concrete behind execution adapters; the entire repository has not completed this migration.
 
 Ports expose transaction-sized operations rather than cursors. The repository owns state; the driver owns sequencing; execution adapters own I/O and reconciliation. Neither model output nor browser state grants authority.
 
-## Submission and acceptance
+## Conversation workspace
+
+`SqliteWorkspaceRepository` owns projects, sessions, messages, document metadata/chunks, settings, turn/step state and tool operations. `Workspace` wires this repository to `LocalConversationExecution` and `ConversationAgent`. Web workers own independent runtime connections. The repository returns data rather than SQL cursors; the use case does not import providers or databases.
+
+Turn admission fixes model/settings, project scope/instructions, retrieval results and recent 30 messages. One transaction creates the shared Run/accounts, conversation Turn/user message and session title/event. Request identity covers session, message, model settings and attachments. Duplicate retries return the original turn; conflicting identities and a second active turn are rejected. A project change affects new turns, not an already-fixed scope.
+
+`workspace_steps` persists STARTED → DECIDED → DONE. A conversation-specific request key binds the model invocation to its step using the existing model ledger. The local OS run lock serializes drivers. Invalid proposals consume a step; a saved proposal/receipt is reused after restart. Ask-user decisions and current question IDs commit together; only the matching answer resumes that turn.
+
+Tool output/read snapshots are published as content-addressed objects. In one transaction, a tool operation fixes result/target/digest, validates current turn authority and decision ownership, reserves tool/write budgets and issues a Ticket. Only then can a generated file be written. The execution adapter publishes a receipt and the repository settles it once. A crash after an output write can be reconciled against the fixed digest; a missing or different file remains UNKNOWN and is never blindly rewritten. Read/search/calculation results fixed in the Ticket can be recovered without rereading changed sources. Uncertain liabilities move to unknown-held; late evidence settles them once. Pre-Ticket object publication can leave orphans; GC is deferred.
+
+Conversation cancellation blocks new tool admission and final answers. Already-ticketed effects can still complete and settle their actual facts. It is not an undo operation. A normal reply commits its message and COMPLETED state atomically, with execution_verified=false. Shared Run SUCCEEDED here means a completed conversation turn, not an independently verified goal. Generated artifact cards require resolved tool operations; answer/session exports merely download existing text. Neither produces the exact-verification use case's goal delivery record.
+
+## Exact-mode submission and acceptance
 
 1. Validate 1–16 explicitly allowed, distinct-basename UTF-8 files, at most 1 MB each.
 2. Read baseline bytes once, calculate sequential exact-rule results, publish baseline objects and managed copies.
@@ -74,13 +86,15 @@ The model's `request_completion` is only a claim. The pure verifier requires:
 
 The report, completed step, Agent state, delivery and events commit together. Downloads require an Agent `SUCCEEDED` delivery and serve the expected content-addressed object after digest verification. This binds delivery to immutable accepted bytes even if someone later changes a managed display file. No Agent goal delivery is inferred from a successful P1 patch.
 
-## Context and memory
+## Context and knowledge
 
 The event/receipt ledger is the durable execution record. Context compilation creates a deterministic bounded projection: recent notes, shortened old previews, the latest tool result, user corrections/rejections, fixed acceptance and tool evidence references. Dropping optional history never rewrites that record. Required context over 32,768 UTF-8 bytes or a serialized model request over 65,536 bytes stops before a model Ticket. These are byte guards, not accurate token estimates.
 
-This version has no semantic summarizer, long-term memory or RAG. Retrieval will be a separate port and a projection of trusted sources rather than a second source of execution truth.
+Conversation projection uses native role messages and a 42,000-byte guard including system instructions, project context, knowledge and current activities. Optional old messages/previews are removed before required context; the persistent record is unchanged. The shared 65,536-byte serialized-request guard also applies. Ollama uses a compact action discriminator and per-tool native argument-object schema, projected back to the same StepDecision, to avoid nested JSON-string failures in small models; remote adapters retain the original string transport. Provider output still passes StepDecision validation and local capability admission.
 
-## Persistence added in v0.4
+Knowledge is local UTF-8 text, chunked at 1,800 characters with 200 overlap. English tokens and Chinese bigrams rank shared/current-project chunks; retrieval examines at most 10,000 chunks per query and returns up to eight. Source IDs, chunk indices and immutable digests accompany results. Import metadata/chunks commit together after object publication. Archived documents are excluded from new retrieval while historical previews remain readable. No embedding model, vector database, semantic summarizer or autonomous long-term memory is implemented. Retrieval is source data, never execution authority.
+
+## Persistence
 
 Existing P1/P2/P3 tables remain. New additive tables:
 
@@ -94,6 +108,8 @@ Existing P1/P2/P3 tables remain. New additive tables:
 | `agent_reads` | immutable internal read snapshot and debit |
 
 Old P3 runs lacking a contract remain inspectable; verification never fabricates acceptance for them. Automatic migration/resume of legacy in-flight runs has not been validated.
+
+v0.5 adds workspace_projects, workspace_sessions, workspace_turns, workspace_messages, workspace_steps, workspace_documents, workspace_chunks, workspace_settings and workspace_operations. These use additive CREATE TABLE IF NOT EXISTS statements; no old table is dropped. Real upgrade acceptance for legacy active runs remains planned.
 
 ## Web boundary
 
