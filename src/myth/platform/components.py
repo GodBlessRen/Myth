@@ -185,8 +185,8 @@ ADAPTERS: tuple[ArchitectureItem, ...] = (
     ArchitectureItem("sqlite", "SQLite", "adapter", Maturity.USABLE, "Local durable state adapter."),
     ArchitectureItem("local_files", "Local Files", "adapter", Maturity.USABLE, "Scoped UTF-8/project/output execution adapter."),
     ArchitectureItem("ollama", "Ollama", "adapter", Maturity.USABLE, "Local model provider adapter."),
-    ArchitectureItem("openai", "OpenAI", "adapter", Maturity.CONNECTED, "Remote model/provider adapter; credentials remain external."),
-    ArchitectureItem("pi_oauth", "Pi OAuth", "adapter", Maturity.CONNECTED, "OpenAI bearer acquisition delegated to Pi."),
+    ArchitectureItem("openai", "OpenAI API Key", "adapter", Maturity.CONNECTED, "Remote Responses provider; API key is read from the environment and never persisted."),
+    ArchitectureItem("chatgpt_oauth", "Sign in with ChatGPT", "adapter", Maturity.USABLE, "Myth-owned OSS OAuth with PKCE/OIDC, secure OS credential storage, refresh rotation and revoke/logout."),
     ArchitectureItem("mcp", "MCP", "adapter", Maturity.EXISTS, "External tool/resource discovery maps into local Capability identities."),
     ArchitectureItem("a2a", "A2A", "adapter", Maturity.PLANNED, "Remote Agent interoperability behind AgentPort."),
     ArchitectureItem("browser", "Browser", "adapter", Maturity.PLANNED, "Browser executor behind ExecutionPort."),
@@ -245,7 +245,7 @@ class MythComponents:
             for spec in self.strategies.list()
         ]
         return {
-            "version": "0.18-goal-work-loop",
+            "version": "0.19-native-oauth",
             "shape": "core-domains-strategies-adapters",
             "principle": "fix facts and boundaries; keep intelligence organization pluggable",
             "core": [item.as_dict() for item in CORE],
