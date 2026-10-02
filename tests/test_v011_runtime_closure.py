@@ -60,9 +60,15 @@ class RuntimeClosureTests(unittest.TestCase):
             b.join(5)
 
             self.assertEqual(errors, [])
-            self.assertEqual(sorted(revisions), [2, 3])
+            # command() returns the latest projection view; after both commits,
+            # either caller may therefore observe revision 3. The durable
+            # invariant is unique, monotonic committed command revisions.
+            self.assertEqual(len(revisions), 2)
+            self.assertTrue(all(revision in {2, 3} for revision in revisions))
             with MythRuntime(root) as runtime:
-                history = Workspace(runtime).control.view(rid)["commands"]
+                view = Workspace(runtime).control.view(rid)
+                history = view["commands"]
+                self.assertEqual(view["revision"], 3)
                 self.assertEqual([item["revision"] for item in history], [2, 3])
 
     def test_goal_identity_is_admitted_before_turn_creation(self):
