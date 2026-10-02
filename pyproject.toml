@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "myth-runtime"
-version = "0.1.0"
+version = "0.2.0"
 description = "A minimal durable agent runtime: proposals are probabilistic; execution and completion are governed by durable facts."
 readme = "README.md"
 requires-python = ">=3.12"
