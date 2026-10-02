@@ -144,6 +144,8 @@ class FoundationEvalRunner:
                     "no executable evaluator is registered for this fixed case",
                     {"latency_ms":round((time.perf_counter()-started)*1000,3)},
                     safety_regression=case.safety_critical,
+                    policy_id=self.policy_id,
+                    comparison_key=case.case_id,
                 )
             verdict,reason,evidence,metrics=method(case)
             metrics=dict(metrics or {})
@@ -186,7 +188,7 @@ class FoundationEvalRunner:
         )
 
     def _case_intent_ambiguous_fallback(self, case):
-        pick=RuleIntentPicker().pick(case.input["text"],{})
+        pick=self.intent_picker.pick(case.input["text"],{})
         ok=pick.route.value==case.expected["route"]
         return (
             EvalVerdict.PASS if ok else EvalVerdict.FAIL,
@@ -275,6 +277,38 @@ class FoundationEvalRunner:
                 f"route={route}, resolution={resolution}",
                 (),
                 {"retrieval_scanned":snapshot["retrieval_report"]["scanned"]},
+            )
+
+    def _case_resolution_marker_presence(self, case):
+        with tempfile.TemporaryDirectory() as tmp, MythRuntime(tmp) as runtime:
+            workspace=self._workspace(runtime)
+            workspace.repository.save_settings(_SETTINGS)
+            marker=case.input["marker"]
+            document=case.input["prefix"]+marker+case.input["suffix"]
+            doc=workspace.repository.import_document({
+                "title":"resolution calibration source",
+                "content":document,
+            })
+            sid=workspace.repository.create_session()["id"]
+            rid=workspace.repository.create_turn(
+                sid,
+                f"根据资料找到 {marker}",
+                "eval-resolution-marker",
+            )["run_id"]
+            snapshot=workspace.repository.turn(rid)["snapshot"]
+            projected="\n".join(item.get("content","") for item in snapshot["knowledge"])
+            visible=marker in projected
+            expected=bool(case.expected["marker_visible"])
+            resolution=snapshot["information_resolution"]["resolution"]
+            ok=visible==expected
+            return (
+                EvalVerdict.PASS if ok else EvalVerdict.FAIL,
+                f"marker_visible={visible}, resolution={resolution}",
+                (f"doc:{doc['id']}@{doc['digest']}",),
+                {
+                    "context_chars":sum(len(item.get("content","")) for item in snapshot["knowledge"]),
+                    "retrieval_scanned":snapshot["retrieval_report"]["scanned"],
+                },
             )
 
     def _case_knowledge_late_candidate(self, case):
