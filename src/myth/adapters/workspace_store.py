@@ -158,14 +158,16 @@ class SqliteWorkspaceRepository:
         rows=self.store.db.execute("SELECT c.*,d.title,d.digest FROM workspace_chunks c JOIN workspace_documents d ON d.id=c.document_id WHERE d.archived=0 AND (d.project_id IS NULL OR d.project_id=?) LIMIT 10000",(project_id,)).fetchall()
         return rank_chunks(query,[dict(r) for r in rows],limit)
 
-    def create_turn(self,sid,text,request_id,document_ids=None):
+    def create_turn(self,sid,text,request_id,document_ids=None,memory_records=None):
         if not isinstance(text,str) or not text.strip() or len(text.encode("utf-8"))>16000:raise ValueError("message must contain 1-16000 UTF-8 bytes")
         if not isinstance(request_id,str) or not 1<=len(request_id)<=200:raise ValueError("request_id is required")
         settings=self.settings()
         if not settings["model"]:raise ValueError("请先在模型设置中选择 Ollama 模型。")
         document_ids=document_ids or []
+        memory_records=memory_records or []
         if not isinstance(document_ids,list) or len(document_ids)>4 or any(not isinstance(d,str) for d in document_ids):raise ValueError("attach at most four document ids")
-        identity=digest_json({"session_id":sid,"text":text,"settings":settings,"documents":document_ids})
+        memory_identity=[{"memory_id":m.get("memory_id"),"revision":m.get("revision")} for m in memory_records]
+        identity=digest_json({"session_id":sid,"text":text,"settings":settings,"documents":document_ids,"memory":memory_identity})
         with self.store.tx() as db:
             existing=db.execute("SELECT run_id,entry_digest FROM workspace_turns WHERE request_id=?",(request_id,)).fetchone()
             if existing:
@@ -182,7 +184,21 @@ class SqliteWorkspaceRepository:
                 if document["project_id"] not in {None,session["project_id"]}:raise PermissionError("attachment belongs to another project")
                 if not any(s["document_id"]==did for s in knowledge):
                     knowledge.append({"document_id":did,"title":document["title"],"content":document["content"][:1000],"chunk_index":0,"digest":document["digest"],"citation":f"doc:{did}:0","score":0})
-            snapshot={"project":project,"knowledge":knowledge,"messages":[{"role":m["role"],"content":m["content"]} for m in session["messages"][-30:]]+[{"role":"user","content":text}]}
+            snapshot={
+                "project":project,
+                "knowledge":knowledge,
+                "memory":[
+                    {
+                        "memory_id":m.get("memory_id"),
+                        "kind":m.get("kind"),
+                        "text":m.get("text",""),
+                        "source_ref":m.get("source_ref"),
+                        "revision":m.get("revision"),
+                    }
+                    for m in memory_records[:8]
+                ],
+                "messages":[{"role":m["role"],"content":m["content"]} for m in session["messages"][-30:]]+[{"role":"user","content":text}],
+            }
             rid=new_id("run")
             db.execute("INSERT INTO runs(run_id,request_id,entry_digest,goal,acceptance_version,state) VALUES(?,?,?,?,?,'RUNNING')",(rid,request_id,identity,text,"conversation-v1"))
             for meter,limit in {"model_calls":settings["max_steps"],"input_tokens":2_000_000,"output_tokens":settings["max_steps"]*settings["max_output_tokens"],"tool_calls":settings["max_steps"],"write_bytes":4_000_000}.items():db.execute("INSERT INTO accounts(run_id,meter,limit_units) VALUES(?,?,?)",(rid,meter,limit))
@@ -252,7 +268,7 @@ class SqliteWorkspaceRepository:
 
     def block(self,rid,status,reason):
         with self.store.tx() as db:
-            if self.turn(rid)["status"] not in {"RUNNING","UNKNOWN","WAITING_USER"}:return
+            if self.turn(rid)["status"] not in {"RUNNING","UNKNOWN","WAITING_USER","PAUSED"}:return
             if status in {"UNKNOWN","CANCELLED"}:
                 for op in self.pending_operations(rid):
                     if op["state"]!="TICKETED":continue
@@ -300,6 +316,17 @@ class SqliteWorkspaceRepository:
 
     def pending_operations(self,rid):
         return [self.operation(r[0]) for r in self.store.db.execute("SELECT decision_id FROM workspace_operations WHERE run_id=? AND state IN ('TICKETED','UNKNOWN')",(rid,))]
+
+    def operations(self,rid):
+        rows=self.store.db.execute("SELECT decision_id FROM workspace_operations WHERE run_id=? ORDER BY rowid",(rid,)).fetchall()
+        return [self.operation(r[0]) for r in rows]
+
+    def events(self,rid):
+        result=[]
+        for row in self.store.db.execute("SELECT * FROM events WHERE run_id=? ORDER BY sequence",(rid,)).fetchall():
+            item=dict(row);item["payload"]=json.loads(item.pop("payload_json"))
+            result.append(item)
+        return result
 
     def artifacts(self,sid):
         results=[];versions={}
