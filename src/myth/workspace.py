@@ -10,12 +10,16 @@ from .platform.memory_store import SqliteMemoryStore
 
 
 class Workspace:
-    def __init__(self, runtime):
+    def __init__(self, runtime, *, intent_picker=None, resolution_controller=None):
         self.components = MythComponents.default()
         # Compatibility alias for v0.6-v0.8 callers.
         self.kernel = self.components
 
-        self.repository = SqliteWorkspaceRepository(runtime)
+        self.repository = SqliteWorkspaceRepository(
+            runtime,
+            intent_picker=intent_picker,
+            resolution_controller=resolution_controller,
+        )
         self.control = SqliteControlService(runtime, self.repository)
         self.memory = SqliteMemoryStore(runtime)
         self.personal = SqlitePersonalState(runtime)
