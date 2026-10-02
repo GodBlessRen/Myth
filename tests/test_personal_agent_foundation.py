@@ -51,7 +51,7 @@ class PersonalAgentFoundationTests(unittest.TestCase):
 
                 self.assertEqual(paused["state"],"PAUSED")
                 self.assertEqual(workspace.memory.list(), [])
-                self.assertEqual(runtime.store.list_runs(), [])
+                self.assertEqual(runtime.store.db.execute("SELECT COUNT(*) FROM runs").fetchone()[0], 0)
 
 
 if __name__ == "__main__":
