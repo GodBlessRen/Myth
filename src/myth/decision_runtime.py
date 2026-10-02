@@ -102,12 +102,24 @@ class DecisionRuntime:
         model_id: str,
         allowed_files: tuple[Path, ...] = (),
         max_output_tokens: int = 1024,
+        max_model_calls: int = 3,
+        max_tool_calls: int = 0,
+        write_bytes_limit: int | None = None,
         request_id: str | None = None,
     ) -> str:
-        """Create a Run whose first durable work item will be a model decision."""
+        """Create a Run with explicit model/tool budgets.
+
+        P2 callers keep the original proposal-only defaults. P3 AgentRuntime
+        opts into tool meters and a larger model-call budget without creating a
+        parallel accounting system.
+        """
 
         if not goal.strip():
             raise ValueError("goal must be non-empty")
+        if type(max_model_calls) is not int or max_model_calls <= 0:
+            raise ValueError("max_model_calls must be a positive integer")
+        if type(max_tool_calls) is not int or max_tool_calls < 0:
+            raise ValueError("max_tool_calls must be a non-negative integer")
         allowed = [str(path.resolve()) for path in allowed_files]
         entry = {
             "kind": "agent_goal",
@@ -118,20 +130,28 @@ class DecisionRuntime:
             "decision_schema": "step-decision-v1",
         }
         run_id = self._id("run")
-        # Input token limit is intentionally generous in P2. Per-call reservation
-        # uses serialized UTF-8 byte length as a conservative tokenizer-independent
-        # upper-bound proxy; settlement uses the provider's actual token count.
+        budgets = {
+            "model_calls": max_model_calls,
+            "input_tokens": 2_000_000,
+            "output_tokens": max_output_tokens * max_model_calls,
+        }
+        if max_tool_calls:
+            total_source_bytes = sum(
+                path.stat().st_size for path in allowed_files if path.exists() and path.is_file()
+            )
+            budgets["tool_calls"] = max_tool_calls
+            budgets["write_bytes"] = (
+                write_bytes_limit
+                if write_bytes_limit is not None
+                else max(1_000_000, total_source_bytes * max_tool_calls * 2)
+            )
         run_id, _ = self.store.create_run(
             run_id=run_id,
             request_id=request_id or self._id("req"),
             entry_digest=digest_json(entry),
             goal=goal,
             acceptance_version="agent-goal-v1",
-            budgets={
-                "model_calls": 3,
-                "input_tokens": 2_000_000,
-                "output_tokens": max_output_tokens * 3,
-            },
+            budgets=budgets,
         )
         return run_id
 
