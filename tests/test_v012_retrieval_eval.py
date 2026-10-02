@@ -7,6 +7,7 @@ import unittest
 from myth.platform.evaluation import (
     EvalObservation,
     EvalVerdict,
+    load_eval_cases,
     release_gate,
     summarize_observations,
 )
@@ -112,6 +113,14 @@ class RetrievalEvalTests(unittest.TestCase):
         self.assertEqual([view["resolution"] for view in views],["L0","L1","L2"])
         self.assertIn("chunks",views[1])
         self.assertIn("content",views[2])
+
+    def test_fixed_foundation_suite_is_machine_readable_and_unique(self):
+        path=Path(__file__).resolve().parents[1]/"evals"/"foundation-v1.json"
+        cases=load_eval_cases(path)
+        self.assertEqual(len(cases),8)
+        self.assertEqual(len({case.case_id for case in cases}),8)
+        self.assertTrue(any(case.safety_critical for case in cases))
+        self.assertTrue({"intent","retrieval","memory","information_resolution","project_search","runtime_safety"} <= {case.category for case in cases})
 
     def test_eval_report_preserves_unsupported_and_safety_evidence(self):
         report=summarize_observations("foundation",[
