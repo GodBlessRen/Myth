@@ -1,4 +1,4 @@
-# Myth v0.9 — Composable Runtime Map
+# Myth v0.10 — Composable Runtime Map
 
 Myth 不再把架构描述成 P0 → P1000 的固定层级。
 
@@ -53,6 +53,9 @@ Strategy 是 Coordination 的可替换策略，不是 Layer。
 
 | Strategy | 当前 |
 | --- | --- |
+| Intent Pick | exists |
+| Information Resolution | exists |
+| Information Gain | exists |
 | Direct | usable |
 | Agent Loop | usable |
 | Workflow | connected |
@@ -108,3 +111,16 @@ Outbound Adapters
 - `planned`：只定义边界。
 
 开发策略：**breadth first, depth later**。先让完整形状存在，再由测试、真实场景和瓶颈决定加深顺序。
+
+
+## Information concepts
+
+这些不是新的强制 Layer。
+
+| Concept | 当前 | 含义 |
+| --- | --- | --- |
+| Intent Pick | exists | 在 expensive reasoning 前选择 direct / local retrieval / deterministic / agent / ask-user 路径；尚未接管主请求链 |
+| Information Resolution | exists | L0 Abstract → L1 Overview → L2 Detail/Evidence；尚未物化多分辨率 Memory/Knowledge views |
+| Information Delta | exists | added / updated / removed / conflicted 的状态变化合同；尚未自动接入 Memory lifecycle |
+| Information Gain | exists | 边际任务价值及 gain-per-cost 合同；尚无校准 estimator |
+

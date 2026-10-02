@@ -4,7 +4,7 @@
 
 “先存在再优化”的意思是：即使未来有很多 Plan，也优先把长期边界、接口和最小行为铺出来，而不是把一个局部做到极深以后才考虑其他形态。
 
-## 当前基线：v0.9
+## 当前基线：v0.10
 
 已经可用：
 
@@ -17,6 +17,13 @@
 - typed Memory；
 - Runtime Inspector；
 - Goal / Trigger / Personal State 的持久化入口。
+
+新增信息决策合同：
+
+- Intent Pick：exists；尚未接管主请求；
+- Information Resolution：exists；尚未 materialize L0/L1/L2；
+- Information Delta：exists；尚未自动计算；
+- Information Gain：exists；尚无校准 estimator。
 
 已经存在但还需加深：
 
@@ -82,6 +89,17 @@ Trigger 只创建工作机会，不绕过 Control / Ticket。
 - optional AG-UI-style interaction adapter.
 
 协议只进入 Adapter；Core 不感知协议名。
+
+## Next — Intent / Information
+
+- Intent Pick 接入 Input/Trigger → Coordination；
+- 先走规则 / 本地检索 / Jev / 小模型等低成本路径，必要时再升级 LLM；
+- Knowledge/Memory 生成 L0/L1/L2 materialized views；
+- Resolution Controller 决定是否升级信息分辨率；
+- Information Delta 接入 Memory revision / conflict / supersede；
+- Information Gain estimator 必须通过固定 eval 校准；
+- 支持 expected gain per token / latency / tool cost；
+- 不把相似度直接当 Information Gain。
 
 ## Next — Context / Memory / Retrieval
 

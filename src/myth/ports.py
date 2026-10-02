@@ -81,3 +81,28 @@ class GoalRepository(Protocol):
     def create_goal(self, title: str, description: str = "") -> dict[str, Any]: ...
     def goal(self, goal_id: str) -> dict[str, Any]: ...
     def goals(self, *, include_archived: bool = False) -> list[dict[str, Any]]: ...
+
+
+
+class IntentPickPort(Protocol):
+    """Choose a processing path without assuming a large-model call."""
+
+    def pick(self, value: str, context: dict[str, Any]) -> Any: ...
+
+
+class InformationResolutionPort(Protocol):
+    """Expand/collapse one information source between L0/L1/L2 views."""
+
+    def resolve(self, source_ref: str, resolution: str) -> Any: ...
+
+
+class InformationGainPort(Protocol):
+    """Estimate marginal task value/cost; estimator semantics must be explicit."""
+
+    def estimate(self, request: dict[str, Any]) -> Any: ...
+
+
+class InformationDeltaPort(Protocol):
+    """Compare information states without becoming the source of truth."""
+
+    def delta(self, before: Any, after: Any) -> Any: ...

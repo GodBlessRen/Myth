@@ -2,7 +2,15 @@
 
 **Durable Runtime 打底、Agent Product 向上生长的本地 Agent 平台。**
 
-v0.9 把架构从“阶段/层级栈”重构为 **Core + Domains + Strategies + Ports/Adapters**：Goal / Run / Action / Attempt / Ticket / Receipt / Artifact / Verification 作为稳定 Core；Coordination / Control / Execution / Capability / State / Context / Memory / Personal State / Observability 作为正交 Domain；Decision / Routing / Workflow / Multi-Agent / Managed Agent / Personal Agent 作为可插拔 Strategy。新增 Goal / Trigger / Personal State 持久化入口，为长期 Personal Agent 留出真实边界；产品与新代码统一使用 Stop，旧 `abort` 仅作为升级兼容入口保留，不再作为产品术语。\n\nv0.8 把 Product Control 真正接入主链：Steer / Pause / Resume / Stop / Model Switch / Thinking Switch / Compact 全部持久化并在安全点生效；Memory 变成带 revision 的本地持久层；Agent 新增 project.search / diff.preview / git.status / git.diff 四个受 Capability Registry 约束的只读编码能力。右侧 Runtime Inspector 现在直接显示 Control revision、Tool Ticket、Operation state、Budget、Memory 与 Event 数量。\n\nv0.7 在 breadth-first 平台骨架上重做产品工作台：对话保持中心，Projects / Knowledge 退到上下文层，右侧 Runtime Inspector 用 Decision → Authority → Result → Completion 展示当前轮的真实执行事实。视觉系统改为暖纸张 / 墨色 / 克制橙色，并直接重构 tokens / layout / components，而不是继续追加 CSS override。\n\nv0.6 开始采用 breadth-first 路线：不再只把单一功能磨深，而是先固定完整平台骨架。这一阶段完成了 breadth-first 骨架铺设；v0.9 已把它重构为 Core / Domains / Strategies / Adapters 的可组合结构。
+v0.10 新增 **Intent Pick + Information Resolution / Delta / Gain** 的纯领域合同与 Ports。Intent Pick 用于在昂贵推理前选择 direct / local retrieval / deterministic / agent / ask-user 等路径；Information Resolution 恢复为“信息分辨率”原义：L0 Abstract → L1 Overview → L2 Detail/Evidence；Delta 描述信息状态变化；Gain 描述在已有信息上的边际任务价值。当前这些均只标记为 `exists`，尚未假装已经接管主请求、物化多分辨率视图或拥有校准 Gain estimator。
+
+v0.9 把架构从“阶段/层级栈”重构为 **Core + Domains + Strategies + Ports/Adapters**：Goal / Run / Action / Attempt / Ticket / Receipt / Artifact / Verification 作为稳定 Core；Coordination / Control / Execution / Capability / State / Context / Memory / Personal State / Observability 作为正交 Domain；Decision / Routing / Workflow / Multi-Agent / Managed Agent / Personal Agent 作为可插拔 Strategy。新增 Goal / Trigger / Personal State 持久化入口，为长期 Personal Agent 留出真实边界；产品与新代码统一使用 Stop，旧 `abort` 仅作为升级兼容入口保留，不再作为产品术语。
+
+v0.8 把 Product Control 真正接入主链：Steer / Pause / Resume / Stop / Model Switch / Thinking Switch / Compact 全部持久化并在安全点生效；Memory 变成带 revision 的本地持久层；Agent 新增 project.search / diff.preview / git.status / git.diff 四个受 Capability Registry 约束的只读编码能力。右侧 Runtime Inspector 现在直接显示 Control revision、Tool Ticket、Operation state、Budget、Memory 与 Event 数量。
+
+v0.7 在 breadth-first 平台骨架上重做产品工作台：对话保持中心，Projects / Knowledge 退到上下文层，右侧 Runtime Inspector 用 Decision → Authority → Result → Completion 展示当前轮的真实执行事实。视觉系统改为暖纸张 / 墨色 / 克制橙色，并直接重构 tokens / layout / components，而不是继续追加 CSS override。
+
+v0.6 开始采用 breadth-first 路线：不再只把单一功能磨深，而是先固定完整平台骨架。这一阶段完成了 breadth-first 骨架铺设；v0.9 已把它重构为 Core / Domains / Strategies / Adapters 的可组合结构。
 
 **Runtime** 视图直接展示 Core / Domains / Strategies / Adapters 与当前真正 executable 的 Capability；成熟度只描述实现程度，不授予执行权限。完整地图见 [PLATFORM_MAP](docs/PLATFORM_MAP.md)，命名与边界见 [Architecture Constitution](docs/ARCHITECTURE_CONSTITUTION.md)。
 
@@ -81,4 +89,4 @@ python -m unittest discover -s tests -v
 node --check src/myth/webui/app.js
 ```
 
-领域逻辑 → 应用用例 → 事务级端口 → SQLite/本地执行/模型适配器；Workspace 负责装配，HTTP 与页面负责交互。原有 P1/P2 底层账本尚未整体迁入端口。详见 [架构](docs/ARCHITECTURE.md)、[设计](docs/DESIGN.md)、[验证](docs/VALIDATION.md)、[规划](docs/ROADMAP.md) 与 [安全边界](SECURITY.md)。
+领域逻辑 → 应用用例 → 事务级端口 → SQLite/本地执行/模型适配器；Workspace 负责装配，HTTP 与页面负责交互。部分早期 Durable Runtime 实现仍在逐步迁移到统一 Ports。详见 [架构](docs/ARCHITECTURE.md)、[设计](docs/DESIGN.md)、[验证](docs/VALIDATION.md)、[规划](docs/ROADMAP.md) 与 [安全边界](SECURITY.md)。
