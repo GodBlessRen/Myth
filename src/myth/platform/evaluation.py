@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
+import json
+from pathlib import Path
 from typing import Any, Iterable
 
 
@@ -59,6 +61,29 @@ class EvalReport:
     @property
     def measured_total(self) -> int:
         return self.pass_count + self.fail_count + self.inconclusive_count
+
+
+
+def load_eval_cases(path: str | Path) -> tuple[EvalCase, ...]:
+    value=json.loads(Path(path).read_text(encoding="utf-8"))
+    if not isinstance(value,dict) or not isinstance(value.get("cases"),list):
+        raise ValueError("eval suite must contain a cases array")
+    cases=[]
+    seen=set()
+    for raw in value["cases"]:
+        if not isinstance(raw,dict):
+            raise ValueError("eval case must be an object")
+        case=EvalCase(
+            case_id=str(raw.get("case_id") or ""),
+            category=str(raw.get("category") or ""),
+            input=dict(raw.get("input") or {}),
+            expected=dict(raw.get("expected") or {}),
+            safety_critical=bool(raw.get("safety_critical",False)),
+        )
+        if case.case_id in seen:
+            raise ValueError(f"duplicate eval case: {case.case_id}")
+        seen.add(case.case_id);cases.append(case)
+    return tuple(cases)
 
 
 def summarize_observations(
