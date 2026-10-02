@@ -24,7 +24,11 @@ class ConversationWebService:
 
     def platform(self):
         with MythRuntime(self.root) as runtime:
-            return Workspace(runtime).components.snapshot()
+            workspace=Workspace(runtime)
+            value=workspace.components.snapshot()
+            value["active_policy"]=workspace.evolution.active("information_resolution")
+            value["policy_history"]=workspace.evolution.history("information_resolution",10)
+            return value
 
     def memories(self,query="",kind=None,limit=50):
         with MythRuntime(self.root) as runtime:

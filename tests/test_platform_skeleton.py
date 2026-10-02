@@ -26,7 +26,7 @@ class PlatformSkeletonTests(unittest.TestCase):
         adapter_ids = {item["id"] for item in snapshot["adapters"]}
 
         self.assertTrue({"goal","run","action","attempt","ticket","receipt","artifact","verification"} <= core_ids)
-        self.assertTrue({"coordination","control","execution","capability","state","context","memory","personal","observability"} <= domain_ids)
+        self.assertTrue({"coordination","control","execution","capability","state","context","memory","personal","observability","evaluation","evolution"} <= domain_ids)
         self.assertTrue({"direct","agent_loop","workflow","routing","multi_agent","managed_agent","personal_agent"} <= strategy_ids)
         self.assertTrue({"sqlite","local_files","ollama","openai","mcp","a2a"} <= adapter_ids)
 
@@ -43,6 +43,8 @@ class PlatformSkeletonTests(unittest.TestCase):
             for item in snapshot[group]:
                 self.assertIn(item["maturity"], allowed)
 
+        domains={item["id"]:item for item in snapshot["domains"]}
+        self.assertEqual(domains["evolution"]["maturity"], Maturity.USABLE.value)
         self.assertIn("project.read", snapshot["executable_capabilities"])
         self.assertNotIn("shell.exec", snapshot["executable_capabilities"])
         self.assertEqual(components.capabilities.get("shell.exec").state, CapabilityState.PLANNED)

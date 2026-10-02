@@ -4,7 +4,7 @@
 
 “先存在再优化”仍成立，但 v0.11 开始明确第二阶段原则：**已经存在的合同优先进入真实请求链、故障链和评测链；不继续用更多抽象掩盖未闭环的能力。**
 
-## 当前基线：v0.14
+## 当前基线：v0.15
 
 已经可用：
 
@@ -26,10 +26,11 @@
 信息决策当前真实状态：
 
 - Intent Pick：**connected**；strict arithmetic + conservative local_retrieval 已进入 Turn admission，未使用通用 LLM 分类器；
-- Information Resolution：**connected**；Rule Controller 在 admission 固定 L0/L1/L2，同一来源保持固定 digest；
-- Evaluation：**usable**；foundation-v1/v2/v3 + executable Runner + durable Eval Ledger + paired policy comparison 已接通；
+- Information Resolution：**connected + evolvable**；未来 Turn 从 durable Active Policy 读取 rule/fixed L0/L1/L2 config，并把 policy_id 固定进 snapshot；
+- Evaluation：**usable**；foundation-v1/v2/v3 + executable Runner + durable Eval Ledger + suite completeness 已接通；
+- Evolution：**usable**；Cost Model / Calibration Matrix / Candidate Registry / explicit Promote / Rollback 已接通，不自动发布；
 - Information Delta：exists；尚未自动计算 conflict / supersede / revision delta；
-- Information Gain：**connected（offline）**；paired fixed-case estimator 已接通，未进入 live admission；无 paired evidence 就保持 uncalibrated。
+- Information Gain：**connected（offline evidence）**；paired fixed-case estimator + cross-case calibration matrix 已接通；不把 similarity/confidence 当 Gain。
 
 已经存在但还需加深：
 
@@ -84,7 +85,25 @@ v0.14 已完成：
 - INCONCLUSIVE / UNSUPPORTED pairing 明确保持 uncalibrated；
 - `eval-history` / `eval-compare` / `gain` CLI。
 
-## Next — Gain calibration depth before live policy use
+## 已完成 — Evidence-driven Evolution Control Plane
+
+v0.15 已完成：
+
+- immutable versioned Cost Model Registry；
+- cross-case Gain Calibration Matrix；
+- durable Policy Candidate Registry；
+- partial-suite eval 与 release evidence 明确分离；
+- baseline/candidate 必须同 suite/version 且完整跑完 fixed suite；
+- Release Gate + Calibration Gate 后 Candidate 才进入 ELIGIBLE；
+- stale baseline Candidate 禁止覆盖新 Active Policy；
+- Promote / Rollback 只更新未来 Workspace/Turn 的 Active Policy pointer；
+- Turn snapshot 固定实际 information_resolution policy_id；
+- policy release history / revision 可审计；
+- CLI：cost-model-put/list、policy-create/evaluate/promote/rollback/status。
+
+## Next — Harden evolution evidence, then expand policy surface
+
+
 
 
 
@@ -158,11 +177,11 @@ Trigger 只创建工作机会，不绕过 Control / Ticket。跨项目 Memory �
 ## Next — Intent / Information
 
 - 在当前 deterministic/local_retrieval 之上，只增加可用 fixed eval 证明的 ask-user / local direct-answer 路径；
-- Resolution Controller 下一步从静态规则升级为 eval-calibrated policy，但必须保留 fallback；
+- 扩大可发布 policy surface：先 Intent Pick / Resolution，再考虑 Routing；每个 domain 单独 Active pointer 与 rollback；
 - Information Delta 接入 Memory revision / conflict / supersede；
 - 扩大 paired eval 到 ordinary QA / local retrieval / multi-step read / artifact / recovery；
-- 为 token / latency / tool / context 成本建立**显式、版本化** cost model，而不是硬编码权重；
-- 只有跨足够 fixed cases 稳定后，才允许 Gain 影响 Resolution Controller；
+- 扩充 Cost Model meter 观测（真实 token/latency/tool/context），保留版本化权重；
+- 增加更大固定 suite、重复运行稳定性、置信区间与噪声检测，再允许更激进的 adaptive policy；
 - 不把 similarity、confidence 或 relevance score 直接命名为 Information Gain。
 
 ## Next — Interop
@@ -175,15 +194,17 @@ Trigger 只创建工作机会，不绕过 Control / Ticket。跨项目 Memory �
 
 协议只进入 Adapter；Core 不感知协议名。
 
-## Next — Verification / Evolution
+## Next — Verification / Evolution hardening
 
 - conversation acceptance profiles；
 - replay as derived data；
-- quality/safety gate before cost optimization；
-- candidate policy registry；
-- explicit promote / rollback。
+- repeated-run variance / confidence evidence；
+- candidate supersede / archive；
+- promotion approval identity；
+- release bundle export/import；
+- multi-domain policy dependency checks。
 
-Evolution 永远不能直接修改正在运行的 Run。
+Evolution 永远不能直接修改正在运行的 Run/Turn；发布只影响未来 admission。
 
 ## Long horizon
 

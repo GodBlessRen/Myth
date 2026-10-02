@@ -16,6 +16,22 @@ def _print(value: object) -> None:
     print(json.dumps(value, ensure_ascii=False, indent=2, default=str))
 
 
+def _weights(values):
+    result={}
+    for raw in values:
+        if "=" not in raw:
+            raise SystemExit("weight must use meter=value")
+        meter,value=raw.split("=",1)
+        meter=meter.strip()
+        if not meter:
+            raise SystemExit("weight meter cannot be empty")
+        try:
+            result[meter]=float(value)
+        except ValueError as exc:
+            raise SystemExit("weight value must be numeric") from exc
+    return result
+
+
 def _provider_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--provider", choices=["scripted", "ollama", "pi-openai", "openai"], required=True)
     parser.add_argument("--model", required=True)
@@ -110,6 +126,34 @@ def build_parser() -> argparse.ArgumentParser:
     gain.add_argument("--to-resolution", choices=["L0","L1","L2"], required=True)
     gain.add_argument("--weight", action="append", default=[], help="declared cost weight as meter=value")
 
+    cost_put = sub.add_parser("cost-model-put", help="register one immutable versioned cost model")
+    cost_put.add_argument("cost_model_id")
+    cost_put.add_argument("--version", type=int, required=True)
+    cost_put.add_argument("--weight", action="append", default=[], required=True, help="meter=value")
+    cost_put.add_argument("--description", default="")
+
+    sub.add_parser("cost-model-list", help="list registered cost models")
+
+    policy_create = sub.add_parser("policy-create", help="create an information-resolution policy candidate")
+    policy_create.add_argument("--candidate-id")
+    policy_create.add_argument("--mode", choices=["rule","fixed"], required=True)
+    policy_create.add_argument("--resolution", choices=["L0","L1","L2"])
+    policy_create.add_argument("--change", action="append", default=[], required=True)
+
+    policy_eval = sub.add_parser("policy-evaluate", help="run baseline/candidate eval and attach calibration evidence")
+    policy_eval.add_argument("candidate_id")
+    policy_eval.add_argument("--suite", default="evals/foundation-v3.json")
+    policy_eval.add_argument("--cost-model-id")
+    policy_eval.add_argument("--min-pairs", type=int, default=1)
+
+    policy_promote = sub.add_parser("policy-promote", help="explicitly promote an eligible policy for future turns")
+    policy_promote.add_argument("candidate_id")
+
+    policy_rollback = sub.add_parser("policy-rollback", help="rollback active information-resolution policy for future turns")
+    policy_rollback.add_argument("--reason", default="explicit rollback")
+
+    sub.add_parser("policy-status", help="show active policy, candidates and promotion history")
+
     web = sub.add_parser("web", help="start the local Myth Agent workspace")
     web.add_argument("--host", default="127.0.0.1")
     web.add_argument("--port", type=int, default=8765)
@@ -176,18 +220,7 @@ def main() -> None:
         from .platform.evaluation_store import SqliteEvaluationLedger
         from .strategies import PairedEvalGainEstimator
 
-        weights={}
-        for raw in args.weight:
-            if "=" not in raw:
-                raise SystemExit("--weight must use meter=value")
-            meter,value=raw.split("=",1)
-            meter=meter.strip()
-            if not meter:
-                raise SystemExit("--weight meter cannot be empty")
-            try:
-                weights[meter]=float(value)
-            except ValueError as exc:
-                raise SystemExit("--weight value must be numeric") from exc
+        weights=_weights(args.weight)
         with MythRuntime(args.root) as runtime:
             pairs=SqliteEvaluationLedger(runtime).paired_comparisons(
                 args.baseline_eval_run_id,
@@ -205,6 +238,88 @@ def main() -> None:
             cost_weights=weights or None,
         )
         _print(estimate.serializable())
+        return
+    if args.command == "cost-model-put":
+        from .platform.cost_model import CostModel, SqliteCostModelRegistry
+        model=CostModel(
+            args.cost_model_id,
+            args.version,
+            _weights(args.weight),
+            args.description,
+        )
+        with MythRuntime(args.root) as runtime:
+            _print(SqliteCostModelRegistry(runtime).put(model))
+        return
+    if args.command == "cost-model-list":
+        from .platform.cost_model import SqliteCostModelRegistry
+        with MythRuntime(args.root) as runtime:
+            _print(SqliteCostModelRegistry(runtime).list())
+        return
+    if args.command == "policy-create":
+        from .platform.evolution_store import SqliteEvolutionControl
+        config={"mode":args.mode}
+        if args.mode=="fixed":
+            if not args.resolution:
+                raise SystemExit("--resolution is required for fixed policy")
+            config["resolution"]=args.resolution
+        elif args.resolution:
+            raise SystemExit("--resolution only applies to fixed policy")
+        with MythRuntime(args.root) as runtime:
+            _print(SqliteEvolutionControl(runtime).create_candidate(
+                config=config,
+                changes=args.change,
+                candidate_id=args.candidate_id,
+            ))
+        return
+    if args.command == "policy-evaluate":
+        from .evaluation_runner import run_eval_suite
+        from .platform.evaluation_store import SqliteEvaluationLedger
+        from .platform.evolution_store import SqliteEvolutionControl
+
+        with MythRuntime(args.root) as runtime:
+            evolution=SqliteEvolutionControl(runtime)
+            candidate=evolution.candidate(args.candidate_id)
+            baseline=evolution.policy(candidate["baseline_policy_id"])
+        baseline_result=run_eval_suite(
+            args.suite,
+            policy_id=baseline["policy_id"],
+            policy_config=baseline["config"],
+        )
+        candidate_result=run_eval_suite(
+            args.suite,
+            policy_id=candidate["candidate_id"],
+            policy_config=candidate["config"],
+        )
+        with MythRuntime(args.root) as runtime:
+            ledger=SqliteEvaluationLedger(runtime)
+            baseline_saved=ledger.record(baseline_result,policy_id=baseline["policy_id"])
+            candidate_saved=ledger.record(candidate_result,policy_id=candidate["candidate_id"])
+            value=SqliteEvolutionControl(runtime).attach_evaluation(
+                candidate["candidate_id"],
+                baseline_eval_run_id=baseline_saved["eval_run_id"],
+                candidate_eval_run_id=candidate_saved["eval_run_id"],
+                cost_model_id=args.cost_model_id,
+                min_pairs=args.min_pairs,
+            )
+        _print(value)
+        return
+    if args.command == "policy-promote":
+        from .platform.evolution_store import SqliteEvolutionControl
+        with MythRuntime(args.root) as runtime:
+            _print(SqliteEvolutionControl(runtime).promote(args.candidate_id))
+        return
+    if args.command == "policy-rollback":
+        from .platform.evolution_store import SqliteEvolutionControl
+        with MythRuntime(args.root) as runtime:
+            _print(SqliteEvolutionControl(runtime).rollback(reason=args.reason))
+        return
+    if args.command == "policy-status":
+        from .platform.evolution_store import SqliteEvolutionControl
+        with MythRuntime(args.root) as runtime:
+            evolution=SqliteEvolutionControl(runtime)
+            value=evolution.status()
+            value["candidates"]=evolution.candidates()
+            _print(value)
         return
     if args.command == "web":
         from .web import serve

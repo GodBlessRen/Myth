@@ -2,6 +2,8 @@
 
 **Durable Runtime 打底、Agent Product 向上生长的本地 Agent 平台。**
 
+v0.15 完成 **Evidence-driven Evolution Control Plane**：新增不可变版本化 Cost Model Registry、跨 case Gain Calibration Matrix、durable Policy Candidate Registry，以及显式 Promote / Rollback。Candidate 必须用同一 suite/version 的**完整** baseline/candidate 评测通过 Release Gate 与 Calibration Gate；局部 case 只能研究，不能发布。Active Policy 是持久指针，只在未来 Workspace/Turn admission 读取，并把 policy_id 固定进 Turn Snapshot；已运行/已创建 Turn 永不被后续 Promote 或 Rollback 改写。
+
 v0.14 把 **Information Gain** 从概念推进到可审计的离线校准链：Eval 结果可写入本地 SQLite Ledger，baseline/candidate 必须在同一 suite/version、同一 case/comparison key 上成对比较；质量增益只来自真实 Verdict 差异，成本默认保留为 token/latency/tool/context 等向量，只有调用者显式声明非负权重时才计算 `gain_per_cost`。策略通过 Workspace composition root 注入，候选 Resolution policy 可离线评测但不会修改生产默认。新增 `foundation-v3` 的 resolution marker case，以及 `eval-history` / `eval-compare` / `gain` CLI。
 
 v0.13 把 **Eval + Intent/Resolution** 真正接成闭环：Turn admission 先固定 retrieval evidence，再做保守 Intent Pick；严格算术走 deterministic，显式/强匹配本地资料走 `local_retrieval`，其余回退 Agent Loop。`RuleResolutionController` 同时固定 L0/L1/L2，并把 route / resolution / retrieval report 写入 Turn Snapshot、Event 和 Context Report。新增可执行 `myth eval`，默认运行版本化 `foundation-v2`；评测 Runner 调用真实 Myth 组件，不自动 promote policy，Information Gain 仍保持未校准。
@@ -89,26 +91,37 @@ myth --root . agent --provider scripted --model exact-patch-demo --allow-file ex
 
 OpenAI Responses / Pi OAuth 适配器保留，远端凭据通过进程环境或 Pi 管理。本轮只实测本地 Ollama，未验证这两个远端入口。选择远端模型会向其发送选定的对话与资料。
 
-## 固定评测与 Information Gain
+## 固定评测、Information Gain 与 Policy Evolution
 
 ```bash
-# 当前生产默认策略
-myth --root . eval --record --policy-id production-v0.14
+# 1) 注册显式、不可变、版本化成本模型
+myth --root . cost-model-put context-v1 --version 1 \
+  --weight context_chars=0.001 --weight tool_calls=2 \
+  --description "explicit local efficiency weights"
 
-# 同一固定 case 做离线策略对照，不修改生产策略
-myth --root . eval --case resolution-marker-presence --resolution-policy L0 --policy-id resolution-l0 --record
-myth --root . eval --case resolution-marker-presence --resolution-policy L1 --policy-id resolution-l1 --record
+# 2) 创建 Candidate；当前 v0.15 只开放 information_resolution policy
+myth --root . policy-create --candidate-id resolution-rule-v2 \
+  --mode rule --change "version rule policy through evidence release"
 
-# 查看持久评测、做成对比较
-myth --root . eval-history
-myth --root . eval-compare <baseline_eval_run_id> <candidate_eval_run_id>
+# 或创建固定 L1 候选
+myth --root . policy-create --candidate-id resolution-fixed-l1 \
+  --mode fixed --resolution L1 --change "force local information to L1"
 
-# 只有显式声明成本权重才计算 gain-per-cost
-myth --root . gain <baseline_eval_run_id> <candidate_eval_run_id> resolution-marker-presence \
-  --from-resolution L0 --to-resolution L1 --weight context_chars=0.001
+# 3) 自动跑完整 baseline/candidate 固定 suite 并绑定 paired calibration
+myth --root . policy-evaluate resolution-rule-v2 \
+  --suite evals/foundation-v3.json --cost-model-id context-v1 --min-pairs 1
+
+# 4) 只有 ELIGIBLE Candidate 才能显式发布
+myth --root . policy-promote resolution-rule-v2
+
+# 5) 查看 Active Policy / Candidate / release history
+myth --root . policy-status
+
+# 6) 显式回滚；只影响未来 Turn
+myth --root . policy-rollback --reason "manual safety rollback"
 ```
 
-Eval Runner 在隔离临时 Runtime 中调用真实组件；`foundation-v1/v2` 保留历史基线，v0.14 默认 `foundation-v3`。Eval Ledger 持久化 suite/version/policy/Observation。Information Gain 只接受同 case 的 paired evidence；INCONCLUSIVE/UNSUPPORTED 明确保持未校准。Release Gate 与 Gain 都不自动修改或发布策略。
+独立研究仍可使用 `eval` / `eval-history` / `eval-compare` / `gain`。但 **partial suite 永远不能作为 Promote 证据**。发布必须满足：同一 suite/version、完整 baseline/candidate case 集、Candidate Release Gate 通过、paired calibration 无固定 case 质量回归、baseline 仍然是当前 Active Policy。Promote 只更新 durable Active Policy pointer；每个新 Turn 把实际 policy_id 固定进 snapshot，因此已存在 Turn 不会被后续演进静默改变。
 
 ## 验证与架构
 

@@ -70,13 +70,13 @@ def default_strategies() -> StrategyRegistry:
             "information_resolution",
             "Information Resolution",
             StrategyState.CONNECTED,
-            "Rule controller is connected at Turn admission: Agent defaults to L0, local retrieval uses L1, and explicit/deep source requests or attachments use L2 under one fixed digest.",
+            "Turn admission resolves a durable active rule/fixed policy into L0/L1/L2 and freezes the policy identity; explicit promotion/rollback affects future Turns only.",
         ),
         StrategySpec(
             "information_gain",
             "Information Gain",
             StrategyState.CONNECTED,
-            "Paired fixed-case eval can estimate observed quality delta and caller-weighted gain-per-cost offline; it does not yet steer live admission.",
+            "Paired fixed-case eval plus cross-case calibration can estimate observed quality delta and explicit-cost gain-per-cost; evidence gates policy release but never auto-promotes.",
         ),
         StrategySpec(
             "direct",

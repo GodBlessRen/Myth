@@ -19,6 +19,9 @@ CREATE TABLE IF NOT EXISTS evaluation_runs(
     report_json TEXT NOT NULL,
     release_gate_json TEXT NOT NULL,
     elapsed_ms REAL,
+    suite_case_count INTEGER,
+    selected_case_count INTEGER,
+    complete_suite INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE IF NOT EXISTS evaluation_observations(
@@ -40,6 +43,14 @@ class SqliteEvaluationLedger:
         self.runtime=runtime
         self.store=runtime.store
         self.store.db.executescript(SCHEMA)
+        columns={row["name"] for row in self.store.db.execute("PRAGMA table_info(evaluation_runs)")}
+        for name,ddl in (
+            ("suite_case_count","INTEGER"),
+            ("selected_case_count","INTEGER"),
+            ("complete_suite","INTEGER NOT NULL DEFAULT 0"),
+        ):
+            if name not in columns:
+                self.store.db.execute(f"ALTER TABLE evaluation_runs ADD COLUMN {name} {ddl}")
 
     @staticmethod
     def _id() -> str:
@@ -62,8 +73,8 @@ class SqliteEvaluationLedger:
         eval_run_id=self._id()
         with self.store.tx() as db:
             db.execute(
-                "INSERT INTO evaluation_runs(eval_run_id,suite_id,suite_version,policy_id,report_json,release_gate_json,elapsed_ms) "
-                "VALUES (?,?,?,?,?,?,?)",
+                "INSERT INTO evaluation_runs(eval_run_id,suite_id,suite_version,policy_id,report_json,release_gate_json,elapsed_ms,"
+                "suite_case_count,selected_case_count,complete_suite) VALUES (?,?,?,?,?,?,?,?,?,?)",
                 (
                     eval_run_id,
                     suite_id,
@@ -72,6 +83,9 @@ class SqliteEvaluationLedger:
                     canonical_json(result.get("report") or {}),
                     canonical_json(result.get("release_gate") or {}),
                     float(result.get("elapsed_ms") or 0.0),
+                    int(result.get("suite_case_count") or len(observations)),
+                    int(result.get("selected_case_count") or len(observations)),
+                    int(bool(result.get("complete_suite",False))),
                 ),
             )
             for item in observations:

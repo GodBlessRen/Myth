@@ -27,8 +27,7 @@ from .platform.evaluation import (
     summarize_observations,
 )
 from .runtime import MythRuntime
-from .domains.information import InformationResolution
-from .strategies import ResolutionPlan, RuleIntentPicker, RuleResolutionController
+from .strategies import RuleIntentPicker, RuleResolutionController, resolution_controller_from_config
 from .workspace import Workspace
 
 
@@ -40,30 +39,6 @@ _SETTINGS = {
     "max_output_tokens": 512,
     "thinking": False,
 }
-
-
-class FixedResolutionController:
-    """Offline eval-only policy. Production defaults are never mutated."""
-
-    strategy_id = "information_resolution"
-
-    def __init__(self, resolution: InformationResolution):
-        self.resolution=resolution
-
-    def choose(self, text, *, route, sources, attached_document_ids=()):
-        if not sources:
-            return ResolutionPlan(InformationResolution.L0,0,0,"no admitted local source is available")
-        chars={
-            InformationResolution.L0:500,
-            InformationResolution.L1:1800,
-            InformationResolution.L2:6000,
-        }[self.resolution]
-        return ResolutionPlan(
-            self.resolution,
-            max(5,len(attached_document_ids)),
-            chars,
-            f"offline eval fixed resolution={self.resolution.value}",
-        )
 
 
 class FoundationEvalRunner:
@@ -89,10 +64,17 @@ class FoundationEvalRunner:
         *,
         policy_id: str = "production-default",
         resolution_policy: str = "default",
+        policy_config: dict | None = None,
     ) -> "FoundationEvalRunner":
-        controller=None
-        if resolution_policy != "default":
-            controller=FixedResolutionController(InformationResolution(resolution_policy.upper()))
+        if policy_config is not None:
+            controller=resolution_controller_from_config(policy_config)
+        elif resolution_policy != "default":
+            controller=resolution_controller_from_config({
+                "mode":"fixed",
+                "resolution":resolution_policy.upper(),
+            })
+        else:
+            controller=RuleResolutionController()
         return cls(
             load_eval_suite(path),
             policy_id=policy_id,
@@ -104,6 +86,7 @@ class FoundationEvalRunner:
             runtime,
             intent_picker=self.intent_picker,
             resolution_controller=self.resolution_controller,
+            resolution_policy_id=self.policy_id,
         )
 
     def run(self, case_ids: Iterable[str] | None = None) -> dict:
@@ -121,6 +104,9 @@ class FoundationEvalRunner:
             "version":self.suite.version,
             "principle":self.suite.principle,
             "policy_id":self.policy_id,
+            "suite_case_count":len(self.suite.cases),
+            "selected_case_count":len(observations),
+            "complete_suite":len(observations)==len(self.suite.cases),
             "observations":[self._observation_dict(item) for item in observations],
             "report":asdict(report),
             "release_gate":{"passed":gate_ok,"reason":gate_reason},
@@ -493,9 +479,11 @@ def run_eval_suite(
     *,
     policy_id: str = "production-default",
     resolution_policy: str = "default",
+    policy_config: dict | None = None,
 ) -> dict:
     return FoundationEvalRunner.from_path(
         path,
         policy_id=policy_id,
         resolution_policy=resolution_policy,
+        policy_config=policy_config,
     ).run(case_ids)
