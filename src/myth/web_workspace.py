@@ -120,6 +120,8 @@ class ConversationWebService:
                 memory_records=memory,
             )
             workspace.control.ensure(turn["run_id"],turn["settings"])
+            if value.get("goal_id"):
+                workspace.personal.bind_run(value["goal_id"],turn["run_id"])
         if turn["status"]=="RUNNING":self._spawn(turn["run_id"])
         return {"run_id":turn["run_id"],"session_id":sid}
 
@@ -187,6 +189,10 @@ class ConversationWebService:
     def goal_triggers(self,goal_id):
         with MythRuntime(self.root) as runtime:
             return Workspace(runtime).personal.triggers(goal_id)
+
+    def goal_runs(self,goal_id):
+        with MythRuntime(self.root) as runtime:
+            return Workspace(runtime).personal.runs(goal_id)
 
     def add_goal_trigger(self,goal_id,value):
         with MythRuntime(self.root) as runtime:
@@ -258,6 +264,8 @@ class ConversationWebService:
             return {"goals":self.goals(query.get("archived",["0"])[0]=="1")}
         if len(parts)==3 and parts[0]=="goals" and parts[2]=="triggers":
             return {"triggers":self.goal_triggers(parts[1])}
+        if len(parts)==3 and parts[0]=="goals" and parts[2]=="runs":
+            return {"runs":self.goal_runs(parts[1])}
         if parts==["personal-state"]:
             return {"state":self.personal_state()}
         if parts==["sessions"]:
