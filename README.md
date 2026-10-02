@@ -41,7 +41,7 @@ Long-term Goal
 2. **Runtime observability**
    - 第三栏不是可删除的 Debug Panel。
    - 每个有意义的 Run 必须可观察：
-     Goal / Execution Flow / Trajectory / Tokens / Context / Tools / Control / Budget。
+     Goal / Execution Flow / Trajectory / Tokens / Cache Hit / Context / Tools / Control / Budget。
 
 3. **Authority boundary**
    - Goal / Memory / Prompt / Model output 都不能扩大权限。
@@ -100,6 +100,7 @@ History / Context | Conversation / Task | Runtime Observatory
 - Execution Flow；
 - Trajectory；
 - Token Window；
+- Prompt Cache Hit；
 - Context Window；
 - Tool Calls；
 - Control；
