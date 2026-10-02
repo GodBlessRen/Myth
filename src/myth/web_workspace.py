@@ -9,6 +9,7 @@ from .workspace import Workspace
 from .providers import create_provider
 from .providers.ollama import OllamaProvider
 from .platform.control import ControlCommand
+from .strategies import RuleIntentPicker
 
 
 class ConversationWebService:
@@ -102,14 +103,16 @@ class ConversationWebService:
 
     def send(self,sid,value):
         settings=self._use("settings")
-        check=self.connection(settings)
-        if not check["ready"]:
-            raise ValueError("模型服务未连接，请在设置中检查模型连接。")
-        if settings["provider"]=="ollama" and settings["model"] not in check["details"].get("models",[]):
-            raise ValueError("所选模型未安装，请选择已有 Ollama 模型。")
-
         text=value.get("text")
         goal_id=value.get("goal_id") or None
+        pick=RuleIntentPicker().pick(str(text or ""), {})
+        if pick.route.value!="deterministic":
+            check=self.connection(settings)
+            if not check["ready"]:
+                raise ValueError("模型服务未连接，请在设置中检查模型连接。")
+            if settings["provider"]=="ollama" and settings["model"] not in check["details"].get("models",[]):
+                raise ValueError("所选模型未安装，请选择已有 Ollama 模型。")
+
         with MythRuntime(self.root) as runtime:
             workspace=Workspace(runtime)
             # Admission validates the long-lived Goal before any Run/Turn exists.
