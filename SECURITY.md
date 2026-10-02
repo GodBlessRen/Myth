@@ -21,8 +21,12 @@ Myth is local-first. Remote model providers are explicit choices; tool authority
 
 - **Ollama:** requests go to the configured local endpoint. Use this for content that must remain local.
 - **OpenAI API key:** `OPENAI_API_KEY` is read at call time and is never persisted by Myth.
-- **Pi OAuth / ChatGPT subscription:** Myth does not read or write Pi's `auth.json`. It asks Pi for a refreshed bearer token via `pi auth print-bearer-token`; Pi remains the credential owner.
-- Bearer/API tokens are used only for the outbound request and are not inserted into ModelResult, durable receipts, object-store artifacts, events or Web responses.
+- **Sign in with ChatGPT:** Myth owns its OAuth lifecycle directly. It uses authorization-code + PKCE S256, fresh state + OIDC nonce, an exact `127.0.0.1` loopback callback, OpenAI's OSS dynamic client registration, and ID-token signature/issuer/audience/expiry/nonce verification.
+- OAuth access/refresh/ID tokens are stored only in an explicitly selected secure OS credential backend. Myth has **no plaintext credential-file fallback**; if a secure backend is unavailable, OAuth fails closed.
+- `.runtime/oauth/chatgpt.json` stores only non-secret registration/profile metadata (issued client id, subject/email/name, stable host id). It must never contain access tokens, refresh tokens, ID tokens, authorization codes or PKCE verifiers.
+- Refresh-token rotation is serialized. Terminal refresh rejection requires reauthentication; temporary transport failures do not silently destroy otherwise valid credentials.
+- Logout attempts remote refresh-token revocation and always clears local credentials; if remote revocation cannot be confirmed, the UI/CLI reports that uncertainty.
+- Bearer/API tokens are used only for outbound requests and are not inserted into Runtime SQLite, ModelResult/raw persistence, durable receipts, object-store artifacts, events, traces, Web JSON or local request logs.
 - A remote provider receives the selected model request content by definition.
 
 ## Agent authority boundary
@@ -42,6 +46,7 @@ In exact mode, request_completion is accepted only after the independent verifie
 ## Web boundary
 
 - `myth web` accepts loopback hosts only: `127.0.0.1`, `localhost`, or `::1`.
+- ChatGPT OAuth callbacks accept only the local callback path and validate Host + OAuth state before consuming an authorization code. Web request logging strips query strings so callback code/state are never printed.
 - Host/port validation rejects DNS-rebound hostnames. Mutations require JSON and a matching Origin when supplied. CSP, frame denial and text-only DOM rendering constrain the browser surface.
 - There is no CORS, credential, unrestricted file or shell endpoint. Project file listings use the explicitly configured root.
 - The service is unauthenticated and trusts the local OS user. A hostile local process can still invoke it; loopback and Origin checks are not a multi-user authentication system.
