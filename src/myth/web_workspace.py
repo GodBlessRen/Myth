@@ -122,8 +122,9 @@ class ConversationWebService:
             # Admission validates the long-lived Goal before any Run/Turn exists.
             # Request identity also binds goal_id so idempotent retries cannot
             # silently attach the same request to a different Goal.
+            goal_context=None
             if goal_id:
-                workspace.personal.goal(goal_id)
+                goal_context=workspace.personal.goal_view(goal_id)
             session=workspace.repository.session(sid)
             memory=workspace.memory.search(
                 str(text or ""),
@@ -138,10 +139,18 @@ class ConversationWebService:
                 value.get("document_ids"),
                 memory_records=memory,
                 goal_id=goal_id,
+                goal_context=goal_context,
             )
             workspace.control.ensure(turn["run_id"],turn["settings"])
             if goal_id:
                 workspace.personal.bind_run(goal_id,turn["run_id"])
+                workspace.personal.checkpoint_run(
+                    goal_id,
+                    turn["run_id"],
+                    status="RUNNING",
+                    summary="A new admitted Turn has started for this Goal.",
+                    next_action="Let the current Turn reach a durable checkpoint.",
+                )
         if turn["status"]=="RUNNING":self._spawn(turn["run_id"])
         return {"run_id":turn["run_id"],"session_id":sid}
 
@@ -197,7 +206,7 @@ class ConversationWebService:
 
     def goals(self,include_archived=False):
         with MythRuntime(self.root) as runtime:
-            return Workspace(runtime).personal.goals(include_archived=include_archived)
+            return Workspace(runtime).personal.goal_views(include_archived=include_archived)
 
     def create_goal(self,value):
         with MythRuntime(self.root) as runtime:
@@ -213,6 +222,20 @@ class ConversationWebService:
     def goal_runs(self,goal_id):
         with MythRuntime(self.root) as runtime:
             return Workspace(runtime).personal.runs(goal_id)
+
+    def goal(self,goal_id):
+        with MythRuntime(self.root) as runtime:
+            return Workspace(runtime).personal.goal_view(goal_id)
+
+    def update_goal_work(self,goal_id,value):
+        with MythRuntime(self.root) as runtime:
+            return Workspace(runtime).personal.update_work_state(
+                goal_id,
+                current_state=value.get("current_state"),
+                next_action=value.get("next_action"),
+                waiting_for=value.get("waiting_for"),
+                progress_note=value.get("progress_note"),
+            )
 
     def add_goal_trigger(self,goal_id,value):
         with MythRuntime(self.root) as runtime:
@@ -282,6 +305,8 @@ class ConversationWebService:
             )}
         if parts==["goals"]:
             return {"goals":self.goals(query.get("archived",["0"])[0]=="1")}
+        if len(parts)==2 and parts[0]=="goals":
+            return self.goal(parts[1])
         if len(parts)==3 and parts[0]=="goals" and parts[2]=="triggers":
             return {"triggers":self.goal_triggers(parts[1])}
         if len(parts)==3 and parts[0]=="goals" and parts[2]=="runs":
@@ -309,6 +334,8 @@ class ConversationWebService:
         if parts==["goals"]:return self.create_goal(value)
         if len(parts)==3 and parts[0]=="goals" and parts[2]=="triggers":
             return self.add_goal_trigger(parts[1],value)
+        if len(parts)==3 and parts[0]=="goals" and parts[2]=="work":
+            return self.update_goal_work(parts[1],value)
         if parts==["personal-state"]:return self.set_personal_state(value)
         if len(parts)==3 and parts[0]=="memories" and parts[2]=="revoke":
             return self.revoke_memory(parts[1])
