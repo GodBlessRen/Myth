@@ -598,7 +598,7 @@ class ConversationWebService:
             return Workspace(runtime).sota_route.view(run_id)
 
     # 列出最近已验收路径；用于 Runtime/诊断，不改变活动策略。
-    def sota_action_paths(self, limit=50):
+    def sota_routes(self, limit=50):
         with MythRuntime(self.root) as runtime:
             return {"paths": Workspace(runtime).sota_route.list(limit)}
 
@@ -833,11 +833,11 @@ class ConversationWebService:
             }
         if parts == ["delivery", "metrics"]:
             return self.delivery_metrics()
-        if parts == ["best-paths"]:
-            return self.sota_action_paths(int(query.get("limit", ["50"])[0]))
+        if parts == ["sota-routes"]:
+            return self.sota_routes(int(query.get("limit", ["50"])[0]))
         if len(parts) == 3 and parts[0] == "turns" and parts[2] == "delivery":
             return self.turn_delivery(parts[1])
-        if len(parts) == 3 and parts[0] == "turns" and parts[2] == "best-path":
+        if len(parts) == 3 and parts[0] == "turns" and parts[2] == "sota-route":
             return self.turn_sota_route(parts[1])
         if len(parts) == 2 and parts[0] == "goals":
             return self.goal(parts[1])
