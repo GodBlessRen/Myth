@@ -51,7 +51,7 @@ def _read_bytes_stable(path: Path, attempts: int = 8) -> bytes:
     last_error = None
     for index in range(max(1, int(attempts))):
         try:
-            return _read_bytes_stable(path)
+            return path.read_bytes()
         except PermissionError as exc:
             last_error = exc
             if index + 1 < attempts:
