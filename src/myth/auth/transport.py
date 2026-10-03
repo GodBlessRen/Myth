@@ -3,6 +3,8 @@
 """
 
 from urllib import request
+from http.client import HTTPConnection, HTTPSConnection
+from ..network_recovery import ConnectionNotDispatched, is_connection_failure
 
 # 凭据响应的内存上限，单位字节；流式正文另按事件累计检查。
 MAX_RESPONSE_BYTES = 8 * 1024 * 1024
@@ -25,9 +27,49 @@ class _NoRedirect(request.HTTPRedirectHandler):
         return None
 
 
+# 仅连接阶段失败可发布零派发证据；connect 返回后 send/getresponse 的同名错误保持原类型。
+class _ConnectEvidence:
+    # 复用标准库代理隧道/TLS 校验；此时尚未发送供应商的推理/认证 HTTP 正文。
+    def connect(self):
+        try:
+            return super().connect()
+        except OSError as exc:
+            if is_connection_failure(exc):
+                raise ConnectionNotDispatched() from None
+            raise
+
+
+# 只在标准 HTTP 连接的 connect 阶段添加证据；正文发送/响应读取仍由标准库实现。
+class _EvidenceHTTPConnection(_ConnectEvidence, HTTPConnection):
+    pass
+
+
+# HTTPS 保留标准库证书验证和代理 CONNECT；TLS 成功前不会发送目标模型 HTTP 正文。
+class _EvidenceHTTPSConnection(_ConnectEvidence, HTTPSConnection):
+    pass
+
+
+# 在 urllib 的公共 do_open 扩展点替换连接类，不复制 TLS 参数或修改全局 opener。
+class _ConnectionEvidenceHandler:
+    # inherited http_open/https_open 传入各版本自己的 TLS 参数，保持 Python 3.12/3.13 兼容。
+    def do_open(self, http_class, req, **connection_args):
+        tracked = {HTTPConnection: _EvidenceHTTPConnection, HTTPSConnection: _EvidenceHTTPSConnection}.get(http_class, http_class)
+        return super().do_open(tracked, req, **connection_args)
+
+
+# 标准 HTTP handler 的连接证据装配，代理和请求头语义保持不变。
+class _EvidenceHTTPHandler(_ConnectionEvidenceHandler, request.HTTPHandler):
+    pass
+
+
+# 标准 HTTPS handler 的连接证据装配，证书校验仍由 HTTPSHandler/HTTPSConnection 拥有。
+class _EvidenceHTTPSHandler(_ConnectionEvidenceHandler, request.HTTPSHandler):
+    pass
+
+
 # 保留系统代理/TLS 验证；每次独立 opener 不修改全局 urllib，不能自动重试已派发调用。
 def open_credential_request(req, *, timeout):
-    return request.build_opener(_NoRedirect()).open(req, timeout=timeout)
+    return request.build_opener(_NoRedirect(), _EvidenceHTTPHandler(), _EvidenceHTTPSHandler()).open(req, timeout=timeout)
 
 
 # 只读上限加一字节以识别超限；解析错误不能把收到的字节放进公开异常。

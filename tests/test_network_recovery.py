@@ -20,7 +20,7 @@ from myth.durable_executor import DurableExecutor
 from myth.agent_runtime import AgentRuntime
 from myth.goal_scheduler import GoalScheduler
 from myth.models import ModelMessage, ModelRequest, ProviderUnavailable, STEP_DECISION_SCHEMA
-from myth.network_recovery import reconnect_delay, is_pre_dispatch_disconnect
+from myth.network_recovery import reconnect_delay, is_pre_dispatch_disconnect, ConnectionNotDispatched, is_connection_failure
 from myth.providers.ollama import OllamaProvider
 from myth.providers.openai import OpenAIResponsesProvider
 from myth.runtime import MythRuntime
@@ -42,7 +42,9 @@ class NetworkRuleTests(unittest.TestCase):
     # 重置/超时可能在提交后发生；不能因为网络错误就推定模型没有收到。
     def test_only_proven_pre_dispatch_failures_are_retryable(self):
         for reason in (socket.gaierror(), ConnectionRefusedError(), OSError(errno.ENETUNREACH, "offline")):
-            self.assertTrue(is_pre_dispatch_disconnect(reason))
+            self.assertTrue(is_connection_failure(reason))
+            self.assertFalse(is_pre_dispatch_disconnect(reason))
+        self.assertTrue(is_pre_dispatch_disconnect(ConnectionNotDispatched()))
         for reason in (TimeoutError(), ConnectionResetError(), OSError(errno.ECONNABORTED, "aborted"), "offline"):
             self.assertFalse(is_pre_dispatch_disconnect(reason))
 
@@ -53,11 +55,19 @@ class NetworkRuleTests(unittest.TestCase):
             (OllamaProvider(), "myth.providers.ollama.open_credential_request"),
             (OpenAIResponsesProvider(provider_id="openai", token_supplier=lambda: "synthetic"), "myth.providers.openai.open_credential_request"),
         ):
-            with patch(target, side_effect=error.URLError(socket.gaierror())) as send:
+            with patch(target, side_effect=error.URLError(ConnectionNotDispatched())) as send:
                 with self.assertRaises(ProviderUnavailable) as caught:
                     provider.invoke(request)
                 self.assertEqual(send.call_count, 1)
                 self.assertEqual(caught.exception.usage, {"model_calls": 0, "input_tokens": 0, "output_tokens": 0})
+
+    # 实际 urllib opener 在 connect 前捕获 DNS 失败；不是 adapter 自己猜测错误阶段。
+    def test_transport_connect_failure_produces_phase_evidence(self):
+        request = ModelRequest("test", (ModelMessage("user", "fixture"),), STEP_DECISION_SCHEMA, 64)
+        with patch("socket.create_connection", side_effect=socket.gaierror()) as connect:
+            with self.assertRaises(ProviderUnavailable):
+                OllamaProvider().invoke(request)
+            self.assertEqual(connect.call_count, 1)
 
     # HTTP 已建立后，即使读取产生同名 DNS 异常也不能升级成“未派发”。
     def test_response_read_failure_is_not_safe_to_replay(self):
@@ -408,6 +418,46 @@ w.run(sys.argv[2], Offline())
                 self.assertEqual(len(received), 1)
             finally:
                 executor.release()
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(3)
+
+
+    # urllib 尚未返回 HTTP response 也可能已经发送；响应阶段同名无路由错误必须保持 UNKNOWN。
+    def test_network_unreachable_after_send_is_not_zero_dispatch(self):
+        received = []
+        accepted = threading.Event()
+        # 服务实际接收 POST 后才允许客户端出现无路由异常，固定“发送后”证据。
+        class Handler(BaseHTTPRequestHandler):
+            # 不在响应写失败时改写已经接收请求这一事实。
+            def do_POST(self):
+                received.append(self.rfile.read(int(self.headers["Content-Length"])))
+                accepted.set()
+                try:
+                    self.send_response(200)
+                    self.end_headers()
+                except OSError:
+                    pass
+            # 本地夹具不输出正文或请求噪声。
+            def log_message(self, *args):
+                pass
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever)
+        thread.start()
+        # getresponse 在 HTTPConnection 已经发送之后执行；不能由 error.reason 推定零派发。
+        def lost_response():
+            self.assertTrue(accepted.wait(3))
+            raise OSError(errno.EHOSTUNREACH, "synthetic post-dispatch route loss")
+        try:
+            provider = OllamaProvider(f"http://127.0.0.1:{server.server_port}", timeout=1)
+            with patch("http.client.HTTPConnection.getresponse", side_effect=lost_response):
+                self.workspace.run(self.rid, provider)
+            self.assertEqual(self.repo.turn(self.rid)["status"], "UNKNOWN")
+            self.assertIsNone(self.repo.network_retry(self.rid))
+            self.assertEqual(len(received), 1)
+            self.assertTrue(received[0])
+            self.assertEqual(DurableExecutor(self.root).dispatchable_runs(), [])
         finally:
             server.shutdown()
             server.server_close()
