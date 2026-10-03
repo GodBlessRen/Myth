@@ -29,6 +29,7 @@ Myth 的开发目标不是“堆更多 Agent 抽象”，而是把一个 **可�
    - 第三栏 Runtime Observatory 必须保留：
      Goal / Execution Flow / Recovery / Trajectory / Tokens / Cache Hit / Context / Tools / Control / Budget。
    - UI 重构不能静默删除这些事实。
+   - Executor heartbeat、Driver heartbeat、durable progress 是三件事；“进程还活着”不能冒充“任务在推进”。
 
 ## 2. 当前产品主线
 
@@ -120,7 +121,7 @@ node --check src/myth/webui/goals.js
 
 如果改动涉及：
 
-- Runtime / recovery：补 crash / INTERRUPTED / UNKNOWN / resume / reconcile / lease expiry 回归；
+- Runtime / recovery：补 crash / INTERRUPTED / UNKNOWN / resume / reconcile / lease expiry / Web 退出后同 Run 接续 / no-progress 观测回归；
 - Intent / routing：补 adversarial cases；
 - Context / provider：补窗口、截断、usage 回归；
 - Goal / Personal：补跨 session / restart；
