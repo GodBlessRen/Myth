@@ -122,6 +122,54 @@ class SotaRouteTests(unittest.TestCase):
         self.assertEqual(self.workspace.sota_route.view(first)["peer_count"], 1)
         self.assertEqual(self.workspace.sota_route.view(second)["peer_count"], 1)
 
+    # 供应商公开 Reasoning Summary 与 reasoning token 成本进入 SOTA Route；隐藏 CoT 不被伪造。
+    def test_reasoning_summary_and_cost_are_kept_for_champion(self):
+        rid = self.run_task([decision(claim="完成")])
+        row = self.runtime.store.db.execute(
+            "SELECT model_attempt_id,response_ref,usage_json FROM model_invocations "
+            "WHERE run_id=? ORDER BY rowid DESC LIMIT 1",
+            (rid,),
+        ).fetchone()
+        raw = {
+            "id": "fixture-reasoning",
+            "status": "completed",
+            "reasoning_summary": ["先定位最小范围，再直接验证。"],
+            "output": [],
+            "usage": {},
+        }
+        response_ref = self.runtime.objects.put(
+            __import__("json").dumps(raw, ensure_ascii=False, sort_keys=True).encode("utf-8")
+        )
+        usage = __import__("json").loads(row["usage_json"])
+        usage["reasoning_tokens"] = 17
+        with self.runtime.store.tx() as db:
+            db.execute(
+                "UPDATE model_invocations SET response_ref=?,usage_json=? WHERE model_attempt_id=?",
+                (
+                    response_ref,
+                    __import__("json").dumps(usage, ensure_ascii=False, sort_keys=True),
+                    row["model_attempt_id"],
+                ),
+            )
+        self.pass_run(rid)
+        view = self.workspace.sota_route.view(rid)
+        self.assertEqual(view["status"], "CHAMPION")
+        self.assertEqual(view["metrics"]["reasoning_tokens"], 17)
+        self.assertEqual(
+            view["reasoning"]["attempts"][0]["summary"],
+            ["先定位最小范围，再直接验证。"],
+        )
+        hint = self.workspace.sota_route.hint_for_snapshot(
+            "完成相同任务",
+            self.repo.settings(),
+            self.repo.create_turn(
+                self.repo.create_session()["id"],
+                "完成相同任务",
+                "reasoning-hint-probe",
+            )["snapshot"],
+        )
+        self.assertIn("先定位最小范围", hint["reasoning_summaries"][0])
+
     # 当前路径显著超过历史成功路径时只给 Drift/Replan 提示，不强行停止或伪造失败。
     def test_longer_current_route_is_marked_as_drift(self):
         winner = self.run_task([decision(claim="完成")])
