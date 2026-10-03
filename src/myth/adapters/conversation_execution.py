@@ -130,9 +130,19 @@ class LocalConversationExecution:
                         goal_coverage="answer",
                     )
 
+        snapshot = dict(turn["snapshot"])
+        if getattr(self.repository, "best_path", None) is not None:
+            # 实时偏离只影响下一步提示，不改变冻结比较身份、权限或预算。
+            view = self.repository.best_path.view(turn["run_id"])
+            snapshot["best_path_live"] = {
+                "drift": view.get("drift", False),
+                "drift_reasons": view.get("drift_reasons") or [],
+                "metrics": view.get("metrics") or {},
+                "best_costs": view.get("best_costs") or {},
+            }
         request = conversation_request(
             turn["settings"],
-            turn["snapshot"],
+            snapshot,
             turn["snapshot"]["messages"],
             activities,
             control=turn.get("control"),

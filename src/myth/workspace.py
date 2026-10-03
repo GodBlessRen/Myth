@@ -10,6 +10,7 @@ from .platform.control_store import SqliteControlService
 from .platform.memory_store import SqliteMemoryStore
 from .platform.evolution_store import SqliteEvolutionControl
 from .delivery import DeliveryLedger
+from .best_path import BestPathLedger
 from .strategies import resolution_controller_from_config
 
 
@@ -49,12 +50,15 @@ class Workspace:
             resolution_controller=resolution_controller,
             resolution_policy_id=resolution_policy_id,
         )
+        # best_path：已验收成功路径的效率账本；只给未来 Run 提供冻结提示，不授予能力。
+        self.best_path = BestPathLedger(runtime)
+        self.repository.best_path = self.best_path
         # control：控制服务协作对象；只在安全点影响未来规划。
         self.control = SqliteControlService(runtime, self.repository)
         # memory：有来源记忆协作对象；不授予权限。
         self.memory = SqliteMemoryStore(runtime)
         # delivery：回答终态、验收、Work item 与人工关注的持久交付账本。
-        self.delivery = DeliveryLedger(runtime)
+        self.delivery = DeliveryLedger(runtime, best_path=self.best_path)
         # execution：用例执行端口/实现；外部效果须经过 Ticket 和收据协议。
         self.execution = LocalConversationExecution(
             runtime,
@@ -76,6 +80,8 @@ class Workspace:
         self.delivery.reconcile_pending(
             self.repository, self.memory, self.personal, limit=32
         )
+        # 启动只补登记历史 PASSED 路径；不重跑旧模型/工具，也不倒写旧 Turn。
+        self.best_path.backfill_once(limit=200)
 
     # 驱动当前用例并依据持久事实推进；恢复、权限、预算与结束条件见本模块具体协作边界。
     def run(self, rid, provider):

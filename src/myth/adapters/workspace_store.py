@@ -112,6 +112,8 @@ class SqliteWorkspaceRepository:
         self.resolution_controller = resolution_controller or RuleResolutionController()
         # resolution_policy_id：本次准入固定的表示策略版本身份；活动指针变化不倒写历史 Turn。
         self.resolution_policy_id = str(resolution_policy_id or "injected/default")
+        # best_path：由 Workspace 装配后注入；仓储缺省仍可独立工作，避免隐藏硬依赖。
+        self.best_path = None
         self.store.db.executescript(SCHEMA)
         # 正常只读检查不争写锁；旧工具不回填估算，真正迁移在写事务中重查，避免并发重复加列。
         columns = {row[1] for row in self.store.db.execute("PRAGMA table_info(workspace_operations)")}
@@ -709,6 +711,12 @@ class SqliteWorkspaceRepository:
                 + [{"role": "user", "content": text}],
                 "goal": dict(goal_context or {}),
             }
+            if self.best_path is not None:
+                # 冻结项目/上下文环境摘要，使“Best Path”只在可证明同条件时比较。
+                snapshot["best_path_environment"] = self.best_path.freeze_environment(snapshot)
+                hint = self.best_path.hint_for_snapshot(text, settings, snapshot)
+                if hint:
+                    snapshot["best_path_hint"] = hint
             rid = new_id("run")
             db.execute(
                 "INSERT INTO runs(run_id,request_id,entry_digest,goal,acceptance_version,state) VALUES(?,?,?,?,?,'RUNNING')",

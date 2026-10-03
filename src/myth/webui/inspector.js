@@ -243,6 +243,54 @@ function renderInspectorDelivery(turn) {
     );
 }
 
+// 用简单字段展示当前 Run 与历史最佳成功路径；Best 只表示同条件下未被更省路径全面超过。
+function renderInspectorBestPath(turn) {
+  const box = $("inspectorBestPath");
+  if (!box) return;
+  box.replaceChildren();
+  const best = turn?.best_path;
+  if (!turn || !best) {
+    box.append(el("div", "inspector-empty", "还没有可比较的成功路径"));
+    return;
+  }
+  inspectorFact(box, "State", best.status || "LEARNING");
+  inspectorFact(box, "Compared runs", best.peer_count || 0);
+  const current = best.metrics || {};
+  const target = best.best_costs || {};
+  const pair = (label, key, suffix = "") => {
+    const now = current[key];
+    const old = target[key];
+    const left = now == null ? "N/A" : Number(now).toLocaleString() + suffix;
+    const right = old == null ? "—" : Number(old).toLocaleString() + suffix;
+    inspectorFact(box, label, left + " · best " + right);
+  };
+  pair("Tool calls", "tool_calls");
+  pair("Steps", "steps");
+  pair("Tokens", "total_tokens");
+  pair("Work time", "work_ms", " ms");
+  pair("Changed lines", "code_churn_lines");
+  if (best.drift) {
+    inspectorFact(
+      box,
+      "Drift",
+      "偏离较省路径 · " + (best.drift_reasons || []).join(" / "),
+    );
+  } else if (best.peer_count) {
+    inspectorFact(box, "Drift", "within known range");
+  }
+  const hint = best.frozen_hint;
+  if (hint?.routes?.length) {
+    inspectorFact(
+      box,
+      "Known route",
+      hint.routes[0].join(" → ").slice(0, 180),
+    );
+  }
+  if (best.environment_scope && best.environment_scope !== "project-state-v1" && best.environment_scope !== "frozen-context-v1") {
+    inspectorFact(box, "Compare scope", "环境未完整冻结 · 不参与 Best");
+  }
+}
+
 // 投影持久游标、owner、租约与恢复建议；租约过期不证明外部效果未发生。
 function renderInspectorRecovery(turn) {
   const box = $("inspectorRecovery");
@@ -632,6 +680,7 @@ function renderRuntimeInspector(session = state.session) {
   renderSessionStatistics(session);
   renderInspectorGoal(turn);
   renderInspectorDelivery(turn);
+  renderInspectorBestPath(turn);
   renderExecutionSpine(turn);
   renderInspectorRecovery(turn);
   renderInspectorTrajectory(turn);

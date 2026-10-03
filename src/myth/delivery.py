@@ -95,11 +95,13 @@ class DeliveryLedger:
     """拥有交付事实；运行执行权仍属于原 Conversation/Control/Runtime。"""
 
     # 该入口按持久合同处理输入与输出，失败保持显式而不伪造完成。
-    def __init__(self, runtime) -> None:
+    def __init__(self, runtime, *, best_path=None) -> None:
         # 持有当前协作对象；生命周期与所属 Runtime/仓储一致。
         self.runtime = runtime
         # 持有当前协作对象；生命周期与所属 Runtime/仓储一致。
         self.store = runtime.store
+        # best_path：验收通过后才同步成功路径；失败/撤销会取消比较资格。
+        self.best_path = best_path
         self.store.db.executescript(SCHEMA)
 
     # 下列辅助入口保持边界显式，调用不隐式扩大权限或真实性。
@@ -317,7 +319,15 @@ class DeliveryLedger:
                 "WHERE run_id=?",
                 (target, run_id),
             )
-        return self.acceptance(run_id)
+        accepted = self.acceptance(run_id)
+        if self.best_path is not None:
+            # Best Path 只消费显式验收事实；同步失败必须可见，不能伪装已学习。
+            self.best_path.sync_acceptance(
+                run_id,
+                accepted["state"],
+                subject_digest=accepted["subject_digest"],
+            )
+        return accepted
 
     # 该入口按持久合同处理输入与输出，失败保持显式而不伪造完成。
     def ensure_root_work_item(self, turn: dict[str, Any]) -> dict[str, Any]:

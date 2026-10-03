@@ -102,6 +102,46 @@ def compile_conversation_context(
             + str(resolution.get("resolution") or "unknown")
             + "。"
         )
+    best_path = snapshot.get("best_path_hint") or {}
+    if best_path:
+        routes = best_path.get("routes") or []
+        route_text = " / ".join(" → ".join(route) for route in routes[:2] if route)
+        costs = best_path.get("best_costs") or {}
+        system += (
+            "\nBest Path（历史已验收成功路径，仅作效率参考，不扩大权限）："
+            + (route_text or "有历史成功样本")
+            + "。历史较省成本：tools="
+            + str(costs.get("tool_calls") if costs.get("tool_calls") is not None else "N/A")
+            + "，steps="
+            + str(costs.get("steps") if costs.get("steps") is not None else "N/A")
+            + "，tokens="
+            + str(costs.get("total_tokens") if costs.get("total_tokens") is not None else "N/A")
+            + "。优先寻找同等质量下更短路径；若当前证据需要，可以偏离。"
+            + "验收、测试和必要证据不能为了省调用而跳过。"
+        )
+    live = snapshot.get("best_path_live") or {}
+    if live.get("drift"):
+        reasons = " / ".join(str(item) for item in live.get("drift_reasons") or [])
+        current = live.get("metrics") or {}
+        known = live.get("best_costs") or {}
+        system += (
+            "\nBest Path 提醒：当前路径已经明显比同条件历史成功路径更绕（"
+            + (reasons or "cost")
+            + "）。当前 tools="
+            + str(current.get("tool_calls", "N/A"))
+            + "，steps="
+            + str(current.get("steps", "N/A"))
+            + "，tokens="
+            + str(current.get("total_tokens", "N/A"))
+            + "；历史较省值约为 "
+            + str(known.get("tool_calls", "N/A"))
+            + " tools / "
+            + str(known.get("steps", "N/A"))
+            + " steps / "
+            + str(known.get("total_tokens", "N/A"))
+            + " tokens。请重新评估剩余工作，避免重复读取、重复检索和无必要改写；"
+            + "若确有新证据需要更长路径，继续执行并保留验证。"
+        )
     system += (
         "\n上下文按字节预算选择。旧工具预览可能标记 folded，不能将预览当作完整文件；"
         "缺少细节时重新读取相关来源。完整会话与执行记录仍保存在本地。"
