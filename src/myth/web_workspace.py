@@ -384,7 +384,7 @@ class ConversationWebService:
                     workspace.personal.goal_view(goal_id) if goal_id else None
                 )
                 turn["delivery"] = workspace.delivery.run_view(turn["run_id"])
-                turn["best_path"] = workspace.best_path.view(turn["run_id"])
+                turn["sota_route"] = workspace.sota_route.view(turn["run_id"])
             value["artifacts"] = workspace.repository.artifacts(sid)
             value["statistics"] = session_statistics(model_invocations, tool_operations)
             return value
@@ -592,15 +592,15 @@ class ConversationWebService:
         with MythRuntime(self.root) as runtime:
             return Workspace(runtime).delivery.run_view(run_id)
 
-    # 读取单 Run 的 Best Path 对比；不生成新路径或模型调用。
-    def turn_best_path(self, run_id):
+    # 读取单 Run 的 SOTA Route 对比；不生成新路径或模型调用。
+    def turn_sota_route(self, run_id):
         with MythRuntime(self.root) as runtime:
-            return Workspace(runtime).best_path.view(run_id)
+            return Workspace(runtime).sota_route.view(run_id)
 
     # 列出最近已验收路径；用于 Runtime/诊断，不改变活动策略。
-    def best_paths(self, limit=50):
+    def sota_action_paths(self, limit=50):
         with MythRuntime(self.root) as runtime:
-            return {"paths": Workspace(runtime).best_path.list(limit)}
+            return {"paths": Workspace(runtime).sota_route.list(limit)}
 
     # 汇总全分母验收、错误完成、待收尾与人工关注。
     def delivery_metrics(self):
@@ -834,11 +834,11 @@ class ConversationWebService:
         if parts == ["delivery", "metrics"]:
             return self.delivery_metrics()
         if parts == ["best-paths"]:
-            return self.best_paths(int(query.get("limit", ["50"])[0]))
+            return self.sota_action_paths(int(query.get("limit", ["50"])[0]))
         if len(parts) == 3 and parts[0] == "turns" and parts[2] == "delivery":
             return self.turn_delivery(parts[1])
         if len(parts) == 3 and parts[0] == "turns" and parts[2] == "best-path":
-            return self.turn_best_path(parts[1])
+            return self.turn_sota_route(parts[1])
         if len(parts) == 2 and parts[0] == "goals":
             return self.goal(parts[1])
         if len(parts) == 3 and parts[0] == "goals" and parts[2] == "triggers":
