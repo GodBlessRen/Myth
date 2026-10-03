@@ -48,6 +48,25 @@ class CacheObservabilityTests(unittest.TestCase):
         self.assertIsNone(summary["cache_hit_rate"])
         self.assertFalse(summary["cache_metrics_available"])
 
+    # 回归断言：模型 wall-clock 仅聚合 Runtime 实测 provider_wall_ms，未报告时保持 N/A。
+    def test_model_wall_summary_uses_runtime_measured_provider_time(self):
+        summary = ConversationWebService._model_usage_summary(
+            [
+                {"usage": {"provider_wall_ms": 1250}},
+                {"usage": {"provider_wall_ms": 2750}},
+            ]
+        )
+        self.assertEqual(summary["provider_wall_ms"], 4000)
+        self.assertTrue(summary["provider_wall_available"])
+
+    # 回归断言：第三栏同时暴露总回复 Worked-time 与模型 provider wall，避免把两种耗时混成一个指标。
+    def test_runtime_observatory_keeps_model_wall_visible(self):
+        webui = Path(__file__).resolve().parents[1] / "src" / "myth" / "webui"
+        inspector = (webui / "inspector.js").read_text(encoding="utf-8")
+        self.assertIn('"Model wall"', inspector)
+        self.assertIn("provider_wall_available", inspector)
+        self.assertIn("runtime measured", inspector)
+
     # 回归断言：第三栏缓存事实入口存在，缺测状态也可见。
     def test_runtime_observatory_keeps_cache_hit_visible(self):
         webui = Path(__file__).resolve().parents[1] / "src" / "myth" / "webui"
