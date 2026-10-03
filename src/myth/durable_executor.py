@@ -519,6 +519,17 @@ class DurableExecutor:
             self.release()
         return 0
 
+    # 有界等待当前本机 Run 线程退出；用于优雅关闭/测试清理，不改变任何 Run 的业务状态。
+    def wait_for_idle(self, timeout=5.0) -> bool:
+        deadline = time.monotonic() + max(0.0, float(timeout))
+        while time.monotonic() < deadline:
+            with self.lock:
+                if not self.active:
+                    return True
+            time.sleep(0.02)
+        with self.lock:
+            return not self.active
+
     # 请求 worker 停止未来扫描；在途线程不被强杀，外部效果继续按真实收据处理。
     def stop(self) -> None:
         self.stop_event.set()
