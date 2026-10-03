@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import time
 import uuid
 from typing import Any
 
@@ -635,9 +636,14 @@ class DecisionRuntime:
             request_key=request_key,
             context_report=model_request.context_report,
         )
+        # Runtime 自己测量 provider.invoke 的 wall-clock；该值包含网络/排队/生成，不等于模型内部纯推理时间。
+        provider_started = time.monotonic()
         try:
             result = provider.invoke(model_request)
         except ContextTruncated as exc:
+            provider_wall_ms = max(
+                0, int((time.monotonic() - provider_started) * 1000)
+            )
             response_ref = self.objects.put(
                 json.dumps(exc.raw, ensure_ascii=False, sort_keys=True).encode("utf-8")
             )
@@ -646,7 +652,7 @@ class DecisionRuntime:
                 request_digest=request_digest,
                 response_ref=response_ref,
                 reason=str(exc),
-                usage=exc.usage,
+                usage={**exc.usage, "provider_wall_ms": provider_wall_ms},
             )
             self._settle_failed(attempt_id, receipt)
             raise ContextBudgetError(str(exc)) from exc
@@ -657,6 +663,15 @@ class DecisionRuntime:
             )
             raise
 
+        provider_wall_ms = max(
+            0, int((time.monotonic() - provider_started) * 1000)
+        )
+        result = ModelResult(
+            result.text,
+            {**result.usage, "provider_wall_ms": provider_wall_ms},
+            result.raw,
+            result.response_id,
+        )
         response_ref = self.objects.put(
             json.dumps(result.raw, ensure_ascii=False, sort_keys=True).encode("utf-8")
         )
