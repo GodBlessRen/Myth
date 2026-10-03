@@ -5,8 +5,21 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <meta name="color-scheme" content="light" />
-    <meta name="theme-color" content="#f6f2ea" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#f7f3ea" />
+    <script>
+      (() => {
+        try {
+          const saved = localStorage.getItem("myth-theme");
+          const theme = saved === "light" || saved === "dark"
+            ? saved
+            : (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+          document.documentElement.dataset.theme = theme;
+        } catch (_) {
+          document.documentElement.dataset.theme = "light";
+        }
+      })();
+    </script>
     <title>Myth · Agent Workbench</title>
     <link rel="stylesheet" href="/app.css" />
   </head>
@@ -87,6 +100,16 @@
           </div>
           <div class="topbar-right">
             <button
+              id="themeToggle"
+              class="icon-button theme-toggle"
+              type="button"
+              aria-label="切换到星空黑"
+              aria-pressed="false"
+              title="切换主题"
+            >
+              <span data-icon="moon"></span>
+            </button>
+            <button
               id="inspectorToggle"
               class="secondary inspector-toggle"
               aria-controls="runtimeInspector"
@@ -124,10 +147,9 @@
               <div class="welcome-mark" aria-hidden="true">
                 <span></span><span></span><span></span><span></span>
               </div>
-              <h1>把任务交给 Myth。<br /><em>过程与证据，都看得见。</em></h1>
+              <h1>把任务交给 Myth。<br /><em>每一步，都有迹可循。</em></h1>
               <p>
-                对话是入口，Runtime
-                是底座。你可以直接讨论，也可以关联项目、资料和受控工具。
+                对话留在中间，运行事实留在右侧。项目、资料、工具与恢复状态，都在同一个工作面。
               </p>
               <div class="suggestions">
                 <button

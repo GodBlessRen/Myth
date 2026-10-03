@@ -60,6 +60,8 @@ const iconPaths = {
   file: "M14 3H5v18h14V8ZM14 3v5h5M8 12h8M8 16h6",
   download: "M12 3v13m-5-5 5 5 5-5M4 17v4h16v-4",
   trash: "M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7",
+  sun: "M12 2v2M12 20v2M4.93 4.93 6.34 6.34M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41M12 17a5 5 0 1 0 0-10 5 5 0 0 0 0 10Z",
+  moon: "M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 9.79 9.79 7 7 0 0 0 21 12.79Z",
 };
 // 创建安全 DOM 节点，正文经 textContent 写入；模型/资料文本不解释为 HTML。
 function el(tag, cls, text) {
@@ -82,6 +84,49 @@ function icon(name) {
 document
   .querySelectorAll("[data-icon]")
   .forEach((e) => e.replaceWith(icon(e.dataset.icon)));
+
+// 奶油白 / 星空黑仅改变浏览器投影；主题选择保存在本机，不进入 Runtime 或会话事实。
+const THEME_STORAGE_KEY = "myth-theme";
+const themeMedia = window.matchMedia("(prefers-color-scheme: dark)");
+function storedTheme() {
+  try {
+    const value = localStorage.getItem(THEME_STORAGE_KEY);
+    return value === "light" || value === "dark" ? value : null;
+  } catch (_) {
+    return null;
+  }
+}
+function applyTheme(theme, persist = false) {
+  const next = theme === "dark" ? "dark" : "light";
+  document.documentElement.dataset.theme = next;
+  document.documentElement.style.colorScheme = next;
+  const themeColor = document.querySelector('meta[name="theme-color"]');
+  if (themeColor) themeColor.content = next === "dark" ? "#090a0d" : "#f7f3ea";
+  const button = $("themeToggle");
+  if (button) {
+    button.replaceChildren(icon(next === "dark" ? "sun" : "moon"));
+    button.setAttribute("aria-pressed", String(next === "dark"));
+    button.setAttribute(
+      "aria-label",
+      next === "dark" ? "切换到奶油白" : "切换到星空黑",
+    );
+    button.title = next === "dark" ? "奶油白" : "星空黑";
+  }
+  if (persist) {
+    try {
+      localStorage.setItem(THEME_STORAGE_KEY, next);
+    } catch (_) {
+      // 主题持久化不可用时仍保留当前页面主题。
+    }
+  }
+}
+applyTheme(
+  document.documentElement.dataset.theme ||
+    (themeMedia.matches ? "dark" : "light"),
+);
+themeMedia.addEventListener?.("change", (event) => {
+  if (!storedTheme()) applyTheme(event.matches ? "dark" : "light");
+});
 // 切换已有节点可见性；只改变展示，不改变 Run 状态。
 function show(id, yes) {
   $(id).classList.toggle("hidden", !yes);
@@ -1544,6 +1589,8 @@ $("menuToggle").onclick = () => {
   show("sidebarShade", true);
 };
 $("sidebarShade").onclick = closeNavigation;
+$("themeToggle").onclick = () =>
+  applyTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark", true);
 document.querySelectorAll("[data-suggestion]").forEach(
   (b) =>
     (b.onclick = () => {
