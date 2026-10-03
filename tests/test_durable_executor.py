@@ -66,6 +66,7 @@ class DurableExecutorTests(unittest.TestCase):
                 self.assertEqual([row["run_id"] for row in rows], [rid])
                 self.assertTrue(executor_snapshot(runtime)["active"])
         finally:
+            executor.wait_for_idle(3.0)
             executor.release()
 
     # 回归断言：UNKNOWN 不进入自动 dispatch 候选；后台 worker 不能把不明模型效果盲目重放。
@@ -98,6 +99,7 @@ class DurableExecutorTests(unittest.TestCase):
                     turn["execution_cursor"]["recovery_state"], "RECONCILE"
                 )
         finally:
+            executor.wait_for_idle(3.0)
             executor.release()
 
     # 回归断言：Goal 到期机会由独立执行器准入和驱动；不依赖 Web 内两秒 scheduler 线程。
@@ -128,6 +130,7 @@ class DurableExecutorTests(unittest.TestCase):
             self.assertEqual(turn["status"], "COMPLETED")
             self.assertEqual(len(provider.calls), 1)
         finally:
+            executor.wait_for_idle(3.0)
             executor.release()
 
     # 回归断言：Driver 心跳存活但 checkpoint 长时间不动时只标记疑似无进展，不擅自失败/重试。
