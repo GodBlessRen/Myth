@@ -3,7 +3,7 @@
 
 from ..acceptance import ContextBudgetError
 from ..domain import BudgetExceeded, RecoveryRequired, PatchContractError
-from ..models import StepDecision, DecisionValidationError
+from ..models import StepDecision, DecisionValidationError, ProviderKnownFailure
 from ..conversation_ports import (
     ConversationRepository,
     ConversationExecution,
@@ -167,13 +167,13 @@ class ConversationAgent:
                             next_action="Review the result and continue the next unfinished part of this goal.",
                         )
                         return
-                except ContextBudgetError as exc:
+                except (ContextBudgetError, ProviderKnownFailure) as exc:
                     self.repository.block(run_id, "FAILED", str(exc))
                     self._checkpoint_goal(
                         run_id,
                         status="FAILED",
                         summary=str(exc),
-                        next_action="Resolve the context-budget blocker before retrying.",
+                        next_action="Resolve the reported provider or context blocker before a new turn.",
                     )
                     return
                 except (

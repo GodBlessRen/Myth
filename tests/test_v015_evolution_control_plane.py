@@ -6,7 +6,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import tempfile
+import threading
 import unittest
+from contextlib import contextmanager
+from unittest.mock import patch
 
 from myth.evaluation_runner import FoundationEvalRunner
 from myth.platform.calibration import build_calibration_matrix
@@ -259,6 +262,66 @@ class EvolutionControlPlaneTests(unittest.TestCase):
             evolution.promote(one["candidate_id"])
             with self.assertRaises(ValueError):
                 evolution.promote(two["candidate_id"])
+
+    # 两个连接同时到达发布写事务；只能一个以相同 baseline 发布，另一个须读到已变化事实。
+    def test_concurrent_promotions_recheck_under_write_lock(self):
+        with MythRuntime(self.root) as runtime:
+            evolution = SqliteEvolutionControl(runtime)
+            ids = ["concurrent-one", "concurrent-two"]
+            for cid in ids:
+                candidate = evolution.create_candidate(candidate_id=cid, config={"mode": "rule"}, changes=[cid])
+                before, after = self._record_pair(runtime, cid, candidate["config"])
+                evolution.attach_evaluation(cid, baseline_eval_run_id=before["eval_run_id"],
+                    candidate_eval_run_id=after["eval_run_id"], min_pairs=2)
+        gate = threading.Barrier(2)
+        outcomes = []
+
+        # 每线程独立 SQLite 连接；屏障固定在 BEGIN 前，避免靠概率测试竞争。
+        def publish(cid):
+            with MythRuntime(self.root) as runtime:
+                evolution = SqliteEvolutionControl(runtime)
+                transaction = runtime.store.tx
+
+                # 同步开始写事务，事务内实际读取不能被旧快照代替。
+                @contextmanager
+                def synchronized_tx():
+                    gate.wait(timeout=5)
+                    with transaction() as db:
+                        yield db
+                runtime.store.tx = synchronized_tx
+                try:
+                    evolution.promote(cid)
+                    outcomes.append("published")
+                except ValueError:
+                    outcomes.append("stale")
+        workers = [threading.Thread(target=publish, args=(cid,)) for cid in ids]
+        for worker in workers:
+            worker.start()
+        for worker in workers:
+            worker.join(10)
+            self.assertFalse(worker.is_alive())
+        self.assertCountEqual(outcomes, ["published", "stale"])
+        with MythRuntime(self.root) as runtime:
+            self.assertEqual(len(SqliteEvolutionControl(runtime).history()), 1)
+
+    # 评测矩阵计算后发生发布；晚到的证据提交不得把 PROMOTED 降回 ELIGIBLE/HOLD。
+    def test_evidence_cannot_change_candidate_promoted_during_calculation(self):
+        with MythRuntime(self.root) as runtime:
+            evolution = SqliteEvolutionControl(runtime)
+            cid = "evidence-window"
+            candidate = evolution.create_candidate(candidate_id=cid, config={"mode": "rule"}, changes=[cid])
+            before, after = self._record_pair(runtime, cid, candidate["config"])
+            evidence = {"baseline_eval_run_id": before["eval_run_id"], "candidate_eval_run_id": after["eval_run_id"]}
+            evolution.attach_evaluation(cid, **evidence, min_pairs=2)
+
+            # 固定计算与写回之间的交错；真实发布事务仍由生产代码执行。
+            def publish_during_calibration(*args, **kwargs):
+                evolution.promote(cid)
+                return build_calibration_matrix(*args, **kwargs)
+            with patch("myth.platform.evolution_store.build_calibration_matrix", side_effect=publish_during_calibration):
+                with self.assertRaisesRegex(ValueError, "immutable"):
+                    evolution.attach_evaluation(cid, **evidence, min_pairs=2)
+            self.assertEqual(evolution.candidate(cid)["status"], "PROMOTED")
 
 
 if __name__ == "__main__":

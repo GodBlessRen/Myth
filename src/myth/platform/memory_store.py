@@ -241,6 +241,10 @@ class SqliteMemoryStore:
                 if not query_terms or score:
                     matched += 1
                     scored.append((score, int(item["candidate_cursor"]), item))
+            # 仍扫描全部候选，但每页只保留稳定 top-k；大记忆库不能积累所有命中正文再全排序。
+            if len(scored) > limit:
+                scored.sort(key=lambda item: (-item[0], -item[1], item[2]["memory_id"]))
+                del scored[limit:]
             cursor = page["next_cursor"]
             if not page["has_more"]:
                 break

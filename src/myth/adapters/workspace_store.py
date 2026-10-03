@@ -62,6 +62,12 @@ CREATE TABLE IF NOT EXISTS workspace_driver_leases(
  generation INTEGER NOT NULL DEFAULT 1,
  lease_until REAL NOT NULL,
  heartbeat_at REAL NOT NULL);
+CREATE INDEX IF NOT EXISTS workspace_messages_session ON workspace_messages(session_id);
+CREATE INDEX IF NOT EXISTS workspace_messages_run ON workspace_messages(run_id);
+CREATE INDEX IF NOT EXISTS workspace_turns_session ON workspace_turns(session_id);
+CREATE INDEX IF NOT EXISTS workspace_sessions_project ON workspace_sessions(project_id,archived);
+CREATE INDEX IF NOT EXISTS workspace_documents_project ON workspace_documents(project_id,archived);
+CREATE INDEX IF NOT EXISTS workspace_operations_run ON workspace_operations(run_id,state);
 """
 
 
@@ -138,6 +144,9 @@ class SqliteWorkspaceRepository:
             parsed.scheme not in {"http", "https"}
             or not parsed.hostname
             or parsed.username
+            or parsed.password
+            or parsed.query
+            or parsed.fragment
         ):
             raise ValueError("invalid model endpoint")
         model = str(value.get("model", "")).strip()

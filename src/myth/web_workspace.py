@@ -40,6 +40,10 @@ class ConversationWebService:
         self.scheduler_thread = None
         # scheduler_state：本进程调度状态投影；真实机会和拒绝原因另存数据库。
         self.scheduler_state = {"running": False, "last_tick": None, "last_error": None}
+        # _connection_cache：最多十六个 Ollama 端点的五秒公开目录缓存；失败不缓存，不保存认证信息。
+        self._connection_cache = {}
+        # _connection_lock：目录检查串行化避免同时刷新；不与 Runtime 写事务组合。
+        self._connection_lock = threading.Lock()
 
     # 逐次读取待恢复/到期机会，在事务外检查供应商，再准入并交正常 Driver；本机调度并发有上限。
     def scheduler_tick(self):
@@ -147,15 +151,24 @@ class ConversationWebService:
 
     # 装配页面初始项目/会话/设置/Goal/恢复和调度投影；刷新不驱动未授权效果。
     def bootstrap(self):
+        # 同一 bootstrap 只打开一次数据库连接，避免重复装配/schema 检查及两次 Goal 查询。
+        with MythRuntime(self.root) as runtime:
+            workspace = Workspace(runtime)
+            repository = workspace.repository
+            projects = repository.projects()
+            sessions = repository.sessions()
+            settings = repository.settings()
+            documents = repository.documents()
+            goals = workspace.personal.goal_views()
         return {
-            "projects": self._use("projects"),
-            "sessions": self._use("sessions"),
-            "settings": self._use("settings"),
-            "documents": self._use("documents"),
+            "projects": projects,
+            "sessions": sessions,
+            "settings": settings,
+            "documents": documents,
             "platform": self.platform(),
             "memory_count": len(self.memories(limit=100)),
-            "goals": self.goals(),
-            "goal_count": len(self.goals()),
+            "goals": goals,
+            "goal_count": len(goals),
             "recoverable_runs": self.recoverable_runs(),
             "executor": self.executor(),
             "scheduler": dict(self.scheduler_state),
@@ -170,8 +183,23 @@ class ConversationWebService:
         )
 
     # 在数据库事务外检查固定供应商/model 可用性；ready 不代替真实调用结果。
-    def connection(self, payload=None):
+    def connection(self, payload=None, *, force=False):
         settings = payload or self._use("settings")
+        if settings.get("provider", "ollama") == "ollama":
+            key = settings.get("ollama_url", "http://127.0.0.1:11434")
+            with self._connection_lock:
+                cached = self._connection_cache.get(key)
+                if not force and cached and time.monotonic() - cached[0] < 5:
+                    return {**cached[1], "details": {**cached[1]["details"], "models": list(cached[1]["details"].get("models", []))}}
+                status = OllamaProvider(key, timeout=5).check()
+                value = {"ready": status.ready, "provider": status.provider_id, "details": status.details or {}}
+                if status.ready:
+                    if len(self._connection_cache) >= 16:
+                        self._connection_cache.clear()
+                    self._connection_cache[key] = (time.monotonic(), value)
+                else:
+                    self._connection_cache.pop(key, None)
+                return {**value, "details": {**value["details"], "models": list(value["details"].get("models", []))}}
         provider = (
             OllamaProvider(
                 settings.get("ollama_url", "http://127.0.0.1:11434"), timeout=5
@@ -194,6 +222,8 @@ class ConversationWebService:
         cached_input_tokens = 0
         provider_wall_ms = 0
         provider_wall_reported = False
+        # first_tokens：每个已报告调用的传输首个非空输出 delta 延迟，单位毫秒；无报告保留 N/A。
+        first_tokens = []
         cache_reported = False
         for item in invocations:
             usage = item.get("usage") if isinstance(item.get("usage"), dict) else {}
@@ -207,6 +237,8 @@ class ConversationWebService:
             if "provider_wall_ms" in usage:
                 provider_wall_reported = True
                 provider_wall_ms += max(0, int(usage.get("provider_wall_ms") or 0))
+            if type(usage.get("time_to_first_token_ms")) is int:
+                first_tokens.append(max(0, usage["time_to_first_token_ms"]))
         hit_rate = (
             cached_input_tokens / input_tokens
             if cache_reported and input_tokens > 0
@@ -221,6 +253,8 @@ class ConversationWebService:
             "provider_wall_ms": provider_wall_ms if provider_wall_reported else None,
             "provider_wall_available": provider_wall_reported,
             "model_calls": len(invocations),
+            "first_token_ms": first_tokens[0] if first_tokens else None,
+            "latest_first_token_ms": first_tokens[-1] if first_tokens else None,
         }
 
     # 读取并核对过期 Driver 的未终结 Run，返回游标与租约；UNKNOWN 仍需人工/收据核对。
@@ -703,7 +737,7 @@ class ConversationWebService:
         if parts == ["platform"]:
             return self.platform()
         if parts == ["connection"]:
-            return self.connection()
+            return self.connection(force=True)
         if parts == ["memories"]:
             return {
                 "memories": self.memories(
@@ -754,7 +788,7 @@ class ConversationWebService:
         if parts == ["settings"]:
             return self._use("save_settings", value)
         if parts == ["connection"]:
-            return self.connection(value)
+            return self.connection(value, force=True)
         if parts == ["memories"]:
             return self.remember(value)
         if parts == ["goals"]:

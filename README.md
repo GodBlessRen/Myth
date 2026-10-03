@@ -15,7 +15,9 @@ Long-term Goal
   -> continue the same Goal
 ```
 
-当前版本：**v0.21.1**
+当前版本：**v0.23.0**
+
+登录、密钥边界、逐模块审查和本地性能对照见 [安全与性能审查](docs/SECURITY_PERFORMANCE_AUDIT.md)。
 
 ## 现在能做什么
 

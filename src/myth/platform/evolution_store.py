@@ -253,6 +253,9 @@ class SqliteEvolutionControl:
         )
         # 本地事务边界：下列写入一起提交，异常整体回滚；文件/网络效果须在事务外另行核对。
         with self.store.tx() as db:
+            # 评测计算期间可能已经发布；写锁内复核，不能改写已发布候选的证据。
+            if self.candidate(candidate_id)["status"] == "PROMOTED":
+                raise ValueError("promoted candidate evidence is immutable")
             db.execute(
                 "UPDATE policy_candidates SET status=?,baseline_eval_run_id=?,candidate_eval_run_id=?,"
                 "cost_model_id=?,calibration_json=?,decision_reason=?,updated_at=CURRENT_TIMESTAMP WHERE candidate_id=?",
@@ -270,22 +273,20 @@ class SqliteEvolutionControl:
 
     # 显式校验候选资格和 baseline 活动身份，同事务切换指针并记历史。
     def promote(self, candidate_id: str) -> dict[str, Any]:
-        candidate = self.candidate(candidate_id)
-        if candidate["status"] != "ELIGIBLE":
-            raise ValueError("only ELIGIBLE candidates can be promoted")
-        current = self.active(candidate["domain"])
-        if current["policy_id"] != candidate["baseline_policy_id"]:
-            raise ValueError(
-                "candidate baseline is stale; re-evaluate against current active policy"
-            )
-        evidence = {
-            "baseline_eval_run_id": candidate["baseline_eval_run_id"],
-            "candidate_eval_run_id": candidate["candidate_eval_run_id"],
-            "cost_model_id": candidate["cost_model_id"],
-            "calibration": candidate["calibration"],
-        }
-        # 本地事务边界：下列写入一起提交，异常整体回滚；文件/网络效果须在事务外另行核对。
+        # 候选资格与 baseline 必须在 BEGIN IMMEDIATE 后核对；事务前的检查会被另一发布者穿透。
         with self.store.tx() as db:
+            candidate = self.candidate(candidate_id)
+            if candidate["status"] != "ELIGIBLE":
+                raise ValueError("only ELIGIBLE candidates can be promoted")
+            current = self.active(candidate["domain"])
+            if current["policy_id"] != candidate["baseline_policy_id"]:
+                raise ValueError("candidate baseline is stale; re-evaluate against current active policy")
+            evidence = {
+                "baseline_eval_run_id": candidate["baseline_eval_run_id"],
+                "candidate_eval_run_id": candidate["candidate_eval_run_id"],
+                "cost_model_id": candidate["cost_model_id"],
+                "calibration": candidate["calibration"],
+            }
             db.execute(
                 "INSERT OR IGNORE INTO policy_versions(policy_id,domain,config_json,source_candidate_id) VALUES (?,?,?,?)",
                 (
@@ -325,13 +326,13 @@ class SqliteEvolutionControl:
         *,
         reason: str = "explicit rollback",
     ) -> dict[str, Any]:
-        current = self.active(domain)
-        previous = current.get("previous_policy_id")
-        if not previous:
-            raise ValueError("no previous policy is available for rollback")
-        self.policy(previous)
-        # 本地事务边界：下列写入一起提交，异常整体回滚；文件/网络效果须在事务外另行核对。
+        # 回退目标也在同一个写事务内读取；迟到请求不能把更新后的指针覆盖为旧快照。
         with self.store.tx() as db:
+            current = self.active(domain)
+            previous = current.get("previous_policy_id")
+            if not previous:
+                raise ValueError("no previous policy is available for rollback")
+            self.policy(previous)
             db.execute(
                 "UPDATE active_policies SET policy_id=?,previous_policy_id=?,revision=revision+1,"
                 "updated_at=CURRENT_TIMESTAMP WHERE domain=?",

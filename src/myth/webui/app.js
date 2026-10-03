@@ -301,11 +301,13 @@ async function beginChatGPTLogin() {
     const profileId = state.chatgptAuth?.status?.profile_id || null;
     const attempt = await authApi("/start", { profile_id: profileId });
     if (!popup) throw new Error("浏览器阻止了登录窗口，请允许弹窗后重试。");
+    // 授权页来自另一源，先断开 opener，避免其导航/操纵本机工作台。
+    popup.opener = null;
     popup.location = attempt.auth_url;
     for (let i = 0; i < 180; i++) {
       await new Promise((r) => setTimeout(r, 1000));
       await refreshChatGPTAuth();
-      if (state.chatgptAuth?.status?.connected) {
+      if (state.chatgptAuth?.status?.login_revision === attempt.login_id) {
         try {
           popup.close();
         } catch {}

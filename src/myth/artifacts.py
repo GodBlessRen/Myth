@@ -6,6 +6,7 @@ from __future__ import annotations
 from dataclasses import asdict
 import json
 import os
+import re
 from pathlib import Path
 import tempfile
 import time
@@ -69,6 +70,8 @@ class ObjectStore:
 
     # 按内容摘要拆分目录；这是内部对象定位，调用方必须使用可信摘要。
     def _path(self, digest: str) -> Path:
+        if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+            raise ValueError("object digest must be a lowercase SHA-256 identity")
         return self.root / digest[:2] / digest[2:]
 
     # 按字节摘要幂等发布对象，复用前/发布后校验；同摘要损坏立即报错。

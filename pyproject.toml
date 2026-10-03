@@ -11,7 +11,7 @@ description = "A composable runtime for durable agents with pluggable intent and
 readme = "README.md"
 requires-python = ">=3.12"
 authors = [{name = "GodBlessRen"}]
-dependencies = ["PyJWT[crypto]>=2.10", "keyring>=25"]
+dependencies = ["PyJWT[crypto]>=2.14.0,<3", "keyring>=25"]
 
 [project.scripts]
 myth = "myth.cli:main"

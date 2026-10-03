@@ -1,0 +1,212 @@
+{
+  "audit_date": "2026-10-03",
+  "baseline_commit": "8b2e415c2ba171282b7be5e65aaca638d3478345",
+  "code_version": "0.23.0",
+  "platform": "Windows-11-10.0.26300-SP0",
+  "python": "3.13.9",
+  "validation_dependencies": {
+    "PyJWT": "2.14.0",
+    "keyring": "25.7.0",
+    "cryptography": "46.0.3"
+  },
+  "production_modules": 73,
+  "modules": [
+    "__init__.py",
+    "acceptance.py",
+    "adapters/__init__.py",
+    "adapters/agent_execution.py",
+    "adapters/agent_store.py",
+    "adapters/conversation_execution.py",
+    "adapters/driver_lock.py",
+    "adapters/personal_store.py",
+    "adapters/workspace_store.py",
+    "agent_runtime.py",
+    "application/__init__.py",
+    "application/agent.py",
+    "application/conversation_agent.py",
+    "artifacts.py",
+    "auth/__init__.py",
+    "auth/chatgpt.py",
+    "auth/transport.py",
+    "cli.py",
+    "conversation.py",
+    "conversation_context.py",
+    "conversation_ports.py",
+    "core/__init__.py",
+    "core/primitives.py",
+    "decision_runtime.py",
+    "demo.py",
+    "domain.py",
+    "domains/__init__.py",
+    "domains/coordination.py",
+    "domains/information.py",
+    "domains/intent.py",
+    "domains/personal.py",
+    "durable_executor.py",
+    "evaluation_runner.py",
+    "goal_scheduler.py",
+    "models.py",
+    "platform/__init__.py",
+    "platform/calibration.py",
+    "platform/capabilities.py",
+    "platform/components.py",
+    "platform/context.py",
+    "platform/contracts.py",
+    "platform/control.py",
+    "platform/control_store.py",
+    "platform/cost_model.py",
+    "platform/evaluation.py",
+    "platform/evaluation_store.py",
+    "platform/evolution.py",
+    "platform/evolution_store.py",
+    "platform/kernel.py",
+    "platform/mcp.py",
+    "platform/memory.py",
+    "platform/memory_store.py",
+    "platform/observability.py",
+    "platform/retrieval.py",
+    "platform/skills.py",
+    "platform/subagents.py",
+    "platform/workflow.py",
+    "ports.py",
+    "providers/__init__.py",
+    "providers/base.py",
+    "providers/ollama.py",
+    "providers/openai.py",
+    "providers/scripted.py",
+    "runtime.py",
+    "store.py",
+    "strategies/__init__.py",
+    "strategies/information_gain.py",
+    "strategies/information_resolution.py",
+    "strategies/intent_pick.py",
+    "task_benchmark.py",
+    "web.py",
+    "web_workspace.py",
+    "workspace.py"
+  ],
+  "validation": {
+    "python_compile": true,
+    "chinese_annotations": true,
+    "javascript_syntax": [
+      "app.js",
+      "inspector.js",
+      "goals.js"
+    ],
+    "diff_check": true,
+    "tests": {
+      "baseline": 223,
+      "final": 267,
+      "final_seconds": 37.635,
+      "new_security_cases": 42,
+      "new_policy_race_cases": 2
+    },
+    "real_model": false,
+    "real_chatgpt_login": false,
+    "actual_os_credentials": {
+      "backend": "keyring.backends.Windows.WinVaultKeyring",
+      "synthetic_only": true,
+      "round_trip": true,
+      "rotated": true,
+      "payload_bytes": 33057,
+      "deleted": true
+    }
+  },
+  "local_benchmark": {
+    "before": {
+      "fixture": {
+        "sessions": 1000,
+        "messages": 100000,
+        "memories": 10000,
+        "preflight_calls": 10,
+        "simulated_catalog_ms": 20
+      },
+      "real_model": false,
+      "message_query_ms": 7.826,
+      "message_rows": 100,
+      "message_query_plan": [
+        "SCAN workspace_messages"
+      ],
+      "memory_ms": 296.275,
+      "memory_peak_bytes": 21009577,
+      "memory_ids": [
+        "memory-09999",
+        "memory-09998",
+        "memory-09997",
+        "memory-09996",
+        "memory-09995",
+        "memory-09994"
+      ],
+      "memory_retrieval": {
+        "backend": "memory-lexical",
+        "candidate_policy": "all-visible-active-memories-v2",
+        "scanned": 10000,
+        "visible": 10000,
+        "matched": 10000,
+        "pages": 50,
+        "exhausted": true,
+        "truncated_before_ranking": false
+      },
+      "preflight_total_ms": 204.555,
+      "catalog_requests": 10
+    },
+    "after": {
+      "fixture": {
+        "sessions": 1000,
+        "messages": 100000,
+        "memories": 10000,
+        "preflight_calls": 10,
+        "simulated_catalog_ms": 20
+      },
+      "real_model": false,
+      "message_query_ms": 0.143,
+      "message_rows": 100,
+      "message_query_plan": [
+        "SEARCH workspace_messages USING INDEX workspace_messages_session (session_id=?)"
+      ],
+      "memory_ms": 270.543,
+      "memory_peak_bytes": 855326,
+      "memory_ids": [
+        "memory-09999",
+        "memory-09998",
+        "memory-09997",
+        "memory-09996",
+        "memory-09995",
+        "memory-09994"
+      ],
+      "memory_retrieval": {
+        "backend": "memory-lexical",
+        "candidate_policy": "all-visible-active-memories-v2",
+        "scanned": 10000,
+        "visible": 10000,
+        "matched": 10000,
+        "pages": 50,
+        "exhausted": true,
+        "truncated_before_ranking": false
+      },
+      "preflight_total_ms": 20.422,
+      "catalog_requests": 1
+    }
+  },
+  "known_secret_patterns": {
+    "working_files": 157,
+    "history_blobs": 714,
+    "history_bytes": 7136904,
+    "patterns": [
+      "openai_key",
+      "jwt",
+      "private_key",
+      "aws_access_key",
+      "github_token"
+    ],
+    "findings": []
+  },
+  "limitations": [
+    "No real OAuth or inference",
+    "Windows only; Linux/macOS secure vault not validated",
+    "No new real-model multi-hour soak",
+    "No browser rendering QA for this audit",
+    "Pattern scan is not a proof of no secrets",
+    "Local benchmarks are synthetic, not model TTFT"
+  ]
+}

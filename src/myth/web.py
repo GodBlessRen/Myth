@@ -75,7 +75,7 @@ class AgentWebService:
 
     # 把回调参数交独立认证管理器校验，响应只含脱敏状态。
     def chatgpt_complete(self, query: str) -> dict[str, Any]:
-        status = self.chatgpt_auth.complete_callback(parse_qs(query))
+        status = self.chatgpt_auth.complete_callback(parse_qs(query, keep_blank_values=True, max_num_fields=20))
         return status.serializable()
 
     # 显式执行远端撤销尝试及本机清理，返回各步事实；网络异常不伪造远端成功。
@@ -276,6 +276,14 @@ def make_handler(service: AgentWebService):
         # server_version：HTTP Server 响应中的应用标识；不属于业务协议版本。
         server_version = f"MythWeb/{__version__}"
 
+        # 半开连接/未送完请求体的读取等待上限，单位秒；不改变模型推理的独立 timeout。
+        request_read_timeout = 15.0
+
+        # 标准库创建读写缓冲后限制 socket 等待，避免一个残缺请求永久占用 HTTP 线程。
+        def setup(self):
+            super().setup()
+            self.connection.settimeout(self.request_read_timeout)
+
         # 输出常规脱敏访问路径；认证回调路径敏感参数不记录。
         def log_message(self, format: str, *args: object) -> None:
             # 认证回调 URL 含单次 code/state，访问日志仅记录路径，不能记录 query。
@@ -290,6 +298,7 @@ def make_handler(service: AgentWebService):
             self.send_header("Cache-Control", "no-store")
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("X-Frame-Options", "DENY")
+            self.send_header("Referrer-Policy", "no-referrer")
             self.send_header(
                 "Content-Security-Policy",
                 "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
@@ -303,6 +312,8 @@ def make_handler(service: AgentWebService):
 
         # 限制请求体大小和 JSON 形状后返回参数；解析成功不意味着业务准入成功。
         def _read_json(self) -> dict[str, Any]:
+            if self.headers.get("Transfer-Encoding") or len(self.headers.get_all("Content-Length", [])) != 1:
+                raise ValueError("one Content-Length and no Transfer-Encoding are required")
             if (
                 self.headers.get("Content-Type", "").split(";")[0].strip()
                 != "application/json"
@@ -429,7 +440,7 @@ def make_handler(service: AgentWebService):
             except Exception as exc:
                 self._json(
                     HTTPStatus.INTERNAL_SERVER_ERROR,
-                    {"error": f"{type(exc).__name__}: {exc}"},
+                    {"error": "本机服务未能完成请求，请检查服务状态。"},
                 )
 
         # 先校验 Host/Origin 和有界 JSON，再调用对应写用例；异常按合同回给页面。
@@ -487,7 +498,7 @@ def make_handler(service: AgentWebService):
             except Exception as exc:
                 self._json(
                     HTTPStatus.CONFLICT,
-                    {"error": f"{type(exc).__name__}: {exc}"},
+                    {"error": "请求未能完成，请检查服务与认证状态。"},
                 )
 
         # 仅接受本机绑定的 Host，阻止跨主机解释入站请求。
@@ -495,6 +506,13 @@ def make_handler(service: AgentWebService):
             host = self.headers.get("Host", "")
             parsed = urlparse("http://" + host)
             if (
+                len(self.headers.get_all("Host", [])) != 1
+                or parsed.username is not None
+                or parsed.password is not None
+                or parsed.path
+                or parsed.query
+                or parsed.fragment
+                or
                 parsed.hostname not in {"localhost", "127.0.0.1", "::1"}
                 or parsed.port != self.server.server_port
             ):
@@ -505,6 +523,9 @@ def make_handler(service: AgentWebService):
             self._check_host()
             host = self.headers.get("Host", "")
             origin = self.headers.get("Origin")
+            # 浏览器可以省略 Origin（如跨站导航）；Fetch Metadata 仍明确标识跨站发起。
+            if self.headers.get("Sec-Fetch-Site") == "cross-site":
+                raise PermissionError("cross-origin access is not allowed")
             if origin and origin != "http://" + host:
                 raise PermissionError("cross-origin access is not allowed")
 

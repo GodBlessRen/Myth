@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import io
 import unittest
 from unittest.mock import patch
 
@@ -32,8 +33,8 @@ class FakeResponse:
         return False
 
     # 固定供应商传输夹具的局部夹具协作；只服务本测试调用链，真实行为仍由外层断言核对。
-    def read(self) -> bytes:
-        return self.payload
+    def read(self, size=-1) -> bytes:
+        return self.payload if size < 0 else self.payload[:size]
 
 
 # 固定供应商传输夹具的固定测试集合/替身；临时资源由本用例拥有，生产状态必须从实际仓储核对。
@@ -41,8 +42,9 @@ class FakeStreamResponse:
     # 保存可控测试条件；这些字段属于替身，不模拟远端真实保证。
     def __init__(self, events):
         self.lines = [
-            ("data: " + json.dumps(event) + "\n").encode() for event in events
+            ("data: " + json.dumps(event) + "\n\n").encode() for event in events
         ]
+        self.stream = io.BytesIO(b"".join(self.lines))
 
     # 固定供应商传输夹具的局部夹具协作；只服务本测试调用链，真实行为仍由外层断言核对。
     def __enter__(self):
@@ -55,6 +57,10 @@ class FakeStreamResponse:
     # 固定供应商传输夹具的局部夹具协作；只服务本测试调用链，真实行为仍由外层断言核对。
     def __iter__(self):
         return iter(self.lines)
+
+    # 模拟有界读取真实 HTTP 流；固定 SSE 帧不能代表远端模型成功。
+    def readline(self, size=-1):
+        return self.stream.readline(size)
 
 
 # 固定供应商传输夹具的局部夹具协作；只服务本测试调用链，真实行为仍由外层断言核对。
@@ -87,7 +93,7 @@ class OllamaProviderTests(unittest.TestCase):
                 }
             )
 
-        with patch("myth.providers.ollama.request.urlopen", side_effect=fake_urlopen):
+        with patch("myth.providers.ollama.open_credential_request", side_effect=fake_urlopen):
             result = OllamaProvider().invoke(request_obj())
         self.assertEqual(captured["body"]["format"], STEP_DECISION_SCHEMA)
         self.assertEqual(captured["body"]["stream"], False)
@@ -109,7 +115,7 @@ class OllamaProviderTests(unittest.TestCase):
                 }
             )
 
-        with patch("myth.providers.ollama.request.urlopen", side_effect=fake_urlopen):
+        with patch("myth.providers.ollama.open_credential_request", side_effect=fake_urlopen):
             with self.assertRaises(ContextTruncated) as caught:
                 OllamaProvider().invoke(request_obj())
         self.assertEqual(caught.exception.usage["input_tokens"], 4090)
@@ -154,7 +160,7 @@ class OpenAIProviderTests(unittest.TestCase):
             chatgpt_plan=True,
             auth_type="oauth",
         )
-        with patch("myth.providers.openai.request.urlopen", side_effect=fake_urlopen):
+        with patch("myth.providers.openai.open_credential_request", side_effect=fake_urlopen):
             result = provider.invoke(request_obj())
         self.assertEqual(captured["auth"], "Bearer secret-token")
         self.assertTrue(captured["body"]["stream"])
@@ -173,7 +179,7 @@ class OpenAIProviderTests(unittest.TestCase):
             auth_type="oauth",
         )
         with patch(
-            "myth.providers.openai.request.urlopen",
+            "myth.providers.openai.open_credential_request",
             return_value=FakeStreamResponse(
                 [{"type": "response.output_text.delta", "delta": "partial"}]
             ),
@@ -206,6 +212,6 @@ class OpenAIProviderTests(unittest.TestCase):
             token_supplier=lambda: "sk-test",
             chatgpt_plan=False,
         )
-        with patch("myth.providers.openai.request.urlopen", side_effect=fake_urlopen):
+        with patch("myth.providers.openai.open_credential_request", side_effect=fake_urlopen):
             provider.invoke(request_obj())
         self.assertEqual(captured["body"]["max_output_tokens"], 128)

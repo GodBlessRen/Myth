@@ -253,6 +253,12 @@ SQLite / local execution / providers
 - OAuth registration/profile metadata 与 Runtime execution state 分离；
 - Myth 不读取 Pi/Codex auth files，也不复用其他应用的 OAuth client identity。
 
+登录挑战只在内存中存活十分钟，退出会更新非秘钥 login epoch 取消旧挑战。认证聚合的登录、刷新、选择与退出共用线程/进程锁；刷新派发前保存 `refresh_pending`，崩溃或结果不明时必须重新授权，不能重发旧 refresh token。系统凭据库的分块清单先登记新代次、最后切换 active，旧代次及未完成代次可清理；SQLite 不承担凭据事务。
+
+传输拒绝 credential redirect，OIDC 使用固定 issuer/JWKS、RS256、至少 2048-bit RSA、规范 compact JWT、audience/azp/nonce/subject 校验。授权 URL 不包含可选 ID Token。公开模型目录可短时缓存，每次仍复核实际系统凭据和授予 scope；缓存不授予权限。
+
+Responses 只在 `response.completed` 后发布完整结果。`time_to_first_token_ms` 是供应商调用开始到首个非空输出 delta 的本机计时，可能包含认证刷新，JSON 决策 delta 不等于页面首字；没有 delta 时显示 N/A。已知拒绝进入 FAILED，传输中断仍保持 UNKNOWN / RECONCILE。细节与验证范围见 [安全与性能审查](SECURITY_PERFORMANCE_AUDIT.md)。
+
 Core 不依赖：
 
 - OpenAI；
