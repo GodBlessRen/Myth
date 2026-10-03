@@ -11,6 +11,7 @@ from ..domain import canonical_json, digest_json, IdentityConflict, BudgetExceed
 from ..decision_runtime import DecisionRuntime
 from ..strategies import RuleIntentPicker, RuleResolutionController
 from ..network_recovery import reconnect_delay
+from ..session_statistics import measured_integer
 
 # SCHEMA：本仓储拥有的表、索引与约束；升级补齐旧字段，删除列须有迁移证据。
 # projects.root 是明确项目范围；archived/pinned 只管理未来可见性，不删除既有引用。
@@ -48,7 +49,7 @@ CREATE TABLE IF NOT EXISTS workspace_settings(id INTEGER PRIMARY KEY CHECK(id=1)
 CREATE TABLE IF NOT EXISTS workspace_operations(
  decision_id TEXT PRIMARY KEY,run_id TEXT REFERENCES workspace_turns(run_id),capability TEXT NOT NULL,
  state TEXT NOT NULL,intent_json TEXT NOT NULL,result_json TEXT,ticket_id TEXT UNIQUE,
- reserved_bytes INTEGER NOT NULL DEFAULT 0);
+ reserved_bytes INTEGER NOT NULL DEFAULT 0,tool_wall_ms INTEGER);
 CREATE TABLE IF NOT EXISTS workspace_execution_cursors(
  run_id TEXT PRIMARY KEY REFERENCES workspace_turns(run_id),
  step INTEGER NOT NULL DEFAULT 0,
@@ -112,6 +113,13 @@ class SqliteWorkspaceRepository:
         # resolution_policy_id：本次准入固定的表示策略版本身份；活动指针变化不倒写历史 Turn。
         self.resolution_policy_id = str(resolution_policy_id or "injected/default")
         self.store.db.executescript(SCHEMA)
+        # 正常只读检查不争写锁；旧工具不回填估算，真正迁移在写事务中重查，避免并发重复加列。
+        columns = {row[1] for row in self.store.db.execute("PRAGMA table_info(workspace_operations)")}
+        if "tool_wall_ms" not in columns:
+            with self.store.tx() as db:
+                columns = {row[1] for row in db.execute("PRAGMA table_info(workspace_operations)")}
+                if "tool_wall_ms" not in columns:
+                    db.execute("ALTER TABLE workspace_operations ADD COLUMN tool_wall_ms INTEGER")
 
     # 读取显式产品模型设置并补齐旧字段；旧供应商名称只映射到当前合同，不读取旧应用凭据。
     def settings(self):
@@ -1454,7 +1462,7 @@ class SqliteWorkspaceRepository:
         return self.operation(decision_id)
 
     # 以已发布收据原子完成工具记录和计量；记录晚到结果，不抹去先前 Stop/Pause。
-    def settle_operation(self, decision_id, result):
+    def settle_operation(self, decision_id, result, *, tool_wall_ms=None):
         # 本地事务边界：下列写入一起提交，异常整体回滚；文件/网络效果须在事务外另行核对。
         with self.store.tx() as db:
             op = self.operation(decision_id)
@@ -1472,8 +1480,8 @@ class SqliteWorkspaceRepository:
                     (cost, cost, op["run_id"], meter),
                 )
             db.execute(
-                "UPDATE workspace_operations SET state='RESOLVED',result_json=? WHERE decision_id=?",
-                (canonical_json(result), decision_id),
+                "UPDATE workspace_operations SET state='RESOLVED',result_json=?,tool_wall_ms=? WHERE decision_id=?",
+                (canonical_json(result), measured_integer(tool_wall_ms), decision_id),
             )
             turn = self.turn(op["run_id"])
             self._checkpoint(

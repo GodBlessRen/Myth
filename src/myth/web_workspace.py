@@ -16,6 +16,7 @@ from .platform.control import ControlCommand
 from .strategies import RuleIntentPicker
 from .goal_scheduler import GoalScheduler
 from .durable_executor import executor_snapshot, run_liveness
+from .session_statistics import session_statistics
 
 
 # HTTP 产品与后台线程门面；线程内独立连接，active 为本机缓存，Lease 与游标为持久恢复事实。
@@ -348,6 +349,9 @@ class ConversationWebService:
             reply_timings = self._reply_timings(value["messages"])
             with self.lock:
                 active = set(self.active)
+            # 复用下方已读取的模型/工具事实，整段会话线性汇总；不为统计再增加逐轮 SQL 查询。
+            model_invocations = []
+            tool_operations = []
             for turn in value["turns"]:
                 lease = workspace.repository.driver_lease(turn["run_id"])
                 if turn["status"] == "RUNNING" and (lease is None or lease["expired"]):
@@ -370,6 +374,8 @@ class ConversationWebService:
                 turn["operations"] = workspace.repository.operations(turn["run_id"])
                 turn["events"] = workspace.repository.events(turn["run_id"])
                 model_state = workspace.repository.decisions.status(turn["run_id"])
+                model_invocations.extend(model_state["model_invocations"])
+                tool_operations.extend(turn["operations"])
                 turn["model_usage"] = self._model_usage_summary(
                     model_state["model_invocations"]
                 )
@@ -378,6 +384,7 @@ class ConversationWebService:
                     workspace.personal.goal_view(goal_id) if goal_id else None
                 )
             value["artifacts"] = workspace.repository.artifacts(sid)
+            value["statistics"] = session_statistics(model_invocations, tool_operations)
             return value
 
     # 先在本机 active 集占位，再竞争持久 Driver Lease 并启动线程；失败释放占位，线程退出清理自己的 owner。
