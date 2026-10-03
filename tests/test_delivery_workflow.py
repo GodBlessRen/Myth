@@ -16,7 +16,9 @@ from myth.workspace import Workspace
 from test_workspace import ChatProvider, decision
 
 
+# 该类型集中拥有当前职责，避免把状态真相分散到多个适配器。
 class DeliveryWorkflowTests(unittest.TestCase):
+    # 该入口按持久合同处理输入与输出，失败保持显式而不伪造完成。
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
@@ -26,10 +28,12 @@ class DeliveryWorkflowTests(unittest.TestCase):
         self.repo.save_settings({"provider": "ollama", "model": "test"})
         self.sid = self.repo.create_session()["id"]
 
+    # 该入口按持久合同处理输入与输出，失败保持显式而不伪造完成。
     def tearDown(self):
         self.runtime.close()
         self.tmp.cleanup()
 
+    # 该入口按持久合同处理输入与输出，失败保持显式而不伪造完成。
     def test_completion_creates_finalization_and_unverified_acceptance(self):
         goal = self.workspace.personal.create_goal("Ship one checked deliverable")
         turn = self.repo.create_turn(
@@ -51,6 +55,7 @@ class DeliveryWorkflowTests(unittest.TestCase):
             "IN_PROGRESS",
         )
 
+    # 该入口按持久合同处理输入与输出，失败保持显式而不伪造完成。
     def test_hard_exit_after_answer_commit_is_reconciled_without_model_replay(self):
         child_root = self.root / "terminal-crash"
         source_root = Path(__file__).resolve().parents[1]
@@ -101,6 +106,7 @@ with MythRuntime(root) as runtime:
                 "IN_PROGRESS",
             )
 
+    # 该入口按持久合同处理输入与输出，失败保持显式而不伪造完成。
     def test_acceptance_binds_subject_and_human_attention(self):
         rid = self.repo.create_turn(self.sid, "Review me", "acceptance")["run_id"]
         self.workspace.run(rid, ChatProvider([decision(claim="Answer")]))
@@ -124,6 +130,7 @@ with MythRuntime(root) as runtime:
                 rid, state="PASSED", checker_id="stale", subject_digest="0" * 64
             )
 
+    # 该入口按持久合同处理输入与输出，失败保持显式而不伪造完成。
     def test_work_plan_revision_is_monotonic(self):
         rid = self.repo.create_turn(self.sid, "Multi-stage work", "plan")["run_id"]
         self.workspace.delivery.ensure_root_work_item(self.repo.turn(rid))
@@ -142,6 +149,7 @@ with MythRuntime(root) as runtime:
                 rid, [{"title": "old plan"}], plan_revision=2
             )
 
+    # 该入口按持久合同处理输入与输出，失败保持显式而不伪造完成。
     def test_trusted_python_unittest_profile_executes_via_receipt(self):
         project_root = self.root / "fixture-project"
         tests = project_root / "tests"
@@ -183,6 +191,7 @@ with MythRuntime(root) as runtime:
         self.assertTrue(operation["result"]["evidence_ref"].startswith("test:"))
         self.assertEqual(self.workspace.delivery.acceptance(rid)["state"], "UNVERIFIED")
 
+    # 该入口按持久合同处理输入与输出，失败保持显式而不伪造完成。
     def test_web_projection_exposes_delivery_metrics(self):
         rid = self.repo.create_turn(self.sid, "Visible delivery", "web-delivery")["run_id"]
         self.workspace.run(rid, ChatProvider([decision(claim="Visible")]))
