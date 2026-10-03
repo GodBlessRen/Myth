@@ -84,6 +84,8 @@ Decision proposal
 
 Run 生命周期不绑定 Browser、HTTP request 或 Web Driver 生命周期。
 
+Conversation / Goal 的已准入工作由独立 **Durable Executor** 驱动。Web 启动时只确保本机执行器存在；之后关闭页面、刷新页面或 Web 进程退出都不会主动停止该执行器。执行器竞争自己的全局短租约，再对每个 Run 继续竞争既有 Driver Lease，因此多个进程不能把同一个 Run 当成两项工作执行。机器重启后再次启动 Myth 时，过期租约允许新执行器从原 Run 的 durable cursor 接管，而不是创建替代 Run。
+
 Conversation Run 额外保存：
 
 - durable Execution Cursor；
@@ -289,11 +291,11 @@ Schema 以 additive migration 为主；旧 active-run upgrade 需要单独验证
 History / Context | Conversation / Task | Runtime Observatory
 ```
 
-第三栏必须保持 Goal / Flow / Trajectory / Tokens / Context / Tools / Control / Budget 可观察。
+第三栏必须保持 Goal / Flow / Recovery / Trajectory / Tokens / Cache Hit / Context / Tools / Control / Budget 可观察。执行器心跳与业务进度分开：`executor heartbeat` 只证明 worker 活着，`Execution Cursor.updated_at` 才作为最近 durable progress 的观察信号；长时间无 checkpoint 只能标记为 **suspected no progress**，不能据此盲目重试未知外部效果。
 
 ## 15. 本地 Goal Wake-up
 
-`GoalScheduler` 是现有 Workspace 的本地适配器，不增加 Core 层次。用户显式创建一次性或固定间隔计划；Web 服务每两秒检查 due schedule，provider readiness 在事务外检查。
+`GoalScheduler` 是现有 Workspace 的本地适配器，不增加 Core 层次。用户显式创建一次性或固定间隔计划；独立 Durable Executor 默认每两秒检查 due schedule，provider readiness 在事务外检查。Web 只负责确保执行器已启动和展示其心跳，不再拥有计划任务的生命周期。
 
 同一 SQLite 事务提交 occurrence、Turn/Run、Goal link 和 admission checkpoint。`request_id` 固定计划入口身份；`(schedule_id, sequence)` 唯一约束固定每次工作机会。未来 due time 仅在 admission 成功时推进，停机期间的过期重复时段合并为一次。
 
@@ -306,7 +308,7 @@ History / Context | Conversation / Task | Runtime Observatory
 当前没有：
 
 - 任意 shell / arbitrary code executor；
-- 脱离 Web 服务的系统常驻调度与通用事件触发；
+- 操作系统级开机自启动/服务管理器与通用事件触发；当前 Durable Executor 是本机独立进程，由 Myth 启动并用 SQLite lease 自恢复；
 - 分布式 lease / worker；
 - 多用户 auth；
 - 通用 MCP/A2A production integration；
