@@ -194,6 +194,21 @@ function renderInspectorRecovery(turn) {
   }
   const cursor = turn.execution_cursor || {};
   const lease = turn.driver_lease || null;
+  const liveness = turn.liveness || {};
+  const executor = state.data?.executor || {};
+  inspectorFact(
+    box,
+    "Executor",
+    executor.active
+      ? "active" + (executor.pid ? " · pid " + executor.pid : "")
+      : executor.state || "unknown",
+  );
+  if (executor.heartbeat_age_seconds != null)
+    inspectorFact(
+      box,
+      "Executor heartbeat",
+      Math.round(Number(executor.heartbeat_age_seconds)) + "s ago",
+    );
   inspectorFact(box, "Phase", cursor.phase || "—");
   inspectorFact(
     box,
@@ -204,6 +219,18 @@ function renderInspectorRecovery(turn) {
       Number(cursor.checkpoint_step || 0),
   );
   inspectorFact(box, "Recovery", cursor.recovery_state || "NONE");
+  if (liveness.seconds_since_progress != null)
+    inspectorFact(
+      box,
+      "Last progress",
+      Math.round(Number(liveness.seconds_since_progress)) + "s ago",
+    );
+  if (liveness.suspected_no_progress)
+    inspectorFact(
+      box,
+      "Progress watch",
+      "NO PROGRESS suspected · inspect before retry",
+    );
   if (cursor.detail)
     inspectorFact(box, "Detail", String(cursor.detail).slice(0, 180));
   if (lease) {
