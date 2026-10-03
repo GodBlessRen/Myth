@@ -74,7 +74,7 @@ Run B: tools 5, tokens  8k, time 50s
 
 ## 环境怎么判定
 
-每个新 Turn 准入时冻结 `best_path_environment`。
+每个新 Turn 准入时冻结 `sota_route_environment`。
 
 无本地项目时，比较键包含：
 
@@ -191,15 +191,15 @@ Promote / Rollback
 - Work time: current · best
 - Changed lines: current · best
 - Drift
-- Known route
+- Action Path
 - Compare scope
 
 原有 Delivery / Execution / Recovery / Trajectory / Tokens / Context / Tools / Budget 全部保留。
 
 ## API
 
-- `GET /api/workspace/turns/{run_id}/best-path`
-- `GET /api/workspace/best-paths?limit=50`
+- `GET /api/workspace/turns/{run_id}/sota-route`
+- `GET /api/workspace/sota-routes?limit=50`
 
 这些接口只读取路径账本，不触发模型/工具执行。
 
