@@ -118,6 +118,12 @@ def default_capabilities() -> CapabilityRegistry:
             "Create an exact-patched managed copy of a project file.",
             "write",
         ),
+        (
+            "test.run",
+            "execution",
+            "Run an explicitly trusted Python unittest profile; no arbitrary shell.",
+            "execute",
+        ),
         ("math.calculate", "compute", "Evaluate bounded arithmetic only.", "compute"),
         (
             "file.read",
@@ -157,12 +163,6 @@ def default_capabilities() -> CapabilityRegistry:
         ),
     ]
     planned = [
-        (
-            "test.run",
-            "execution",
-            "Run an admitted test command in a controlled executor.",
-            "execute",
-        ),
         (
             "shell.exec",
             "execution",

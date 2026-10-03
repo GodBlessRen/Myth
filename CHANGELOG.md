@@ -1,5 +1,14 @@
 # Changelog
 
+## 未发布 — v0.24 交付闭环
+
+- 新增 durable finalization obligation：回答已提交而 Memory / Goal 未收尾时，重启后补齐派生投影，不重新调用模型。
+- 普通 Conversation 新增 Acceptance Ledger（UNVERIFIED / PASSED / FAILED / INCONCLUSIVE），绑定当前回答与产物摘要；Runtime 第三栏新增 Delivery 区。
+- 新增持久 Work item / plan revision / evidence / human attention 计量，为跨阶段项目工作建立可检查身份。
+- `test.run` 首次进入 executable：只运行用户显式 `trusted_project=true` 的 Python unittest profile；无任意 shell，并明确不宣称 OS 级网络隔离。
+- 详细边界与 0–12 周阶段映射见 [v0.24 交付闭环](docs/DELIVERY_WORKFLOW_V024.md)。
+
+
 ## 未发布 — 会话统计
 
 - Runtime 第三栏新增整段会话的模型/工具累计用时、调用级平均 TTFT、端到端 TPS；原有最新 Turn 观测区保留。

@@ -71,6 +71,7 @@ _TOOL_ARGUMENTS = {
     "diff.preview": object_schema({"path": _TEXT, "content": _TEXT}),
     "git.status": object_schema({}, []),
     "git.diff": object_schema({"path": _TEXT}, []),
+    "test.run": object_schema({"profile_id": _TEXT}),
     "artifact.write": object_schema({"path": _TEXT, "content": _TEXT}),
     "project.patch_exact": object_schema(
         {
@@ -148,6 +149,7 @@ TOOL_CATALOG = {
     },
     "git.status": {},
     "git.diff": {"path": "optional relative file"},
+    "test.run": {"profile_id": "explicit trusted-project Python unittest profile"},
     "artifact.write": {
         "path": "relative output filename",
         "content": "complete UTF-8 content",

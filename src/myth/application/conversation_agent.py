@@ -10,6 +10,7 @@ from ..conversation_ports import (
     ConversationControl,
     ConversationMemory,
     GoalCheckpoint,
+    ConversationDelivery,
 )
 
 
@@ -24,6 +25,7 @@ class ConversationAgent:
         control: ConversationControl,
         memory: ConversationMemory,
         personal: GoalCheckpoint | None = None,
+        delivery: ConversationDelivery | None = None,
     ):
         # repository：用例仓储端口/实现；持久状态写入归此协作对象所有。
         self.repository = repository
@@ -35,6 +37,8 @@ class ConversationAgent:
         self.memory = memory
         # personal：长期意图及进度的状态所有者；对话准入通过显式事务协作加入。
         self.personal = personal
+        # delivery：交付事实所有者；COMPLETED 不自动等于语义验收通过。
+        self.delivery = delivery
 
     # 按 Turn 冻结 Goal 身份写长期进度；个人仓储负责拒绝旧 Run 的迟到覆盖。
     def _checkpoint_goal(
@@ -70,6 +74,13 @@ class ConversationAgent:
     def run(self, run_id, provider):
         with self.execution.lock(run_id):
             turn = self.repository.turn(run_id)
+            if self.delivery is not None:
+                self.delivery.reconcile_pending(
+                    self.repository, self.memory, self.personal, run_id=run_id, limit=1
+                )
+                turn = self.repository.turn(run_id)
+                if turn["status"] in {"RUNNING", "INTERRUPTED", "UNKNOWN"}:
+                    self.delivery.ensure_root_work_item(turn)
             if turn["status"] == "PAUSED":
                 return
             if (turn.get("network_retry") or {}).get("remaining_seconds", 0) > 0:
@@ -136,6 +147,8 @@ class ConversationAgent:
                     if decision.decision_type == "tool_call":
                         result = self.execution.execute(turn, decision_id, decision)
                         self.repository.finish_tool(run_id, step["step"], result)
+                        if self.delivery is not None:
+                            self.delivery.record_tool_result(run_id, result)
                         if self._gate(run_id):
                             return
                     elif decision.decision_type == "ask_user":
@@ -145,6 +158,12 @@ class ConversationAgent:
                             decision.question,
                             decision_id,
                         )
+                        if self.delivery is not None:
+                            self.delivery.update_root_work_item(
+                                run_id,
+                                status="WAITING",
+                                progress_note=decision.question or "Waiting for user input.",
+                            )
                         self._checkpoint_goal(
                             run_id,
                             status="WAITING_USER",
@@ -154,21 +173,36 @@ class ConversationAgent:
                         )
                         return
                     else:
+                        if self.delivery is not None:
+                            goal = (turn.get("snapshot") or {}).get("goal") or {}
+                            self.delivery.prepare_completion(
+                                run_id,
+                                decision.claim or "",
+                                goal_id=goal.get("goal_id"),
+                                goal_summary=(decision.claim or "")[:2000],
+                                next_action="Review the result and continue the next unfinished part of this goal.",
+                            )
                         self.repository.finish_reply(
                             run_id, step["step"], decision.claim
                         )
-                        completed = self.repository.turn(run_id)
-                        self.memory.record_episode(
-                            run_id,
-                            completed["snapshot"]["messages"][-1]["content"],
-                            decision.claim or "",
-                        )
-                        self._checkpoint_goal(
-                            run_id,
-                            status="COMPLETED",
-                            summary=(decision.claim or "")[:2000],
-                            next_action="Review the result and continue the next unfinished part of this goal.",
-                        )
+                        if self.delivery is not None:
+                            self.delivery.mark_answer_committed(run_id)
+                            self.delivery.reconcile_pending(
+                                self.repository, self.memory, self.personal, run_id=run_id, limit=1
+                            )
+                        else:
+                            completed = self.repository.turn(run_id)
+                            self.memory.record_episode(
+                                run_id,
+                                completed["snapshot"]["messages"][-1]["content"],
+                                decision.claim or "",
+                            )
+                            self._checkpoint_goal(
+                                run_id,
+                                status="COMPLETED",
+                                summary=(decision.claim or "")[:2000],
+                                next_action="Review the result and continue the next unfinished part of this goal.",
+                            )
                         return
                 except ProviderUnavailable:
                     # 明确零派发收据已经结算；保留同一 step，退出线程等待后台按持久截止时间继续。

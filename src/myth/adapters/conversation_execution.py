@@ -18,6 +18,7 @@ from ..domain import RecoveryRequired, exact_patch, sha256_bytes
 from ..platform.capabilities import CapabilityState, default_capabilities
 from ..models import StepDecision
 from ..strategies import RuleIntentPicker
+from ..verification import SqliteVerificationProfiles
 
 # EXCLUDED：项目读取/检索排除项；避免把秘钥、版本库和生成缓存纳入上下文。
 EXCLUDED = {
@@ -75,6 +76,8 @@ class LocalConversationExecution:
         self.registry = capability_registry or default_capabilities()
         # intent_picker：纯路径选择策略；输出是提案，不改变能力范围。
         self.intent_picker = RuleIntentPicker()
+        # verification：显式受信项目的固定 Python unittest profile；不提供任意 shell。
+        self.verification = SqliteVerificationProfiles(runtime, repository)
         # receipts：持久效果日志协作对象；不存在日志不自动证明调用未发出。
         self.receipts = runtime.runtime_dir / "conversation-receipts"
         self.receipts.mkdir(exist_ok=True)
@@ -585,6 +588,31 @@ class LocalConversationExecution:
         if spec.state is not CapabilityState.EXECUTABLE:
             raise PermissionError(f"capability is not executable: {capability}")
 
+        # test.run 的结果必须在 Ticket 后产生；无收据时保持 UNKNOWN，绝不自动重跑项目代码。
+        if capability == "test.run":
+            intent = self.verification.intent(turn, args)
+            op = self.repository.start_operation(
+                turn["run_id"], decision_id, capability, intent
+            )
+            tool_started = time.monotonic()
+            result = self.verification.run(turn, args.get("profile_id"))
+            tool_wall_ms = max(0, int((time.monotonic() - tool_started) * 1000))
+            atomic_write(
+                self.receipts / f"{decision_id}.json",
+                json.dumps(
+                    {
+                        "decision_id": decision_id,
+                        "ticket_id": op["ticket_id"],
+                        "result": result,
+                        "tool_wall_ms": tool_wall_ms,
+                    },
+                    ensure_ascii=False,
+                ).encode("utf-8"),
+            )
+            return self.repository.settle_operation(
+                decision_id, result, tool_wall_ms=tool_wall_ms
+            )
+
         # 单调时钟只测本次真实执行/结果准备；已结算的稳定决定在上方直接复用，不重复测量或累加。
         tool_started = time.monotonic()
         result = {"capability_id": capability}
@@ -688,12 +716,18 @@ class LocalConversationExecution:
                 if (
                     value["ticket_id"] != op["ticket_id"]
                     or value["decision_id"] != op["decision_id"]
-                    or value["result"] != op["intent"]["result"]
+                    or (
+                        "result" in op["intent"]
+                        and value["result"] != op["intent"]["result"]
+                    )
                 ):
                     raise RecoveryRequired("receipt differs from fixed tool intent")
                 result = value["result"]
                 # 旧收据缺计量保持未报告；坏观测字段由仓储忽略，不能改变工具效果核对/预算结算。
                 tool_wall_ms = value.get("tool_wall_ms")
+            elif op["intent"].get("requires_receipt"):
+                # 动态执行结果不能由 Intent 猜测；没有收据就保持不明。
+                return False
             elif op["intent"].get("target"):
                 target = Path(op["intent"]["target"])
                 if (

@@ -56,3 +56,8 @@ Workflow、Routing/Parallel、Multi-Agent、MCP/A2A 和更复杂 Evolution 暂�
 ## 长期方向
 
 只有明确部署需求出现后再推进系统常驻服务、分布式 worker、远端执行、多用户授权、组织 policy 和 fleet scheduling。当前固定间隔计划不是通用 cron/Event Bus/Trigger DSL。
+
+
+## v0.24 — Delivery workflow
+
+实现说明见 [DELIVERY_WORKFLOW_V024.md](DELIVERY_WORKFLOW_V024.md)。本阶段增加终态收尾补偿、绑定交付摘要的验收、持久 Work item、受信项目 `test.run` profile、人工关注计量与 Runtime Delivery 观测。真实 2–4 周连续自用仍是发布闸门，不以测试夹具替代。
