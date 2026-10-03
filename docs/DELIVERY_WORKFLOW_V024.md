@@ -83,3 +83,6 @@ Runtime 第三栏保留原有轨迹、Token、Context、Tool、Budget、Recovery
 ## 发布闸门
 
 合并前必须满足 Python 全回归、Node UI 回归、终结窗口真实进程退出探针、test.run PASS / FAIL / timeout / receipt 恢复回归，并确保文档不把 fixture 写成真实模型或多周使用成绩。
+
+
+CI 注：本分支以仓库既有中文说明守卫、Python/Node 回归和四平台矩阵作为合并前最低工程门槛。
