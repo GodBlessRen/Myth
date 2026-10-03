@@ -81,7 +81,7 @@ class Workspace:
             self.repository, self.memory, self.personal, limit=32
         )
         # 启动只补登记历史 PASSED 路径；不重跑旧模型/工具，也不倒写旧 Turn。
-        self.best_path.sync_existing(limit=200)
+        self.best_path.backfill_once(limit=200)
 
     # 驱动当前用例并依据持久事实推进；恢复、权限、预算与结束条件见本模块具体协作边界。
     def run(self, rid, provider):
