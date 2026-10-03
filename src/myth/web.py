@@ -94,11 +94,11 @@ class AgentWebService:
         with MythRuntime(self.root) as runtime:
             return AgentRuntime(runtime).list_runs()
 
-    # 读取当前持久事实并生成状态投影；不得把模型 claim 当作已执行或已验收。
+    # 读取当前持久事实并生成状态投影；持锁组合本机 Driver 标志，避免 RUNNING 快照与刚清除 active 串成不一致视图。
     def status(self, run_id: str) -> dict[str, Any]:
-        with MythRuntime(self.root) as runtime:
-            result = AgentRuntime(runtime).status(run_id)
         with self._lock:
+            with MythRuntime(self.root) as runtime:
+                result = AgentRuntime(runtime).status(run_id)
             result["driver_active"] = run_id in self._active
         return result
 
