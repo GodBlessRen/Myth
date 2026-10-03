@@ -1,3 +1,6 @@
+"""回归边界：Exact Agent 端口装配与固定文件范围。
+本文件固定夹具、输入和断言；通过只证明这些窗口，替身调用不等同真实模型质量或远端集成。"""
+
 from __future__ import annotations
 
 import json
@@ -10,12 +13,15 @@ from myth.models import ModelResult, ProviderStatus
 from myth.runtime import MythRuntime
 
 
+# Exact Agent 端口装配与固定文件范围的固定测试集合/替身；临时资源由本用例拥有，生产状态必须从实际仓储核对。
 class LoopProvider:
     provider_id = "fake-loop"
 
+    # 固定返回替身连接状态；只隔离传输，不证明真实供应商可用。
     def check(self) -> ProviderStatus:
         return ProviderStatus(self.provider_id, True, auth_type="none")
 
+    # 按预定顺序返回模型夹具或注入异常；调用计数用于核对重放边界。
     def invoke(self, request) -> ModelResult:
         user_payload = json.loads(request.messages[-1].content)
         context = json.loads(user_payload["context"])
@@ -31,12 +37,14 @@ class LoopProvider:
                 "decision_type": "tool_call",
                 "reason": "The allowed file contains the requested source text.",
                 "capability_id": "file.patch_exact",
-                "arguments_json": json.dumps({
-                    "path": Path(user_payload["allowed_files"][0]).name,
-                    "old_text": "foo",
-                    "new_text": "bar",
-                    "expected_count": 1,
-                }),
+                "arguments_json": json.dumps(
+                    {
+                        "path": Path(user_payload["allowed_files"][0]).name,
+                        "old_text": "foo",
+                        "new_text": "bar",
+                        "expected_count": 1,
+                    }
+                ),
                 "question": "",
                 "missing_info_category": "",
                 "claim": "",
@@ -66,12 +74,15 @@ class LoopProvider:
         )
 
 
+# Exact Agent 端口装配与固定文件范围的固定测试集合/替身；临时资源由本用例拥有，生产状态必须从实际仓储核对。
 class AskProvider:
     provider_id = "fake-ask"
 
+    # 固定返回替身连接状态；只隔离传输，不证明真实供应商可用。
     def check(self) -> ProviderStatus:
         return ProviderStatus(self.provider_id, True, auth_type="none")
 
+    # 按预定顺序返回模型夹具或注入异常；调用计数用于核对重放边界。
     def invoke(self, request) -> ModelResult:
         payload = {
             "decision_type": "ask_user",
@@ -92,7 +103,9 @@ class AskProvider:
         )
 
 
+# Exact Agent 端口装配与固定文件范围的固定测试集合/替身；临时资源由本用例拥有，生产状态必须从实际仓储核对。
 class AgentRuntimeTests(unittest.TestCase):
+    # 回归断言：应用经端口执行真实受管工具，固定验收通过后才能交付。
     def test_agent_executes_tool_then_verifies_completion(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -108,7 +121,14 @@ class AgentRuntimeTests(unittest.TestCase):
                     allowed_files=(source,),
                     max_steps=4,
                     max_output_tokens=100,
-                    acceptance=[{"path": str(source), "old_text": "foo", "new_text": "bar", "expected_count": 1}],
+                    acceptance=[
+                        {
+                            "path": str(source),
+                            "old_text": "foo",
+                            "new_text": "bar",
+                            "expected_count": 1,
+                        }
+                    ],
                 )
                 status = agent.run(run_id, provider)
 
@@ -122,19 +142,24 @@ class AgentRuntimeTests(unittest.TestCase):
                 self.assertIsNotNone(status["delivery"])
                 self.assertEqual(len(status["model"]["decisions"]), 2)
 
+    # 回归断言：模型参数不能读取/修改准入文件范围之外的对象。
     def test_model_cannot_escape_allowed_file_set(self) -> None:
+        # Exact Agent 端口装配与固定文件范围的固定测试集合/替身；临时资源由本用例拥有，生产状态必须从实际仓储核对。
         class EscapeProvider(LoopProvider):
+            # 按预定顺序返回模型夹具或注入异常；调用计数用于核对重放边界。
             def invoke(self, request) -> ModelResult:
                 payload = {
                     "decision_type": "tool_call",
                     "reason": "try another path",
                     "capability_id": "file.patch_exact",
-                    "arguments_json": json.dumps({
-                        "path": "../secret.txt",
-                        "old_text": "x",
-                        "new_text": "y",
-                        "expected_count": 1,
-                    }),
+                    "arguments_json": json.dumps(
+                        {
+                            "path": "../secret.txt",
+                            "old_text": "x",
+                            "new_text": "y",
+                            "expected_count": 1,
+                        }
+                    ),
                     "question": "",
                     "missing_info_category": "",
                     "claim": "",
@@ -173,6 +198,7 @@ class AgentRuntimeTests(unittest.TestCase):
             finally:
                 secret.unlink(missing_ok=True)
 
+    # 回归断言：信息不足时保存待答问题；用户明确回答才继续原 Run。
     def test_agent_can_pause_for_user(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

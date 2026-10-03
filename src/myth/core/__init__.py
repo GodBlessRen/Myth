@@ -1,9 +1,7 @@
-"""Stable Myth core vocabulary.
-
-The core records durable intent and facts.  It deliberately does not prescribe
-how intelligence is organized.
-"""
+"""最小核心合同的公开导出。
+包导出本身不启动业务工作；具体状态归属、I/O 和恢复合同见被导出模块。"""
 
 from .primitives import Goal, GoalState
 
+# __all__：公开导出名单；兼容别名只有在确认外部迁移完成后才删除。
 __all__ = ["Goal", "GoalState"]

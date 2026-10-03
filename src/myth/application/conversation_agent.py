@@ -1,20 +1,51 @@
-"""通用对话循环：Control Plane 只在安全点改变未来工作，工具效果仍走持久执行端口。"""
+"""Conversation 与长期 Goal 的应用循环。
+通过五类端口协调状态、I/O、控制、记忆及进度；安全点控制未来派发，COMPLETED 仅表示回答结束，不能升级为语义验收。"""
 
 from ..acceptance import ContextBudgetError
 from ..domain import BudgetExceeded, RecoveryRequired, PatchContractError
 from ..models import StepDecision, DecisionValidationError
-from ..conversation_ports import ConversationRepository, ConversationExecution
+from ..conversation_ports import (
+    ConversationRepository,
+    ConversationExecution,
+    ConversationControl,
+    ConversationMemory,
+    GoalCheckpoint,
+)
 
 
+# 只依赖端口的对话编排器；Control、Memory、Personal 协作各自保留状态所有权。
 class ConversationAgent:
-    def __init__(self, repository: ConversationRepository, execution: ConversationExecution, *, control, memory, personal=None):
+    # 接收五类可替换端口；应用不取得 SQL/具体供应商，长期 checkpoint 可缺省，终结后协作提交各自状态。
+    def __init__(
+        self,
+        repository: ConversationRepository,
+        execution: ConversationExecution,
+        *,
+        control: ConversationControl,
+        memory: ConversationMemory,
+        personal: GoalCheckpoint | None = None,
+    ):
+        # repository：用例仓储端口/实现；持久状态写入归此协作对象所有。
         self.repository = repository
+        # execution：用例执行端口/实现；外部效果须经过 Ticket 和收据协议。
         self.execution = execution
+        # control：控制服务协作对象；只在安全点影响未来规划。
         self.control = control
+        # memory：有来源记忆协作对象；不授予权限。
         self.memory = memory
+        # personal：长期意图及进度的状态所有者；对话准入通过显式事务协作加入。
         self.personal = personal
 
-    def _checkpoint_goal(self, run_id: str, *, status: str, summary: str = "", next_action: str = "", waiting_for: str = "") -> None:
+    # 按 Turn 冻结 Goal 身份写长期进度；个人仓储负责拒绝旧 Run 的迟到覆盖。
+    def _checkpoint_goal(
+        self,
+        run_id: str,
+        *,
+        status: str,
+        summary: str = "",
+        next_action: str = "",
+        waiting_for: str = "",
+    ) -> None:
         if self.personal is None:
             return
         turn = self.repository.turn(run_id)
@@ -31,9 +62,11 @@ class ConversationAgent:
             waiting_for=waiting_for,
         )
 
+    # 查询控制安全点并返回是否停止规划；控制不会撤销已签发外部调用。
     def _gate(self, run_id: str) -> bool:
         return self.control.gate(run_id) is not None
 
+    # 锁定一个 Run，先核对旧机会，逐步复用/绑定决定；效果后保留收据，回答后分别记录经历和 Goal 进度。
     def run(self, run_id, provider):
         with self.execution.lock(run_id):
             turn = self.repository.turn(run_id)
@@ -51,7 +84,12 @@ class ConversationAgent:
                     "UNKNOWN",
                     "模型或工具已获执行凭证，但结果尚不明确；不会自动重发。",
                 )
-                self._checkpoint_goal(run_id,status="UNKNOWN",summary="Execution receipt is unresolved.",next_action="Reconcile the uncertain attempt before continuing.")
+                self._checkpoint_goal(
+                    run_id,
+                    status="UNKNOWN",
+                    summary="Execution receipt is unresolved.",
+                    next_action="Reconcile the uncertain attempt before continuing.",
+                )
                 return
             self.repository.reopen(run_id)
 
@@ -65,20 +103,30 @@ class ConversationAgent:
                         "BUDGET_EXHAUSTED",
                         "本轮达到步数上限，可开始新一轮继续。",
                     )
-                    self._checkpoint_goal(run_id,status="BUDGET_EXHAUSTED",summary="Turn step budget exhausted.",next_action="Review the unfinished work and admit a new turn.")
+                    self._checkpoint_goal(
+                        run_id,
+                        status="BUDGET_EXHAUSTED",
+                        summary="Turn step budget exhausted.",
+                        next_action="Review the unfinished work and admit a new turn.",
+                    )
                     return
                 try:
                     turn = self.repository.turn(run_id)
                     turn["control"] = self.control.view(run_id)
                     if step.get("decision"):
-                        decision_id, decision = step["decision_id"], StepDecision(**step["decision"])
+                        decision_id, decision = step["decision_id"], StepDecision(
+                            **step["decision"]
+                        )
                     else:
-                        decision_id, decision = self.execution.decide(turn, step["step"], provider)
-                        self.repository.bind(run_id, step["step"], decision_id, decision)
+                        decision_id, decision = self.execution.decide(
+                            turn, step["step"], provider
+                        )
+                        self.repository.bind(
+                            run_id, step["step"], decision_id, decision
+                        )
                         self.control.consume_compaction(run_id, decision_id=decision_id)
 
-                    # A pause/abort arriving while the model was in flight is
-                    # observed here before any newly proposed tool is launched.
+                    # 模型在途时到达的 Pause/Stop 在这里被观察；新工具派发前再次检查安全点。
                     if self._gate(run_id):
                         return
 
@@ -103,7 +151,9 @@ class ConversationAgent:
                         )
                         return
                     else:
-                        self.repository.finish_reply(run_id, step["step"], decision.claim)
+                        self.repository.finish_reply(
+                            run_id, step["step"], decision.claim
+                        )
                         completed = self.repository.turn(run_id)
                         self.memory.record_episode(
                             run_id,
@@ -119,15 +169,35 @@ class ConversationAgent:
                         return
                 except ContextBudgetError as exc:
                     self.repository.block(run_id, "FAILED", str(exc))
-                    self._checkpoint_goal(run_id,status="FAILED",summary=str(exc),next_action="Resolve the context-budget blocker before retrying.")
+                    self._checkpoint_goal(
+                        run_id,
+                        status="FAILED",
+                        summary=str(exc),
+                        next_action="Resolve the context-budget blocker before retrying.",
+                    )
                     return
-                except (DecisionValidationError, ValueError, PermissionError, PatchContractError) as exc:
+                except (
+                    DecisionValidationError,
+                    ValueError,
+                    PermissionError,
+                    PatchContractError,
+                ) as exc:
                     self.repository.reject(run_id, step["step"], str(exc))
                 except BudgetExceeded as exc:
                     self.repository.block(run_id, "BUDGET_EXHAUSTED", str(exc))
-                    self._checkpoint_goal(run_id,status="BUDGET_EXHAUSTED",summary=str(exc),next_action="Start a new admitted turn with an adjusted budget.")
+                    self._checkpoint_goal(
+                        run_id,
+                        status="BUDGET_EXHAUSTED",
+                        summary=str(exc),
+                        next_action="Start a new admitted turn with an adjusted budget.",
+                    )
                     return
                 except (RecoveryRequired, OSError, RuntimeError) as exc:
                     self.repository.block(run_id, "UNKNOWN", str(exc))
-                    self._checkpoint_goal(run_id,status="UNKNOWN",summary=str(exc),next_action="Reconcile the uncertain attempt before any replay.")
+                    self._checkpoint_goal(
+                        run_id,
+                        status="UNKNOWN",
+                        summary=str(exc),
+                        next_action="Reconcile the uncertain attempt before any replay.",
+                    )
                     return

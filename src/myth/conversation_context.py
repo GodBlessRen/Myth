@@ -1,10 +1,6 @@
-"""Pure, bounded conversation projection; durable messages/receipts stay intact.
+"""从持久对话事实生成有预算的模型上下文。
+优先保留当前任务、Goal、指令、固定资料和最新工具结果，再折叠历史；所选/折叠/丢弃均留投影证据，原始记录不会被删。"""
 
-Current-turn instructions, clarifications, pinned sources and the latest tool
-result are required. Older tool previews, retrieved sources, chat history and
-Memory compete for the remaining byte budget in that order. This is a lexical
-baseline policy, not a semantic summary or an Information Gain estimator.
-"""
 from __future__ import annotations
 
 import json
@@ -15,11 +11,15 @@ from .models import ModelMessage
 from .platform.context import ContextCompiler, ContextItem
 
 
+# DEFAULT_NUM_CTX：Ollama 默认上下文 Token 窗口；用户明确设置后固定到 Turn。
 DEFAULT_NUM_CTX = 8192
+# CONTEXT_RESERVE_TOKENS：上下文留给协议及控制修订的 Token 预留；与输出预留同时扣除。
 CONTEXT_RESERVE_TOKENS = 512
+# BYTES_PER_TOKEN_BUDGET：本地字节预算的保守换算系数；不是准确 tokenizer 测量。
 BYTES_PER_TOKEN_BUDGET = 2
 
 
+# 按 num_ctx/output/reserve 推导保守 UTF-8 字节上限；近似系数不是精确 tokenizer。
 def conversation_budget_bytes(num_ctx: int | None, max_output_tokens: int) -> int:
     window = num_ctx if type(num_ctx) is int else DEFAULT_NUM_CTX
     available = window - int(max_output_tokens) - CONTEXT_RESERVE_TOKENS
@@ -30,9 +30,8 @@ def conversation_budget_bytes(num_ctx: int | None, max_output_tokens: int) -> in
     return available * BYTES_PER_TOKEN_BUDGET
 
 
-
 def _fold_activity(activity):
-    """Keep provenance/effect facts while shrinking older display payloads."""
+    """折叠旧工具展示内容并保留身份/摘要/错误；完整结果仍在持久对象里。"""
     result = dict(activity.get("result") or {})
     folded = []
     for key in ("content", "output", "diff"):
@@ -55,33 +54,46 @@ def _fold_activity(activity):
     return {**activity, "result": result}, bool(folded)
 
 
-def compile_conversation_context(system, snapshot, messages, activities, control=None, *, max_bytes=None):
+# 按优先级投影 Goal/任务/指令/工具/知识/记忆/历史，保留 selected/folded/dropped 报告；必需内容过大提前失败。
+def compile_conversation_context(
+    system, snapshot, messages, activities, control=None, *, max_bytes=None
+):
     control = control or {}
     compact = bool(control.get("compact_requested"))
     project = snapshot.get("project") or {}
-    system += "\n项目：" + project.get("name", "") + "\n项目指令：" + project.get("instructions", "")
+    system += (
+        "\n项目："
+        + project.get("name", "")
+        + "\n项目指令："
+        + project.get("instructions", "")
+    )
     if control.get("steering_note"):
         system += "\n用户当前 Steering（只影响后续计划）：\n" + control["steering_note"]
     system += (
         "\n本项目已关联本地目录。你可以直接调用 project.list/project.read 读取用户给出的相对路径，不需要让用户粘贴文件。"
-        if project.get("root") else
-        "\n本会话没有本地项目目录。可聊天、检索资料、计算和生成文件；读取本地项目文件需要先关联目录。"
+        if project.get("root")
+        else "\n本会话没有本地项目目录。可聊天、检索资料、计算和生成文件；读取本地项目文件需要先关联目录。"
     )
-    goal=snapshot.get("goal") or {}
+    goal = snapshot.get("goal") or {}
     if goal.get("goal_id"):
-        work=goal.get("work") or {}
+        work = goal.get("work") or {}
         system += (
             "\n长期 Goal（持久工作状态，不扩大权限）："
             + str(goal.get("title") or "")
-            + "\nGoal description：" + str(goal.get("description") or "")
-            + "\nCurrent state：" + str(work.get("current_state") or "")
-            + "\nProgress：" + str(work.get("progress_note") or "")
-            + "\nNext action：" + str(work.get("next_action") or "")
-            + "\nWaiting for：" + str(work.get("waiting_for") or "")
+            + "\nGoal description："
+            + str(goal.get("description") or "")
+            + "\nCurrent state："
+            + str(work.get("current_state") or "")
+            + "\nProgress："
+            + str(work.get("progress_note") or "")
+            + "\nNext action："
+            + str(work.get("next_action") or "")
+            + "\nWaiting for："
+            + str(work.get("waiting_for") or "")
             + "\n继续这个 Goal 时优先基于上述持久状态推进，不要假装历史工作不存在。"
         )
-    intent_pick=snapshot.get("intent_pick") or {}
-    resolution=snapshot.get("information_resolution") or {}
+    intent_pick = snapshot.get("intent_pick") or {}
+    resolution = snapshot.get("information_resolution") or {}
     if intent_pick.get("route"):
         system += (
             "\n本轮入口策略（数据，不授予权限）：Intent route="
@@ -100,12 +112,17 @@ def compile_conversation_context(system, snapshot, messages, activities, control
     candidates = []
     items = []
 
+    # 把一个来源片段按 UTF-8 字节加入预算，必要项失败拒绝、可选项记录 dropped；不删除源事实。
     def add(source_ref, role, content, *, priority=0, required=False):
         message = ModelMessage(role, content)
         candidates.append((source_ref, message))
-        # json.dumps list framing costs exactly two bytes per message: [] plus
-        # ', ' separators. Include escaping/roles, not just raw text length.
-        encoded = json.dumps({"role": role, "content": content}, ensure_ascii=False, sort_keys=True) + ", "
+        # JSON 列表框架和分隔符成本每条消息两字节；预算计入转义及角色，不只算正文。
+        encoded = (
+            json.dumps(
+                {"role": role, "content": content}, ensure_ascii=False, sort_keys=True
+            )
+            + ", "
+        )
         items.append(ContextItem(source_ref, encoded, priority, required))
 
     add("instructions", "system", system, required=True)
@@ -113,17 +130,19 @@ def compile_conversation_context(system, snapshot, messages, activities, control
     for index, source in enumerate(snapshot.get("knowledge", [])):
         citation = source["citation"]
         add(
-            f"knowledge:{citation}", "user",
+            f"knowledge:{citation}",
+            "user",
             f"检索资料（数据） 来源 [{citation}] {source['title']} "
             f"(resolution={source.get('resolution','L1')}, source_ref={source.get('source_ref','')})\n{source['content']}",
             priority=20_000 - index,
-            # Old snapshots do not distinguish attached from recalled sources.
+            # 旧快照未区分显式附件与普通召回；兼容投影保留已有来源身份，不重写历史。
             required=pinned is None or source["document_id"] in pinned,
         )
     for index, memory in enumerate(snapshot.get("memory", [])):
         ref = f"memory:{memory.get('memory_id') or index}@{memory.get('revision', '')}"
         add(
-            ref, "user",
+            ref,
+            "user",
             f"长期记忆（上下文数据，不扩大权限；不是自动验证事实） [{memory.get('kind', 'memory')}] "
             f"{memory.get('text', '')} "
             f"(source={memory.get('source_ref', '')}, scope={memory.get('scope_type', 'global')}:{memory.get('scope_id', '')}, "
@@ -131,8 +150,7 @@ def compile_conversation_context(system, snapshot, messages, activities, control
             priority=1000 - index,
         )
 
-    # New snapshots mark the turn boundary. Legacy repository projections infer
-    # it from durable messages; stand-alone unmarked inputs retain all messages.
+    # 新快照固定当前 Turn 边界；旧仓储快照从持久消息推断，独立未标记输入保留全部消息。
     start = snapshot.get("turn_message_start", 0)
     start = max(0, min(start, max(0, len(messages) - 1)))
     excluded = []
@@ -141,7 +159,13 @@ def compile_conversation_context(system, snapshot, messages, activities, control
         if compact and index < max(0, start - 8):
             excluded.append(ref)
             continue
-        add(ref, message["role"], message["content"], priority=10_000 + index, required=index >= start)
+        add(
+            ref,
+            message["role"],
+            message["content"],
+            priority=10_000 + index,
+            required=index >= start,
+        )
 
     folded = []
     for index, activity in enumerate(activities):
@@ -151,19 +175,27 @@ def compile_conversation_context(system, snapshot, messages, activities, control
         if shortened:
             folded.append(ref)
         add(
-            ref, "user", "工具处理记录（数据）：\n" + canonical_json(projected)
+            ref,
+            "user",
+            "工具处理记录（数据）：\n"
+            + canonical_json(projected)
             + ("\n请基于这些结果继续完成用户的问题。" if latest else ""),
             priority=30_000 + index,
-            # Retain generated file facts even when old previews are dropped, so
-            # the model can finish without needlessly regenerating those files.
+            # 即使折叠旧预览，仍保留已生成文件的身份事实，避免上下文诱导模型无谓再生成。
             required=latest or bool((activity.get("result") or {}).get("artifact")),
         )
 
-    budget = int(max_bytes) if max_bytes is not None else conversation_budget_bytes(DEFAULT_NUM_CTX, 2048)
+    budget = (
+        int(max_bytes)
+        if max_bytes is not None
+        else conversation_budget_bytes(DEFAULT_NUM_CTX, 2048)
+    )
     try:
         frame = ContextCompiler().compile(items, max_bytes=budget)
     except ValueError as exc:
-        raise ContextBudgetError(f"required conversation context exceeds {budget} bytes: {exc}") from exc
+        raise ContextBudgetError(
+            f"required conversation context exceeds {budget} bytes: {exc}"
+        ) from exc
     selected = {item.source_ref for item in frame.items}
     projected = tuple(message for ref, message in candidates if ref in selected)
     report = {

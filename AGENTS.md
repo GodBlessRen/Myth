@@ -91,6 +91,8 @@ Strategy 不是 Layer；不要为了新增策略修改 Core。
 
 ## 4. 修改代码前
 
+所有代码修改必须遵守 [项目宪法的简体中文指导性注释规则](docs/ARCHITECTURE_CONSTITUTION.md#11-简体中文指导性注释)。文件、类、函数、属性及关键步骤的注释应解释架构协作、状态所有权、单位、事务与恢复边界。逐行审阅有设计含义的代码；修改实现时同步修正注释。
+
 先回答：
 
 - 这个改动解决了哪个真实失败？
@@ -109,6 +111,7 @@ Strategy 不是 Layer；不要为了新增策略修改 Core。
 
 ```bash
 python -m compileall -q src tests
+python scripts/check_annotations.py
 python -m unittest discover -s tests -v
 node --check src/myth/webui/app.js
 node --check src/myth/webui/inspector.js

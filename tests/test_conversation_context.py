@@ -1,4 +1,6 @@
-"""Context pressure must not turn optional recall into a failed user task."""
+"""回归边界：有界上下文与 Compact revision 消费。
+本文件固定夹具、输入和断言；通过只证明这些窗口，替身调用不等同真实模型质量或远端集成。"""
+
 import copy
 import json
 from pathlib import Path
@@ -14,21 +16,38 @@ from myth.workspace import Workspace
 from test_workspace import ChatProvider, decision
 
 
-SETTINGS = {"provider": "ollama", "model": "test", "max_output_tokens": 512, "num_ctx": 16384, "temperature": 0.0}
+SETTINGS = {
+    "provider": "ollama",
+    "model": "test",
+    "max_output_tokens": 512,
+    "num_ctx": 16384,
+    "temperature": 0.0,
+}
 
 
+# 有界上下文与 Compact revision 消费的固定测试集合/替身；临时资源由本用例拥有，生产状态必须从实际仓储核对。
 class ConversationContextTests(unittest.TestCase):
+    # 有界上下文与 Compact revision 消费的局部夹具协作；只服务本测试调用链，真实行为仍由外层断言核对。
     def compile(self, snapshot, activities=(), control=None, settings=None):
         return conversation_request(
-            settings or SETTINGS, snapshot, snapshot["messages"], list(activities), control=control,
+            settings or SETTINGS,
+            snapshot,
+            snapshot["messages"],
+            list(activities),
+            control=control,
         )
 
+    # 回归断言：可选旧记忆不能挤掉当前任务和硬约束。
     def test_optional_memory_cannot_crowd_out_current_task(self):
         snapshot = {
             "messages": [{"role": "user", "content": "CURRENT-TASK"}],
             "memory": [
-                {"memory_id": f"m{i}", "text": f"MEMORY-{i} " + "旧资料" * 880,
-                 "source_ref": f"run:{i}", "revision": 1}
+                {
+                    "memory_id": f"m{i}",
+                    "text": f"MEMORY-{i} " + "旧资料" * 880,
+                    "source_ref": f"run:{i}",
+                    "revision": 1,
+                }
                 for i in range(6)
             ],
         }
@@ -39,15 +58,34 @@ class ConversationContextTests(unittest.TestCase):
         self.assertTrue(request.context_report["dropped"])
         self.assertLessEqual(request.context_report["bytes_used"], 42000)
 
+    # 回归断言：折叠旧工具展示保留来源，最新工具结果继续精确进入请求。
     def test_old_git_and_search_results_fold_but_latest_remains_exact(self):
         snapshot = {"messages": [{"role": "user", "content": "inspect repository"}]}
         activities = [
-            {"step": 1, "capability": "git.diff", "decision_id": "d1",
-             "result": {"output": "OLD-DIFF\n" + "a" * 24000}},
-            {"step": 2, "capability": "knowledge.search", "decision_id": "d2",
-             "result": {"sources": [{"citation": "doc:d:0", "content": "b" * 24000}]}},
-            {"step": 3, "capability": "project.read", "decision_id": "d3",
-             "result": {"content": "LATEST-EVIDENCE", "digest": "fixed-hash", "next_offset": 15}},
+            {
+                "step": 1,
+                "capability": "git.diff",
+                "decision_id": "d1",
+                "result": {"output": "OLD-DIFF\n" + "a" * 24000},
+            },
+            {
+                "step": 2,
+                "capability": "knowledge.search",
+                "decision_id": "d2",
+                "result": {
+                    "sources": [{"citation": "doc:d:0", "content": "b" * 24000}]
+                },
+            },
+            {
+                "step": 3,
+                "capability": "project.read",
+                "decision_id": "d3",
+                "result": {
+                    "content": "LATEST-EVIDENCE",
+                    "digest": "fixed-hash",
+                    "next_offset": 15,
+                },
+            },
         ]
         original = copy.deepcopy(activities)
         request = self.compile(snapshot, activities)
@@ -59,88 +97,157 @@ class ConversationContextTests(unittest.TestCase):
         self.assertNotIn("a" * 24000, text)
         self.assertEqual(activities, original)
 
+    # 回归断言：Compact 仍保留当前任务全部澄清，不能以压缩改意图。
     def test_compact_keeps_original_task_and_all_current_clarifications(self):
         snapshot = {
             "turn_message_start": 2,
-            "messages": [{"role": "user", "content": "OLD-CHAT"},
-                         {"role": "assistant", "content": "OLD-ANSWER"},
-                         {"role": "user", "content": "ORIGINAL-GOAL"}]
-                        + [{"role": "assistant" if i % 2 == 0 else "user",
-                            "content": f"CLARIFICATION-{i}"} for i in range(10)],
+            "messages": [
+                {"role": "user", "content": "OLD-CHAT"},
+                {"role": "assistant", "content": "OLD-ANSWER"},
+                {"role": "user", "content": "ORIGINAL-GOAL"},
+            ]
+            + [
+                {
+                    "role": "assistant" if i % 2 == 0 else "user",
+                    "content": f"CLARIFICATION-{i}",
+                }
+                for i in range(10)
+            ],
         }
-        request = self.compile(snapshot, control={"compact_requested": True, "revision": 4})
+        request = self.compile(
+            snapshot, control={"compact_requested": True, "revision": 4}
+        )
         text = "\n".join(m.content for m in request.messages)
         self.assertIn("ORIGINAL-GOAL", text)
         for i in range(10):
             self.assertIn(f"CLARIFICATION-{i}", text)
         self.assertTrue(request.context_report["compact_requested"])
 
+    # 回归断言：大量召回不能挤掉显式固定附件。
     def test_pinned_attachment_survives_recall_pressure(self):
         snapshot = {
             "messages": [{"role": "user", "content": "summarize attachment"}],
             "attached_document_ids": ["pin"],
             "knowledge": [
-                {"document_id": str(i), "citation": f"doc:{i}:0", "title": "retrieved",
-                 "content": "资料" * 2900} for i in range(5)
-            ] + [{"document_id": "pin", "citation": "doc:pin:0", "title": "attached",
-                  "content": "PINNED-EVIDENCE"}],
+                {
+                    "document_id": str(i),
+                    "citation": f"doc:{i}:0",
+                    "title": "retrieved",
+                    "content": "资料" * 2900,
+                }
+                for i in range(5)
+            ]
+            + [
+                {
+                    "document_id": "pin",
+                    "citation": "doc:pin:0",
+                    "title": "attached",
+                    "content": "PINNED-EVIDENCE",
+                }
+            ],
         }
         request = self.compile(snapshot)
         self.assertIn("PINNED-EVIDENCE", "\n".join(m.content for m in request.messages))
         self.assertIn("knowledge:doc:pin:0", request.context_report["selected"])
 
+    # 回归断言：必需资料过大提前失败，不能原始字符串截断后照常调用。
     def test_required_content_is_never_silently_cut(self):
         for snapshot, activities in [
-            ({"project": {"instructions": "x" * 42000},
-              "messages": [{"role": "user", "content": "task"}]}, []),
-            ({"messages": [{"role": "user", "content": "task"}]},
-             [{"step": 1, "result": {"content": "文" * 15000}}]),
+            (
+                {
+                    "project": {"instructions": "x" * 42000},
+                    "messages": [{"role": "user", "content": "task"}],
+                },
+                [],
+            ),
+            (
+                {"messages": [{"role": "user", "content": "task"}]},
+                [{"step": 1, "result": {"content": "文" * 15000}}],
+            ),
         ]:
-            with self.subTest(snapshot=snapshot.keys()), self.assertRaises(ContextBudgetError):
+            with (
+                self.subTest(snapshot=snapshot.keys()),
+                self.assertRaises(ContextBudgetError),
+            ):
                 self.compile(snapshot, activities)
 
+    # 回归断言：压缩历史展示仍保留已生成产物身份，避免重复生成。
     def test_compact_limits_only_history_and_preserves_generated_artifact(self):
         snapshot = {
             "turn_message_start": 20,
             "messages": [{"role": "user", "content": f"OLD-{i}"} for i in range(20)]
-                        + [{"role": "user", "content": "CURRENT-GOAL"}],
+            + [{"role": "user", "content": "CURRENT-GOAL"}],
         }
         activities = [
-            {"step": 1, "result": {"artifact": {"name": "plan.md", "digest": "immutable"},
-                                   "evidence_ref": "artifact:write@immutable"}},
+            {
+                "step": 1,
+                "result": {
+                    "artifact": {"name": "plan.md", "digest": "immutable"},
+                    "evidence_ref": "artifact:write@immutable",
+                },
+            },
             {"step": 2, "result": {"content": "latest"}},
         ]
         request = self.compile(snapshot, activities, {"compact_requested": True})
-        self.assertEqual(len([ref for ref in request.context_report["selected"] if ref.startswith("message:")]), 9)
+        self.assertEqual(
+            len(
+                [
+                    ref
+                    for ref in request.context_report["selected"]
+                    if ref.startswith("message:")
+                ]
+            ),
+            9,
+        )
         self.assertIn("artifact:write@immutable", str(request.serializable()))
         self.assertIn("message:0", request.context_report["dropped"])
 
+    # 回归断言：字节预算包括传输角色、转义和指令，不能只算正文。
     def test_accounting_includes_json_escaping_roles_and_remote_instructions(self):
-        snapshot = {"messages": [{"role": "user", "content": "\\\"\n文" * 1800}]}
+        snapshot = {"messages": [{"role": "user", "content": '\\"\n文' * 1800}]}
         for provider in ("ollama", "openai", "pi-openai"):
-            request = self.compile(snapshot, settings={**SETTINGS, "provider": provider})
+            request = self.compile(
+                snapshot, settings={**SETTINGS, "provider": provider}
+            )
             serialized = request.serializable()
-            actual = len(json.dumps(serialized["messages"], ensure_ascii=False, sort_keys=True).encode("utf-8"))
+            actual = len(
+                json.dumps(
+                    serialized["messages"], ensure_ascii=False, sort_keys=True
+                ).encode("utf-8")
+            )
             self.assertEqual(request.context_report["bytes_used"], actual)
             self.assertLessEqual(actual, 42000)
-            self.assertLessEqual(len(json.dumps(serialized, ensure_ascii=False).encode("utf-8")), 65536)
-            self.assertEqual(request.serializable(), self.compile(snapshot, settings={**SETTINGS, "provider": provider}).serializable())
+            self.assertLessEqual(
+                len(json.dumps(serialized, ensure_ascii=False).encode("utf-8")), 65536
+            )
+            self.assertEqual(
+                request.serializable(),
+                self.compile(
+                    snapshot, settings={**SETTINGS, "provider": provider}
+                ).serializable(),
+            )
 
 
+# 有界上下文与 Compact revision 消费的固定测试集合/替身；临时资源由本用例拥有，生产状态必须从实际仓储核对。
 class ConversationContinuityTests(unittest.TestCase):
+    # 建立本用例独立夹具/临时状态；状态不能跨测试共享，故障窗口以本方法固定条件为准。
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.runtime = MythRuntime(Path(self.temp.name))
         self.workspace = Workspace(self.runtime)
         self.repo = self.workspace.repository
-        self.repo.save_settings({**SETTINGS,"num_ctx":32768})
+        self.repo.save_settings({**SETTINGS, "num_ctx": 32768})
         self.sid = self.repo.create_session()["id"]
-        self.rid = self.repo.create_turn(self.sid, "read then answer", "first")["run_id"]
+        self.rid = self.repo.create_turn(self.sid, "read then answer", "first")[
+            "run_id"
+        ]
 
+    # 关闭本用例连接/服务并清理临时状态；清理失败不能覆盖被测异常。
     def tearDown(self):
         self.runtime.close()
         self.temp.cleanup()
 
+    # 回归断言：暂停 Turn 继续占有会话，不能另建工作绕过安全点。
     def test_paused_turn_still_owns_the_session(self):
         self.workspace.control.command(self.rid, "pause")
         with self.assertRaises(ValueError):
@@ -152,10 +259,14 @@ class ConversationContinuityTests(unittest.TestCase):
         self.workspace.run(self.rid, ChatProvider())
         self.repo.create_turn(self.sid, "next task", "second")
 
+    # 回归断言：在途新增 Compact 留给下一真实请求，不提前消费命令。
     def test_compact_arriving_in_flight_applies_to_next_model_request(self):
-        provider = ChatProvider([decision("tool_call", "math.calculate", {"expression": "2+3"}), decision()])
+        provider = ChatProvider(
+            [decision("tool_call", "math.calculate", {"expression": "2+3"}), decision()]
+        )
         invoke = provider.invoke
 
+        # 有界上下文与 Compact revision 消费的局部夹具协作；只服务本测试调用链，真实行为仍由外层断言核对。
         def while_in_flight(request):
             if not provider.calls:
                 self.workspace.control.command(self.rid, "compact")
@@ -165,14 +276,22 @@ class ConversationContinuityTests(unittest.TestCase):
         self.workspace.run(self.rid, provider)
         self.assertEqual(self.repo.turn(self.rid)["status"], "COMPLETED")
         self.assertTrue(provider.calls[1].context_report["compact_requested"])
-        events = [e for e in self.repo.events(self.rid) if e["kind"] == "ContextCompactionConsumed"]
+        events = [
+            e
+            for e in self.repo.events(self.rid)
+            if e["kind"] == "ContextCompactionConsumed"
+        ]
         self.assertEqual(len(events), 1)
 
+    # 回归断言：旧收据/决定重放不清除较新的 Compact revision。
     def test_replayed_receipt_does_not_acknowledge_new_compact_command(self):
+        # 有界上下文与 Compact revision 消费的固定测试集合/替身；临时资源由本用例拥有，生产状态必须从实际仓储核对。
         class Crash(BaseException):
             pass
 
-        provider = ChatProvider([decision("tool_call", "math.calculate", {"expression": "2+3"}), decision()])
+        provider = ChatProvider(
+            [decision("tool_call", "math.calculate", {"expression": "2+3"}), decision()]
+        )
         with patch.object(self.repo, "bind", side_effect=Crash):
             with self.assertRaises(Crash):
                 self.workspace.run(self.rid, provider)
@@ -180,15 +299,22 @@ class ConversationContinuityTests(unittest.TestCase):
         self.workspace.run(self.rid, provider)
         self.assertEqual(len(provider.calls), 2)
         self.assertTrue(provider.calls[1].context_report["compact_requested"])
-        events = [e for e in self.repo.events(self.rid) if e["kind"] == "ConversationContextCompiled"]
+        events = [
+            e
+            for e in self.repo.events(self.rid)
+            if e["kind"] == "ConversationContextCompiled"
+        ]
         self.assertEqual(len(events), 2)
 
+    # 回归断言：大工具结果通过投影预算处理；原始完整收据/对象仍保存。
     def test_two_large_tool_outputs_complete_with_original_receipts_intact(self):
-        provider = ChatProvider([
-            decision("tool_call", "git.diff"),
-            decision("tool_call", "git.diff"),
-            decision(),
-        ])
+        provider = ChatProvider(
+            [
+                decision("tool_call", "git.diff"),
+                decision("tool_call", "git.diff"),
+                decision(),
+            ]
+        )
         result = {"output": "diff-line\n" * 2600, "truncated": False}
         with patch.object(self.workspace.execution, "_git", return_value=result):
             self.workspace.run(self.rid, provider)
@@ -200,9 +326,14 @@ class ConversationContinuityTests(unittest.TestCase):
         self.assertEqual(accounts["model_calls"]["settled"], 3)
         self.assertEqual(accounts["tool_calls"]["settled"], 2)
 
+    # 回归断言：上下文事件对应固定请求对象，重开后来源和字节账一致。
     def test_context_event_matches_immutable_request_and_survives_reopen(self):
         self.workspace.run(self.rid, ChatProvider())
-        events = [e for e in self.repo.events(self.rid) if e["kind"] == "ConversationContextCompiled"]
+        events = [
+            e
+            for e in self.repo.events(self.rid)
+            if e["kind"] == "ConversationContextCompiled"
+        ]
         self.assertEqual(len(events), 1)
         payload = events[0]["payload"]
         request = json.loads(self.runtime.objects.get(payload["request_ref"]))
@@ -210,39 +341,58 @@ class ConversationContinuityTests(unittest.TestCase):
             self.assertEqual(payload[key], value)
         with MythRuntime(Path(self.temp.name)) as runtime:
             saved = Workspace(runtime).repository.events(self.rid)
-            self.assertEqual(events, [e for e in saved if e["kind"] == "ConversationContextCompiled"])
+            self.assertEqual(
+                events, [e for e in saved if e["kind"] == "ConversationContextCompiled"]
+            )
 
+    # 回归断言：请求构造失败前没有 Ticket/已使用 Compact 的伪造事件。
     def test_context_failure_has_no_model_ticket_or_compiled_event(self):
         turn = self.repo.turn(self.rid)
         turn["snapshot"]["project"] = {"instructions": "X" * 70000}
         with self.runtime.store.tx() as db:
-            db.execute("UPDATE workspace_turns SET snapshot_json=? WHERE run_id=?",
-                       (canonical_json(turn["snapshot"]), self.rid))
+            db.execute(
+                "UPDATE workspace_turns SET snapshot_json=? WHERE run_id=?",
+                (canonical_json(turn["snapshot"]), self.rid),
+            )
         provider = ChatProvider()
         self.workspace.run(self.rid, provider)
         self.assertEqual(provider.calls, [])
         self.assertEqual(self.repo.turn(self.rid)["status"], "FAILED")
-        self.assertFalse(any(e["kind"] in {"ModelTicketGranted", "ConversationContextCompiled"}
-                             for e in self.repo.events(self.rid)))
+        self.assertFalse(
+            any(
+                e["kind"] in {"ModelTicketGranted", "ConversationContextCompiled"}
+                for e in self.repo.events(self.rid)
+            )
+        )
 
+    # 回归断言：旧快照兼容推断当前边界，不倒写历史记录。
     def test_legacy_snapshot_infers_current_turn_boundary_without_rewriting(self):
         turn = self.repo.turn(self.rid)
         snapshot = turn["snapshot"]
         snapshot.pop("turn_message_start")
         snapshot.pop("attached_document_ids")
-        snapshot["messages"] = [{"role": "user", "content": f"old-{i}"} for i in range(12)] + snapshot["messages"]
+        snapshot["messages"] = [
+            {"role": "user", "content": f"old-{i}"} for i in range(12)
+        ] + snapshot["messages"]
         stored = canonical_json(snapshot)
         with self.runtime.store.tx() as db:
-            db.execute("UPDATE workspace_turns SET snapshot_json=? WHERE run_id=?", (stored, self.rid))
+            db.execute(
+                "UPDATE workspace_turns SET snapshot_json=? WHERE run_id=?",
+                (stored, self.rid),
+            )
         turn = self.repo.turn(self.rid)
         self.assertEqual(turn["snapshot"]["turn_message_start"], 12)
         self.workspace.control.command(self.rid, "compact")
         provider = ChatProvider()
         self.workspace.run(self.rid, provider)
         self.assertIn("read then answer", str(provider.calls[0].serializable()))
-        self.assertEqual(self.runtime.store.db.execute(
-            "SELECT snapshot_json FROM workspace_turns WHERE run_id=?", (self.rid,),
-        ).fetchone()[0], stored)
+        self.assertEqual(
+            self.runtime.store.db.execute(
+                "SELECT snapshot_json FROM workspace_turns WHERE run_id=?",
+                (self.rid,),
+            ).fetchone()[0],
+            stored,
+        )
 
 
 if __name__ == "__main__":

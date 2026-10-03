@@ -1,4 +1,5 @@
-"""Durable local ledger for evaluation evidence and policy comparisons."""
+"""评测运行和逐题观测的 SQLite 证据账本。
+固定 suite/version/policy 身份保存观测；对比使用同题配对，筛选或缺项不能作为完整发布证明。"""
 
 from __future__ import annotations
 
@@ -10,6 +11,7 @@ from ..domain import canonical_json
 from .evaluation import EvalObservation, EvalVerdict, compare_observations
 
 
+# SCHEMA：本仓储拥有的表、索引与约束；升级补齐旧字段，删除列须有迁移证据。
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS evaluation_runs(
     eval_run_id TEXT PRIMARY KEY,
@@ -38,39 +40,51 @@ CREATE TABLE IF NOT EXISTS evaluation_observations(
 """
 
 
+# 固定评测及逐题证据的持久目录；配对身份包含 suite/version/case，报告不是自动发布命令。
 class SqliteEvaluationLedger:
+    # 复用 Runtime 连接建立固定评测报告/逐题观测表；不执行生产任务或自动发布策略。
     def __init__(self, runtime):
-        self.runtime=runtime
-        self.store=runtime.store
+        # runtime：共享 Runtime 装配对象；其 SQLite 连接只在所属线程使用。
+        self.runtime = runtime
+        # store：持久事实仓储；短事务维护本地一致性；外部效果不能并入数据库事务。
+        self.store = runtime.store
         self.store.db.executescript(SCHEMA)
-        columns={row["name"] for row in self.store.db.execute("PRAGMA table_info(evaluation_runs)")}
-        for name,ddl in (
-            ("suite_case_count","INTEGER"),
-            ("selected_case_count","INTEGER"),
-            ("complete_suite","INTEGER NOT NULL DEFAULT 0"),
+        columns = {
+            row["name"]
+            for row in self.store.db.execute("PRAGMA table_info(evaluation_runs)")
+        }
+        for name, ddl in (
+            ("suite_case_count", "INTEGER"),
+            ("selected_case_count", "INTEGER"),
+            ("complete_suite", "INTEGER NOT NULL DEFAULT 0"),
         ):
             if name not in columns:
-                self.store.db.execute(f"ALTER TABLE evaluation_runs ADD COLUMN {name} {ddl}")
+                self.store.db.execute(
+                    f"ALTER TABLE evaluation_runs ADD COLUMN {name} {ddl}"
+                )
 
+    # 生成带类型前缀的新身份；重试去重使用已固定的 request/decision 身份，不靠新 UUID 判断已执行。
     @staticmethod
     def _id() -> str:
         return f"eval_{uuid.uuid4().hex}"
 
+    # 同事务登记固定报告和逐题观测，保留 policy 与完整覆盖身份。
     def record(self, result: dict[str, Any], *, policy_id: str) -> dict[str, Any]:
-        policy=str(policy_id or "").strip()
-        if not policy or len(policy)>200:
+        policy = str(policy_id or "").strip()
+        if not policy or len(policy) > 200:
             raise ValueError("policy_id must contain 1-200 characters")
-        result_policy=str(result.get("policy_id") or policy).strip()
+        result_policy = str(result.get("policy_id") or policy).strip()
         if result_policy != policy:
             raise ValueError("recorded policy_id must match the runner result")
-        suite_id=str(result.get("suite_id") or "").strip()
-        suite_version=int(result.get("version") or 0)
-        if not suite_id or suite_version<1:
+        suite_id = str(result.get("suite_id") or "").strip()
+        suite_version = int(result.get("version") or 0)
+        if not suite_id or suite_version < 1:
             raise ValueError("evaluation result requires suite id/version")
-        observations=result.get("observations") or []
-        if not isinstance(observations,list):
+        observations = result.get("observations") or []
+        if not isinstance(observations, list):
             raise ValueError("evaluation observations must be a list")
-        eval_run_id=self._id()
+        eval_run_id = self._id()
+        # 本地事务边界：下列写入一起提交，异常整体回滚；文件/网络效果须在事务外另行核对。
         with self.store.tx() as db:
             db.execute(
                 "INSERT INTO evaluation_runs(eval_run_id,suite_id,suite_version,policy_id,report_json,release_gate_json,elapsed_ms,"
@@ -85,7 +99,7 @@ class SqliteEvaluationLedger:
                     float(result.get("elapsed_ms") or 0.0),
                     int(result.get("suite_case_count") or len(observations)),
                     int(result.get("selected_case_count") or len(observations)),
-                    int(bool(result.get("complete_suite",False))),
+                    int(bool(result.get("complete_suite", False))),
                 ),
             )
             for item in observations:
@@ -100,20 +114,21 @@ class SqliteEvaluationLedger:
                         str(item.get("reason") or ""),
                         canonical_json(item.get("metrics") or {}),
                         canonical_json(item.get("evidence_refs") or []),
-                        int(bool(item.get("safety_regression",False))),
+                        int(bool(item.get("safety_regression", False))),
                         item.get("comparison_key") or item.get("case_id"),
                     ),
                 )
         return self.run(eval_run_id)
 
+    # 读取有界 Run 列表供产品/CLI 展示；这是历史投影，不重新驱动任何 Run。
     def list_runs(self, limit: int = 50) -> list[dict[str, Any]]:
-        if type(limit) is not int or not 1<=limit<=200:
+        if type(limit) is not int or not 1 <= limit <= 200:
             raise ValueError("limit must be 1-200")
         return [
             {
                 **dict(row),
-                "report":json.loads(row["report_json"]),
-                "release_gate":json.loads(row["release_gate_json"]),
+                "report": json.loads(row["report_json"]),
+                "release_gate": json.loads(row["release_gate_json"]),
             }
             for row in self.store.db.execute(
                 "SELECT * FROM evaluation_runs ORDER BY rowid DESC LIMIT ?",
@@ -121,19 +136,20 @@ class SqliteEvaluationLedger:
             )
         ]
 
+    # 按 eval_run_id 读取持久报告与逐题证据；此方法是查询，不驱动业务 Run。
     def run(self, eval_run_id: str) -> dict[str, Any]:
-        row=self.store.db.execute(
+        row = self.store.db.execute(
             "SELECT * FROM evaluation_runs WHERE eval_run_id=?",
             (eval_run_id,),
         ).fetchone()
         if row is None:
             raise KeyError(eval_run_id)
-        observations=[
+        observations = [
             {
                 **dict(item),
-                "metrics":json.loads(item["metrics_json"]),
-                "evidence_refs":json.loads(item["evidence_refs_json"]),
-                "safety_regression":bool(item["safety_regression"]),
+                "metrics": json.loads(item["metrics_json"]),
+                "evidence_refs": json.loads(item["evidence_refs_json"]),
+                "safety_regression": bool(item["safety_regression"]),
             }
             for item in self.store.db.execute(
                 "SELECT * FROM evaluation_observations WHERE eval_run_id=? ORDER BY case_id",
@@ -142,11 +158,12 @@ class SqliteEvaluationLedger:
         ]
         return {
             **dict(row),
-            "report":json.loads(row["report_json"]),
-            "release_gate":json.loads(row["release_gate_json"]),
-            "observations":observations,
+            "report": json.loads(row["report_json"]),
+            "release_gate": json.loads(row["release_gate_json"]),
+            "observations": observations,
         }
 
+    # 还原一条持久观测的字段/引用；不重新运行或修改预期。
     @staticmethod
     def _observation(row: dict[str, Any], policy_id: str) -> EvalObservation:
         return EvalObservation(
@@ -160,35 +177,47 @@ class SqliteEvaluationLedger:
             comparison_key=row.get("comparison_key") or row["case_id"],
         )
 
+    # 要求两个 run 的 suite/version 完全一致再按同题配对；不能跨版本比较刷分。
     def paired_comparisons(self, baseline_eval_run_id: str, candidate_eval_run_id: str):
-        baseline=self.run(baseline_eval_run_id)
-        candidate=self.run(candidate_eval_run_id)
-        if baseline["suite_id"] != candidate["suite_id"] or baseline["suite_version"] != candidate["suite_version"]:
+        baseline = self.run(baseline_eval_run_id)
+        candidate = self.run(candidate_eval_run_id)
+        if (
+            baseline["suite_id"] != candidate["suite_id"]
+            or baseline["suite_version"] != candidate["suite_version"]
+        ):
             raise ValueError("policy comparison requires the same suite id/version")
-        before={item["case_id"]:item for item in baseline["observations"]}
-        after={item["case_id"]:item for item in candidate["observations"]}
-        pairs=[]
+        before = {item["case_id"]: item for item in baseline["observations"]}
+        after = {item["case_id"]: item for item in candidate["observations"]}
+        pairs = []
         for case_id in sorted(set(before) & set(after)):
-            pairs.append(compare_observations(
-                self._observation(before[case_id],baseline["policy_id"]),
-                self._observation(after[case_id],candidate["policy_id"]),
-            ))
+            pairs.append(
+                compare_observations(
+                    self._observation(before[case_id], baseline["policy_id"]),
+                    self._observation(after[case_id], candidate["policy_id"]),
+                )
+            )
         return pairs
 
-    def compare(self, baseline_eval_run_id: str, candidate_eval_run_id: str) -> list[dict[str, Any]]:
-        rows=[]
-        for comparison in self.paired_comparisons(baseline_eval_run_id,candidate_eval_run_id):
-            rows.append({
-                "case_id":comparison.case_id,
-                "comparison_key":comparison.comparison_key,
-                "baseline_policy_id":comparison.baseline_policy_id,
-                "candidate_policy_id":comparison.candidate_policy_id,
-                "baseline_verdict":comparison.baseline_verdict.value,
-                "candidate_verdict":comparison.candidate_verdict.value,
-                "observed_quality_gain":comparison.observed_quality_gain,
-                "cost_delta":comparison.cost_delta,
-                "evidence_refs":list(comparison.evidence_refs),
-                "calibrated":comparison.calibrated,
-            })
+    # 基于完整配对结果汇总质量/成本与发布判断；保留逐题回归和缺证据。
+    def compare(
+        self, baseline_eval_run_id: str, candidate_eval_run_id: str
+    ) -> list[dict[str, Any]]:
+        rows = []
+        for comparison in self.paired_comparisons(
+            baseline_eval_run_id, candidate_eval_run_id
+        ):
+            rows.append(
+                {
+                    "case_id": comparison.case_id,
+                    "comparison_key": comparison.comparison_key,
+                    "baseline_policy_id": comparison.baseline_policy_id,
+                    "candidate_policy_id": comparison.candidate_policy_id,
+                    "baseline_verdict": comparison.baseline_verdict.value,
+                    "candidate_verdict": comparison.candidate_verdict.value,
+                    "observed_quality_gain": comparison.observed_quality_gain,
+                    "cost_delta": comparison.cost_delta,
+                    "evidence_refs": list(comparison.evidence_refs),
+                    "calibrated": comparison.calibrated,
+                }
+            )
         return rows
-
