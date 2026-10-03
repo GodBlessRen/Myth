@@ -7,7 +7,6 @@ import difflib
 import json
 import os
 from pathlib import Path
-import shutil
 import subprocess
 import threading
 
@@ -496,12 +495,23 @@ class LocalConversationExecution:
                 raise ValueError("git command failed")
             return raw[:limit], truncated
 
+    # 只从环境中明确的绝对 PATH 目录选择 Git；不用 Windows 会隐式插入当前目录的 which。
+    @staticmethod
+    def _git_executable():
+        name = "git.exe" if os.name == "nt" else "git"
+        for entry in os.get_exec_path():
+            directory = Path(entry)
+            if not directory.is_absolute():
+                continue
+            candidate = directory / name
+            if candidate.is_file() and os.access(candidate, os.X_OK):
+                return str(candidate.resolve())
+        raise ValueError("git executable is not available in an absolute PATH directory")
+
     # 用固定只读 argv 调用 git.status/diff；不接受任意 shell 文本，也不修改仓库。
     def _git(self, turn, kind, args):
         root, _ = self.project_path(turn, ".")
-        executable = shutil.which("git")
-        if executable is None:
-            raise ValueError("git executable is not available")
+        executable = self._git_executable()
         if not (root / ".git").exists():
             raise ValueError("project root is not a Git repository")
         # 显式禁用项目配置的 fsmonitor/textconv/外部 diff；工具白名单不能成为程序执行通道。

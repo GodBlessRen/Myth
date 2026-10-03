@@ -497,6 +497,16 @@ class WorkspaceSecurityTests(unittest.TestCase):
         self.assertTrue(value["truncated"])
         self.assertLessEqual(len(value["output"].encode()), 24000)
 
+    # 空/相对 PATH 项不能授权当前项目同名程序；只选择明确配置的绝对目录，不执行测试伪程序。
+    def test_git_selection_skips_current_and_relative_path_entries(self):
+        directory = self.root / "configured-bin"
+        directory.mkdir()
+        candidate = directory / ("git.exe" if os.name == "nt" else "git")
+        candidate.write_bytes(b"synthetic executable fixture")
+        candidate.chmod(0o700)
+        with patch("myth.adapters.conversation_execution.os.get_exec_path", return_value=["", ".", "relative-bin", str(directory)]):
+            self.assertEqual(self.execution._git_executable(), str(candidate.resolve()))
+
     # Runtime 根内放同名恶意 Python 包；实际子进程 help 导入必须使用可信安装目录。
     def test_worker_launch_cannot_import_runtime_root_shadow_package(self):
         package = self.root / "myth"

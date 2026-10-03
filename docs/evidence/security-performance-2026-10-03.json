@@ -96,9 +96,9 @@
     "diff_check": true,
     "tests": {
       "baseline": 223,
-      "final": 267,
-      "final_seconds": 37.635,
-      "new_security_cases": 42,
+      "final": 268,
+      "final_seconds": 38.527,
+      "new_security_cases": 43,
       "new_policy_race_cases": 2
     },
     "real_model": false,
