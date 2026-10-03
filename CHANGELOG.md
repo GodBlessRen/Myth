@@ -1,15 +1,16 @@
 # Changelog
 
-## 未发布 — v0.25 Best Path
+## 未发布 — v0.25 SOTA Route
 
-- 新增 **Best Path** 成功路径账本：只有 `COMPLETED + Acceptance PASSED` 的 Run 才能进入同条件效率比较。
+- 新增 **SOTA Route** 成功路径账本：只有 `COMPLETED + Acceptance PASSED` 的 Run 才能进入同条件效率比较。
 - 同任务、同模型设置、同冻结 Context / Knowledge / Memory / Goal / Policy 条件比较；本地项目额外冻结允许文本源码 SHA-256 状态摘要，环境不完整时明确 `NOT_COMPARABLE`。
 - 不使用单一神秘总分；基础比较保留 model/tool calls、steps、Token、write bytes，多方都实测时再比较 work time、changed lines、human attention。
-- 新 Turn 自动冻结历史 **Best Path hint**；只作为效率 prior，不扩大权限、不跳过验收/测试。
+- 新 Turn 自动冻结历史 **SOTA Route hint**；只作为效率 prior，不扩大权限、不跳过验收/测试。
 - 当前路径明显超过历史成功路径时产生 **Drift**，下一次模型决策收到 Replan 提示，但不自动停止。
-- Runtime 第三栏新增 Best Path：Current vs Best、Known route、Drift 与 Compare scope；原有可观测面保持不变。
+- Runtime 第三栏新增 SOTA Route：Current vs Champion、Action Path、Drift 与 Compare scope；原有可观测面保持不变。
 - 路径账本只保存可观察工具序列和小型定位字段，不保存/推断隐藏 Chain-of-Thought，也不复制源码大参数。
-- 设计与边界见 [Best Path](docs/BEST_PATH.md)。
+- OpenAI/ChatGPT 在供应商实际返回时记录 **Reasoning Cost / Reasoning Summary / Action Path**；公开摘要可进入 Champion 经验提示，隐藏 CoT 保持 unavailable，不反推。
+- 设计与边界见 [SOTA Route](docs/SOTA_ROUTE.md)。
 
 
 ## 未发布 — v0.24 交付闭环
