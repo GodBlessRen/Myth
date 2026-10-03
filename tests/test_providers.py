@@ -215,9 +215,10 @@ class OpenAIProviderTests(unittest.TestCase):
             thinking=True,
         )
         provider = OpenAIResponsesProvider(
-            provider_id="openai",
-            token_supplier=lambda: "sk-test",
-            chatgpt_plan=False,
+            provider_id="chatgpt",
+            token_supplier=lambda: "secret-token",
+            chatgpt_plan=True,
+            auth_type="oauth",
         )
         with patch(
             "myth.providers.openai.open_credential_request",
