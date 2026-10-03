@@ -1468,8 +1468,10 @@ class SqliteWorkspaceRepository:
             op = self.operation(decision_id)
             if op["state"] == "RESOLVED":
                 return op["result"]
-            if result != op["intent"]["result"]:
+            if "result" in op["intent"] and result != op["intent"]["result"]:
                 raise IdentityConflict("tool result differs from admitted intent")
+            if "result" not in op["intent"] and not op["intent"].get("requires_receipt"):
+                raise IdentityConflict("dynamic tool result requires an explicit receipt contract")
             liability = "unknown_held" if op["state"] == "UNKNOWN" else "reserved"
             for meter, cost in {
                 "tool_calls": 1,
