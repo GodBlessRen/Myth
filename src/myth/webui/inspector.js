@@ -248,15 +248,15 @@ function renderInspectorBestPath(turn) {
   const box = $("inspectorBestPath");
   if (!box) return;
   box.replaceChildren();
-  const best = turn?.best_path;
+  const best = turn?.sota_route;
   if (!turn || !best) {
     box.append(el("div", "inspector-empty", "还没有可比较的成功路径"));
     return;
   }
-  inspectorFact(box, "State", best.status || "LEARNING");
+  inspectorFact(box, "State", best.status || "WORKING");
   inspectorFact(box, "Compared runs", best.peer_count || 0);
   const current = best.metrics || {};
-  const target = best.best_costs || {};
+  const target = best.champion_costs || {};
   const pair = (label, key, suffix = "") => {
     const now = current[key];
     const old = target[key];
@@ -279,11 +279,11 @@ function renderInspectorBestPath(turn) {
     inspectorFact(box, "Drift", "within known range");
   }
   const hint = best.frozen_hint;
-  if (hint?.routes?.length) {
+  if (hint?.action_paths?.length) {
     inspectorFact(
       box,
       "Known route",
-      hint.routes[0].join(" → ").slice(0, 180),
+      hint.action_paths[0].join(" → ").slice(0, 180),
     );
   }
   if (best.environment_scope && best.environment_scope !== "project-state-v1" && best.environment_scope !== "frozen-context-v1") {
