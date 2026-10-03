@@ -9,6 +9,7 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 import re
+import sys
 
 # 只检出中文字符，不能据此判定事实准确、术语正确或解释充分。
 CHINESE = re.compile(r"[\u4e00-\u9fff]")
@@ -117,4 +118,6 @@ def main() -> int:
 
 # 开发命令返回明确退出码，CI 才能阻止无说明的新声明进入主分支。
 if __name__ == "__main__":
+    # 英文 Windows runner 的重定向默认 cp1252；中文合同报告固定 UTF-8，不能因本机代码页误判失败。
+    sys.stdout.reconfigure(encoding="utf-8")
     raise SystemExit(main())

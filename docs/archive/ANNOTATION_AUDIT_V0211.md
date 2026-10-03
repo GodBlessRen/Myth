@@ -73,5 +73,6 @@
 - 真实构建并安装 `myth_runtime-0.21.1-py3-none-any.whl`，在隔离安装目录验证 import、五份 HTTP 资源、Goal/Session、计划保存/暂停，全部通过。
 - wheel SHA-256：`3af552a07d3894beb1d130f31569e78f6284a9a869a4b52be0a169c8283a0148`。
 - 机器可读记录见 [annotation-audit-v0211.json](../evidence/annotation-audit-v0211.json)。远端 Windows/Linux × Python 3.12/3.13 结果以本次 PR 的 Checks 为准。
+- 首次远端 Linux 两组通过，Windows 两组在检查器打印中文结果时被 cp1252 拒绝；检查器已固定 UTF-8 输出，并本地用 cp1252 重定向复现环境验证修复。
 
 本轮不复用 v0.21 的真实模型 source digest 作为新源码证据，也不把旧真实模型报告升级为本轮测试。浏览器视觉布局没有在本轮重新实览；静态结构和安装 HTTP 资源验证保留各自范围。
