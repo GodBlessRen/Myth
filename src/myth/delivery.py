@@ -77,10 +77,12 @@ ON delivery_attention(run_id);
 """
 
 
+# 该入口按持久合同处理输入与输出，失败保持显式而不伪造完成。
 def _digest(value: Any) -> str:
     return hashlib.sha256(canonical_json(value).encode("utf-8")).hexdigest()
 
 
+# 该入口按持久合同处理输入与输出，失败保持显式而不伪造完成。
 def _bounded_json(value: Any, *, max_bytes: int = 32_000) -> str:
     raw = canonical_json(value)
     if len(raw.encode("utf-8")) > max_bytes:
@@ -88,18 +90,24 @@ def _bounded_json(value: Any, *, max_bytes: int = 32_000) -> str:
     return raw
 
 
+# 该类型集中拥有当前职责，避免把状态真相分散到多个适配器。
 class DeliveryLedger:
     """拥有交付事实；运行执行权仍属于原 Conversation/Control/Runtime。"""
 
+    # 该入口按持久合同处理输入与输出，失败保持显式而不伪造完成。
     def __init__(self, runtime) -> None:
+        # 持有当前协作对象；生命周期与所属 Runtime/仓储一致。
         self.runtime = runtime
+        # 持有当前协作对象；生命周期与所属 Runtime/仓储一致。
         self.store = runtime.store
         self.store.db.executescript(SCHEMA)
 
+    # 下列辅助入口保持边界显式，调用不隐式扩大权限或真实性。
     @staticmethod
     def _id(prefix: str) -> str:
         return f"{prefix}_{uuid.uuid4().hex}"
 
+    # 该入口按持久合同处理输入与输出，失败保持显式而不伪造完成。
     def prepare_completion(
         self,
         run_id: str,
@@ -140,6 +148,7 @@ class DeliveryLedger:
             )
         return self.finalization(run_id)
 
+    # 该入口按持久合同处理输入与输出，失败保持显式而不伪造完成。
     def mark_answer_committed(self, run_id: str) -> dict[str, Any]:
         with self.store.tx() as db:
             db.execute(
@@ -149,12 +158,14 @@ class DeliveryLedger:
             )
         return self.finalization(run_id)
 
+    # 该入口按持久合同处理输入与输出，失败保持显式而不伪造完成。
     def finalization(self, run_id: str) -> dict[str, Any] | None:
         row = self.store.db.execute(
             "SELECT * FROM delivery_finalizations WHERE run_id=?", (run_id,)
         ).fetchone()
         return dict(row) if row else None
 
+    # 该入口按持久合同处理输入与输出，失败保持显式而不伪造完成。
     def _subject(self, run_id: str) -> tuple[str, list[Any]]:
         answer_row = self.store.db.execute(
             "SELECT content,metadata_json FROM workspace_messages "
@@ -201,6 +212,7 @@ class DeliveryLedger:
                 deduped.append(item)
         return _digest(subject), deduped[:100]
 
+    # 该入口按持久合同处理输入与输出，失败保持显式而不伪造完成。
     def ensure_acceptance(
         self, run_id: str, subject_digest: str | None = None, evidence: list[Any] | None = None
     ) -> dict[str, Any]:
@@ -244,6 +256,7 @@ class DeliveryLedger:
                 )
         return self.acceptance(run_id)
 
+    # 该入口按持久合同处理输入与输出，失败保持显式而不伪造完成。
     def acceptance(self, run_id: str) -> dict[str, Any] | None:
         row = self.store.db.execute(
             "SELECT * FROM delivery_acceptance WHERE run_id=?", (run_id,)
@@ -254,6 +267,7 @@ class DeliveryLedger:
         value["evidence"] = json.loads(value.pop("evidence_json"))
         return value
 
+    # 该入口按持久合同处理输入与输出，失败保持显式而不伪造完成。
     def set_acceptance(
         self,
         run_id: str,
@@ -305,6 +319,7 @@ class DeliveryLedger:
             )
         return self.acceptance(run_id)
 
+    # 该入口按持久合同处理输入与输出，失败保持显式而不伪造完成。
     def ensure_root_work_item(self, turn: dict[str, Any]) -> dict[str, Any]:
         run_id = turn["run_id"]
         goal = (turn.get("snapshot") or {}).get("goal") or {}
@@ -337,6 +352,7 @@ class DeliveryLedger:
             )
         return self.work_items(run_id)[0]
 
+    # 该入口按持久合同处理输入与输出，失败保持显式而不伪造完成。
     def work_items(self, run_id: str) -> list[dict[str, Any]]:
         rows = self.store.db.execute(
             "SELECT * FROM delivery_work_items WHERE run_id=? ORDER BY ordinal",
@@ -350,6 +366,7 @@ class DeliveryLedger:
             values.append(item)
         return values
 
+    # 该入口按持久合同处理输入与输出，失败保持显式而不伪造完成。
     def plan_work_items(
         self, run_id: str, items: list[dict[str, Any]], *, plan_revision: int | None = None
     ) -> list[dict[str, Any]]:
@@ -395,6 +412,7 @@ class DeliveryLedger:
             )
         return self.work_items(run_id)
 
+    # 该入口按持久合同处理输入与输出，失败保持显式而不伪造完成。
     def update_work_item(
         self,
         work_item_id: str,
@@ -427,6 +445,7 @@ class DeliveryLedger:
             )
         return next(item for item in self.work_items(row["run_id"]) if item["work_item_id"] == work_item_id)
 
+    # 该入口按持久合同处理输入与输出，失败保持显式而不伪造完成。
     def update_root_work_item(
         self,
         run_id: str,
@@ -444,6 +463,7 @@ class DeliveryLedger:
                 row["work_item_id"], status=status, progress_note=progress_note, evidence=evidence
             )
 
+    # 该入口按持久合同处理输入与输出，失败保持显式而不伪造完成。
     def record_tool_result(self, run_id: str, result: dict[str, Any]) -> None:
         items = self.work_items(run_id)
         if not items:
@@ -475,6 +495,7 @@ class DeliveryLedger:
             evidence=deduped[:100],
         )
 
+    # 该入口按持久合同处理输入与输出，失败保持显式而不伪造完成。
     def record_attention(
         self, run_id: str, *, kind: str, seconds: int, note: str = ""
     ) -> dict[str, Any]:
@@ -499,6 +520,7 @@ class DeliveryLedger:
             ).fetchone()
         )
 
+    # 该入口按持久合同处理输入与输出，失败保持显式而不伪造完成。
     def run_view(self, run_id: str) -> dict[str, Any]:
         attention = self.store.db.execute(
             "SELECT coalesce(sum(seconds),0) AS seconds,count(*) AS entries "
@@ -512,6 +534,7 @@ class DeliveryLedger:
             "attention": dict(attention),
         }
 
+    # 该入口按持久合同处理输入与输出，失败保持显式而不伪造完成。
     def metrics(self) -> dict[str, Any]:
         rows = self.store.db.execute(
             "SELECT state,count(*) AS n FROM delivery_acceptance GROUP BY state"
@@ -540,6 +563,7 @@ class DeliveryLedger:
             "human_attention_entries": int(attention[1] or 0),
         }
 
+    # 该入口按持久合同处理输入与输出，失败保持显式而不伪造完成。
     def reconcile_pending(
         self,
         repository,
