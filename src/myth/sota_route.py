@@ -1,4 +1,4 @@
-"""Best Path：从已验收成功 Run 中学习更省的可观察执行路径。
+"""SOTA Route：从已验收成功 Run 中学习更省的可观察执行路径。
 只比较同任务/同冻结环境键；不读取或保存模型隐藏推理，不把低成本当成质量证据。
 """
 
@@ -12,9 +12,9 @@ from typing import Any
 from .domain import canonical_json, digest_json
 
 
-# BEST_PATH_SCHEMA：保存已验收路径快照；历史 Run 不因未来新纪录而被改写执行事实。
-BEST_PATH_SCHEMA = r"""
-CREATE TABLE IF NOT EXISTS best_path_runs(
+# SOTA_ROUTE_SCHEMA：保存已验收路径快照；历史 Run 不因未来新纪录而被改写执行事实。
+SOTA_ROUTE_SCHEMA = r"""
+CREATE TABLE IF NOT EXISTS sota_route_runs(
     run_id TEXT PRIMARY KEY NOT NULL REFERENCES workspace_turns(run_id),
     comparison_key TEXT NOT NULL,
     task_key TEXT NOT NULL,
@@ -24,13 +24,14 @@ CREATE TABLE IF NOT EXISTS best_path_runs(
     subject_digest TEXT NOT NULL,
     metrics_json TEXT NOT NULL,
     path_json TEXT NOT NULL,
+    reasoning_json TEXT NOT NULL DEFAULT '{}',
     eligible INTEGER NOT NULL DEFAULT 1 CHECK(eligible IN (0,1)),
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
-CREATE INDEX IF NOT EXISTS best_path_runs_group
-ON best_path_runs(comparison_key, eligible);
-CREATE TABLE IF NOT EXISTS best_path_meta(
+CREATE INDEX IF NOT EXISTS sota_route_runs_group
+ON sota_route_runs(comparison_key, eligible);
+CREATE TABLE IF NOT EXISTS sota_route_meta(
     key TEXT PRIMARY KEY NOT NULL,
     value TEXT NOT NULL,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -58,7 +59,7 @@ PROJECT_SKIP = {
     ".git", ".runtime", ".venv", "venv", "node_modules", "__pycache__",
     ".aws", ".ssh", ".codex", ".myth", ".config", "secrets",
 }
-# PROJECT_TEXT_SUFFIXES：与当前项目文本工具的主范围对齐；二进制资产不作为首版 Best Path 可比条件。
+# PROJECT_TEXT_SUFFIXES：与当前项目文本工具的主范围对齐；二进制资产不作为首版 SOTA Route 可比条件。
 PROJECT_TEXT_SUFFIXES = {
     ".txt", ".md", ".py", ".json", ".csv", ".yaml", ".yml", ".html",
     ".css", ".js", ".ts", ".tsx", ".jsx", ".toml", ".ini", ".cfg",
@@ -82,15 +83,15 @@ def _line_count(value) -> int:
     return len(text.splitlines()) if text else 0
 
 
-# Best Path 状态所有者；负责路径快照、同条件比较和下一 Run 的冻结提示。
-class BestPathLedger:
+# SOTA Route 状态所有者；负责路径快照、同条件比较和下一 Run 的冻结提示。
+class SotaRouteLedger:
     # 保存共享 Runtime 连接并幂等建表；不拥有模型/工具执行权。
     def __init__(self, runtime) -> None:
         # runtime：对象库和 SQLite 生命周期仍由外层 Workspace 管理。
         self.runtime = runtime
-        # store：只读取既有执行事实并保存 Best Path 派生账本。
+        # store：只读取既有执行事实并保存 SOTA Route 派生账本。
         self.store = runtime.store
-        self.store.db.executescript(BEST_PATH_SCHEMA)
+        self.store.db.executescript(SOTA_ROUTE_SCHEMA)
 
     # 从固定设置生成模型条件键；不同模型/思考/上下文预算不混为同一比赛。
     def _model_key(self, settings: dict[str, Any]) -> str:
@@ -108,7 +109,7 @@ class BestPathLedger:
         }
         return digest_json(fixed)
 
-    # 冻结项目文本状态摘要；读取只做 SHA-256，不把源码/秘钥正文写入 Best Path 账本。
+    # 冻结项目文本状态摘要；读取只做 SHA-256，不把源码/秘钥正文写入 SOTA Route 账本。
     def freeze_environment(self, snapshot: dict[str, Any]) -> dict[str, Any]:
         project = snapshot.get("project") or {}
         root_value = project.get("root")
@@ -157,7 +158,7 @@ class BestPathLedger:
             "bytes": total_bytes,
         }
 
-    # 从冻结 Snapshot 生成环境键；显式排除 Best Path 自己，避免提示递归改变比较身份。
+    # 从冻结 Snapshot 生成环境键；显式排除 SOTA Route 自己，避免提示递归改变比较身份。
     def _environment_key(self, snapshot: dict[str, Any]) -> tuple[str, str]:
         project = snapshot.get("project") or {}
         history_end = int(snapshot.get("turn_message_start") or 0)
@@ -184,7 +185,7 @@ class BestPathLedger:
         ]
         goal = snapshot.get("goal") or {}
         work = goal.get("work") or {}
-        frozen_environment = snapshot.get("best_path_environment") or {}
+        frozen_environment = snapshot.get("sota_route_environment") or {}
         environment = {
             "project": {
                 "id": project.get("id"),
@@ -220,7 +221,7 @@ class BestPathLedger:
         )
         return digest_json(environment), scope
 
-    # 为候选任务生成比较身份；只有三个键都相同的 Run 才会进入同一 Best Path 组。
+    # 为候选任务生成比较身份；只有三个键都相同的 Run 才会进入同一 SOTA Route 组。
     def identity(
         self,
         task: str,
@@ -369,6 +370,7 @@ class BestPathLedger:
         )
         input_tokens = int(accounts.get("input_tokens", 0))
         output_tokens = int(accounts.get("output_tokens", 0))
+        reasoning = self.reasoning(run_id)
         return {
             "model_calls": int(accounts.get("model_calls", 0)),
             "tool_calls": int(accounts.get("tool_calls", 0)),
@@ -377,6 +379,7 @@ class BestPathLedger:
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
             "total_tokens": input_tokens + output_tokens,
+            "reasoning_tokens": reasoning["reasoning_tokens"],
             "write_bytes": int(accounts.get("write_bytes", 0)),
             "model_wall_ms": model_wall,
             "tool_wall_ms": tool_wall,
@@ -435,6 +438,56 @@ class BestPathLedger:
             result.append(item)
         return result
 
+    # 读取供应商公开 Reasoning Summary 与可测推理成本；原始隐藏 CoT 永远不从这里推断。
+    def reasoning(self, run_id: str) -> dict[str, Any]:
+        attempts = []
+        total_reasoning_tokens = 0
+        reasoning_tokens_measured = False
+        for row in self.store.db.execute(
+            "SELECT model_attempt_id,model_id,response_ref,usage_json FROM model_invocations "
+            "WHERE run_id=? AND outcome='SUCCEEDED' ORDER BY rowid",
+            (run_id,),
+        ).fetchall():
+            try:
+                usage = json.loads(row["usage_json"] or "{}")
+            except json.JSONDecodeError:
+                usage = {}
+            measured_tokens = _measured_int(usage.get("reasoning_tokens"))
+            if measured_tokens is not None:
+                total_reasoning_tokens += measured_tokens
+                reasoning_tokens_measured = True
+            summaries: list[str] = []
+            response_ref = row["response_ref"]
+            if isinstance(response_ref, str) and response_ref:
+                try:
+                    raw = json.loads(
+                        self.runtime.objects.get(response_ref).decode("utf-8")
+                    )
+                except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError):
+                    raw = {}
+                values = raw.get("reasoning_summary") if isinstance(raw, dict) else None
+                if isinstance(values, list):
+                    summaries = [
+                        value.strip()[:4000]
+                        for value in values
+                        if isinstance(value, str) and value.strip()
+                    ][:4]
+            attempts.append(
+                {
+                    "model_attempt_id": row["model_attempt_id"],
+                    "model_id": row["model_id"],
+                    "reasoning_tokens": measured_tokens,
+                    "summary": summaries,
+                }
+            )
+        return {
+            "reasoning_tokens": (
+                total_reasoning_tokens if reasoning_tokens_measured else None
+            ),
+            "summary_available": any(item["summary"] for item in attempts),
+            "attempts": attempts,
+        }
+
     # 比较两个同质量 Run 的成本：A 所有基础成本不高于 B 且至少一项更低时，A beats B。
     def _beats(self, a: dict[str, Any], b: dict[str, Any]) -> bool:
         keys = list(CORE_COSTS)
@@ -451,10 +504,10 @@ class BestPathLedger:
             a[key] < b[key] for key in keys
         )
 
-    # 读取一个比较组的已验收 Run，并标出当前 Best group；不强行把不同权衡压成单一总分。
+    # 读取一个比较组的已验收 Run，并标出当前 Champion group；不强行把不同权衡压成单一总分。
     def group(self, comparison_key: str) -> list[dict[str, Any]]:
         rows = self.store.db.execute(
-            "SELECT * FROM best_path_runs WHERE comparison_key=? AND eligible=1 "
+            "SELECT * FROM sota_route_runs WHERE comparison_key=? AND eligible=1 "
             "ORDER BY rowid",
             (comparison_key,),
         ).fetchall()
@@ -463,6 +516,7 @@ class BestPathLedger:
             item = dict(row)
             item["metrics"] = json.loads(item.pop("metrics_json"))
             item["path"] = json.loads(item.pop("path_json"))
+            item["reasoning"] = json.loads(item.pop("reasoning_json"))
             values.append(item)
         for item in values:
             beaten_by = [
@@ -477,12 +531,12 @@ class BestPathLedger:
                 if other["run_id"] != item["run_id"]
                 and self._beats(item["metrics"], other["metrics"])
             ]
-            item["status"] = "BEST" if not beaten_by else "BEATEN"
-            item["beaten_by"] = beaten_by[:8]
+            item["status"] = "CHAMPION" if not beaten_by else "LOSER"
+            item["lost_to"] = beaten_by[:8]
             item["beats"] = beats[:8]
         return values
 
-    # 选择给模型看的短路径样本；只从 BEST 且已 PASSED 的 Run 提取动作名与成本上界。
+    # 选择给模型看的 Champion 路线；Action Path + Reasoning Summary 都只是经验先验，不扩大权限。
     def hint_for_snapshot(
         self,
         task: str,
@@ -491,11 +545,12 @@ class BestPathLedger:
     ) -> dict[str, Any] | None:
         identity = self.identity(task, settings, snapshot)
         group = self.group(identity["comparison_key"])
-        best = [item for item in group if item["status"] == "BEST"]
-        if not best:
+        champions = [item for item in group if item["status"] == "CHAMPION"]
+        if not champions:
             return None
         routes = []
-        for item in best:
+        summaries = []
+        for item in champions:
             route = [
                 (
                     entry.get("capability")
@@ -506,13 +561,26 @@ class BestPathLedger:
             ]
             if route and route not in routes:
                 routes.append(route)
-            if len(routes) >= 2:
+            for attempt in (item.get("reasoning") or {}).get("attempts", []):
+                for summary in attempt.get("summary") or []:
+                    text = str(summary).strip()[:1200]
+                    if text and text not in summaries:
+                        summaries.append(text)
+                    if len(summaries) >= 2:
+                        break
+                if len(summaries) >= 2:
+                    break
+            if len(routes) >= 2 and len(summaries) >= 2:
                 break
         minima = {}
-        for key in CORE_COSTS + ("work_ms", "code_churn_lines"):
+        for key in CORE_COSTS + (
+            "work_ms",
+            "code_churn_lines",
+            "reasoning_tokens",
+        ):
             values = [
                 item["metrics"].get(key)
-                for item in best
+                for item in champions
                 if isinstance(item["metrics"].get(key), (int, float))
             ]
             minima[key] = min(values) if values else None
@@ -520,12 +588,14 @@ class BestPathLedger:
             "comparison_key": identity["comparison_key"],
             "environment_scope": identity["environment_scope"],
             "passed_runs": len(group),
-            "best_runs": len(best),
-            "best_costs": minima,
-            "routes": routes,
+            "champion_runs": len(champions),
+            "champion_costs": minima,
+            "action_paths": routes,
+            "reasoning_summaries": summaries,
             "rule": (
-                "Use as an efficiency prior only. Do not skip required evidence or verification; "
-                "deviate when current evidence requires it."
+                "Use observable Champion experience as an efficiency prior only. "
+                "Reasoning Summary is provider-visible summary, not hidden chain-of-thought. "
+                "Do not skip required evidence or verification; deviate when current evidence requires it."
             ),
         }
 
@@ -536,32 +606,36 @@ class BestPathLedger:
             (run_id,),
         ).fetchone()
         if acceptance is None or acceptance["state"] != "PASSED":
-            raise ValueError("Best Path only admits PASSED delivery")
+            raise ValueError("SOTA Route only admits PASSED delivery")
         if (
             subject_digest is not None
             and subject_digest != acceptance["subject_digest"]
         ):
-            raise ValueError("Best Path subject digest does not match current acceptance")
+            raise ValueError("SOTA Route subject digest does not match current acceptance")
         turn = self._turn(run_id)
         if turn.get("status") != "COMPLETED":
-            raise ValueError("Best Path requires a completed delivery")
+            raise ValueError("SOTA Route requires a completed delivery")
         task = self._task_for_turn(turn)
         identity = self.identity(task, turn["settings"], turn["snapshot"])
         metrics = self.metrics(run_id)
         path = self.path(run_id)
-        eligible = int(identity["environment_scope"] in {"frozen-context-v1", "project-state-v1"})
+        reasoning = self.reasoning(run_id)
+        eligible = int(
+            identity["environment_scope"] in {"frozen-context-v1", "project-state-v1"}
+        )
         with self.store.tx() as db:
             db.execute(
-                "INSERT INTO best_path_runs("
+                "INSERT INTO sota_route_runs("
                 "run_id,comparison_key,task_key,model_key,environment_key,environment_scope,"
-                "subject_digest,metrics_json,path_json,eligible"
-                ") VALUES(?,?,?,?,?,?,?,?,?,?) "
+                "subject_digest,metrics_json,path_json,reasoning_json,eligible"
+                ") VALUES(?,?,?,?,?,?,?,?,?,?,?) "
                 "ON CONFLICT(run_id) DO UPDATE SET "
                 "comparison_key=excluded.comparison_key,task_key=excluded.task_key,"
                 "model_key=excluded.model_key,environment_key=excluded.environment_key,"
                 "environment_scope=excluded.environment_scope,"
                 "subject_digest=excluded.subject_digest,metrics_json=excluded.metrics_json,"
-                "path_json=excluded.path_json,eligible=excluded.eligible,updated_at=CURRENT_TIMESTAMP",
+                "path_json=excluded.path_json,reasoning_json=excluded.reasoning_json,"
+                "eligible=excluded.eligible,updated_at=CURRENT_TIMESTAMP",
                 (
                     run_id,
                     identity["comparison_key"],
@@ -572,6 +646,7 @@ class BestPathLedger:
                     acceptance["subject_digest"],
                     canonical_json(metrics),
                     canonical_json(path),
+                    canonical_json(reasoning),
                     eligible,
                 ),
             )
@@ -589,7 +664,7 @@ class BestPathLedger:
             return self.observe(run_id, subject_digest=subject_digest)
         with self.store.tx() as db:
             db.execute(
-                "UPDATE best_path_runs SET eligible=0,updated_at=CURRENT_TIMESTAMP "
+                "UPDATE sota_route_runs SET eligible=0,updated_at=CURRENT_TIMESTAMP "
                 "WHERE run_id=?",
                 (run_id,),
             )
@@ -598,14 +673,14 @@ class BestPathLedger:
     # 首次升级只回填一次旧 PASSED 记录；中断可幂等重试，成功后不在每次 Workspace 装配重复扫描。
     def backfill_once(self, limit: int = 200) -> int:
         marker = self.store.db.execute(
-            "SELECT value FROM best_path_meta WHERE key='backfill-v1'"
+            "SELECT value FROM sota_route_meta WHERE key='backfill-v1'"
         ).fetchone()
         if marker is not None and marker["value"] == "done":
             return 0
         synced = self.sync_existing(limit=limit)
         with self.store.tx() as db:
             db.execute(
-                "INSERT INTO best_path_meta(key,value) VALUES('backfill-v1','done') "
+                "INSERT INTO sota_route_meta(key,value) VALUES('backfill-v1','done') "
                 "ON CONFLICT(key) DO UPDATE SET value='done',updated_at=CURRENT_TIMESTAMP"
             )
         return synced
@@ -626,38 +701,52 @@ class BestPathLedger:
                 continue
         return synced
 
-    # 读取当前 Run 与同组 Best Path 对比；未验收 Run 只做实时偏离观察，不进入历史冠军组。
+    # 读取当前 Run 与同组 Champion 对比；未验收 Run 处于 WORKING，只观察实时成本与 Drift。
     def view(self, run_id: str) -> dict[str, Any]:
         turn = self._turn(run_id)
         task = self._task_for_turn(turn)
         identity = self.identity(task, turn["settings"], turn["snapshot"])
         metrics = self.metrics(run_id)
+        reasoning = self.reasoning(run_id)
         group = self.group(identity["comparison_key"])
         current = next((item for item in group if item["run_id"] == run_id), None)
-        best = [item for item in group if item["status"] == "BEST"]
-        historical_best = [item for item in best if item["run_id"] != run_id]
+        champions = [item for item in group if item["status"] == "CHAMPION"]
+        historical_champions = [
+            item for item in champions if item["run_id"] != run_id
+        ]
         minima = {}
-        for key in CORE_COSTS + ("work_ms", "code_churn_lines"):
+        source = historical_champions or champions
+        for key in CORE_COSTS + (
+            "work_ms",
+            "code_churn_lines",
+            "reasoning_tokens",
+        ):
             values = [
                 item["metrics"].get(key)
-                for item in historical_best or best
+                for item in source
                 if isinstance(item["metrics"].get(key), (int, float))
             ]
             minima[key] = min(values) if values else None
 
         drift_reasons = []
-        if historical_best:
-            best_tools = minima.get("tool_calls")
-            best_steps = minima.get("steps")
-            best_tokens = minima.get("total_tokens")
-            if best_tools is not None and metrics["tool_calls"] > best_tools + 2:
+        if historical_champions:
+            champion_tools = minima.get("tool_calls")
+            champion_steps = minima.get("steps")
+            champion_tokens = minima.get("total_tokens")
+            if (
+                champion_tools is not None
+                and metrics["tool_calls"] > champion_tools + 2
+            ):
                 drift_reasons.append("tool_calls")
-            if best_steps is not None and metrics["steps"] > best_steps + 2:
+            if (
+                champion_steps is not None
+                and metrics["steps"] > champion_steps + 2
+            ):
                 drift_reasons.append("steps")
             if (
-                best_tokens is not None
-                and best_tokens > 0
-                and metrics["total_tokens"] > best_tokens * 1.5
+                champion_tokens is not None
+                and champion_tokens > 0
+                and metrics["total_tokens"] > champion_tokens * 1.5
             ):
                 drift_reasons.append("tokens")
 
@@ -668,25 +757,30 @@ class BestPathLedger:
                 current["status"]
                 if current
                 else "NOT_COMPARABLE"
-                if identity["environment_scope"] in {"project-state-partial-v1", "project-unavailable-v1", "project-unfrozen-v1"}
-                else "LEARNING"
+                if identity["environment_scope"] in {
+                    "project-state-partial-v1",
+                    "project-unavailable-v1",
+                    "project-unfrozen-v1",
+                }
+                else "WORKING"
             ),
             "metrics": metrics,
-            "path": self.path(run_id),
+            "reasoning": reasoning,
+            "action_path": self.path(run_id),
             "peer_count": len(group),
-            "best_count": len(best),
-            "best_costs": minima,
-            "beaten_by": current["beaten_by"] if current else [],
+            "champion_count": len(champions),
+            "champion_costs": minima,
+            "lost_to": current["lost_to"] if current else [],
             "beats": current["beats"] if current else [],
             "drift": bool(drift_reasons),
             "drift_reasons": drift_reasons,
-            "frozen_hint": (turn.get("snapshot") or {}).get("best_path_hint"),
+            "frozen_hint": (turn.get("snapshot") or {}).get("sota_route_hint"),
         }
 
-    # 返回最近 Best Path 账本供诊断；列表不触发比较组重写或策略发布。
+    # 返回最近 SOTA Route 账本供诊断；列表不触发比较组重写或策略发布。
     def list(self, limit: int = 50) -> list[dict[str, Any]]:
         rows = self.store.db.execute(
-            "SELECT run_id FROM best_path_runs ORDER BY rowid DESC LIMIT ?",
+            "SELECT run_id FROM sota_route_runs ORDER BY rowid DESC LIMIT ?",
             (max(1, min(int(limit), 200)),),
         ).fetchall()
         return [self.view(row["run_id"]) for row in rows]

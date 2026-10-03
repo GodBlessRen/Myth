@@ -1,4 +1,4 @@
-# Myth v0.25 — Best Path
+# Myth v0.25 — SOTA Route
 
 ## 目标
 
@@ -12,7 +12,7 @@ Myth v0.25 不再只问：
 
 > 在成功的前提下，这次是不是走得更省？
 
-这个机制统一叫 **Best Path**。产品界面只保留四个简单词：
+这个机制统一叫 **SOTA Route**。产品界面只保留四个简单词：
 
 - **Best**：当前没有已知成功路径在所有可比较成本上都更省。
 - **Beaten**：已经存在一条成功路径，在所有可比较成本上都不更贵，并且至少一项更省。
@@ -23,7 +23,7 @@ Myth v0.25 不再只问：
 
 ## 第一原则：先成功，再省
 
-Best Path 的准入条件是：
+SOTA Route 的准入条件是：
 
 ```text
 Run COMPLETED
@@ -39,7 +39,7 @@ Acceptance PASSED
 
 模型自己的“我已经完成”不产生 Best 资格。
 
-验收离开 `PASSED` 后，原记录保留审计，但立即退出 Best Path 比较集合。
+验收离开 `PASSED` 后，原记录保留审计，但立即退出 SOTA Route 比较集合。
 
 ## 比较什么
 
@@ -70,11 +70,11 @@ Run B: tools 5, tokens  8k, time 50s
 
 在没有用户显式成本权重时，Myth 不假装知道谁“总分更高”。
 
-只有当一条路径在所有可比较基础成本上都不更差，并至少一项更好时，才会把另一条标记为 `Beaten`。
+只有当一条路径在所有可比较基础成本上都不更差，并至少一项更好时，才会把另一条标记为 `Loser`。
 
 ## 环境怎么判定
 
-每个新 Turn 准入时冻结 `best_path_environment`。
+每个新 Turn 准入时冻结 `sota_route_environment`。
 
 无本地项目时，比较键包含：
 
@@ -99,7 +99,7 @@ Run B: tools 5, tokens  8k, time 50s
 
 ## 路径保存什么
 
-Best Path 保存的是**可观察执行路径**，例如：
+SOTA Route 保存的是**可观察执行路径**，例如：
 
 ```text
 project.search
@@ -112,7 +112,7 @@ project.search
 
 不会保存或推断模型隐藏 Chain-of-Thought。
 
-大段源码、Prompt、patch 正文也不会复制到 Best Path 账本；只保留 capability、step、稳定 decision id 和少量定位字段。
+大段源码、Prompt、patch 正文也不会复制到 SOTA Route 账本；只保留 capability、step、稳定 decision id 和少量定位字段。
 
 ## 如何真正影响下一次执行
 
@@ -121,7 +121,7 @@ project.search
 新的同条件 Turn 在准入时会冻结一份短提示：
 
 ```text
-Best Path
+SOTA Route
 known route: project.search → project.read → patch → test → reply
 known low cost: 4 tools / 5 steps / 8k tokens
 
@@ -131,7 +131,7 @@ Do not skip required evidence or verification.
 
 模型仍然可以因为新证据偏离历史路线。
 
-Best Path 不扩大工具权限、不修改预算、不跳过验收。
+SOTA Route 不扩大工具权限、不修改预算、不跳过验收。
 
 ## Drift：发现“开始绕了”
 
@@ -162,7 +162,7 @@ Drift = Replan signal
 ```text
 成功 Run
   ↓
-Best Path
+SOTA Route
   ↓
 找到更省的重复模式
   ↓
@@ -175,13 +175,13 @@ Evolution
 Promote / Rollback
 ```
 
-**Best Path 负责发现。Evolution 负责证明和发布。**
+**SOTA Route 负责发现。Evolution 负责证明和发布。**
 
 一个偶然的漂亮 Run 不会自动改变生产策略。
 
 ## Runtime Observatory
 
-第三栏新增 `Best Path` 区：
+第三栏新增 `SOTA Route` 区：
 
 - State
 - Compared runs
@@ -191,27 +191,27 @@ Promote / Rollback
 - Work time: current · best
 - Changed lines: current · best
 - Drift
-- Known route
+- Action Path
 - Compare scope
 
 原有 Delivery / Execution / Recovery / Trajectory / Tokens / Context / Tools / Budget 全部保留。
 
 ## API
 
-- `GET /api/workspace/turns/{run_id}/best-path`
-- `GET /api/workspace/best-paths?limit=50`
+- `GET /api/workspace/turns/{run_id}/sota-route`
+- `GET /api/workspace/sota-routes?limit=50`
 
 这些接口只读取路径账本，不触发模型/工具执行。
 
 ## 关键不变量
 
-1. **PASSED 才能进 Best Path。**
+1. **PASSED 才能进 SOTA Route。**
 2. **省不等于对。先验收，再比较。**
 3. **环境不够确定时，不宣布 Best。**
-4. **Best Path 不保存隐藏 CoT。**
+4. **SOTA Route 不保存隐藏 CoT。**
 5. **历史路线只是 prior，不是强制计划。**
 6. **Drift 只请求重新评估，不擅自停止。**
-7. **Best Path 不直接 Promote 策略。**
+7. **SOTA Route 不直接 Promote 策略。**
 8. **所有比较来自 durable facts，不从 UI 文本猜测。**
 
 ## 下一步实测
@@ -225,7 +225,7 @@ success / acceptance
         ↓
 trajectory variance
         ↓
-Best Path
+SOTA Route
         ↓
 drift / repeated waste patterns
 ```
@@ -237,8 +237,21 @@ drift / repeated waste patterns
 - wall time 方差
 - changed-line 方差
 - human attention 方差
-- 同一模型被 Best Path 提示后，方差是否下降
+- 同一模型被 SOTA Route 提示后，方差是否下降
 
 核心研究问题：
 
 > Harness 能不能让同样聪明的模型，更经常走向自己已经证明过的高效成功路径？
+
+
+## Reasoning Analysis
+
+SOTA Route 把模型可观察的“思考侧”固定拆为三个事实：
+
+- **Reasoning Cost**：供应商实际报告的 reasoning tokens、模型 wall time 等；缺测保持 N/A。
+- **Reasoning Summary**：供应商公开返回的推理摘要。它可以帮助发现为什么某次 Champion 路径更直接，但不是隐藏 Chain-of-Thought。
+- **Action Path**：Myth 实际观察到的 tool / ask / reply 序列。
+
+若供应商返回公开 Reasoning Summary，Champion 的摘要最多取有界片段进入未来同条件 Run，作为规划先验；当前证据、权限、验收与测试仍必须重新核对。
+
+隐藏 CoT 不可见时，Myth 明确保存 `unavailable`，不反推、不伪造。

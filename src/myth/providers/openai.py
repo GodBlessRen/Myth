@@ -69,7 +69,55 @@ def _extract_output_text(value: dict) -> str:
     return "".join(chunks)
 
 
-# 投影供应商实际用量及可选缓存量；缺字段保持未知，不结算为真实零成本。
+# 提取供应商公开的 Reasoning Summary；它是模型生成摘要，不是隐藏 Chain-of-Thought。
+def _extract_reasoning_summary(value: dict) -> list[str]:
+    summaries: list[str] = []
+    for item in value.get("output", []):
+        if not isinstance(item, dict) or item.get("type") != "reasoning":
+            continue
+        for summary in item.get("summary", []):
+            if (
+                isinstance(summary, dict)
+                and summary.get("type") in {None, "summary_text"}
+                and isinstance(summary.get("text"), str)
+                and summary["text"].strip()
+            ):
+                summaries.append(summary["text"].strip())
+    return summaries
+
+
+# 只对已知推理家族或显式 Thinking 请求 Reasoning Summary；未知模型不冒险添加不支持参数。
+def _wants_reasoning_summary(model_request: ModelRequest) -> bool:
+    thinking = model_request.thinking
+    if thinking is True:
+        return True
+    if isinstance(thinking, str) and thinking.strip().lower() not in {
+        "", "off", "false", "none", "default",
+    }:
+        return True
+    model = model_request.model.strip().lower()
+    return model.startswith(("gpt-5", "gpt-6", "o1", "o3", "o4"))
+
+
+# 把 Responses output 限制为可观察结果；加密 reasoning state 不复制进分析对象。
+def _observable_output(value: dict) -> list[dict]:
+    output: list[dict] = []
+    for item in value.get("output", []):
+        if not isinstance(item, dict):
+            continue
+        if item.get("type") == "reasoning":
+            clean = {
+                key: item[key]
+                for key in ("id", "type", "status", "summary")
+                if key in item
+            }
+            output.append(clean)
+        elif item.get("type") == "message":
+            output.append(item)
+    return output
+
+
+# 投影供应商实际用量、推理 Token 及可选缓存量；缺字段保持未知，不结算为真实零成本。
 def _usage(value: dict) -> dict[str, int]:
     usage_value = value.get("usage") if isinstance(value.get("usage"), dict) else {}
     result = {
@@ -87,6 +135,14 @@ def _usage(value: dict) -> dict[str, int]:
     cached_tokens = input_details.get("cached_tokens")
     if type(cached_tokens) is int and cached_tokens >= 0:
         result["cached_input_tokens"] = cached_tokens
+    output_details = (
+        usage_value.get("output_tokens_details")
+        if isinstance(usage_value.get("output_tokens_details"), dict)
+        else {}
+    )
+    reasoning_tokens = output_details.get("reasoning_tokens")
+    if type(reasoning_tokens) is int and reasoning_tokens >= 0:
+        result["reasoning_tokens"] = reasoning_tokens
     return result
 
 
@@ -175,6 +231,9 @@ class OpenAIResponsesProvider:
         }
         # 两条路径都按流消费；决定只有 terminal completion 后才能交 Runtime。
         payload["stream"] = True
+        # Reasoning Summary 是供应商公开摘要；不是原始思维链。支持时主动请求 auto 级摘要供 SOTA Route 分析。
+        if _wants_reasoning_summary(model_request):
+            payload["reasoning"] = {"summary": "auto"}
         if not self.chatgpt_plan:
             payload["max_output_tokens"] = max(model_request.max_output_tokens, 16)
 
@@ -248,8 +307,14 @@ class OpenAIResponsesProvider:
         usage = _usage(value)
         if first_token_ms is not None:
             usage["time_to_first_token_ms"] = first_token_ms
-        # 不保存服务端回显的请求头/凭据/未知元数据，只留结果与用量证据。
-        safe_raw = redact_response({k: value[k] for k in ("id", "status", "output", "usage") if k in value}, token)
+        # 只保留可观察结果/用量/公开 Reasoning Summary；encrypted_content 属不透明推理状态，不进入分析账本。
+        reasoning_summary = _extract_reasoning_summary(value)
+        safe_value = {
+            **{k: value[k] for k in ("id", "status", "usage", "reasoning") if k in value},
+            "output": _observable_output(value),
+            "reasoning_summary": reasoning_summary,
+        }
+        safe_raw = redact_response(safe_value, token)
         return ModelResult(
             text=redact_response(output_text, token),
             usage=usage,
