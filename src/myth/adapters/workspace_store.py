@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import time
 import uuid
+from contextlib import nullcontext
 from ..conversation import chunks, rank_chunks, score_chunk
 from ..domain import canonical_json, digest_json, IdentityConflict, BudgetExceeded
 from ..decision_runtime import DecisionRuntime
@@ -254,10 +255,14 @@ class SqliteWorkspaceRepository:
     def search(self,query,project_id=None,limit=5):
         return self.search_report(query,project_id,limit)["sources"]
 
-    def create_turn(self,sid,text,request_id,document_ids=None,memory_records=None,goal_id=None,goal_context=None):
+    def create_turn(self,sid,text,request_id,document_ids=None,memory_records=None,goal_id=None,goal_context=None,*,_db=None,_settings=None):
+        # Scheduler admission joins its occurrence transaction explicitly. Never
+        # make RuntimeStore.tx nestable: external effects still stay outside it.
+        if _db is not None and (_db is not self.store.db or not _db.in_transaction):
+            raise RuntimeError("admission requires this store's active transaction")
         if not isinstance(text,str) or not text.strip() or len(text.encode("utf-8"))>16000:raise ValueError("message must contain 1-16000 UTF-8 bytes")
         if not isinstance(request_id,str) or not 1<=len(request_id)<=200:raise ValueError("request_id is required")
-        settings=self.settings()
+        settings=dict(_settings) if _settings is not None else self.settings()
         if not settings["model"]:raise ValueError("请先在模型设置中选择 Ollama 模型。")
         document_ids=document_ids or []
         memory_records=memory_records or []
@@ -266,7 +271,7 @@ class SqliteWorkspaceRepository:
         # Retrieved Memory is an execution snapshot derived after admission; changing
         # ambient memory must not break idempotent retries of the same request_id.
         identity=digest_json({"session_id":sid,"text":text,"settings":settings,"documents":document_ids,"goal_id":goal_id})
-        with self.store.tx() as db:
+        with (self.store.tx() if _db is None else nullcontext(_db)) as db:
             existing=db.execute("SELECT run_id,entry_digest FROM workspace_turns WHERE request_id=?",(request_id,)).fetchone()
             if existing:
                 if existing["entry_digest"]!=identity:raise IdentityConflict("request_id reused with different message or settings")
@@ -274,6 +279,21 @@ class SqliteWorkspaceRepository:
             session=self.session(sid)
             if session["archived"]:raise ValueError("restore the archived conversation first")
             if any(t["status"] in ACTIVE_TURN_STATUSES for t in session["turns"]):raise ValueError("本会话仍有未完成一轮，请先继续、答复或停止。")
+            if goal_id:
+                goal=db.execute("SELECT * FROM goals WHERE goal_id=?",(goal_id,)).fetchone()
+                if goal is None:raise KeyError(goal_id)
+                if goal["state"]!="ACTIVE":raise ValueError("only an active Goal admits new work")
+                # Validate and freeze the persisted identity inside admission.
+                # Caller snapshots cannot impersonate a Goal or bypass Pause.
+                db.execute("INSERT OR IGNORE INTO goal_work_state(goal_id) VALUES(?)",(goal_id,))
+                work=db.execute("SELECT * FROM goal_work_state WHERE goal_id=?",(goal_id,)).fetchone()
+                goal_context={**dict(goal),"work":dict(work)}
+                occupied=db.execute(
+                    "SELECT 1 FROM goal_runs g JOIN workspace_turns t ON t.run_id=g.run_id "
+                    "WHERE g.goal_id=? AND t.status IN ('RUNNING','INTERRUPTED','UNKNOWN','WAITING_USER','PAUSED') LIMIT 1",
+                    (goal_id,),
+                ).fetchone()
+                if occupied:raise ValueError("Goal has unfinished work; continue or stop that Run first")
             project=self.project(session["project_id"]) if session["project_id"] else None
             retrieval=self.search_report(text,session["project_id"])
             knowledge=list(retrieval["sources"])
@@ -364,6 +384,14 @@ class SqliteWorkspaceRepository:
             db.execute("INSERT INTO runs(run_id,request_id,entry_digest,goal,acceptance_version,state) VALUES(?,?,?,?,?,'RUNNING')",(rid,request_id,identity,text,"conversation-v1"))
             for meter,limit in {"model_calls":settings["max_steps"],"input_tokens":2_000_000,"output_tokens":settings["max_steps"]*settings["max_output_tokens"],"tool_calls":settings["max_steps"],"write_bytes":4_000_000}.items():db.execute("INSERT INTO accounts(run_id,meter,limit_units) VALUES(?,?,?)",(rid,meter,limit))
             db.execute("INSERT INTO workspace_turns(run_id,session_id,request_id,entry_digest,settings_json,snapshot_json,status,max_steps) VALUES(?,?,?,?,?,?,'RUNNING',?)",(rid,sid,request_id,identity,canonical_json(settings),canonical_json(snapshot),settings["max_steps"]))
+            if goal_id:
+                db.execute("INSERT INTO goal_runs(goal_id,run_id) VALUES(?,?)",(goal_id,rid))
+                db.execute(
+                    "UPDATE goal_work_state SET current_state='IN_PROGRESS',last_run_id=?,revision=revision+1,"
+                    "progress_note='A new admitted Turn has started for this Goal.',"
+                    "next_action='Let the current Turn reach a durable checkpoint.',waiting_for='',updated_at=CURRENT_TIMESTAMP WHERE goal_id=?",
+                    (rid,goal_id),
+                )
             db.execute(
                 "INSERT INTO workspace_execution_cursors(run_id,step,phase,checkpoint_step,recovery_state,detail) VALUES(?,0,'ADMITTED',0,'NONE','Turn admitted')",
                 (rid,),

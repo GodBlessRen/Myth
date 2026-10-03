@@ -13,6 +13,8 @@
 | 看产品视觉与交互原则 | [DESIGN.md](DESIGN.md) |
 | 看当前下一步 | [ROADMAP.md](ROADMAP.md) |
 | 看验证边界 | [VALIDATION.md](VALIDATION.md) |
+| 安排 Goal 后续工作 | [GOAL_WAKEUP.md](GOAL_WAKEUP.md) |
+| 跑固定真实任务基线 | [TASK_BENCHMARK.md](TASK_BENCHMARK.md) |
 | 看版本演进 | [CHANGELOG](../CHANGELOG.md) |
 | 开发 / Agent 工作规范 | [AGENTS.md](../AGENTS.md) |
 

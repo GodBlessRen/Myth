@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.21 — Goal Wake-up and Measured Daily Tasks
+
+- 增加显式一次性 Timer / 固定间隔计划，模型设置在创建时固定，Web 服务每两秒检查到期工作。
+- 计划请求去重；Wakeup / Turn / Goal link / admission checkpoint 共用事务；两个连接不能重复认领同一次机会。
+- 停机错过的重复时段合并为一次；会话/Goal 忙、暂停、等待或断连时保留计划并延后检查。
+- 提交后 Driver 中断由原 Run 恢复；UNKNOWN 不自动重放；旧 Goal checkpoint 不覆盖新 Run。
+- 增加「目标与计划」工作台；窄屏 Runtime 入口保留全部观测事实，修复 390px 对话溢出。
+- `task-benchmark` 保存 10 个固定日常任务 × 重复试次 × Myth/simple-loop 的完整数据库和独立字节验收；替身与真实 provider 分开标记。
+- 真实任务暴露的 PatchContractError 改为 Ticket 前已知拒绝，模型可纠正；补齐步数耗尽及未决收据的 Goal checkpoint。
+- CI 扩为 Windows/Linux × Python 3.12/3.13；具体实测边界见 docs/archive/VALIDATION_V021.md。
+
 ## v0.20 — Recovery-first Agent Runtime
 
 - Conversation Run 新增 durable Execution Cursor：step / phase / checkpoint / recovery state。

@@ -115,6 +115,16 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate.add_argument("--resolution-policy", choices=["default","L0","L1","L2"], default="default")
     evaluate.add_argument("--record", action="store_true")
 
+    tasks = sub.add_parser("task-benchmark", help="run fixed daily tasks and persist every trial, including failures")
+    tasks.add_argument("--suite", default="evals/daily-v1.json")
+    tasks.add_argument("--output", required=True, type=Path, help="new evidence directory; never overwrites a run")
+    tasks.add_argument("--provider", choices=["scripted", "ollama", "openai", "chatgpt"], default="scripted")
+    tasks.add_argument("--model", default="fixture")
+    tasks.add_argument("--ollama-url", default="http://127.0.0.1:11434")
+    tasks.add_argument("--repeats", type=int, default=3)
+    tasks.add_argument("--arm", action="append", choices=["myth", "simple-loop"])
+    tasks.add_argument("--case", action="append", default=[], dest="case_ids")
+
     history = sub.add_parser("eval-history", help="show persisted local evaluation runs")
     history.add_argument("--limit", type=int, default=20)
 
@@ -187,6 +197,23 @@ def _require_provider(args: argparse.Namespace):
 
 def main() -> None:
     args = build_parser().parse_args()
+
+    if args.command == "task-benchmark":
+        from .task_benchmark import run_task_benchmark
+        result = run_task_benchmark(
+            args.suite, args.output, provider_name=args.provider, model=args.model,
+            ollama_url=args.ollama_url, repeats=args.repeats,
+            auth_root=args.root,
+            arms=tuple(args.arm or ["myth", "simple-loop"]), case_ids=args.case_ids,
+            on_trial=lambda trial: print(
+                f"{trial['repeat']} {trial['case_id']} {trial['arm']}: "
+                f"{'PASS' if trial['success'] else 'FAIL'} ({trial['status']})", flush=True),
+        )
+        _print({"report": str(args.output.resolve() / "report.json"),
+                "complete_suite": result["complete_suite"], "summary": result["summary"]})
+        if any(not t["success"] for t in result["trials"]):
+            raise SystemExit(1)
+        return
 
     if args.command == "provider-check":
         _print(_provider(args).check())

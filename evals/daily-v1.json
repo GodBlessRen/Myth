@@ -1,0 +1,72 @@
+{
+  "suite_id": "daily-v1",
+  "version": 1,
+  "cases": [
+    {
+      "id": "arithmetic", "category": "answer",
+      "prompt": "计算 (17 + 25) * 3",
+      "acceptance": {"answer_contains": ["126"]},
+      "steps": [{"claim": "126"}]
+    },
+    {
+      "id": "knowledge-fact", "category": "retrieval",
+      "documents": [{"title": "发布计划", "content": "Myth 发布代号是 MINT-4729。发布日期为周五。"}],
+      "prompt": "根据发布计划回答 Myth 的发布代号，只回答代号。",
+      "acceptance": {"answer_contains": ["MINT-4729"]},
+      "steps": [{"claim": "MINT-4729"}]
+    },
+    {
+      "id": "source-read", "category": "tools",
+      "files": {"notes.txt": "本周任务：检查恢复。验收口令：SOURCE-381。"},
+      "prompt": "用 project.read 读取 notes.txt，告诉我验收口令。必须以读取结果为依据。",
+      "acceptance": {"answer_contains": ["SOURCE-381"], "tools": ["project.read"]},
+      "steps": [{"tool": "project.read", "args": {"path": "notes.txt"}}, {"claim": "SOURCE-381"}]
+    },
+    {
+      "id": "project-search", "category": "tools",
+      "files": {"a.txt": "普通资料。", "nested/b.txt": "故障工单：INCIDENT-819。"},
+      "prompt": "用 project.search 在项目中搜索 INCIDENT，回答完整故障工单编号。",
+      "acceptance": {"answer_contains": ["INCIDENT-819"], "tools": ["project.search"]},
+      "steps": [{"tool": "project.search", "args": {"query": "INCIDENT"}}, {"claim": "INCIDENT-819"}]
+    },
+    {
+      "id": "combine-sources", "category": "retrieval",
+      "documents": [{"title": "项目负责人", "content": "项目负责人：林青。"}, {"title": "项目预算", "content": "项目预算：1200 元。"}],
+      "prompt": "根据项目资料回答负责人和预算，不要编造其他信息。",
+      "acceptance": {"answer_contains": ["林青", "1200"]},
+      "steps": [{"claim": "负责人林青，预算 1200 元。"}]
+    },
+    {
+      "id": "artifact-text", "category": "artifact",
+      "prompt": "使用 artifact.write 生成 report.txt，内容必须恰好是 READY-2026（不要加换行）。完成后说明已生成。",
+      "acceptance": {"artifacts": {"report.txt": "READY-2026"}},
+      "steps": [{"tool": "artifact.write", "args": {"path": "report.txt", "content": "READY-2026"}}, {"claim": "已生成 report.txt。"}]
+    },
+    {
+      "id": "artifact-json", "category": "artifact",
+      "prompt": "使用 artifact.write 生成 config.json，内容必须恰好是 {\"enabled\":true,\"limit\":3}，不要加换行或空格。",
+      "acceptance": {"artifacts": {"config.json": "{\"enabled\":true,\"limit\":3}"}},
+      "steps": [{"tool": "artifact.write", "args": {"path": "config.json", "content": "{\"enabled\":true,\"limit\":3}"}}, {"claim": "已生成 config.json。"}]
+    },
+    {
+      "id": "patch-copy", "category": "artifact",
+      "files": {"settings.txt": "mode=old\n"},
+      "prompt": "使用 project.patch_exact 在 settings.txt 的输出副本里把 old 替换为 new，expected_count=1。原项目文件保持原样。",
+      "acceptance": {"artifacts": {"settings.txt": "mode=new\n"}},
+      "steps": [{"tool": "project.patch_exact", "args": {"path": "settings.txt", "old_text": "old", "new_text": "new", "expected_count": 1}}, {"claim": "已生成修改副本。"}]
+    },
+    {
+      "id": "interruption-resume", "category": "recovery", "interrupt_before_run": true,
+      "prompt": "使用 artifact.write 生成 resumed.txt，内容必须恰好是 RESUMED-91，不要加换行。",
+      "acceptance": {"artifacts": {"resumed.txt": "RESUMED-91"}},
+      "steps": [{"tool": "artifact.write", "args": {"path": "resumed.txt", "content": "RESUMED-91"}}, {"claim": "已生成 resumed.txt。"}]
+    },
+    {
+      "id": "goal-continuation", "category": "continuity",
+      "first_prompt": "请记住当前进度口令 GOAL-652，下一轮需要它。只回答这个口令。",
+      "prompt": "从这个 Goal 的持久进度中找出上一轮口令，只回答口令。",
+      "acceptance": {"answer_contains": ["GOAL-652"]},
+      "steps": [{"claim": "GOAL-652"}, {"claim": "GOAL-652"}]
+    }
+  ]
+}

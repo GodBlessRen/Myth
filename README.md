@@ -15,12 +15,14 @@ Long-term Goal
   -> continue the same Goal
 ```
 
-当前版本：**v0.20**
+当前版本：**v0.21**
 
 ## 现在能做什么
 
 - 多轮 Conversation + Agent Loop；
 - 长期 Goal 跨 Session / restart 保存进度、下一步与等待项；
+- Goal 一次性 Timer / 固定间隔计划，服务运行时通过正常 admission 唤醒工作；
+- 固定日常任务基线与逐次证据报告，支持真实 provider 和简单 Loop 路由对照；
 - Steer / Pause / Resume / Stop / Compact；
 - Ollama，本地上下文窗口与 `num_ctx` 对齐；
 - Knowledge / Memory 检索与 provenance；
@@ -31,7 +33,7 @@ Long-term Goal
 - 固定 EvalSuite、Eval Ledger、Policy Candidate / Promote / Rollback；
 - 三栏工作台，第三栏常驻 Runtime Observatory。
 
-当前**没有**任意 shell、通用代码执行、后台自主调度、多用户权限或分布式 worker。
+当前**没有**任意 shell、通用代码执行、操作系统常驻服务、多用户权限或分布式 worker。
 
 ## 产品不变量
 
@@ -116,6 +118,10 @@ History / Context | Conversation / Task | Runtime Observatory
 
 详见 [Observability Contract](docs/OBSERVABILITY.md)。
 
+在「目标与计划」中创建 Goal、选择工作会话和时间，保存一次性或固定间隔计划。模型设置在保存计划时固定；未完成的会话/Goal 会等待，断连会重试。关闭 Web 服务期间不执行；重启后重复计划的错过时段合并为一次。窄屏可通过顶部 Runtime 按钮打开完整观测面板。
+
+计划用法和验证命令见 [Goal Wake-up](docs/GOAL_WAKEUP.md) 与 [Task Benchmark](docs/TASK_BENCHMARK.md)。
+
 ## Runtime shape
 
 稳定 Core：
@@ -142,11 +148,10 @@ Intent Pick、Information Resolution、Agent Loop、Workflow、Routing、Multi-A
 
 接下来优先：
 
-1. 10 个真实日常任务 × 重复运行；
-2. 根据真实失败补 Tool / Context / Memory；
-3. 最小 Timer / Schedule，只负责唤醒 due Goal；
-4. 受限 `test.run`，让代码类任务可以验证候选改动；
-5. 连续自用，再决定高级架构是否值得深化。
+1. 用固定的 10 个日常任务继续积累真实模型失败；
+2. 根据证据补 Tool / Context / Memory；
+3. 受限 `test.run`，让代码类任务可以验证候选改动；
+4. 连续自用与计划故障注入，再决定高级架构是否值得深化。
 
 详见 [Roadmap](docs/ROADMAP.md)。
 
@@ -157,6 +162,7 @@ python -m compileall -q src tests
 python -m unittest discover -s tests -v
 node --check src/myth/webui/app.js
 node --check src/myth/webui/inspector.js
+node --check src/myth/webui/goals.js
 ```
 
 自动测试大量使用 deterministic provider / test doubles；不能据此宣称真实模型稳定性。当前验证边界见 [VALIDATION.md](docs/VALIDATION.md)。

@@ -112,6 +112,7 @@ python -m compileall -q src tests
 python -m unittest discover -s tests -v
 node --check src/myth/webui/app.js
 node --check src/myth/webui/inspector.js
+node --check src/myth/webui/goals.js
 ```
 
 如果改动涉及：
@@ -122,6 +123,7 @@ node --check src/myth/webui/inspector.js
 - Goal / Personal：补跨 session / restart；
 - UI observability：保证第三栏身份与 renderer 仍存在；
 - Evaluation / Evolution：必须使用固定 suite，不允许挑题发布。
+- Goal schedule：覆盖同请求去重、到期争抢、提交后进程退出、暂停、断连重试、过期合并和 UNKNOWN 不自动重放。
 
 ## 6. 文档规则
 

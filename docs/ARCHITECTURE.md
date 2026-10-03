@@ -272,6 +272,7 @@ Core 不依赖：
 - projects / documents / chunks；
 - Memory；
 - Goal / Goal work state / Trigger / Personal State；
+- Goal schedule / due occurrence / immutable model settings；
 - Evaluation runs / observations；
 - Cost Model / Policy Candidate / Active Policy / history；
 - content-addressed objects / Artifact evidence。
@@ -290,12 +291,22 @@ History / Context | Conversation / Task | Runtime Observatory
 
 第三栏必须保持 Goal / Flow / Trajectory / Tokens / Context / Tools / Control / Budget 可观察。
 
-## 15. 当前明确不做
+## 15. 本地 Goal Wake-up
+
+`GoalScheduler` 是现有 Workspace 的本地适配器，不增加 Core 层次。用户显式创建一次性或固定间隔计划；Web 服务每两秒检查 due schedule，provider readiness 在事务外检查。
+
+同一 SQLite 事务提交 occurrence、Turn/Run、Goal link 和 admission checkpoint。`request_id` 固定计划入口身份；`(schedule_id, sequence)` 唯一约束固定每次工作机会。未来 due time 仅在 admission 成功时推进，停机期间的过期重复时段合并为一次。
+
+提交后 Driver 消失时，原 Run 从 Execution Cursor 进入正常恢复流程；不创建替代 Run。UNKNOWN、PAUSED、WAITING_USER 不由定时器自动重放。会话与 Goal 的未完成轮次阻止新 admission；旧 Run 的迟到 Goal checkpoint 不能覆盖新 Run。
+
+详见 [GOAL_WAKEUP.md](GOAL_WAKEUP.md)。
+
+## 16. 当前明确不做
 
 当前没有：
 
 - 任意 shell / arbitrary code executor；
-- 后台 autonomous scheduler；
+- 脱离 Web 服务的系统常驻调度与通用事件触发；
 - 分布式 lease / worker；
 - 多用户 auth；
 - 通用 MCP/A2A production integration；
