@@ -203,6 +203,46 @@ function renderInspectorGoal(turn) {
   }
 }
 
+// 展示回答、语义验收与 Work item；三者分开，避免把“已回复”画成“已验收”。
+function renderInspectorDelivery(turn) {
+  const box = $("inspectorDelivery");
+  if (!box) return;
+  box.replaceChildren();
+  const delivery = turn?.delivery || {};
+  const acceptance = delivery.acceptance;
+  const finalization = delivery.finalization;
+  const items = delivery.work_items || [];
+  if (!turn || (!acceptance && !finalization && !items.length)) {
+    box.append(el("div", "inspector-empty", "暂无交付验收"));
+    return;
+  }
+  inspectorFact(box, "Answer", turn.status === "COMPLETED" ? "persisted" : turn.status || "—");
+  inspectorFact(box, "Acceptance", acceptance?.state || "UNVERIFIED");
+  if (acceptance?.checker_id) inspectorFact(box, "Checker", acceptance.checker_id);
+  if (acceptance?.subject_digest)
+    inspectorFact(box, "Subject", acceptance.subject_digest.slice(0, 12) + "…");
+  if (finalization) {
+    inspectorFact(box, "Finalization", finalization.state || "—");
+    if (finalization.last_error)
+      inspectorFact(box, "Finalize error", String(finalization.last_error).slice(0, 160));
+  }
+  const active =
+    [...items].reverse().find((item) => !["DONE", "INVALIDATED"].includes(item.status)) ||
+    items.at(-1);
+  if (active) {
+    inspectorFact(box, "Work item", `${active.ordinal} · ${active.status}`);
+    inspectorFact(box, "Plan rev", active.plan_revision || 1);
+    if (active.progress_note)
+      inspectorFact(box, "Progress", active.progress_note.slice(0, 160));
+  }
+  if (delivery.attention?.seconds)
+    inspectorFact(
+      box,
+      "Human attention",
+      `${delivery.attention.seconds}s · ${delivery.attention.entries} entries`,
+    );
+}
+
 // 投影持久游标、owner、租约与恢复建议；租约过期不证明外部效果未发生。
 function renderInspectorRecovery(turn) {
   const box = $("inspectorRecovery");
@@ -591,6 +631,7 @@ function renderRuntimeInspector(session = state.session) {
     $("inspectorPulse").className = "inspector-pulse " + cls;
   renderSessionStatistics(session);
   renderInspectorGoal(turn);
+  renderInspectorDelivery(turn);
   renderExecutionSpine(turn);
   renderInspectorRecovery(turn);
   renderInspectorTrajectory(turn);
