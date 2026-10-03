@@ -383,6 +383,7 @@ class ConversationWebService:
                 turn["goal_current"] = (
                     workspace.personal.goal_view(goal_id) if goal_id else None
                 )
+                turn["delivery"] = workspace.delivery.run_view(turn["run_id"])
             value["artifacts"] = workspace.repository.artifacts(sid)
             value["statistics"] = session_statistics(model_invocations, tool_operations)
             return value
@@ -585,6 +586,58 @@ class ConversationWebService:
 
         return {"run_id": rid, "status": turn["status"], "control": projection}
 
+    # 单 Run 交付投影；读取不会重跑模型/工具。
+    def turn_delivery(self, run_id):
+        with MythRuntime(self.root) as runtime:
+            return Workspace(runtime).delivery.run_view(run_id)
+
+    # 汇总全分母验收、错误完成、待收尾与人工关注。
+    def delivery_metrics(self):
+        with MythRuntime(self.root) as runtime:
+            return Workspace(runtime).delivery.metrics()
+
+    # 验收必须绑定当前 subject digest；模型文字不能直接升级成 PASS。
+    def set_delivery_acceptance(self, run_id, value):
+        with MythRuntime(self.root) as runtime:
+            return Workspace(runtime).delivery.set_acceptance(
+                run_id,
+                state=value.get("state", "UNVERIFIED"),
+                checker_id=value.get("checker_id", "human/manual"),
+                evidence=value.get("evidence"),
+                note=value.get("note", ""),
+                subject_digest=value.get("subject_digest"),
+            )
+
+    # 记录连续自用中的人工关注时长。
+    def record_delivery_attention(self, run_id, value):
+        with MythRuntime(self.root) as runtime:
+            return Workspace(runtime).delivery.record_attention(
+                run_id,
+                kind=value.get("kind", "review"),
+                seconds=value.get("seconds"),
+                note=value.get("note", ""),
+            )
+
+    # 给同一个 Run 增加持久阶段；plan_revision 必须单调增加。
+    def plan_work_items(self, run_id, value):
+        with MythRuntime(self.root) as runtime:
+            return {
+                "work_items": Workspace(runtime).delivery.plan_work_items(
+                    run_id,
+                    value.get("items") or [],
+                    plan_revision=value.get("plan_revision"),
+                )
+            }
+
+    # test.run 只能使用项目已显式建立的受限 profile。
+    def verification_profiles(self, project_id):
+        with MythRuntime(self.root) as runtime:
+            return Workspace(runtime).verification.list(project_id)
+
+    def create_verification_profile(self, project_id, value):
+        with MythRuntime(self.root) as runtime:
+            return Workspace(runtime).verification.create(project_id, value)
+
     # 保存用户明确要求的有来源记忆；不从文本推断权限或秘钥。
     def remember(self, value):
         with MythRuntime(self.root) as runtime:
@@ -766,6 +819,10 @@ class ConversationWebService:
                 "schedules": self.schedules(),
                 "scheduler": dict(self.scheduler_state),
             }
+        if parts == ["delivery", "metrics"]:
+            return self.delivery_metrics()
+        if len(parts) == 3 and parts[0] == "turns" and parts[2] == "delivery":
+            return self.turn_delivery(parts[1])
         if len(parts) == 2 and parts[0] == "goals":
             return self.goal(parts[1])
         if len(parts) == 3 and parts[0] == "goals" and parts[2] == "triggers":
@@ -794,6 +851,8 @@ class ConversationWebService:
             )
         if len(parts) == 3 and parts[0] == "projects" and parts[2] == "files":
             return self.project_files(parts[1], query.get("path", ["."])[0])
+        if len(parts) == 3 and parts[0] == "projects" and parts[2] == "verification-profiles":
+            return {"profiles": self.verification_profiles(parts[1])}
         raise KeyError("endpoint")
 
     # 分派明确产品写入操作；参数、身份与权限规则由对应用例/仓储校验。
@@ -834,6 +893,14 @@ class ConversationWebService:
             return self.send(parts[1], value)
         if parts == ["documents"]:
             return self._use("import_document", value)
+        if len(parts) == 3 and parts[0] == "projects" and parts[2] == "verification-profiles":
+            return self.create_verification_profile(parts[1], value)
+        if len(parts) == 3 and parts[0] == "turns" and parts[2] == "acceptance":
+            return self.set_delivery_acceptance(parts[1], value)
+        if len(parts) == 3 and parts[0] == "turns" and parts[2] == "attention":
+            return self.record_delivery_attention(parts[1], value)
+        if len(parts) == 3 and parts[0] == "turns" and parts[2] == "work-items":
+            return self.plan_work_items(parts[1], value)
         if len(parts) == 3 and parts[0] == "documents" and parts[2] == "archive":
             return self._use("archive_document", parts[1])
         if len(parts) == 3 and parts[0] == "turns":
