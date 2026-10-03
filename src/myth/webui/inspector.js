@@ -243,51 +243,90 @@ function renderInspectorDelivery(turn) {
     );
 }
 
-// 用简单字段展示当前 Run 与历史最佳成功路径；Best 只表示同条件下未被更省路径全面超过。
-function renderInspectorBestPath(turn) {
-  const box = $("inspectorBestPath");
+// 展示 SOTA Route：状态、Reasoning Cost、Reasoning Summary 与 Action Path 分开，隐藏 CoT 永远标记不可见。
+function renderInspectorSotaRoute(turn) {
+  const box = $("inspectorSotaRoute");
   if (!box) return;
   box.replaceChildren();
-  const best = turn?.sota_route;
-  if (!turn || !best) {
-    box.append(el("div", "inspector-empty", "还没有可比较的成功路径"));
+  const route = turn?.sota_route;
+  if (!turn || !route) {
+    box.append(el("div", "inspector-empty", "还没有可比较的成功路线"));
     return;
   }
-  inspectorFact(box, "State", best.status || "WORKING");
-  inspectorFact(box, "Compared runs", best.peer_count || 0);
-  const current = best.metrics || {};
-  const target = best.champion_costs || {};
+  inspectorFact(box, "State", route.status || "WORKING");
+  inspectorFact(box, "Compared runs", route.peer_count || 0);
+  const current = route.metrics || {};
+  const target = route.champion_costs || {};
   const pair = (label, key, suffix = "") => {
     const now = current[key];
     const old = target[key];
     const left = now == null ? "N/A" : Number(now).toLocaleString() + suffix;
     const right = old == null ? "—" : Number(old).toLocaleString() + suffix;
-    inspectorFact(box, label, left + " · best " + right);
+    inspectorFact(box, label, left + " · champion " + right);
   };
+
   pair("Tool calls", "tool_calls");
   pair("Steps", "steps");
   pair("Tokens", "total_tokens");
   pair("Work time", "work_ms", " ms");
   pair("Changed lines", "code_churn_lines");
-  if (best.drift) {
+
+  inspectorFact(box, "Reasoning Cost", current.reasoning_tokens == null
+    ? "N/A · provider not reported"
+    : Number(current.reasoning_tokens).toLocaleString() + " reasoning tokens");
+
+  const attempts = route.reasoning?.attempts || [];
+  const summaries = attempts.flatMap((item) => item.summary || []);
+  inspectorFact(
+    box,
+    "Reasoning Summary",
+    summaries.length ? String(summaries.at(-1)).slice(0, 220) : "N/A · provider not reported",
+  );
+  inspectorFact(box, "Hidden CoT", "unavailable · never inferred");
+
+  const actionPath = route.action_path || [];
+  const actionText = actionPath
+    .map((item) =>
+      item.kind === "tool"
+        ? item.capability || "tool"
+        : item.kind === "ask"
+          ? "ask_user"
+          : "reply",
+    )
+    .join(" → ");
+  inspectorFact(box, "Action Path", actionText ? actionText.slice(0, 220) : "—");
+
+  if (route.drift) {
     inspectorFact(
       box,
       "Drift",
-      "偏离较省路径 · " + (best.drift_reasons || []).join(" / "),
+      "偏离 Champion · " + (route.drift_reasons || []).join(" / "),
     );
-  } else if (best.peer_count) {
+  } else if (route.peer_count) {
     inspectorFact(box, "Drift", "within known range");
   }
-  const hint = best.frozen_hint;
+
+  const hint = route.frozen_hint;
   if (hint?.action_paths?.length) {
     inspectorFact(
       box,
-      "Known route",
+      "Champion Route",
       hint.action_paths[0].join(" → ").slice(0, 180),
     );
   }
-  if (best.environment_scope && best.environment_scope !== "project-state-v1" && best.environment_scope !== "frozen-context-v1") {
-    inspectorFact(box, "Compare scope", "环境未完整冻结 · 不参与 Best");
+  if (hint?.reasoning_summaries?.length) {
+    inspectorFact(
+      box,
+      "Champion Summary",
+      String(hint.reasoning_summaries[0]).slice(0, 220),
+    );
+  }
+  if (
+    route.environment_scope &&
+    route.environment_scope !== "project-state-v1" &&
+    route.environment_scope !== "frozen-context-v1"
+  ) {
+    inspectorFact(box, "Compare scope", "环境未完整冻结 · 不参与 Champion 比较");
   }
 }
 
@@ -680,7 +719,7 @@ function renderRuntimeInspector(session = state.session) {
   renderSessionStatistics(session);
   renderInspectorGoal(turn);
   renderInspectorDelivery(turn);
-  renderInspectorBestPath(turn);
+  renderInspectorSotaRoute(turn);
   renderExecutionSpine(turn);
   renderInspectorRecovery(turn);
   renderInspectorTrajectory(turn);
