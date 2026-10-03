@@ -497,6 +497,17 @@ const toolLabels = {
   "project.patch_exact": "修改文件副本",
   "math.calculate": "计算",
 };
+// 将服务端 wall-clock 秒数格式化为回复旁的紧凑“用时”；这是整轮处理时间，不冒充纯模型推理时延。
+function workedTime(seconds) {
+  const total = Math.max(0, Math.floor(Number(seconds || 0)));
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const secs = total % 60;
+  if (hours) return `用时 ${hours}小时 ${minutes}分 ${secs}秒`;
+  if (minutes) return `用时 ${minutes}分 ${secs}秒`;
+  return `用时 ${secs}秒`;
+}
+
 // 以持久 activities 投影工具过程；折叠 UI 不删除收据或原始结果。
 function toolGroup(turn) {
   const steps = turn.activities.filter(
@@ -572,6 +583,7 @@ function renderThread(session) {
       t.current_step,
       t.activities,
       t.driver_active,
+      t.reply_timing,
     ]),
     session.artifacts,
   ]);
@@ -618,6 +630,13 @@ function renderThread(session) {
           .catch(() => toast("浏览器未允许剪贴板访问。"));
       save.href = `/api/workspace/messages/${encodeURIComponent(message.id)}/download`;
       save.download = "myth-answer.md";
+      const elapsed = message.metadata?.reply_elapsed_seconds;
+      if (elapsed !== undefined && elapsed !== null) {
+        const worked = el("span", "message-worked", workedTime(elapsed));
+        worked.title =
+          "从本轮用户输入持久化到这条回复落库的总 wall-clock 时间，不是纯模型推理时延。";
+        actions.prepend(worked);
+      }
       actions.append(copy, save);
       main.append(actions);
     }
@@ -663,8 +682,16 @@ function renderThread(session) {
     }
     const typing = el("div", "typing");
     for (let i = 0; i < 3; i++) typing.append(el("span", "typing-dot"));
+    const liveElapsed = last.reply_timing?.elapsed_seconds;
     typing.append(
-      el("span", "", last.driver_active ? "正在思考与处理…" : "这一轮已中断"),
+      el(
+        "span",
+        "",
+        last.driver_active
+          ? "正在思考与处理…" +
+              (liveElapsed !== undefined ? " · " + workedTime(liveElapsed) : "")
+          : "这一轮已中断",
+      ),
     );
     $("thread").append(typing);
   }
