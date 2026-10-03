@@ -170,6 +170,69 @@ class OpenAIProviderTests(unittest.TestCase):
         self.assertEqual(result.usage["input_tokens"], 8)
         self.assertEqual(result.usage["cached_input_tokens"], 5)
 
+    # 回归断言：推理模型公开摘要/推理 Token 被保留为可观察证据，但不冒充原始 Chain-of-Thought。
+    def test_reasoning_summary_and_cost_are_observable(self) -> None:
+        captured = {}
+        completed = {
+            "id": "resp_reasoning",
+            "status": "completed",
+            "output": [
+                {
+                    "type": "reasoning",
+                    "id": "rs_1",
+                    "summary": [
+                        {
+                            "type": "summary_text",
+                            "text": "先定位最小相关范围，再验证候选修改。",
+                        }
+                    ],
+                    "encrypted_content": "opaque-secret-state",
+                },
+                {
+                    "type": "message",
+                    "content": [{"type": "output_text", "text": "{}"}],
+                },
+            ],
+            "usage": {
+                "input_tokens": 20,
+                "output_tokens": 12,
+                "output_tokens_details": {"reasoning_tokens": 7},
+            },
+        }
+
+        # 固定供应商传输夹具的局部夹具协作；只核对公开摘要合同，不模拟隐藏思维。
+        def fake_urlopen(req, timeout):
+            captured["body"] = json.loads(req.data)
+            return FakeStreamResponse(
+                [{"type": "response.completed", "response": completed}]
+            )
+
+        request = ModelRequest(
+            model="gpt-5-demo",
+            messages=(ModelMessage("system", "system"), ModelMessage("user", "goal")),
+            response_schema=STEP_DECISION_SCHEMA,
+            max_output_tokens=128,
+            thinking=True,
+        )
+        provider = OpenAIResponsesProvider(
+            provider_id="openai",
+            token_supplier=lambda: "sk-test",
+            chatgpt_plan=False,
+        )
+        with patch(
+            "myth.providers.openai.open_credential_request",
+            side_effect=fake_urlopen,
+        ):
+            result = provider.invoke(request)
+
+        self.assertEqual(captured["body"]["reasoning"]["summary"], "auto")
+        self.assertEqual(result.usage["reasoning_tokens"], 7)
+        self.assertEqual(
+            result.raw["reasoning_summary"],
+            ["先定位最小相关范围，再验证候选修改。"],
+        )
+        self.assertNotIn("opaque-secret-state", json.dumps(result.raw))
+
     # 回归断言：缺完整 SSE 终结事件不能把局部文本当成功。
     def test_chatgpt_plan_requires_completed_terminal_event(self) -> None:
         provider = OpenAIResponsesProvider(
