@@ -87,21 +87,27 @@ class ConversationMemory(Protocol):
 class ConversationDelivery(Protocol):
     """交付账本协议；终态补偿、验收与 Work item 不替代执行 Ticket/Receipt。"""
 
+    # 确保本 Run 有稳定的根工作项身份；不代表成果已验收。
     def ensure_root_work_item(self, turn: dict) -> dict: ...
 
+    # 更新根工作项的阶段投影；执行收据仍由 Runtime 独立拥有。
     def update_root_work_item(
         self, run_id: str, *, status: str, progress_note: str = "", evidence: list | None = None
     ) -> None: ...
 
+    # 把已结算工具证据关联到交付项；不会据结果文本自动判定 PASS。
     def record_tool_result(self, run_id: str, result: dict) -> None: ...
 
+    # 回答提交前登记持久收尾义务，覆盖提交后进程退出窗口。
     def prepare_completion(
         self, run_id: str, answer: str, *, goal_id: str | None = None,
         goal_summary: str = "", next_action: str = "", waiting_for: str = ""
     ) -> dict: ...
 
+    # 标记回答已持久化，使后续恢复只补派生投影。
     def mark_answer_committed(self, run_id: str) -> dict: ...
 
+    # 幂等补齐已完成回答的 Memory/Goal；UNKNOWN 外部效果不得重放。
     def reconcile_pending(
         self, repository, memory, personal, *, run_id: str | None = None, limit: int = 32
     ) -> list[dict]: ...
