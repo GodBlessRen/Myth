@@ -84,6 +84,29 @@ class ConversationMemory(Protocol):
     def record_episode(self, run_id: str, user_text: str, answer: str) -> dict: ...
 
 
+class ConversationDelivery(Protocol):
+    """交付账本协议；终态补偿、验收与 Work item 不替代执行 Ticket/Receipt。"""
+
+    def ensure_root_work_item(self, turn: dict) -> dict: ...
+
+    def update_root_work_item(
+        self, run_id: str, *, status: str, progress_note: str = "", evidence: list | None = None
+    ) -> None: ...
+
+    def record_tool_result(self, run_id: str, result: dict) -> None: ...
+
+    def prepare_completion(
+        self, run_id: str, answer: str, *, goal_id: str | None = None,
+        goal_summary: str = "", next_action: str = "", waiting_for: str = ""
+    ) -> dict: ...
+
+    def mark_answer_committed(self, run_id: str) -> dict: ...
+
+    def reconcile_pending(
+        self, repository, memory, personal, *, run_id: str | None = None, limit: int = 32
+    ) -> list[dict]: ...
+
+
 class GoalCheckpoint(Protocol):
     """Goal 进度协议；实现方校验最新 Run 身份并处理迟到 checkpoint。"""
 
