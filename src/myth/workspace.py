@@ -9,6 +9,7 @@ from .platform import MythComponents
 from .platform.control_store import SqliteControlService
 from .platform.memory_store import SqliteMemoryStore
 from .platform.evolution_store import SqliteEvolutionControl
+from .delivery import DeliveryLedger
 from .strategies import resolution_controller_from_config
 
 
@@ -52,12 +53,15 @@ class Workspace:
         self.control = SqliteControlService(runtime, self.repository)
         # memory：有来源记忆协作对象；不授予权限。
         self.memory = SqliteMemoryStore(runtime)
+        # delivery：回答终态、验收、Work item 与人工关注的持久交付账本。
+        self.delivery = DeliveryLedger(runtime)
         # execution：用例执行端口/实现；外部效果须经过 Ticket 和收据协议。
         self.execution = LocalConversationExecution(
             runtime,
             self.repository,
             capability_registry=self.components.capabilities,
         )
+        self.verification = self.execution.verification
         # agent：Exact Agent 用例装配对象；保留固定验收合同。
         self.agent = ConversationAgent(
             self.repository,
@@ -65,6 +69,11 @@ class Workspace:
             control=self.control,
             memory=self.memory,
             personal=self.personal,
+            delivery=self.delivery,
+        )
+        # 只补齐已持久化 COMPLETED 回答的派生投影；UNKNOWN 外部效果绝不在这里重放。
+        self.delivery.reconcile_pending(
+            self.repository, self.memory, self.personal, limit=32
         )
 
     # 驱动当前用例并依据持久事实推进；恢复、权限、预算与结束条件见本模块具体协作边界。
