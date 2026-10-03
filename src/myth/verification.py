@@ -45,6 +45,7 @@ SAFE_ENV_KEYS = {
 }
 
 
+# 该入口按持久合同处理输入与输出，失败保持显式而不伪造完成。
 def _inside(root: Path, value: str, *, must_exist: bool = False) -> Path:
     raw = str(value or "").strip()
     if not raw:
@@ -60,19 +61,26 @@ def _inside(root: Path, value: str, *, must_exist: bool = False) -> Path:
     return resolved
 
 
+# 该类型集中拥有当前职责，避免把状态真相分散到多个适配器。
 class SqliteVerificationProfiles:
     """测试 profile 状态所有者与本机固定 argv 执行器。"""
 
+    # 该入口按持久合同处理输入与输出，失败保持显式而不伪造完成。
     def __init__(self, runtime, repository) -> None:
+        # 持有当前协作对象；生命周期与所属 Runtime/仓储一致。
         self.runtime = runtime
+        # 持有当前协作对象；生命周期与所属 Runtime/仓储一致。
         self.store = runtime.store
+        # 持有当前协作对象；生命周期与所属 Runtime/仓储一致。
         self.repository = repository
         self.store.db.executescript(SCHEMA)
 
+    # 下列辅助入口保持边界显式，调用不隐式扩大权限或真实性。
     @staticmethod
     def _id() -> str:
         return f"verify_{uuid.uuid4().hex}"
 
+    # 该入口按持久合同处理输入与输出，失败保持显式而不伪造完成。
     def create(self, project_id: str, value: dict[str, Any]) -> dict[str, Any]:
         self.repository.project(project_id)
         if value.get("trusted_project") is not True:
@@ -120,6 +128,7 @@ class SqliteVerificationProfiles:
             )
         return self.profile(profile_id)
 
+    # 该入口按持久合同处理输入与输出，失败保持显式而不伪造完成。
     def profile(self, profile_id: str) -> dict[str, Any]:
         row = self.store.db.execute(
             "SELECT * FROM workspace_verification_profiles WHERE profile_id=?",
@@ -132,6 +141,7 @@ class SqliteVerificationProfiles:
         value["trusted_project"] = bool(value["trusted_project"])
         return value
 
+    # 该入口按持久合同处理输入与输出，失败保持显式而不伪造完成。
     def list(self, project_id: str | None = None) -> list[dict[str, Any]]:
         if project_id:
             self.repository.project(project_id)
@@ -145,6 +155,7 @@ class SqliteVerificationProfiles:
             ).fetchall()
         return [self.profile(row["profile_id"]) for row in rows]
 
+    # 该入口按持久合同处理输入与输出，失败保持显式而不伪造完成。
     def _contract(
         self, turn: dict[str, Any], profile_id: str
     ) -> tuple[dict[str, Any], Path, list[str], dict[str, str]]:
@@ -179,6 +190,7 @@ class SqliteVerificationProfiles:
             env["PYTHONPATH"] = os.pathsep.join(pythonpath)
         return profile, root, command, env
 
+    # 该入口按持久合同处理输入与输出，失败保持显式而不伪造完成。
     def intent(self, turn: dict[str, Any], args: dict[str, Any]) -> dict[str, Any]:
         profile, root, command, _ = self._contract(turn, args.get("profile_id"))
         return {
@@ -200,6 +212,7 @@ class SqliteVerificationProfiles:
             },
         }
 
+    # 下列辅助入口保持边界显式，调用不隐式扩大权限或真实性。
     @staticmethod
     def _kill_tree(proc: subprocess.Popen) -> None:
         if proc.poll() is not None:
@@ -224,6 +237,7 @@ class SqliteVerificationProfiles:
             except Exception:
                 pass
 
+    # 该入口按持久合同处理输入与输出，失败保持显式而不伪造完成。
     def run(self, turn: dict[str, Any], profile_id: str) -> dict[str, Any]:
         profile, root, command, env = self._contract(turn, profile_id)
         start = time.monotonic()
