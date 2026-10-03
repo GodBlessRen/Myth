@@ -556,7 +556,7 @@ class BestPathLedger:
                 "model_key=excluded.model_key,environment_key=excluded.environment_key,"
                 "environment_scope=excluded.environment_scope,"
                 "subject_digest=excluded.subject_digest,metrics_json=excluded.metrics_json,"
-                "path_json=excluded.path_json,eligible=1,updated_at=CURRENT_TIMESTAMP",
+                "path_json=excluded.path_json,eligible=excluded.eligible,updated_at=CURRENT_TIMESTAMP",
                 (
                     run_id,
                     identity["comparison_key"],
