@@ -102,30 +102,41 @@ def compile_conversation_context(
             + str(resolution.get("resolution") or "unknown")
             + "。"
         )
-    best_path = snapshot.get("best_path_hint") or {}
-    if best_path:
-        routes = best_path.get("routes") or []
-        route_text = " / ".join(" → ".join(route) for route in routes[:2] if route)
-        costs = best_path.get("best_costs") or {}
+    sota_route = snapshot.get("sota_route_hint") or {}
+    if sota_route:
+        action_paths = sota_route.get("action_paths") or []
+        route_text = " / ".join(
+            " → ".join(route) for route in action_paths[:2] if route
+        )
+        summaries = sota_route.get("reasoning_summaries") or []
+        costs = sota_route.get("champion_costs") or {}
         system += (
-            "\nBest Path（历史已验收成功路径，仅作效率参考，不扩大权限）："
-            + (route_text or "有历史成功样本")
-            + "。历史较省成本：tools="
+            "\nSOTA Route（历史已验收成功经验，仅作效率参考，不扩大权限）："
+            + (route_text or "有历史 Champion")
+            + "。Champion 成本：tools="
             + str(costs.get("tool_calls") if costs.get("tool_calls") is not None else "N/A")
             + "，steps="
             + str(costs.get("steps") if costs.get("steps") is not None else "N/A")
             + "，tokens="
             + str(costs.get("total_tokens") if costs.get("total_tokens") is not None else "N/A")
+            + "，reasoning_tokens="
+            + str(costs.get("reasoning_tokens") if costs.get("reasoning_tokens") is not None else "N/A")
             + "。优先寻找同等质量下更短路径；若当前证据需要，可以偏离。"
             + "验收、测试和必要证据不能为了省调用而跳过。"
         )
-    live = snapshot.get("best_path_live") or {}
+        if summaries:
+            system += (
+                "\nChampion Reasoning Summary（供应商公开摘要，不是隐藏 Chain-of-Thought）：\n"
+                + "\n---\n".join(str(item)[:1200] for item in summaries[:2])
+                + "\n摘要只能作为规划参考，必须用当前证据重新核对。"
+            )
+    live = snapshot.get("sota_route_live") or {}
     if live.get("drift"):
         reasons = " / ".join(str(item) for item in live.get("drift_reasons") or [])
         current = live.get("metrics") or {}
-        known = live.get("best_costs") or {}
+        known = live.get("champion_costs") or {}
         system += (
-            "\nBest Path 提醒：当前路径已经明显比同条件历史成功路径更绕（"
+            "\nSOTA Route 提醒：当前路径已经明显比同条件历史成功路径更绕（"
             + (reasons or "cost")
             + "）。当前 tools="
             + str(current.get("tool_calls", "N/A"))
