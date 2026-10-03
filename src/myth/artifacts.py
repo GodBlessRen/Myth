@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import tempfile
+import time
 from typing import Any
 
 from .domain import Outcome, ReceiptData, sha256_bytes
@@ -45,6 +46,19 @@ def atomic_write(path: Path, data: bytes) -> None:
             tmp.unlink(missing_ok=True)
 
 
+# Windows 同摘要并发发布时目标文件可能短暂被另一句柄占用；只对本地读取权限冲突做有界退避。
+def _read_bytes_stable(path: Path, attempts: int = 8) -> bytes:
+    last_error = None
+    for index in range(max(1, int(attempts))):
+        try:
+            return _read_bytes_stable(path)
+        except PermissionError as exc:
+            last_error = exc
+            if index + 1 < attempts:
+                time.sleep(0.01 * (index + 1))
+    raise last_error  # type: ignore[misc]
+
+
 # 内容寻址的不可变字节库；读取和发布均核验 SHA-256，损坏必须显式失败。
 class ObjectStore:
     # 建立按摘要寻址的对象根；写入/读取时都核对字节身份，目录不等于数据库事务。
@@ -62,7 +76,7 @@ class ObjectStore:
         digest = sha256_bytes(data)
         path = self._path(digest)
         if path.exists():
-            if sha256_bytes(path.read_bytes()) != digest:
+            if sha256_bytes(_read_bytes_stable(path)) != digest:
                 raise IOError(f"object corruption at {path}")
             return digest
         try:
@@ -70,16 +84,16 @@ class ObjectStore:
         except (FileExistsError, PermissionError):
             # Windows 可能因另一个发布者正在读取同摘要对象而拒绝 replace。
             # 仅当目标已有完全相同字节才复用确定事实；路径不存在或内容冲突仍是失败，不盲重试。
-            if not path.is_file() or path.read_bytes() != data:
+            if not path.is_file() or _read_bytes_stable(path) != data:
                 raise
-        if sha256_bytes(path.read_bytes()) != digest:
+        if sha256_bytes(_read_bytes_stable(path)) != digest:
             raise IOError(f"object failed post-publish digest check: {digest}")
         return digest
 
     # 读取对象并重新核对摘要，避免把损坏字节当作验收或恢复证据。
     def get(self, digest: str) -> bytes:
         path = self._path(digest)
-        data = path.read_bytes()
+        data = _read_bytes_stable(path)
         if sha256_bytes(data) != digest:
             raise IOError(f"object digest mismatch: {digest}")
         return data
@@ -105,7 +119,7 @@ class ManagedWorkspace:
     def materialize(self, run_id: str, target_name: str, data: bytes) -> Path:
         path = self.path_for(run_id, target_name)
         if path.exists():
-            current = path.read_bytes()
+            current = _read_bytes_stable(path)
             if current != data:
                 raise FileExistsError(
                     "managed baseline already exists with different bytes"
@@ -137,7 +151,7 @@ class ReceiptJournal:
             "utf-8"
         )
         if path.exists():
-            existing = path.read_bytes()
+            existing = _read_bytes_stable(path)
             if existing != encoded:
                 raise IOError("conflicting receipt journal for the same Attempt")
             return path
