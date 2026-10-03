@@ -136,7 +136,8 @@ def ensure_executor_process(root: str | Path) -> dict:
         "worker",
     ]
     kwargs = {
-        "cwd": str(root),
+        # 从可信安装目录启动模块，不能让用户 Runtime 目录的同名 myth 包抢先执行。
+        "cwd": str(Path(__file__).resolve().parents[1]),
         "stdin": subprocess.DEVNULL,
         "stdout": subprocess.DEVNULL,
         "stderr": subprocess.DEVNULL,

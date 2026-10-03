@@ -275,7 +275,7 @@ class NativeOAuthTests(unittest.TestCase):
             {},
             io.BytesIO(body),
         )
-        with patch("myth.auth.chatgpt.request.urlopen", side_effect=rejected):
+        with patch("myth.auth.chatgpt.open_credential_request", side_effect=rejected):
             with self.assertRaises(ChatGPTOAuthError) as caught:
                 self.manager._token_request({"grant_type": "refresh_token"})
         message = str(caught.exception)

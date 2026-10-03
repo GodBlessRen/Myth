@@ -1,5 +1,17 @@
 # Changelog
 
+## 未发布 — 安全与性能审查
+
+- ChatGPT 登录 URL 移除 ID Token；登录/刷新/退出共用跨进程状态锁，刷新派发前记录 pending，退出取消旧登录机会。
+- 系统凭据库使用有界分块和发布清单，支持 Windows 长令牌、旧记录迁移、轮换及中断后清理；无明文 fallback。
+- OIDC 增加规范 JWT 编码、RSA 2048-bit、azp/subject 绑定检查；PyJWT 最低版本提升到 2.14.0。
+- 携带凭据的 HTTP 禁止重定向；错误和结果脱敏，响应/SSE/Git 输出有界，Web 半开请求限时并拒绝歧义长度头。
+- 解析 Responses SSE 完成事件后立即返回；记录传输首输出 delta 时间，缺失 usage 保持未知；已知 4xx 失败不再误标 UNKNOWN。
+- 项目读取复核链接实际路径；搜索剪枝私有/依赖目录，Git diff 排除敏感文件并禁用外部 diff/textconv/fsmonitor。
+- 后台 worker 从可信安装目录加载；策略发布、回退与证据不可变校验在写事务内完成。
+- 会话查询补索引，Memory 全扫描只保留 top-k，公开模型目录短时缓存减少重复 preflight。
+- 增加安全反例、合成系统凭据 smoke、固定本地开销对照及不回显匹配值的历史秘钥模式扫描；边界见 [审查报告](docs/SECURITY_PERFORMANCE_AUDIT.md)。
+
 ## v0.23 — Long-run Soak + Worked Time
 
 - Assistant 回复下方新增“用时 X分 X秒 / X小时 X分 X秒”，基于服务端持久消息时间计算整轮 wall-clock；运行中同步显示当前已处理时长。

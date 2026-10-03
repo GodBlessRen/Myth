@@ -5,9 +5,10 @@ from __future__ import annotations
 
 import difflib
 import json
+import os
 from pathlib import Path
-import shutil
 import subprocess
+import threading
 
 from ..artifacts import atomic_write
 from .driver_lock import local_run_lock
@@ -27,6 +28,9 @@ EXCLUDED = {
     "__pycache__",
     ".aws",
     ".ssh",
+    ".codex",
+    ".myth",
+    ".config",
     "secrets",
 }
 # TEXT_SUFFIXES：项目检索允许的文本后缀；枚举不放开秘钥/符号链接限制。
@@ -172,6 +176,8 @@ class LocalConversationExecution:
         path = (root / relative).resolve()
         if not path.is_relative_to(root):
             raise PermissionError("path escapes project root")
+        # 再检查解析后的真实相对路径：普通别名不能绕过 .env/认证目录的黑名单。
+        self.relative_path(str(path.relative_to(root)))
         return root, path
 
     # 列出有界项目条目并跳过禁止路径/符号链接；truncated 明确表示未展示完整目录。
@@ -346,20 +352,33 @@ class LocalConversationExecution:
         root, path = self.project_path(turn, start)
         if not path.is_dir():
             raise ValueError("search path must be a directory")
-        for candidate in sorted(path.rglob("*")):
-            if not candidate.is_file() or candidate.is_symlink():
-                continue
-            relative = candidate.relative_to(root)
-            try:
-                self.relative_path(str(relative))
-            except PermissionError:
-                continue
-            if (
-                candidate.suffix.lower() not in TEXT_SUFFIXES
-                or candidate.stat().st_size > 512_000
-            ):
-                continue
-            yield root, candidate, relative
+        # 逐目录排序与剪枝，不能先展开 node_modules/.git 的整棵树再套 max_files。
+        visited = 0
+        for directory, dirs, names in os.walk(path, followlinks=False):
+            allowed_dirs = []
+            for name in sorted(dirs):
+                entry = Path(directory) / name
+                try:
+                    self.project_path(turn, str(entry.relative_to(root)))
+                except PermissionError:
+                    continue
+                if not entry.is_symlink() and not entry.is_junction():
+                    allowed_dirs.append(name)
+            dirs[:] = allowed_dirs
+            visited += len(dirs) + len(names)
+            if visited > 50000:
+                raise ValueError("project search exceeds the entry limit; narrow the search path")
+            for name in sorted(names):
+                candidate = Path(directory) / name
+                if candidate.is_symlink() or candidate.suffix.lower() not in TEXT_SUFFIXES:
+                    continue
+                relative = candidate.relative_to(root)
+                try:
+                    self.project_path(turn, str(relative))
+                except PermissionError:
+                    continue
+                if candidate.is_file() and candidate.stat().st_size <= 512_000:
+                    yield root, candidate, relative
 
     # 在固定项目范围按字面查询分页结果；报告 candidate/cursor/has_more，不能把一个页当作全项目无命中。
     def _search_project(self, turn, args):
@@ -445,35 +464,92 @@ class LocalConversationExecution:
             "truncated": truncated,
         }
 
+    # 只读 Git 的 stdout 有界消费；达到上限主动停止进程，避免先收集全部大 diff 再截断。
+    @staticmethod
+    def _read_git(command, root, limit):
+        expired = threading.Event()
+        with subprocess.Popen(command, cwd=root, stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)) as process:
+            # 超时线程只终止此固定只读 Git 进程；不运行 shell，不泄露项目配置错误正文。
+            def expire():
+                expired.set()
+                try:
+                    process.kill()
+                except OSError:
+                    pass
+            timer = threading.Timer(8, expire)
+            timer.daemon = True
+            timer.start()
+            try:
+                raw = process.stdout.read(limit + 1)
+                truncated = len(raw) > limit
+                if truncated:
+                    process.kill()
+                result = process.wait()
+            finally:
+                timer.cancel()
+            if expired.is_set():
+                raise ValueError("git command exceeded its deadline")
+            if result and not truncated:
+                raise ValueError("git command failed")
+            return raw[:limit], truncated
+
+    # 只从环境中明确的绝对 PATH 目录选择 Git；不用 Windows 会隐式插入当前目录的 which。
+    @staticmethod
+    def _git_executable():
+        name = "git.exe" if os.name == "nt" else "git"
+        for entry in os.get_exec_path():
+            directory = Path(entry)
+            if not directory.is_absolute():
+                continue
+            candidate = directory / name
+            if candidate.is_file() and os.access(candidate, os.X_OK):
+                return str(candidate.resolve())
+        raise ValueError("git executable is not available in an absolute PATH directory")
+
     # 用固定只读 argv 调用 git.status/diff；不接受任意 shell 文本，也不修改仓库。
     def _git(self, turn, kind, args):
         root, _ = self.project_path(turn, ".")
-        if shutil.which("git") is None:
-            raise ValueError("git executable is not available")
+        executable = self._git_executable()
         if not (root / ".git").exists():
             raise ValueError("project root is not a Git repository")
+        # 显式禁用项目配置的 fsmonitor/textconv/外部 diff；工具白名单不能成为程序执行通道。
+        prefix = [executable, "-c", "core.fsmonitor=false", "--no-pager"]
         if kind == "git.status":
-            command = ["git", "status", "--short", "--untracked-files=normal"]
+            command = prefix + ["status", "--short", "--untracked-files=normal"]
         else:
-            command = ["git", "diff", "--no-ext-diff"]
+            command = prefix + ["diff", "--no-ext-diff", "--no-textconv"]
             raw = args.get("path")
             if raw:
-                relative = self.relative_path(raw)
-                command += ["--", relative.as_posix()]
-        result = subprocess.run(
-            command,
-            cwd=root,
-            text=True,
-            capture_output=True,
-            timeout=8,
-            check=False,
-        )
-        if result.returncode != 0:
-            raise ValueError((result.stderr or "git command failed")[:1000])
-        output = result.stdout
+                _, checked = self.project_path(turn, raw)
+                if checked.is_dir():
+                    raise ValueError("git diff path must identify a file")
+                command += ["--", ":(literal)" + checked.relative_to(root).as_posix()]
+            else:
+                # Git 可跟踪被工具排除的秘钥文件；先枚举路径，逐个复核后才请求正文。
+                listing, truncated = self._read_git(prefix + ["diff", "--no-ext-diff", "--no-textconv", "--name-only", "-z"],
+                    root, 1024 * 1024)
+                if truncated:
+                    raise ValueError("git diff exceeds the path listing limit; choose a file")
+                admitted = []
+                for name in listing.decode("utf-8").split("\0"):
+                    if not name:
+                        continue
+                    try:
+                        self.project_path(turn, name)
+                    except PermissionError:
+                        continue
+                    admitted.append(":(literal)" + name)
+                if not admitted:
+                    return {"output": "", "truncated": False, "command": "git diff (admitted paths)"}
+                if len(admitted) > 500 or sum(len(item.encode("utf-8")) + 3 for item in admitted) > 24000:
+                    raise ValueError("git diff exceeds the path limit; choose a file")
+                command += ["--", *admitted]
+        output, truncated = self._read_git(command, root, 24000)
         return {
-            "output": output[:24000],
-            "truncated": len(output) > 24000,
+            "output": output.decode("utf-8", errors="replace"),
+            "truncated": truncated,
             "command": (
                 " ".join(command[:3]) + " …" if len(command) > 3 else " ".join(command)
             ),

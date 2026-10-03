@@ -21,6 +21,7 @@ from .domain import (
 )
 from .models import (
     ContextTruncated,
+    ProviderKnownFailure,
     DecisionValidationError,
     ModelMessage,
     ModelRequest,
@@ -600,6 +601,8 @@ class DecisionRuntime:
                 receipt_path = self._receipt_path(existing["model_attempt_id"])
                 if receipt_path.exists():
                     receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+                    if receipt.get("outcome") == "FAILED":
+                        raise ProviderKnownFailure(receipt["reason"], usage=receipt.get("usage"))
                     decision = parse_step_decision(receipt["text"])
                     return (
                         self._save_decision(
@@ -640,7 +643,7 @@ class DecisionRuntime:
         provider_started = time.monotonic()
         try:
             result = provider.invoke(model_request)
-        except ContextTruncated as exc:
+        except ProviderKnownFailure as exc:
             provider_wall_ms = max(
                 0, int((time.monotonic() - provider_started) * 1000)
             )
@@ -655,7 +658,9 @@ class DecisionRuntime:
                 usage={**exc.usage, "provider_wall_ms": provider_wall_ms},
             )
             self._settle_failed(attempt_id, receipt)
-            raise ContextBudgetError(str(exc)) from exc
+            if isinstance(exc, ContextTruncated):
+                raise ContextBudgetError(str(exc)) from exc
+            raise
         except Exception as exc:
             self._mark_unknown(
                 attempt_id,

@@ -5,9 +5,10 @@ from __future__ import annotations
 
 import json
 import socket
-from urllib import error, request
+from urllib import error, request, parse
 
-from ..models import ContextTruncated, ModelRequest, ModelResult, ProviderStatus
+from ..models import ContextTruncated, ModelRequest, ModelResult, ProviderStatus, ProviderKnownFailure
+from ..auth.transport import open_credential_request, read_bounded
 
 
 # Ollama HTTP 适配器；timeout 以秒计，num_ctx 与 ContextCompiler 窗口一致，结果不明不内部重发。
@@ -24,6 +25,10 @@ class OllamaProvider:
     ) -> None:
         # base_url：明确供应商/服务入口；产品设置校验允许范围，传输层使用该固定地址。
         self.base_url = base_url.rstrip("/")
+        endpoint = parse.urlparse(self.base_url)
+        if (endpoint.scheme not in {"http", "https"} or not endpoint.hostname or endpoint.username
+                or endpoint.password or endpoint.query or endpoint.fragment):
+            raise ValueError("invalid Ollama endpoint")
         # timeout：一次网络/操作等待的上限，单位秒；超时不能证明远端未执行。
         self.timeout = timeout
         # keep_alive：Ollama 模型驻留选项；控制加载生命周期，不代表业务状态。
@@ -47,9 +52,16 @@ class OllamaProvider:
         raw = None
         for attempt in range(2):
             try:
-                with request.urlopen(req, timeout=self.timeout) as response:
-                    raw = response.read()
+                with open_credential_request(req, timeout=self.timeout) as response:
+                    raw = read_bounded(response)
                 break
+            except error.HTTPError as exc:
+                exc.close()
+                # 远端拒绝消息可能回显提交内容；只投影状态码，明确 4xx 不伪造成 UNKNOWN。
+                if exc.code in {400, 401, 403, 404, 422, 429}:
+                    raise ProviderKnownFailure(f"Ollama request rejected ({exc.code})",
+                        usage={"model_calls": int(method == "POST")}, raw={"http_status": exc.code}) from None
+                raise RuntimeError("Ollama request failed before completion") from None
             except error.URLError as exc:
                 # 仅连接拒绝/DNS 等能证明请求未被接受的情况可本地重试；超时等派发后不确定保持单次调用，交 Runtime 记为 UNKNOWN。
                 reason = getattr(exc, "reason", None)
@@ -58,10 +70,13 @@ class OllamaProvider:
                 )
                 if attempt == 0 and pre_dispatch:
                     continue
-                raise RuntimeError(f"Ollama request failed: {exc}") from exc
+                raise RuntimeError("Ollama endpoint could not complete the request") from None
         if raw is None:
             raise RuntimeError("Ollama request produced no response bytes")
-        value = json.loads(raw.decode("utf-8"))
+        try:
+            value = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            raise RuntimeError("Ollama returned malformed JSON") from None
         if not isinstance(value, dict):
             raise RuntimeError("Ollama response must be a JSON object")
         return value
@@ -78,9 +93,9 @@ class OllamaProvider:
             return ProviderStatus(
                 self.provider_id, True, auth_type="none", details={"models": models}
             )
-        except Exception as exc:
+        except Exception:
             return ProviderStatus(
-                self.provider_id, False, auth_type="none", details={"error": str(exc)}
+                self.provider_id, False, auth_type="none", details={"error": "Ollama model catalog is unavailable"}
             )
 
     # 将已准入统一请求交给具体传输实现，返回模型结果/用量；不拥有业务状态或完成验收。

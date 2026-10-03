@@ -316,6 +316,9 @@ function renderInspectorTokens(turn) {
   } else {
     inspectorFact(box, "Model wall", "N/A");
   }
+  inspectorFact(box, "First token", modelUsage.first_token_ms == null
+    ? "N/A · provider not reported"
+    : `${modelUsage.first_token_ms} ms · first nonempty output delta`);
   inspectorFact(
     box,
     "Model calls",

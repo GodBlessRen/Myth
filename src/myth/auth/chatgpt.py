@@ -1,15 +1,17 @@
 """Myth 自有 ChatGPT OAuth 的认证适配器。
-PKCE/state/nonce/OIDC 校验与刷新串行化在此完成；token 只进系统凭据库，元数据不含秘钥。认证独立于 Runtime 执行数据库，退出先尝试远端撤销再清本机凭据。
+PKCE/state/nonce/OIDC 校验与刷新串行化在此完成；token 只进系统凭据库，元数据不含秘钥。退出先关闭本机使用权，再尝试远端撤销并清理系统凭据。
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import wraps
 import base64
 import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
+import re
 from pathlib import Path
 import secrets
 import threading
@@ -21,10 +23,12 @@ import webbrowser
 
 import jwt
 import keyring
+from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicKey
 from keyring.errors import PasswordDeleteError
 
 from .. import __version__
 from ..artifacts import atomic_write
+from .transport import open_credential_request, read_bounded, public_error_code, redact_response
 
 
 # ISSUER：固定 OIDC 颁发者；验证 issuer 时必须精确匹配。
@@ -51,6 +55,10 @@ KEYRING_SERVICE = "Myth ChatGPT OAuth"
 REFRESH_SKEW_SECONDS = 300
 # LOGIN_TTL_SECONDS：登录挑战有效时长，单位秒；到期挑战不能交换凭据。
 LOGIN_TTL_SECONDS = 600
+# 进程内模型目录缓存只保存公开 slug/name；账号、登录/退出代次隔离，三十秒后重新查询。
+_MODEL_CATALOG_CACHE: dict[tuple, tuple[float, tuple]] = {}
+# 不同 Runtime 根的目录缓存写入锁；不能替代认证 state.lock。
+_MODEL_CATALOG_LOCK = threading.Lock()
 
 # _TERMINAL_REFRESH_ERRORS：明确不可继续刷新的拒绝码；标记重新授权，不无限重发。
 _TERMINAL_REFRESH_ERRORS = {
@@ -100,7 +108,7 @@ class KeyringCredentialStore:
 
     # 保存本应用系统秘钥库命名空间；实际访问前验证后端安全性，失败不明文降级。
     def __init__(self, service: str = KEYRING_SERVICE) -> None:
-        # service：HTTP 产品门面协作对象；Handler 不直接写业务数据库。
+        # service：系统凭据库命名空间；不同合成测试必须使用随机独立名称。
         self.service = service
 
     # 选择可证明为直接安全系统存储的 keyring 后端；不可用时拒绝明文/链式降级。
@@ -113,10 +121,12 @@ class KeyringCredentialStore:
             numeric_priority = float(priority)
         except (TypeError, ValueError):
             numeric_priority = 0.0
-        secure_backend = any(
-            marker in identity
-            for marker in ("windows", "macos", "secretservice", "kwallet", "libsecret")
-        )
+        # 只接受 keyring 自带系统适配器的准确模块，不能凭类名包含 windows 等字样获得信任。
+        secure_backend = type(backend).__module__ in {
+            "keyring.backends.Windows", "keyring.backends.macOS",
+            "keyring.backends.SecretService", "keyring.backends.kwallet",
+            "keyring.backends.libsecret",
+        }
         if (
             numeric_priority <= 0
             or not secure_backend
@@ -131,16 +141,82 @@ class KeyringCredentialStore:
             )
         return backend
 
+    # 每个 profile 独立服务名，避免 Windows 后端以共享 service 搬移其他账号的记录。
+    def _record_service(self, profile_id: str) -> str:
+        return f"{self.service}:record:{profile_id}"
+
+    # 分块地址只由系统库内受校验的代次和序号构造，不能引用任意用户凭据。
+    def _part_service(self, profile_id: str, generation: str, index: int) -> str:
+        return f"{self.service}:part:{profile_id}:{generation}:{index}"
+
+    # 读取系统库内的分块清单；清单先于块发布，崩溃后仍可枚举并删除未提交的代次。
+    def _manifest(self, backend, profile_id: str) -> dict | None:
+        raw = backend.get_password(self._record_service(profile_id), profile_id)
+        if raw is None:
+            return None
+        value = json.loads(raw)
+        if not isinstance(value, dict) or value.get("format") != "myth-credential-v2":
+            raise ValueError("invalid manifest")
+        entries = value.get("entries")
+        if not isinstance(entries, list) or not 1 <= len(entries) <= 4:
+            raise ValueError("invalid manifest entries")
+        generations = set()
+        for entry in entries:
+            if (not isinstance(entry, dict)
+                    or re.fullmatch(r"[0-9a-f]{32}", str(entry.get("generation"))) is None
+                    or re.fullmatch(r"[0-9a-f]{64}", str(entry.get("digest"))) is None
+                    or type(entry.get("parts")) is not int or not 1 <= entry["parts"] <= 66
+                    or entry["generation"] in generations):
+                raise ValueError("invalid manifest entry")
+            generations.add(entry["generation"])
+        if value.get("active") is not None and value["active"] not in generations:
+            raise ValueError("invalid manifest active generation")
+        return value
+
+    # 清单本身小于 Windows 单条上限，且没有 token 内容；所有字段仍在系统凭据库中。
+    def _save_manifest(self, backend, profile_id: str, manifest: dict) -> None:
+        backend.set_password(self._record_service(profile_id), profile_id,
+            json.dumps(manifest, ensure_ascii=True, separators=(",", ":")))
+
+    # 幂等删除系统记录；只吞不存在，其他错误保留清单供稍后再次清理。
+    @staticmethod
+    def _delete_record(backend, service: str, profile_id: str) -> None:
+        try:
+            backend.delete_password(service, profile_id)
+        except PasswordDeleteError:
+            pass
+
+    # 删除清单的一整个代次；失败时调用方不能把该代次从清单静默移除。
+    def _delete_generation(self, backend, profile_id: str, entry: dict) -> None:
+        for index in range(entry["parts"]):
+            self._delete_record(backend, self._part_service(profile_id, entry["generation"], index), profile_id)
+
     # 按 profile_id 读取系统秘钥库并校验 JSON 形状；错误脱敏，不向 Runtime 返回原始秘钥。
     def load(self, profile_id: str) -> dict[str, Any] | None:
         try:
-            raw = self._backend().get_password(self.service, profile_id)
+            backend = self._backend()
+            manifest = self._manifest(backend, profile_id)
+            if manifest is None:
+                # 旧版单条记录只在没有 v2 清单时读取；下一次成功保存时迁移并清理。
+                raw = backend.get_password(self.service, profile_id)
+            else:
+                active = manifest.get("active")
+                if active is None:
+                    return None
+                entry = next(item for item in manifest["entries"] if item["generation"] == active)
+                pieces = [backend.get_password(self._part_service(profile_id, active, index), profile_id)
+                    for index in range(entry["parts"])]
+                if not all(isinstance(piece, str) for piece in pieces):
+                    raise ValueError("credential generation is incomplete")
+                raw = "".join(pieces)
+                if hashlib.sha256(raw.encode("ascii")).hexdigest() != entry["digest"]:
+                    raise ValueError("credential generation digest mismatch")
         except CredentialStoreUnavailable:
             raise
         except Exception as exc:
             raise CredentialStoreUnavailable(
                 "The OS credential store could not be read."
-            ) from exc
+            ) from None
         if raw is None:
             return None
         try:
@@ -148,7 +224,7 @@ class KeyringCredentialStore:
         except json.JSONDecodeError as exc:
             raise CredentialStoreUnavailable(
                 "Stored ChatGPT credentials are unreadable."
-            ) from exc
+            ) from None
         if not isinstance(value, dict):
             raise CredentialStoreUnavailable(
                 "Stored ChatGPT credentials have an invalid shape."
@@ -158,30 +234,58 @@ class KeyringCredentialStore:
     # 把认证秘钥仅写系统凭据库；元数据路径和 Runtime DB 不参与保存。
     def save(self, profile_id: str, value: dict[str, Any]) -> None:
         try:
-            self._backend().set_password(
-                self.service,
-                profile_id,
-                json.dumps(value, ensure_ascii=False, separators=(",", ":")),
-            )
+            backend = self._backend()
+            encoded = json.dumps(value, ensure_ascii=True, separators=(",", ":"))
+            if len(encoded) > 65536:
+                raise ValueError("credential record exceeds the byte limit")
+            prior = self._manifest(backend, profile_id)
+            entries = list(prior["entries"]) if prior else []
+            if len(entries) >= 4:
+                raise ValueError("credential cleanup is required before another save")
+            generation = uuid.uuid4().hex
+            pieces = [encoded[index:index + 1000] for index in range(0, len(encoded), 1000)]
+            entry = {"generation": generation, "parts": len(pieces),
+                "digest": hashlib.sha256(encoded.encode("ascii")).hexdigest()}
+            manifest = {"format": "myth-credential-v2", "active": prior.get("active") if prior else None,
+                "entries": entries + [entry]}
+            # 先记录代次再写块；active 指针最后才切换，部分写入不能被 load 当作完整凭据。
+            self._save_manifest(backend, profile_id, manifest)
+            for index, piece in enumerate(pieces):
+                backend.set_password(self._part_service(profile_id, generation, index), profile_id, piece)
+            manifest["active"] = generation
+            self._save_manifest(backend, profile_id, manifest)
+            remaining = [entry]
+            for old in entries:
+                try:
+                    self._delete_generation(backend, profile_id, old)
+                except Exception:
+                    remaining.append(old)
+            manifest["entries"] = remaining
+            self._save_manifest(backend, profile_id, manifest)
+            self._delete_record(backend, self.service, profile_id)
         except CredentialStoreUnavailable:
             raise
         except Exception as exc:
             raise CredentialStoreUnavailable(
                 "The OS credential store could not save ChatGPT credentials."
-            ) from exc
+            ) from None
 
     # 清理指定 profile 的系统秘钥；不存在可幂等忽略，其他存储错误显式失败。
     def delete(self, profile_id: str) -> None:
         try:
-            self._backend().delete_password(self.service, profile_id)
-        except PasswordDeleteError:
-            pass
+            backend = self._backend()
+            manifest = self._manifest(backend, profile_id)
+            if manifest is not None:
+                for entry in manifest["entries"]:
+                    self._delete_generation(backend, profile_id, entry)
+                self._delete_record(backend, self._record_service(profile_id), profile_id)
+            self._delete_record(backend, self.service, profile_id)
         except CredentialStoreUnavailable:
             raise
         except Exception as exc:
             raise CredentialStoreUnavailable(
                 "The OS credential store could not delete ChatGPT credentials."
-            ) from exc
+            ) from None
 
 
 # 内存中的单次登录挑战；state/nonce/verifier 有期限，不能序列化进 Runtime 或公开日志。
@@ -201,6 +305,10 @@ class PendingLogin:
     profile_id: str | None
     # created_at：挑战创建的 UTC epoch 秒；与 LOGIN_TTL_SECONDS 一起计算有效期。
     created_at: float
+    # login_epoch：开始登录时固定的退出代次；跨管理器退出后，旧挑战不能重新连接账号。
+    login_epoch: str
+    # login_id：前端匹配本次已完成登录的非凭据身份；不能用旧 connected 状态冒充完成。
+    login_id: str
 
 
 # 对外认证状态投影；可见账号和到期信息，但不包含 access/refresh/ID token。
@@ -224,6 +332,8 @@ class ChatGPTAuthStatus:
     scopes: tuple[str, ...]
     # reason：可解释的选择/拒绝原因；不是授权证据。
     reason: str | None = None
+    # login_revision：最近成功登录的公开机会身份；不含 OAuth state/nonce/token。
+    login_revision: str | None = None
 
     # 生成 JSON 可保存的数据投影；保留身份、版本和单位，不在此授予执行或发布权限。
     def serializable(self) -> dict[str, Any]:
@@ -237,17 +347,20 @@ class ChatGPTAuthStatus:
             "expires_at": self.expires_at,
             "scopes": list(self.scopes),
             "reason": self.reason,
+            "login_revision": self.login_revision,
         }
 
 
-# refresh token 轮转的阻塞本机锁；不涵盖所有元数据/退出操作，不参与 Run 执行。
+# 认证聚合的跨进程锁；元数据、轮转、登录和退出共用，不参与 Run 执行。
 class _CrossProcessLock:
     # 仅保存本机刷新锁路径；__enter__ 才取得阻塞 OS 锁，__exit__ 释放，不授予 Runtime 权限。
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, timeout: float = 65.0) -> None:
         # path：本对象持久文件路径；数据身份由所属合同另行校验。
         self.path = path
         # file：本机锁文件句柄；仅在锁上下文有效，退出必须释放。
         self.file = None
+        # timeout：争抢锁的最大等待秒数；超时拒绝认证修改，不能绕开锁。
+        self.timeout = timeout
 
     # 进入本机资源作用域并返回可用对象；与退出路径配对管理资源生命周期。
     def __enter__(self):
@@ -258,14 +371,25 @@ class _CrossProcessLock:
             self.file.write(b"\0")
             self.file.flush()
         self.file.seek(0)
-        if os.name == "nt":
-            import msvcrt
-
-            msvcrt.locking(self.file.fileno(), msvcrt.LK_LOCK, 1)
-        else:
-            import fcntl
-
-            fcntl.flock(self.file.fileno(), fcntl.LOCK_EX)
+        deadline = time.monotonic() + self.timeout
+        try:
+            while True:
+                try:
+                    if os.name == "nt":
+                        import msvcrt
+                        msvcrt.locking(self.file.fileno(), msvcrt.LK_NBLCK, 1)
+                    else:
+                        import fcntl
+                        fcntl.flock(self.file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except OSError:
+                    if time.monotonic() >= deadline:
+                        raise ChatGPTOAuthError("ChatGPT authentication is busy; try again.") from None
+                    time.sleep(0.025)
+        except BaseException:
+            self.file.close()
+            self.file = None
+            raise
         return self
 
     # 离开作用域释放本实例资源；异常继续传播，不能在清理时伪造业务成功。
@@ -287,7 +411,24 @@ class _CrossProcessLock:
             self.file = None
 
 
-# 认证装配与生命周期所有者；内存挑战、非秘钥元数据、系统秘钥库分开，刷新跨线程/进程串行化。
+# 同一认证聚合只允许一个修改者；嵌套调用复用当前线程已经取得的 OS 锁。
+def _serialized_auth(method):
+    # 首次取得跨进程锁；finally 清深度，异常不能留下假锁所有权。
+    @wraps(method)
+    def wrapped(self, *args, **kwargs):
+        with self._state_lock:
+            if getattr(self._state_depth, "value", 0):
+                return method(self, *args, **kwargs)
+            with _CrossProcessLock(self.auth_dir / "state.lock", self.timeout * 2 + 5):
+                self._state_depth.value = 1
+                try:
+                    return method(self, *args, **kwargs)
+                finally:
+                    self._state_depth.value = 0
+    return wrapped
+
+
+# 认证装配与生命周期所有者；内存挑战、非秘钥元数据、系统秘钥库分开，修改跨线程/进程串行化。
 class ChatGPTAuthManager:
     # 装配系统秘钥库端口、无 token 元数据路径、内存挑战及刷新锁；构造不自动登录/刷新，网络等待上限单位秒。
     def __init__(
@@ -311,10 +452,12 @@ class ChatGPTAuthManager:
         self._pending: dict[str, PendingLogin] = {}
         # _pending_lock：登录挑战目录的线程锁；消费 state 与取得挑战在同一临界区。
         self._pending_lock = threading.Lock()
-        # _refresh_lock：本认证管理器刷新线程锁；与本机文件锁组合防止 refresh token 并发轮转。
-        self._refresh_lock = threading.Lock()
+        # _state_lock：认证聚合可重入线程锁；所有生命周期修改共用 state.lock。
+        self._state_lock = threading.RLock()
+        # _state_depth：每线程嵌套深度；只能复用该线程持有的 OS 锁。
+        self._state_depth = threading.local()
         # _jwks：固定身份服务的签名公钥客户端；验证 ID token 时使用，token 不写入 Runtime。
-        self._jwks = jwt.PyJWKClient(JWKS_URL)
+        self._jwks = jwt.PyJWKClient(JWKS_URL, timeout=timeout)
         self.auth_dir.mkdir(parents=True, exist_ok=True)
 
     # 生成去 padding 的 URL-safe Base64，供 PKCE challenge 与挑战身份使用。
@@ -339,11 +482,12 @@ class ChatGPTAuthManager:
                 "host_id": None,
                 "active_profile_id": None,
                 "profiles": {},
+                "login_epoch": "initial",
             }
         try:
             value = json.loads(self.metadata_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
-            raise ChatGPTOAuthError("ChatGPT OAuth metadata is unreadable.") from exc
+            raise ChatGPTOAuthError("ChatGPT OAuth metadata is unreadable.") from None
         if not isinstance(value, dict) or not isinstance(
             value.get("profiles", {}), dict
         ):
@@ -352,11 +496,20 @@ class ChatGPTAuthManager:
         value.setdefault("host_id", None)
         value.setdefault("active_profile_id", None)
         value.setdefault("profiles", {})
+        value.setdefault("login_epoch", "initial")
         return value
 
     # 单文件原子发布非秘钥元数据，Unix 尽力收紧权限；不构成与系统凭据库的跨系统事务。
     def _save_metadata(self, value: dict[str, Any]) -> None:
         self.auth_dir.mkdir(parents=True, exist_ok=True)
+        # 明确字段白名单：即使调用方误带凭据，也不能落到明文元数据。
+        value = {key: value.get(key) for key in (
+            "version", "host_id", "active_profile_id", "profiles", "login_epoch"
+        )}
+        value["profiles"] = {
+            pid: {key: raw.get(key) for key in ("client_id", "subject", "email", "name", "status", "login_revision")}
+            for pid, raw in (value.get("profiles") or {}).items() if isinstance(raw, dict)
+        }
         encoded = (
             json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
         ).encode("utf-8")
@@ -368,6 +521,7 @@ class ChatGPTAuthManager:
                 pass
 
     # 生成并保存本机 OAuth 注册主机身份；这是元数据身份，不是访问 token。
+    @_serialized_auth
     def host_id(self) -> str:
         metadata = self._load_metadata()
         value = metadata.get("host_id")
@@ -418,6 +572,7 @@ class ChatGPTAuthManager:
         return dict(profile)
 
     # 显式切换本机活动账号并返回认证投影；不扩大原授予 scope。
+    @_serialized_auth
     def select_profile(self, profile_id: str) -> ChatGPTAuthStatus:
         self._profile(profile_id)
         metadata = self._load_metadata()
@@ -431,6 +586,7 @@ class ChatGPTAuthManager:
         return value if isinstance(value, str) and value else None
 
     # 校验 loopback callback 后生成限时 state/nonce/verifier，挑战只留内存；重授权绑定原客户端与账号。
+    @_serialized_auth
     def begin_login(
         self, redirect_uri: str, *, profile_id: str | None = None
     ) -> dict[str, Any]:
@@ -439,6 +595,9 @@ class ChatGPTAuthManager:
             parsed.scheme != "http"
             or parsed.hostname != "127.0.0.1"
             or parsed.path != "/auth/callback"
+            or parsed.port is None
+            or not 1 <= parsed.port <= 65535
+            or parsed.query
         ):
             raise ValueError(
                 "OAuth redirect_uri must be http://127.0.0.1:<port>/auth/callback"
@@ -450,15 +609,12 @@ class ChatGPTAuthManager:
 
         metadata = self._load_metadata()
         requested_client_id = DYNAMIC_CLIENT_ID
-        id_token_hint = None
         login_hint = None
         if profile_id:
             profile = self._profile(profile_id)
             requested_client_id = str(profile["client_id"])
             login_hint = profile.get("email")
-            stored = self.credentials.load(profile_id)
-            if stored and isinstance(stored.get("id_token"), str):
-                id_token_hint = stored["id_token"]
+            # 省略可选 id_token_hint：授权入口会进入 Web JSON/浏览器，不能携带 ID Token。
 
         state = self._new_secret()
         nonce = self._new_secret()
@@ -472,6 +628,8 @@ class ChatGPTAuthManager:
             requested_client_id=requested_client_id,
             profile_id=profile_id,
             created_at=time.time(),
+            login_epoch=metadata["login_epoch"],
+            login_id=self._new_secret(16),
         )
         with self._pending_lock:
             now = time.time()
@@ -480,6 +638,8 @@ class ChatGPTAuthManager:
                 for key, value in self._pending.items()
                 if now - value.created_at < LOGIN_TTL_SECONDS
             }
+            if len(self._pending) >= 16:
+                raise ChatGPTOAuthError("Too many pending ChatGPT sign-in attempts.")
             self._pending[state] = attempt
 
         params = {
@@ -493,10 +653,9 @@ class ChatGPTAuthManager:
             "code_challenge": challenge,
             "code_challenge_method": "S256",
             "ext_agent_host_id": self.host_id(),
-            "agent_name_hint": AGENT_NAME,
         }
-        if id_token_hint:
-            params["id_token_hint"] = id_token_hint
+        if requested_client_id == DYNAMIC_CLIENT_ID:
+            params["agent_name_hint"] = AGENT_NAME
         if login_hint:
             params["login_hint"] = str(login_hint)
 
@@ -504,6 +663,7 @@ class ChatGPTAuthManager:
             "auth_url": AUTHORIZATION_ENDPOINT + "?" + parse.urlencode(params),
             "expires_in": LOGIN_TTL_SECONDS,
             "return_to": redirect_uri,
+            "login_id": attempt.login_id,
         }
 
     # 从回调参数取一个值供后续严格校验；不把解析结果写进日志。
@@ -511,10 +671,17 @@ class ChatGPTAuthManager:
     def _single(params: dict[str, Any], name: str) -> str | None:
         value = params.get(name)
         if isinstance(value, list):
-            value = value[0] if value else None
-        return str(value) if value not in (None, "") else None
+            if len(value) != 1:
+                raise ChatGPTOAuthError("OAuth callback contains ambiguous parameters.")
+            value = value[0]
+        if value in (None, ""):
+            return None
+        if not isinstance(value, str) or len(value) > 8192:
+            raise ChatGPTOAuthError("OAuth callback contains invalid parameters.")
+        return value
 
     # 保存服务新颁发的 client_id 元数据，固定 profile 关联；秘钥另存系统库。
+    @_serialized_auth
     def _persist_registration(self, client_id: str) -> str:
         profile_id = self._profile_id(client_id)
         metadata = self._load_metadata()
@@ -535,7 +702,11 @@ class ChatGPTAuthManager:
         return profile_id
 
     # 一次性消费有效 state，交换 code，校验 OIDC/nonce/账号，再保存系统凭据与非秘钥元数据；二者不宣称同事务。
+    @_serialized_auth
     def complete_callback(self, params: dict[str, Any]) -> ChatGPTAuthStatus:
+        # 所有安全字段先排除重复/超长/歧义；畸形请求不能消费有效挑战。
+        for name in ("state", "code", "client_id", "error", "iss"):
+            self._single(params, name)
         state = self._single(params, "state")
         if not state:
             raise ChatGPTOAuthError("OAuth callback is missing state.")
@@ -545,11 +716,16 @@ class ChatGPTAuthManager:
             raise ChatGPTOAuthError("OAuth callback state is unknown or expired.")
         if not secrets.compare_digest(state, attempt.state):
             raise ChatGPTOAuthError("OAuth callback state mismatch.")
+        if attempt.login_epoch != self._load_metadata()["login_epoch"]:
+            raise ChatGPTOAuthError("OAuth callback was cancelled by sign-out.")
+        callback_issuer = self._single(params, "iss")
+        if callback_issuer is not None and callback_issuer != ISSUER:
+            raise ChatGPTOAuthError("OAuth callback issuer mismatch.")
 
         provider_error = self._single(params, "error")
         if provider_error:
             raise OAuthRejected(
-                provider_error, "ChatGPT authorization was not completed."
+                public_error_code(provider_error, "oauth_rejected"), "ChatGPT authorization was not completed."
             )
 
         code = self._single(params, "code")
@@ -601,16 +777,12 @@ class ChatGPTAuthManager:
             id_token, client_id=client_id, nonce=attempt.nonce
         )
         subject = str(claims["sub"])
-        if attempt.profile_id:
-            old = self._profile(profile_id)
-            if old.get("subject") and old["subject"] != subject:
-                raise ChatGPTOAuthError(
-                    "Reauthorization returned a different ChatGPT identity."
-                )
+        old = self._profile(profile_id)
+        if old.get("subject") and old["subject"] != subject:
+            raise ChatGPTOAuthError("Reauthorization returned a different ChatGPT identity.")
 
         scopes = self._normalize_scopes(token_response.get("scope"))
-        expires_in = int(token_response.get("expires_in") or 3600)
-        expires_at = int(time.time()) + max(60, expires_in)
+        expires_at = self._expires_at(token_response)
         secret_record = {
             "access_token": access_token,
             "refresh_token": refresh_token,
@@ -629,6 +801,7 @@ class ChatGPTAuthManager:
             "email": claims.get("email"),
             "name": claims.get("name"),
             "status": "connected",
+            "login_revision": attempt.login_id,
         }
         metadata["active_profile_id"] = profile_id
         self._save_metadata(metadata)
@@ -645,26 +818,50 @@ class ChatGPTAuthManager:
             values = []
         return tuple(sorted({item for item in values if item}))
 
+    # 使用服务颁发的真实寿命，不把短寿命 token 延长为六十秒；缺项/非法值拒绝使用。
+    @staticmethod
+    def _expires_at(value: dict[str, Any]) -> int:
+        seconds = value.get("expires_in")
+        if type(seconds) is not int or not 0 < seconds <= 604800:
+            raise ChatGPTOAuthError("OAuth token response has an invalid lifetime.")
+        return int(time.time()) + seconds
+
     # 用 JWKS 校验签名、issuer/audience/expiry/sub 及 nonce；校验错误脱敏，不能信任未验证 claims。
     def _verify_id_token(
         self, token: str, *, client_id: str, nonce: str | None
     ) -> dict[str, Any]:
         try:
+            # OIDC compact JWT 仅接受规范的未填充 Base64URL；旧库的宽松解码不能扩大合同。
+            if not isinstance(token, str) or len(token) > 32768 or not re.fullmatch(r"[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+", token):
+                raise ValueError("invalid compact JWT")
+            for segment in token.split("."):
+                raw = base64.urlsafe_b64decode(segment + "=" * (-len(segment) % 4))
+                if base64.urlsafe_b64encode(raw).decode().rstrip("=") != segment:
+                    raise ValueError("non-canonical compact JWT")
             key = self._jwks.get_signing_key_from_jwt(token).key
+            if not isinstance(key, RSAPublicKey) or key.key_size < 2048:
+                raise ValueError("OIDC requires an RSA public key of at least 2048 bits")
             claims = jwt.decode(
                 token,
                 key=key,
                 algorithms=["RS256"],
                 audience=client_id,
                 issuer=ISSUER,
-                options={"require": ["exp", "iss", "aud", "sub"]},
+                options={"require": ["exp", "iat", "iss", "aud", "sub"]},
             )
         except Exception as exc:
             raise ChatGPTOAuthError(
                 "ChatGPT identity token verification failed."
-            ) from exc
+            ) from None
         if nonce is not None and claims.get("nonce") != nonce:
             raise ChatGPTOAuthError("ChatGPT identity token nonce mismatch.")
+        audiences = claims.get("aud")
+        if (claims.get("azp") is not None and claims["azp"] != client_id) or (
+            isinstance(audiences, list) and len(audiences) > 1 and claims.get("azp") != client_id
+        ):
+            raise ChatGPTOAuthError("ChatGPT identity token authorized party mismatch.")
+        if not isinstance(claims.get("sub"), str) or not claims["sub"]:
+            raise ChatGPTOAuthError("ChatGPT identity token subject is invalid.")
         return claims
 
     # 向固定 token endpoint 提交 OAuth 表单；code/verifier/token 不进入 Runtime 对象。
@@ -685,33 +882,35 @@ class ChatGPTAuthManager:
             },
         )
         try:
-            with request.urlopen(req, timeout=self.timeout) as response:
-                raw = response.read()
+            with open_credential_request(req, timeout=self.timeout) as response:
+                raw = read_bounded(response)
         except error.HTTPError as exc:
-            raw = exc.read()
+            with exc:
+                raw = read_bounded(exc)
             code = "oauth_rejected"
             try:
                 payload = json.loads(raw.decode("utf-8"))
                 if isinstance(payload, dict) and isinstance(payload.get("error"), str):
-                    code = payload["error"][:80]
+                    code = public_error_code(payload["error"], code)
             except Exception:
                 pass
             raise OAuthRejected(
                 code,
                 f"OAuth endpoint rejected the request ({exc.code}, {code}).",
                 status=exc.code,
-            ) from exc
+            ) from None
         except error.URLError as exc:
-            raise ChatGPTOAuthError("OAuth endpoint could not be reached.") from exc
+            raise ChatGPTOAuthError("OAuth endpoint could not be reached.") from None
         try:
             value = json.loads(raw.decode("utf-8"))
-        except json.JSONDecodeError as exc:
-            raise ChatGPTOAuthError("OAuth endpoint returned invalid JSON.") from exc
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ChatGPTOAuthError("OAuth endpoint returned invalid JSON.") from None
         if not isinstance(value, dict):
             raise ChatGPTOAuthError("OAuth endpoint returned an invalid response.")
         return value
 
     # 返回账号/授予 scope/到期信息投影；不刷新 token 或公开秘钥，ready 只表示计划权限已授予。
+    @_serialized_auth
     def status(self, profile_id: str | None = None) -> ChatGPTAuthStatus:
         profile_id = profile_id or self._active_profile_id()
         if not profile_id:
@@ -724,6 +923,10 @@ class ChatGPTAuthManager:
             return ChatGPTAuthStatus(
                 False, False, False, None, None, None, None, (), "profile_missing"
             )
+        if profile.get("status") in {"signed_out", "reauth_required", "refresh_pending"}:
+            return ChatGPTAuthStatus(False, False, False, profile_id,
+                profile.get("email"), profile.get("name"), None, (),
+                "reauth_required" if profile.get("status") != "signed_out" else "signed_out")
         try:
             stored = self.credentials.load(profile_id)
         except CredentialStoreUnavailable as exc:
@@ -763,6 +966,7 @@ class ChatGPTAuthManager:
             expires_at=expires_at,
             scopes=scopes,
             reason=None if sharing else "chatgpt_plan_usage_not_granted",
+            login_revision=profile.get("login_revision"),
         )
 
     # 删除失效系统秘钥并标记需要用户重新登录；不复用已失效 refresh token。
@@ -775,10 +979,13 @@ class ChatGPTAuthManager:
             self._save_metadata(metadata)
 
     # 检查明确账号和已授予 scope，到期前刷新后仅交给传输供应函数；不得记录返回秘钥。
+    @_serialized_auth
     def access_token(self, profile_id: str | None = None) -> str:
         profile_id = profile_id or self._active_profile_id()
         if not profile_id:
             raise ChatGPTOAuthError("No ChatGPT account is selected.")
+        if self._profile(profile_id).get("status") in {"signed_out", "reauth_required", "refresh_pending"}:
+            raise ChatGPTOAuthError("The selected ChatGPT account requires sign-in.")
         stored = self.credentials.load(profile_id)
         if not stored:
             raise ChatGPTOAuthError("The selected ChatGPT account is signed out.")
@@ -790,90 +997,137 @@ class ChatGPTAuthManager:
             <= int(time.time()) + REFRESH_SKEW_SECONDS
         ):
             stored = self._refresh(profile_id)
+        # 轮转可能缩减 scope；必须按新颁发的凭据复核权限。
+        scopes = self._normalize_scopes(stored.get("scope"))
+        if not {"chatgpt.tokens.use.direct", "resource.invoke"}.issubset(scopes):
+            raise ChatGPTOAuthError("ChatGPT plan usage permission is not enabled.")
         token = stored.get("access_token")
         if not isinstance(token, str) or not token:
             raise ChatGPTOAuthError("Stored ChatGPT access token is unavailable.")
         return token
 
     # 跨线程和进程串行刷新并重新读秘钥；明确失效要求重授权，保存轮转凭据后返回；与元数据不构成跨系统事务。
+    @_serialized_auth
     def _refresh(self, profile_id: str) -> dict[str, Any]:
-        with (
-            self._refresh_lock,
-            _CrossProcessLock(self.auth_dir / f"refresh-{profile_id}.lock"),
+        # 已持有认证聚合锁；保持与登录/退出同一串行顺序。
+        if self._profile(profile_id).get("status") in {"signed_out", "reauth_required", "refresh_pending"}:
+            raise ChatGPTOAuthError("The selected ChatGPT account requires sign-in.")
+        stored = self.credentials.load(profile_id)
+        if not stored:
+            raise ChatGPTOAuthError("The selected ChatGPT account is signed out.")
+        if (
+            int(stored.get("expires_at") or 0)
+            > int(time.time()) + REFRESH_SKEW_SECONDS
         ):
-            stored = self.credentials.load(profile_id)
-            if not stored:
-                raise ChatGPTOAuthError("The selected ChatGPT account is signed out.")
-            if (
-                int(stored.get("expires_at") or 0)
-                > int(time.time()) + REFRESH_SKEW_SECONDS
-            ):
-                return stored
-            refresh_token = stored.get("refresh_token")
-            client_id = stored.get("client_id")
-            if (
-                not isinstance(refresh_token, str)
-                or not refresh_token
-                or not isinstance(client_id, str)
-                or not client_id
-            ):
+            return stored
+        refresh_token = stored.get("refresh_token")
+        client_id = stored.get("client_id")
+        if (
+            not isinstance(refresh_token, str)
+            or not refresh_token
+            or not isinstance(client_id, str)
+            or not client_id
+        ):
+            self._mark_reauth_required(profile_id)
+            raise ChatGPTOAuthError(
+                "ChatGPT credentials cannot be refreshed; sign in again."
+            )
+        # 派发轮转前持久记录未结算状态；中途进程退出后，另一个进程不能再用旧 refresh token。
+        metadata = self._load_metadata()
+        metadata["profiles"][profile_id]["status"] = "refresh_pending"
+        self._save_metadata(metadata)
+        try:
+            value = self._token_request(
+                {
+                    "grant_type": "refresh_token",
+                    "client_id": client_id,
+                    "refresh_token": refresh_token,
+                    "resource": RESOURCE,
+                }
+            )
+        except OAuthRejected as exc:
+            if exc.code in _TERMINAL_REFRESH_ERRORS:
+                self._mark_reauth_required(profile_id)
+            elif exc.status is not None and 400 <= exc.status < 500:
+                metadata = self._load_metadata()
+                metadata["profiles"][profile_id]["status"] = "connected"
+                self._save_metadata(metadata)
+            raise
+        except (ChatGPTOAuthError, OSError, RuntimeError):
+            # 轮转结果不明时不能重复提交旧 refresh token；关闭本地认证并要求重新登录。
+            self._mark_reauth_required(profile_id)
+            raise ChatGPTOAuthError("ChatGPT refresh could not be confirmed; sign in again.") from None
+
+        new_access = value.get("access_token")
+        if not isinstance(new_access, str) or not new_access:
+            self._mark_reauth_required(profile_id)
+            raise ChatGPTOAuthError(
+                "Refresh response did not contain an access token."
+            )
+        new_refresh = value.get("refresh_token")
+        if not isinstance(new_refresh, str) or not new_refresh:
+            new_refresh = refresh_token
+        new_id_token = value.get("id_token")
+        if isinstance(new_id_token, str) and new_id_token:
+            try:
+                claims = self._verify_id_token(new_id_token, client_id=client_id, nonce=None)
+            except ChatGPTOAuthError:
+                self._mark_reauth_required(profile_id)
+                raise
+            if str(claims.get("sub")) != str(stored.get("subject")):
                 self._mark_reauth_required(profile_id)
                 raise ChatGPTOAuthError(
-                    "ChatGPT credentials cannot be refreshed; sign in again."
+                    "Refreshed ChatGPT identity does not match the selected account."
                 )
-            try:
-                value = self._token_request(
-                    {
-                        "grant_type": "refresh_token",
-                        "client_id": client_id,
-                        "refresh_token": refresh_token,
-                        "resource": RESOURCE,
-                    }
-                )
-            except OAuthRejected as exc:
-                if exc.code in _TERMINAL_REFRESH_ERRORS:
-                    self._mark_reauth_required(profile_id)
-                raise
+        else:
+            new_id_token = stored.get("id_token")
 
-            new_access = value.get("access_token")
-            if not isinstance(new_access, str) or not new_access:
-                raise ChatGPTOAuthError(
-                    "Refresh response did not contain an access token."
-                )
-            new_refresh = value.get("refresh_token")
-            if not isinstance(new_refresh, str) or not new_refresh:
-                new_refresh = refresh_token
-            new_id_token = value.get("id_token")
-            if isinstance(new_id_token, str) and new_id_token:
-                claims = self._verify_id_token(
-                    new_id_token, client_id=client_id, nonce=None
-                )
-                if str(claims.get("sub")) != str(stored.get("subject")):
-                    self._mark_reauth_required(profile_id)
-                    raise ChatGPTOAuthError(
-                        "Refreshed ChatGPT identity does not match the selected account."
-                    )
-            else:
-                new_id_token = stored.get("id_token")
-
-            scopes = self._normalize_scopes(
-                value.get("scope")
-            ) or self._normalize_scopes(stored.get("scope"))
-            updated = {
-                **stored,
-                "access_token": new_access,
-                "refresh_token": new_refresh,
-                "id_token": new_id_token,
-                "expires_at": int(time.time())
-                + max(60, int(value.get("expires_in") or 3600)),
-                "scope": " ".join(scopes),
-            }
+        scopes = self._normalize_scopes(value["scope"] if "scope" in value else stored.get("scope"))
+        updated = {
+            **stored,
+            "access_token": new_access,
+            "refresh_token": new_refresh,
+            "id_token": new_id_token,
+            "expires_at": self._expires_at(value),
+            "scope": " ".join(scopes),
+        }
+        try:
             self.credentials.save(profile_id, updated)
-            return updated
+        except CredentialStoreUnavailable:
+            # 远端已轮转但本机未保存：元数据先阻止旧凭据再次被使用。
+            metadata = self._load_metadata()
+            metadata["profiles"][profile_id]["status"] = "reauth_required"
+            self._save_metadata(metadata)
+            raise
+        # 系统库先保存新轮转值，元数据才回到 connected；两个系统之间的崩溃窗口保守要求重授权。
+        metadata = self._load_metadata()
+        metadata["profiles"][profile_id]["status"] = "connected"
+        self._save_metadata(metadata)
+        return updated
 
     # 用有效短期 token 读取计划模型目录并返回可公开字段；模型列表不等于成功推理。
-    def list_models(self, profile_id: str | None = None) -> list[dict[str, str]]:
+    @_serialized_auth
+    def list_models(self, profile_id: str | None = None, *, force: bool = False) -> list[dict[str, str]]:
+        profile_id = profile_id or self._active_profile_id()
+        # 即使命中目录，也先读取系统凭据并复核有效性/权限；缓存不授予调用权。
         token = self.access_token(profile_id)
+        metadata = self._load_metadata()
+        profile = self._profile(profile_id)
+        key = (str(self.root), profile_id, metadata["login_epoch"], profile.get("login_revision"))
+        now = time.monotonic()
+        with _MODEL_CATALOG_LOCK:
+            cached = _MODEL_CATALOG_CACHE.get(key)
+        if not force and cached and now - cached[0] < 30:
+            return [dict(item) for item in cached[1]]
+        result = self._fetch_models(token)
+        with _MODEL_CATALOG_LOCK:
+            if len(_MODEL_CATALOG_CACHE) >= 16:
+                _MODEL_CATALOG_CACHE.clear()
+            _MODEL_CATALOG_CACHE[key] = (time.monotonic(), tuple(dict(item) for item in result))
+        return result
+
+    # 使用一次有效凭据读取目录；只留公开字段，HTTP 重定向不携带 token 继续执行。
+    def _fetch_models(self, token: str) -> list[dict[str, str]]:
         req = request.Request(
             f"{RESOURCE}/models",
             headers={
@@ -883,38 +1137,41 @@ class ChatGPTAuthManager:
             },
         )
         try:
-            with request.urlopen(req, timeout=self.timeout) as response:
-                raw = response.read()
+            with open_credential_request(req, timeout=self.timeout) as response:
+                raw = read_bounded(response)
         except error.HTTPError as exc:
+            exc.close()
             raise ChatGPTOAuthError(
                 f"ChatGPT model catalog request failed ({exc.code})."
-            ) from exc
+            ) from None
         except error.URLError as exc:
             raise ChatGPTOAuthError(
                 "ChatGPT model catalog could not be reached."
-            ) from exc
+            ) from None
         try:
             value = json.loads(raw.decode("utf-8"))
-        except json.JSONDecodeError as exc:
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise ChatGPTOAuthError(
                 "ChatGPT model catalog returned invalid JSON."
-            ) from exc
+            ) from None
         rows = value.get("models") if isinstance(value, dict) else None
         if not isinstance(rows, list) and isinstance(value, dict):
             rows = value.get("data")
         if not isinstance(rows, list):
             raise ChatGPTOAuthError("ChatGPT model catalog has an invalid shape.")
         result = []
+        if len(rows) > 1000:
+            raise ChatGPTOAuthError("ChatGPT model catalog exceeds the model limit.")
         for item in rows:
             if not isinstance(item, dict):
                 continue
             if item.get("visibility") not in {None, "list"}:
                 continue
             slug = item.get("slug") or item.get("id")
-            if not isinstance(slug, str) or not slug:
+            if not isinstance(slug, str) or not slug or len(slug) > 200 or token in slug:
                 continue
             display = item.get("display_name") or slug
-            result.append({"slug": slug, "display_name": str(display)})
+            result.append({"slug": slug, "display_name": redact_response(str(display)[:300], token)})
         return result
 
     # 尝试固定端点远端撤销；错误作为退出结果保留，不宣称不可用网络下已远端撤销。
@@ -936,20 +1193,34 @@ class ChatGPTAuthManager:
             },
         )
         try:
-            with request.urlopen(req, timeout=self.timeout) as response:
-                response.read()
+            with open_credential_request(req, timeout=self.timeout) as response:
+                read_bounded(response)
         except error.HTTPError as exc:
+            exc.close()
             raise ChatGPTOAuthError(
                 f"Remote ChatGPT session revocation failed ({exc.code})."
-            ) from exc
+            ) from None
         except error.URLError as exc:
             raise ChatGPTOAuthError(
                 "Remote ChatGPT session revocation could not be confirmed."
-            ) from exc
+            ) from None
 
-    # 尝试远端撤销后清系统凭据与状态；保留撤销是否成功的事实。
+    # 先关闭本机使用权，再尝试远端撤销并清理系统凭据；保留撤销是否成功的事实。
+    @_serialized_auth
     def logout(self, profile_id: str | None = None) -> dict[str, Any]:
-        profile_id = profile_id or self._active_profile_id()
+        # 退出先持久取消旧挑战，包含其他管理器的待完成登录，不能在退出后重新写回凭据。
+        metadata = self._load_metadata()
+        profile_id = profile_id or metadata.get("active_profile_id")
+        metadata["login_epoch"] = self._new_secret()
+        profile = metadata["profiles"].get(profile_id)
+        if isinstance(profile, dict):
+            # 先关闭本机使用权，远端撤销/系统库删除期间崩溃也不能继续认证。
+            profile["status"] = "signed_out"
+        if metadata.get("active_profile_id") == profile_id:
+            metadata["active_profile_id"] = None
+        self._save_metadata(metadata)
+        with self._pending_lock:
+            self._pending.clear()
         if not profile_id:
             return {"signed_out": True, "remote_revoked": True}
         stored = self.credentials.load(profile_id)
@@ -967,7 +1238,8 @@ class ChatGPTAuthManager:
                     self._revoke_refresh_token(refresh_token, client_id)
                 except ChatGPTOAuthError:
                     remote_revoked = False
-            self.credentials.delete(profile_id)
+        # 未完成分块也可能留下系统库记录，load=None 时仍要执行清理。
+        self.credentials.delete(profile_id)
 
         metadata = self._load_metadata()
         profile = metadata["profiles"].get(profile_id)
@@ -997,6 +1269,11 @@ def run_loopback_login(
 
     # 固定 loopback 路由的 HTTP 入站适配器；只解析有界参数/返回投影，业务状态仍归仓储与用例。
     class Handler(BaseHTTPRequestHandler):
+        # 回调只需一条短请求；半开请求不能无限占用临时监听线程。
+        def setup(self):
+            super().setup()
+            self.connection.settimeout(15.0)
+
         # 禁用回调请求日志，避免 code/state 经 URL 泄露。
         def log_message(self, *_args) -> None:
             return
@@ -1009,7 +1286,20 @@ def run_loopback_login(
                 self.end_headers()
                 return
             try:
-                status = manager.complete_callback(parse.parse_qs(parsed.query))
+                params = parse.parse_qs(parsed.query, keep_blank_values=True, max_num_fields=20)
+                incoming = manager._single(params, "state")
+                if (self.headers.get("Host") != f"127.0.0.1:{self.server.server_port}"
+                        or not incoming or not secrets.compare_digest(incoming, expected_state)):
+                    raise ChatGPTOAuthError("Unrelated OAuth callback.")
+            except (ValueError, ChatGPTOAuthError):
+                # 未持有本次 state 的请求不能结束 CLI 登录等待，也不能消耗挑战。
+                self.send_response(400)
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Referrer-Policy", "no-referrer")
+                self.end_headers()
+                return
+            try:
+                status = manager.complete_callback(params)
                 result["status"] = status
                 body = b"Myth is connected to ChatGPT. You can close this window."
                 self.send_response(200)
@@ -1019,6 +1309,8 @@ def run_loopback_login(
                 self.send_response(400)
             self.send_header("content-type", "text/plain; charset=utf-8")
             self.send_header("cache-control", "no-store")
+            self.send_header("referrer-policy", "no-referrer")
+            self.send_header("x-content-type-options", "nosniff")
             self.send_header("content-length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
@@ -1028,6 +1320,7 @@ def run_loopback_login(
     server.timeout = 0.5
     redirect_uri = f"http://127.0.0.1:{server.server_port}/auth/callback"
     attempt = manager.begin_login(redirect_uri, profile_id=profile_id)
+    expected_state = parse.parse_qs(parse.urlparse(attempt["auth_url"]).query)["state"][0]
     if open_browser:
         webbrowser.open(attempt["auth_url"])
     deadline = time.monotonic() + timeout
@@ -1036,6 +1329,8 @@ def run_loopback_login(
             server.handle_request()
     finally:
         server.server_close()
+        with manager._pending_lock:
+            manager._pending.pop(expected_state, None)
     if not done.is_set():
         raise ChatGPTOAuthError("ChatGPT sign-in timed out.")
     if "error" in result:
