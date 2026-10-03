@@ -4,7 +4,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+from pathlib import Path
 from typing import Any
 
 from .domain import canonical_json, digest_json
@@ -45,6 +47,18 @@ OPTIONAL_COSTS = (
     "code_churn_lines",
     "human_attention_seconds",
 )
+
+# PROJECT_SKIP：项目状态指纹跳过版本库/依赖/秘钥目录；只用于“环境是否相同”的比较身份。
+PROJECT_SKIP = {
+    ".git", ".runtime", ".venv", "venv", "node_modules", "__pycache__",
+    ".aws", ".ssh", ".codex", ".myth", ".config", "secrets",
+}
+# PROJECT_TEXT_SUFFIXES：与当前项目文本工具的主范围对齐；二进制资产不作为首版 Best Path 可比条件。
+PROJECT_TEXT_SUFFIXES = {
+    ".txt", ".md", ".py", ".json", ".csv", ".yaml", ".yml", ".html",
+    ".css", ".js", ".ts", ".tsx", ".jsx", ".toml", ".ini", ".cfg",
+    ".xml", ".sh", ".ps1", ".go", ".rs", ".java", ".c", ".h", ".cpp",
+}
 
 
 # 只做轻量文本稳定化；不重写用户任务语义，代码/空格差异仍保留。
@@ -89,6 +103,55 @@ class BestPathLedger:
         }
         return digest_json(fixed)
 
+    # 冻结项目文本状态摘要；读取只做 SHA-256，不把源码/秘钥正文写入 Best Path 账本。
+    def freeze_environment(self, snapshot: dict[str, Any]) -> dict[str, Any]:
+        project = snapshot.get("project") or {}
+        root_value = project.get("root")
+        if not root_value:
+            return {"scope": "frozen-context-v1", "project_digest": None, "files": 0, "bytes": 0}
+        root = Path(root_value).resolve()
+        if not root.is_dir():
+            return {"scope": "project-unavailable-v1", "project_digest": None, "files": 0, "bytes": 0}
+        digest = hashlib.sha256()
+        files = 0
+        total_bytes = 0
+        complete = True
+        try:
+            for path in sorted(root.rglob("*"), key=lambda item: item.as_posix()):
+                if not path.is_file() or path.is_symlink():
+                    continue
+                relative = path.relative_to(root)
+                lowered = [part.lower() for part in relative.parts]
+                if any(
+                    part in PROJECT_SKIP
+                    or part.startswith(".env")
+                    or part.endswith((".key", ".pem"))
+                    for part in lowered
+                ):
+                    continue
+                if path.suffix.lower() not in PROJECT_TEXT_SUFFIXES:
+                    continue
+                size = path.stat().st_size
+                if size > 1_000_000:
+                    continue
+                files += 1
+                total_bytes += size
+                if files > 10_000 or total_bytes > 64_000_000:
+                    complete = False
+                    break
+                raw = path.read_bytes()
+                digest.update(relative.as_posix().encode("utf-8"))
+                digest.update(b"\0")
+                digest.update(hashlib.sha256(raw).digest())
+        except OSError:
+            complete = False
+        return {
+            "scope": "project-state-v1" if complete else "project-state-partial-v1",
+            "project_digest": digest.hexdigest() if complete else None,
+            "files": files,
+            "bytes": total_bytes,
+        }
+
     # 从冻结 Snapshot 生成环境键；显式排除 Best Path 自己，避免提示递归改变比较身份。
     def _environment_key(self, snapshot: dict[str, Any]) -> tuple[str, str]:
         project = snapshot.get("project") or {}
@@ -116,11 +179,15 @@ class BestPathLedger:
         ]
         goal = snapshot.get("goal") or {}
         work = goal.get("work") or {}
+        frozen_environment = snapshot.get("best_path_environment") or {}
         environment = {
             "project": {
                 "id": project.get("id"),
                 "root": project.get("root"),
                 "instructions": project.get("instructions"),
+                "project_digest": frozen_environment.get("project_digest"),
+                "project_files": frozen_environment.get("files"),
+                "project_bytes": frozen_environment.get("bytes"),
             },
             "history": history,
             "knowledge": knowledge,
@@ -142,11 +209,9 @@ class BestPathLedger:
             "information_resolution": snapshot.get("information_resolution") or {},
             "policy_bindings": snapshot.get("policy_bindings") or {},
         }
-        # 本地项目文件正文目前不是 Turn Snapshot 的不可变对象，因此范围名称明确不声称“物理环境完全相同”。
-        scope = (
-            "frozen-context+project-identity-v1"
-            if project.get("root")
-            else "frozen-context-v1"
+        scope = str(
+            frozen_environment.get("scope")
+            or ("project-unfrozen-v1" if project.get("root") else "frozen-context-v1")
         )
         return digest_json(environment), scope
 
@@ -461,12 +526,13 @@ class BestPathLedger:
         identity = self.identity(task, turn["settings"], turn["snapshot"])
         metrics = self.metrics(run_id)
         path = self.path(run_id)
+        eligible = int(identity["environment_scope"] in {"frozen-context-v1", "project-state-v1"})
         with self.store.tx() as db:
             db.execute(
                 "INSERT INTO best_path_runs("
                 "run_id,comparison_key,task_key,model_key,environment_key,environment_scope,"
                 "subject_digest,metrics_json,path_json,eligible"
-                ") VALUES(?,?,?,?,?,?,?,?,?,1) "
+                ") VALUES(?,?,?,?,?,?,?,?,?,?) "
                 "ON CONFLICT(run_id) DO UPDATE SET "
                 "comparison_key=excluded.comparison_key,task_key=excluded.task_key,"
                 "model_key=excluded.model_key,environment_key=excluded.environment_key,"
@@ -483,6 +549,7 @@ class BestPathLedger:
                     acceptance["subject_digest"],
                     canonical_json(metrics),
                     canonical_json(path),
+                    eligible,
                 ),
             )
         return self.view(run_id)
@@ -559,7 +626,13 @@ class BestPathLedger:
         return {
             **identity,
             "eligible": bool(current and current.get("eligible")),
-            "status": current["status"] if current else "LEARNING",
+            "status": (
+                current["status"]
+                if current
+                else "NOT_COMPARABLE"
+                if identity["environment_scope"] in {"project-state-partial-v1", "project-unavailable-v1", "project-unfrozen-v1"}
+                else "LEARNING"
+            ),
             "metrics": metrics,
             "path": self.path(run_id),
             "peer_count": len(group),
