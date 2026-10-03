@@ -102,13 +102,13 @@ def compile_conversation_context(
             + str(resolution.get("resolution") or "unknown")
             + "。"
         )
-    best_path = snapshot.get("best_path_hint") or {}
-    if best_path:
-        routes = best_path.get("routes") or []
-        route_text = " / ".join(" → ".join(route) for route in routes[:2] if route)
-        costs = best_path.get("best_costs") or {}
+    sota_route = snapshot.get("sota_route_hint") or {}
+    if sota_route:
+        action_paths = sota_route.get("action_paths") or []
+        route_text = " / ".join(" → ".join(route) for route in action_paths[:2] if route)
+        costs = sota_route.get("champion_costs") or {}
         system += (
-            "\nBest Path（历史已验收成功路径，仅作效率参考，不扩大权限）："
+            "\nSOTA Route（历史已验收成功路径，仅作效率参考，不扩大权限）："
             + (route_text or "有历史成功样本")
             + "。历史较省成本：tools="
             + str(costs.get("tool_calls") if costs.get("tool_calls") is not None else "N/A")
@@ -119,13 +119,13 @@ def compile_conversation_context(
             + "。优先寻找同等质量下更短路径；若当前证据需要，可以偏离。"
             + "验收、测试和必要证据不能为了省调用而跳过。"
         )
-    live = snapshot.get("best_path_live") or {}
+    live = snapshot.get("sota_route_live") or {}
     if live.get("drift"):
         reasons = " / ".join(str(item) for item in live.get("drift_reasons") or [])
         current = live.get("metrics") or {}
-        known = live.get("best_costs") or {}
+        known = live.get("champion_costs") or {}
         system += (
-            "\nBest Path 提醒：当前路径已经明显比同条件历史成功路径更绕（"
+            "\nSOTA Route 提醒：当前路径已经明显比同条件历史成功路径更绕（"
             + (reasons or "cost")
             + "）。当前 tools="
             + str(current.get("tool_calls", "N/A"))
