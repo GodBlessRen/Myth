@@ -1,7 +1,5 @@
-"""Architecture metadata for Myth's composable runtime.
-
-These are descriptive maturity records, not mandatory execution layers.
-"""
+"""组件成熟度与职责的纯描述合同。
+这是架构元数据而非强制执行层；旧别名保留导入兼容，成熟度声明必须与源码和验证证据一致。"""
 
 from __future__ import annotations
 
@@ -9,24 +7,39 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 
+# 架构条目的成熟度；旧 WIRED 别名只兼容导入，不作为新命名。
 class Maturity(StrEnum):
+    # EXISTS：合同/组件存在，尚不宣称完整产品装配。
     EXISTS = "exists"
+    # CONNECTED：当前路径已经装配，真实验证范围另见证据。
     CONNECTED = "connected"
+    # WIRED：旧公开兼容值，与 CONNECTED 相同；新代码不再使用。
     WIRED = "connected"  # v0.6-v0.8 compatibility alias; do not use in new UI/docs.
+    # USABLE：已有明确可用路径；不能外推为所有场景稳定。
     USABLE = "usable"
+    # HARDENED：声明的加固成熟度；需要对应测试和证据支持。
     HARDENED = "hardened"
+    # PLANNED：规划中的能力/后端；不会因登记而自动执行。
     PLANNED = "planned"
 
 
+# 组件身份、职责、成熟度和依赖的纯元数据；不保存真实执行状态。
 @dataclass(frozen=True)
 class ArchitectureItem:
+    # item_id：架构元数据稳定身份；不是运行实例 ID。
     item_id: str
+    # label：产品显示名称；不能替代执行状态。
     label: str
+    # kind：当前合同的对象/记忆用途分类；需与所属枚举解释。
     kind: str
+    # maturity：架构条目成熟度声明；与实际装配/验证保持一致。
     maturity: Maturity
+    # responsibility：单一职责说明；描述不代表实现已经完成。
     responsibility: str
+    # depends_on：显式前置依赖身份；不是已完成证明。
     depends_on: tuple[str, ...] = ()
 
+    # 输出架构描述的 JSON 投影；依赖和成熟度是声明，不是执行收据。
     def as_dict(self) -> dict[str, object]:
         return {
             "id": self.item_id,
@@ -38,7 +51,8 @@ class ArchitectureItem:
         }
 
 
-# Backward-compatible names for older imports.  New code should use
-# Maturity/ArchitectureItem and should not model Myth as a strict layer stack.
+# 保留旧公开导出名供迁移；新代码使用 Maturity/ArchitectureItem，不把组合结构误建成强制层栈。
+# LayerState：旧成熟度兼容名；新代码使用 Maturity，不能混用 Run 状态。
 LayerState = Maturity
+# PlatformLayer：旧架构条目兼容名；描述对象不构成强制层次。
 PlatformLayer = ArchitectureItem

@@ -15,7 +15,7 @@ Long-term Goal
   -> continue the same Goal
 ```
 
-当前版本：**v0.21**
+当前版本：**v0.21.1**
 
 ## 现在能做什么
 
@@ -174,6 +174,7 @@ node --check src/myth/webui/goals.js
 - [CHANGELOG.md](CHANGELOG.md) — 版本演进
 - [ARCHITECTURE.md](docs/ARCHITECTURE.md) — 当前架构事实
 - [ARCHITECTURE_CONSTITUTION.md](docs/ARCHITECTURE_CONSTITUTION.md) — 稳定边界
+- [CODE_GUIDE.md](docs/CODE_GUIDE.md) — 中文源码阅读、状态所有权与原子性边界
 - [OBSERVABILITY.md](docs/OBSERVABILITY.md) — 第三栏观测合同
 - [DESIGN.md](docs/DESIGN.md) — 产品视觉与交互原则
 - [ROADMAP.md](docs/ROADMAP.md) — 下一步

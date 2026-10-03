@@ -1,0 +1,223 @@
+{
+  "schema": "myth-code-audit/v1",
+  "runtime_version": "0.21.1",
+  "base_commit": "1bc6d73",
+  "date": "2026-10-03",
+  "source_guidance": {
+    "files": 71,
+    "classes": 149,
+    "functions": 576
+  },
+  "coverage_guard": {
+    "result": "PASS",
+    "files": 106,
+    "classes": 204,
+    "functions": 895,
+    "production_property_declarations": 447,
+    "quality_claim": "existence only; semantic accuracy requires review"
+  },
+  "local_tests": {
+    "result": "PASS",
+    "os": "Windows",
+    "python": "3.13.9",
+    "tests": 213,
+    "elapsed_seconds": 27.867,
+    "real_provider_quality": "not measured"
+  },
+  "static_checks": {
+    "compileall": "PASS",
+    "node_check": [
+      "app.js",
+      "inspector.js",
+      "goals.js"
+    ],
+    "unused_imports": "PASS (F401/F811)",
+    "git_diff_check": "PASS"
+  },
+  "javascript_executable_ast": {
+    "base_commit": "1bc6d73",
+    "result": "unchanged",
+    "files": [
+      "app.js",
+      "inspector.js",
+      "goals.js"
+    ]
+  },
+  "python_executable_review": {
+    "unchanged_executable_python_files": 90,
+    "reviewed_changes_after_annotation_baseline": [
+      "src/myth/__init__.py",
+      "src/myth/adapters/personal_store.py",
+      "src/myth/adapters/workspace_store.py",
+      "src/myth/artifacts.py",
+      "src/myth/auth/chatgpt.py",
+      "src/myth/evaluation_runner.py",
+      "src/myth/goal_scheduler.py",
+      "src/myth/runtime.py",
+      "src/myth/store.py",
+      "src/myth/task_benchmark.py",
+      "src/myth/web.py",
+      "tests/test_architecture.py",
+      "tests/test_runtime.py",
+      "tests/test_state_boundaries.py"
+    ],
+    "largest_modules": [
+      [
+        47,
+        "src/myth/adapters/workspace_store.py"
+      ],
+      [
+        42,
+        "src/myth/auth/chatgpt.py"
+      ],
+      [
+        39,
+        "src/myth/web_workspace.py"
+      ],
+      [
+        36,
+        "src/myth/ports.py"
+      ],
+      [
+        31,
+        "src/myth/web.py"
+      ],
+      [
+        26,
+        "src/myth/store.py"
+      ],
+      [
+        21,
+        "src/myth/evaluation_runner.py"
+      ],
+      [
+        21,
+        "src/myth/adapters/personal_store.py"
+      ]
+    ]
+  },
+  "reviewed_function_changes_vs_main": {
+    "src/myth/artifacts.py": [
+      "ObjectStore.put"
+    ],
+    "src/myth/conversation_ports.py": [
+      "ConversationControl.consume_compaction",
+      "ConversationControl.gate",
+      "ConversationControl.view",
+      "ConversationMemory.record_episode",
+      "GoalCheckpoint.checkpoint_run"
+    ],
+    "src/myth/goal_scheduler.py": [
+      "GoalScheduler.admit"
+    ],
+    "src/myth/runtime.py": [
+      "MythRuntime.submit_patch"
+    ],
+    "src/myth/store.py": [
+      "RuntimeStore.admission_transaction",
+      "RuntimeStore.create_action_attempt",
+      "RuntimeStore.create_run",
+      "RuntimeStore.request_run"
+    ],
+    "src/myth/task_benchmark.py": [
+      "_trial",
+      "_trial.admit"
+    ],
+    "src/myth/web.py": [
+      "make_handler"
+    ],
+    "src/myth/workspace.py": [
+      "Workspace.__init__"
+    ],
+    "src/myth/__init__.py": [
+      "__dir__",
+      "__getattr__"
+    ],
+    "src/myth/adapters/agent_execution.py": [
+      "LocalAgentExecution.lock"
+    ],
+    "src/myth/adapters/conversation_execution.py": [
+      "LocalConversationExecution.__init__",
+      "LocalConversationExecution.lock"
+    ],
+    "src/myth/adapters/personal_store.py": [
+      "SqlitePersonalState._require_transaction",
+      "SqlitePersonalState.admission_snapshot",
+      "SqlitePersonalState.bind_admitted_run",
+      "SqlitePersonalState.create_goal",
+      "SqlitePersonalState.work_state"
+    ],
+    "src/myth/adapters/workspace_store.py": [
+      "SqliteWorkspaceRepository.__init__",
+      "SqliteWorkspaceRepository.create_turn"
+    ],
+    "src/myth/application/conversation_agent.py": [
+      "ConversationAgent.__init__"
+    ],
+    "src/myth/auth/chatgpt.py": [
+      "ChatGPTAuthManager._form_request",
+      "ChatGPTAuthManager._revoke_refresh_token",
+      "ChatGPTAuthManager.list_models"
+    ],
+    "src/myth/platform/components.py": [
+      "MythComponents.snapshot"
+    ],
+    "src/myth/providers/openai.py": [
+      "OpenAIResponsesProvider.invoke"
+    ]
+  },
+  "fixed_daily_harness": {
+    "type": "harness_fixture",
+    "trials": 60,
+    "passed": 60,
+    "arms": {
+      "myth": "30/30",
+      "simple-loop": "30/30"
+    },
+    "source_identity": {
+      "suite_digest": "db96680c9fd2577c5a92f0704e5fb59a8a47fe6dd62772f00a379a1116febc74",
+      "runtime_version": "0.21.1",
+      "source_digest": "250554ca21854f22118314f5e415e59ffde3cafddb32ec6ebcbc873858e96ad5"
+    },
+    "real_model_quality": "not measured"
+  },
+  "wheel": {
+    "name": "myth_runtime-0.21.1-py3-none-any.whl",
+    "sha256": "3af552a07d3894beb1d130f31569e78f6284a9a869a4b52be0a169c8283a0148",
+    "installed_smoke": "PASS",
+    "checks": [
+      "isolated installed import",
+      "HTTP assets",
+      "Goal/session",
+      "schedule persistence/pause"
+    ]
+  },
+  "archived_fixed_fixtures": {
+    "evals/archive/foundation-v1.json": {
+      "git_blob_sha256": "2b3ab7e11e6cba5b4400fa92ec84788bbf076067b740b8488ab0d8aeb3db194d",
+      "git_content_unchanged": true
+    },
+    "evals/archive/foundation-v2.json": {
+      "git_blob_sha256": "f7ddddf727f4f34ea0438a39f2add2adb6b5d3ae8bedb4c1e86303d272039005",
+      "git_content_unchanged": true
+    },
+    "evals/archive/foundation-v3.json": {
+      "git_blob_sha256": "81096a3c909993118374143921ecb9256b1fbc7f1763a8b404bdc6d2a8b66a26",
+      "git_content_unchanged": true
+    }
+  },
+  "cleanup": {
+    "regenerable_build_mirror_removed_bytes": 639640,
+    "unused_imports_removed": 3,
+    "duplicate_goal_bind_removed": true,
+    "runtime_evidence_deleted": false
+  },
+  "limits": [
+    "Control still writes cross-aggregate tables",
+    "reply, memory, Goal checkpoint and Driver cleanup commit separately",
+    "database/file/credential store are separate systems",
+    "new unreferenced preparation objects are retained",
+    "no new browser visual audit",
+    "no new real-provider quality measurement"
+  ]
+}

@@ -27,6 +27,8 @@ node --check src/myth/webui/goals.js
 
 ## 自动测试覆盖的核心边界
 
+开发前运行 `python scripts/check_annotations.py`；它检查中文职责说明覆盖，不判断内容准确性。准入/状态所有权回归集中在 `tests/test_state_boundaries.py`，当前协作边界见 [CODE_GUIDE.md](CODE_GUIDE.md)。
+
 - durable Run / Attempt / Ticket / Receipt；
 - model / tool UNKNOWN 不盲 replay；
 - crash 后恢复与预算结算；

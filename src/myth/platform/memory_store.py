@@ -1,4 +1,6 @@
-"""Persistent typed memory with explicit provenance and revision semantics."""
+"""生产记忆的持久 SQLite 适配器。
+以 kind/source_ref 去重并递增 revision，按 global/project/session 范围扫描全部可见候选；经历默认 context，不自动升级 verified。
+"""
 
 from __future__ import annotations
 
@@ -9,6 +11,7 @@ from typing import Iterable
 from .memory import MemoryKind
 
 
+# SCHEMA：本仓储拥有的表、索引与约束；升级补齐旧字段，删除列须有迁移证据。
 SCHEMA = r"""
 CREATE TABLE IF NOT EXISTS workspace_memories(
     memory_id TEXT PRIMARY KEY NOT NULL,
@@ -27,19 +30,28 @@ CREATE TABLE IF NOT EXISTS workspace_memories(
 """
 
 
+# 提取英文词项与中文二元片段供词面检索；相关度不是语义验证。
 def _terms(text: str) -> set[str]:
     english = re.findall(r"[a-z0-9_]+", text.lower())
     chinese = re.findall(r"[一-鿿]+", text)
-    return set(english + [part[i:i+2] for part in chinese for i in range(max(1, len(part)-1))])
+    return set(
+        english
+        + [part[i : i + 2] for part in chinese for i in range(max(1, len(part) - 1))]
+    )
 
 
+# 真实记忆聚合的 SQLite 所有者；作用域与事实等级显式保存，检索全可见候选。
 class SqliteMemoryStore:
+    # 复用 Runtime 连接建立持久有来源记忆表；检索是词面扫描，写入不会自动升级 verified。
     def __init__(self, runtime) -> None:
+        # runtime：共享 Runtime 装配对象；其 SQLite 连接只在所属线程使用。
         self.runtime = runtime
+        # store：持久事实仓储；短事务维护本地一致性；外部效果不能并入数据库事务。
         self.store = runtime.store
         self.store.db.executescript(SCHEMA)
         columns = {
-            row["name"] for row in self.store.db.execute("PRAGMA table_info(workspace_memories)")
+            row["name"]
+            for row in self.store.db.execute("PRAGMA table_info(workspace_memories)")
         }
         if "scope_type" not in columns:
             self.store.db.execute(
@@ -54,6 +66,7 @@ class SqliteMemoryStore:
                 "ALTER TABLE workspace_memories ADD COLUMN fact_level TEXT NOT NULL DEFAULT 'context'"
             )
 
+    # 校验 kind/text/source/scope/fact_level 后按来源更新或创建；同事务递增 revision，不凭经历升级 verified。
     def remember(
         self,
         *,
@@ -80,6 +93,7 @@ class SqliteMemoryStore:
         level = str(fact_level or "context").strip().lower()
         if level not in {"context", "user_asserted", "verified"}:
             raise ValueError("memory fact_level must be context/user_asserted/verified")
+        # 本地事务边界：下列写入一起提交，异常整体回滚；文件/网络效果须在事务外另行核对。
         with self.store.tx() as db:
             row = db.execute(
                 "SELECT * FROM workspace_memories WHERE kind=? AND source_ref=?",
@@ -98,10 +112,19 @@ class SqliteMemoryStore:
                 db.execute(
                     "INSERT INTO workspace_memories(memory_id,kind,text,source_ref,scope_type,scope_id,fact_level) "
                     "VALUES (?,?,?,?,?,?,?)",
-                    (memory_id, memory_kind.value, value, source, scope, scope_value, level),
+                    (
+                        memory_id,
+                        memory_kind.value,
+                        value,
+                        source,
+                        scope,
+                        scope_value,
+                        level,
+                    ),
                 )
         return self.get(memory_id)
 
+    # 按身份取得已登记数据；缺失身份显式失败，调用方不能据此捏造已存在对象。
     def get(self, memory_id: str) -> dict:
         row = self.store.db.execute(
             "SELECT * FROM workspace_memories WHERE memory_id=?", (memory_id,)
@@ -110,6 +133,7 @@ class SqliteMemoryStore:
             raise KeyError(memory_id)
         return dict(row)
 
+    # 返回当前目录/仓储的可见条目；排序和过滤只生成投影，不授予执行权。
     def list(self, *, active_only: bool = True, limit: int = 100) -> list[dict]:
         if type(limit) is not int or not 1 <= limit <= 500:
             raise ValueError("limit must be 1-500")
@@ -121,6 +145,7 @@ class SqliteMemoryStore:
         args = (limit,)
         return [dict(row) for row in self.store.db.execute(sql, args).fetchall()]
 
+    # 按 rowid 分页扫描当前作用域可见且 active 的记忆；避免 top-k 排序前删掉后部候选。
     def candidates(
         self,
         *,
@@ -137,7 +162,11 @@ class SqliteMemoryStore:
         allowed = None
         if kinds is not None:
             allowed = {
-                item.value if isinstance(item, MemoryKind) else MemoryKind(str(item)).value
+                (
+                    item.value
+                    if isinstance(item, MemoryKind)
+                    else MemoryKind(str(item)).value
+                )
                 for item in kinds
             }
         rows = self.store.db.execute(
@@ -145,30 +174,39 @@ class SqliteMemoryStore:
             "WHERE active=1 AND rowid>? ORDER BY rowid LIMIT ?",
             (cursor, page_size + 1),
         ).fetchall()
-        values=[]
+        values = []
         for row in rows[:page_size]:
-            item=dict(row)
+            item = dict(row)
             if allowed and item["kind"] not in allowed:
                 continue
-            scope=item.get("scope_type") or "global"
-            scope_id=item.get("scope_id")
-            visible=(
-                scope=="global"
-                or (scope=="project" and project_id is not None and scope_id==project_id)
-                or (scope=="session" and session_id is not None and scope_id==session_id)
+            scope = item.get("scope_type") or "global"
+            scope_id = item.get("scope_id")
+            visible = (
+                scope == "global"
+                or (
+                    scope == "project"
+                    and project_id is not None
+                    and scope_id == project_id
+                )
+                or (
+                    scope == "session"
+                    and session_id is not None
+                    and scope_id == session_id
+                )
             )
             if visible:
                 values.append(item)
-        raw=list(rows[:page_size])
-        next_cursor=int(raw[-1]["candidate_cursor"]) if raw else cursor
+        raw = list(rows[:page_size])
+        next_cursor = int(raw[-1]["candidate_cursor"]) if raw else cursor
         return {
-            "candidates":values,
-            "cursor":cursor,
-            "next_cursor":next_cursor,
-            "has_more":len(rows)>page_size,
-            "scanned":len(raw),
+            "candidates": values,
+            "cursor": cursor,
+            "next_cursor": next_cursor,
+            "has_more": len(rows) > page_size,
+            "scanned": len(raw),
         }
 
+    # 遍历所有可见候选后稳定排 top-k，返回扫描覆盖；Memory 内容只作上下文。
     def search_report(
         self,
         query: str,
@@ -180,43 +218,53 @@ class SqliteMemoryStore:
     ) -> dict:
         if type(limit) is not int or not 1 <= limit <= 20:
             raise ValueError("limit must be 1-20")
-        query_terms=_terms(str(query))
-        scored=[];cursor=0;scanned=0;visible=0;matched=0;pages=0
+        query_terms = _terms(str(query))
+        scored = []
+        cursor = 0
+        scanned = 0
+        visible = 0
+        matched = 0
+        pages = 0
         while True:
-            page=self.candidates(
+            page = self.candidates(
                 cursor=cursor,
                 page_size=200,
                 project_id=project_id,
                 session_id=session_id,
                 kinds=kinds,
             )
-            pages+=1;scanned+=page["scanned"]
+            pages += 1
+            scanned += page["scanned"]
             for item in page["candidates"]:
-                visible+=1
-                score=len(query_terms & _terms(item["text"]))
+                visible += 1
+                score = len(query_terms & _terms(item["text"]))
                 if not query_terms or score:
-                    matched+=1
-                    scored.append((score,int(item["candidate_cursor"]),item))
-            cursor=page["next_cursor"]
-            if not page["has_more"]:break
-        scored.sort(key=lambda item:(-item[0],-item[1],item[2]["memory_id"]))
-        results=[]
-        for _,_,item in scored[:limit]:
-            value=dict(item);value.pop("candidate_cursor",None);results.append(value)
+                    matched += 1
+                    scored.append((score, int(item["candidate_cursor"]), item))
+            cursor = page["next_cursor"]
+            if not page["has_more"]:
+                break
+        scored.sort(key=lambda item: (-item[0], -item[1], item[2]["memory_id"]))
+        results = []
+        for _, _, item in scored[:limit]:
+            value = dict(item)
+            value.pop("candidate_cursor", None)
+            results.append(value)
         return {
-            "memories":results,
-            "retrieval":{
-                "backend":"memory-lexical",
-                "candidate_policy":"all-visible-active-memories-v2",
-                "scanned":scanned,
-                "visible":visible,
-                "matched":matched,
-                "pages":pages,
-                "exhausted":True,
-                "truncated_before_ranking":False,
+            "memories": results,
+            "retrieval": {
+                "backend": "memory-lexical",
+                "candidate_policy": "all-visible-active-memories-v2",
+                "scanned": scanned,
+                "visible": visible,
+                "matched": matched,
+                "pages": pages,
+                "exhausted": True,
+                "truncated_before_ranking": False,
             },
         }
 
+    # 读取当前作用域的检索结果；相似度只用于排序，不升级为已验证事实。
     def search(
         self,
         query: str,
@@ -234,8 +282,10 @@ class SqliteMemoryStore:
             session_id=session_id,
         )["memories"]
 
+    # 撤销条目在未来查询中的可见性；历史快照与已发生效果不被倒写。
     def revoke(self, memory_id: str) -> dict:
         current = self.get(memory_id)
+        # 本地事务边界：下列写入一起提交，异常整体回滚；文件/网络效果须在事务外另行核对。
         with self.store.tx() as db:
             db.execute(
                 "UPDATE workspace_memories SET active=0,revision=revision+1,"
@@ -244,6 +294,7 @@ class SqliteMemoryStore:
             )
         return self.get(memory_id)
 
+    # 以 Run 来源幂等记录结束经历，按冻结项目/会话范围保存；不宣称回答为 verified。
     def record_episode(self, run_id: str, user_text: str, assistant_text: str) -> dict:
         text = f"User: {user_text.strip()}\nAssistant: {assistant_text.strip()}"
         if len(text.encode("utf-8")) > 8_000:
@@ -254,7 +305,11 @@ class SqliteMemoryStore:
             (run_id,),
         ).fetchone()
         scope_type = "project" if row and row["project_id"] else "session"
-        scope_id = row["project_id"] if row and row["project_id"] else (row["session_id"] if row else run_id)
+        scope_id = (
+            row["project_id"]
+            if row and row["project_id"]
+            else (row["session_id"] if row else run_id)
+        )
         return self.remember(
             kind=MemoryKind.EPISODIC,
             text=text,
@@ -263,4 +318,3 @@ class SqliteMemoryStore:
             scope_id=scope_id,
             fact_level="context",
         )
-

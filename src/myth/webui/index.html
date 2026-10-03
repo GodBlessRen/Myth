@@ -1,133 +1,923 @@
 <!doctype html>
+<!-- 工作台 DOM 合同：id 由 app/inspector/goals 三个脚本使用；正文数据通过安全文本渲染。
+     文件只声明界面，不保存凭据、不创建业务工作。修改 id 时同步调用方和 Web 合同测试。 -->
 <html lang="zh-CN">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"><meta name="theme-color" content="#f6f2ea"><title>Myth · Agent Workbench</title><link rel="stylesheet" href="/app.css"></head>
-<body>
-<div class="shell">
-  <aside id="sidebar" class="sidebar" aria-label="主导航">
-    <a class="brand" href="#chat"><span class="brand-symbol" aria-hidden="true">m</span><span>myth<span class="brand-dot">.</span></span></a>
-    <button id="newChat" class="new-chat"><span data-icon="plus"></span>新建对话</button>
-    <div class="nav-section primary-nav">
-  <nav class="navigation" aria-label="主要功能">
-    <a href="#chat" data-page="chat"><span data-icon="chat"></span><span>对话</span></a>
-    <a href="#goals" data-page="goals"><span data-icon="spark"></span><span>目标与计划</span></a>
-    <a href="#runtime" data-page="runtime"><span data-icon="spark"></span><span>Runtime</span></a>
-  </nav>
-</div>
-<div class="sidebar-context">
-  <span class="sidebar-label">上下文</span>
-  <nav class="navigation secondary-nav" aria-label="上下文与资料">
-    <a href="#projects" data-page="projects"><span data-icon="folder"></span><span>项目</span></a>
-    <a href="#knowledge" data-page="knowledge"><span data-icon="book"></span><span>知识库</span></a>
-    <a href="#sessions" data-page="sessions"><span data-icon="history"></span><span>会话管理</span></a>
-  </nav>
-</div>
-    <div class="recent-heading"><span>最近对话</span><a href="#sessions" aria-label="全部会话">查看全部</a></div>
-    <div id="recentSessions" class="recent-sessions"></div>
-    <div class="sidebar-bottom"><a href="#settings" data-page="settings" class="settings-link"><span data-icon="settings"></span>模型与设置</a><div class="local-profile"><span class="local-dot"></span><div><strong>Local workspace</strong><small>数据留在本机</small></div></div></div>
-  </aside>
-  <button id="sidebarShade" class="sidebar-shade hidden" aria-label="关闭导航"></button>
-  <main class="main">
-    <header class="topbar"><div class="topbar-left"><button id="menuToggle" class="icon-button mobile-menu" aria-label="展开导航"><span data-icon="menu"></span></button><div class="workspace-crumb"><span>Myth</span><span>/</span><strong id="pageTitle">对话</strong></div></div><div class="topbar-right"><button id="inspectorToggle" class="secondary inspector-toggle" aria-controls="runtimeInspector" aria-expanded="false">Runtime</button><div id="turnControls" class="turn-controls hidden"><button id="steerTurn" class="control-button">Steer</button><button id="pauseTurn" class="control-button">Pause</button><button id="resumeTurn" class="control-button hidden">Resume</button><button id="compactTurn" class="control-button">Compact</button><button id="stopRun" class="control-button danger-control">Stop</button></div><button id="modelPill" class="model-pill"><span id="connectionDot" class="connection-dot"></span><span id="modelLabel">连接 Ollama</span><span data-icon="chevron"></span></button><button id="sessionMenu" class="icon-button hidden" aria-label="编辑当前会话"><span data-icon="more"></span></button></div></header>
-
-    <section id="chatPage" class="chat-page page">
-      <div id="chatScroll" class="chat-scroll">
-        <div id="welcome" class="welcome">
-  <div class="welcome-mark" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
-  <h1>把任务交给 Myth。<br><em>过程与证据，都看得见。</em></h1>
-  <p>对话是入口，Runtime 是底座。你可以直接讨论，也可以关联项目、资料和受控工具。</p>
-  <div class="suggestions">
-    <button data-suggestion="请帮我把一个模糊想法整理成可执行计划。先指出最关键的不确定性。"><strong>梳理任务</strong><small>从模糊目标到下一步</small></button>
-    <button data-action="projects"><strong>理解项目</strong><small>读取本地文件与项目上下文</small></button>
-    <button data-action="knowledge"><strong>基于资料回答</strong><small>检索本地知识并保留来源</small></button>
-  </div>
-  <div id="welcomeConnection" class="welcome-connection hidden"><span data-icon="info"></span><span>模型还未连接。</span><a href="#settings">打开设置</a></div>
-</div>
-<div id="thread" class="thread hidden"></div>
-      </div>
-      <div class="composer-area">
-        <div id="turnNotice" class="turn-notice hidden" role="status"></div>
-        <div id="attachmentChips" class="attachment-chips"></div>
-        <form id="composer" class="composer"><textarea id="prompt" rows="1" aria-label="消息" placeholder="给 Myth 一个任务，或继续当前对话…"></textarea><div class="composer-bottom"><div class="composer-options"><button id="attachButton" type="button" class="icon-button" aria-label="附加文本资料"><span data-icon="clip"></span></button><label class="project-select-label"><span data-icon="folder"></span><select id="chatProject" aria-label="对话所属项目"><option value="">独立对话</option></select></label><label class="project-select-label"><span data-icon="spark"></span><select id="chatGoal" aria-label="长期 Goal"><option value="">不绑定 Goal</option></select></label><button id="quickGoal" type="button" class="icon-button" aria-label="创建长期 Goal"><span data-icon="plus"></span></button><span class="agent-mode"><span class="agent-dot"></span>Agent</span></div><div class="send-area"><span id="inputHint">Enter 发送</span><button id="stopTurn" type="button" class="stop-button hidden" aria-label="停止当前轮次">■</button><button id="send" type="submit" class="send-button" aria-label="发送消息"><span data-icon="arrow"></span></button></div></div></form>
-        <input id="chatFiles" type="file" accept=".txt,.md,.py,.json,.csv,.yaml,.yml,.html,.js,.ts" multiple hidden>
-      </div>
-    </section>
-
-    <section id="sessionsPage" class="page content-page hidden"><div class="page-heading"><div><h1>每次思考，都有来处。</h1><p>回到之前的讨论，接着往前。</p></div><button id="newSession" class="primary"><span data-icon="plus"></span>新建对话</button></div><div class="list-toolbar"><div class="tab-group"><button id="activeSessions" class="selected">全部会话</button><button id="archivedSessions">已归档</button></div><div class="search-field"><span data-icon="search"></span><input id="sessionSearch" placeholder="搜索会话…" aria-label="搜索会话"></div></div><div id="sessionCards" class="session-cards"></div></section>
-
-    <section id="projectsPage" class="page content-page hidden"><div class="page-heading"><div><h1>把相关的工作，放在一起。</h1><p>统一指令、文件和资料，让对话保持上下文。</p></div><button id="createProject" class="primary"><span data-icon="plus"></span>新建项目</button></div><div id="projectCards" class="project-cards"></div></section>
-    <section id="projectPage" class="page content-page hidden"><a href="#projects" class="back-link">← 所有项目</a><div class="page-heading"><div><h1 id="projectName"></h1><p id="projectDescription"></p></div><div class="button-row"><button id="editProject" class="secondary">编辑项目</button><button id="projectChat" class="primary"><span data-icon="chat"></span>开始对话</button></div></div><div class="project-layout"><div><section class="panel"><div class="panel-heading"><h2>项目指令</h2><span data-icon="spark"></span></div><p id="projectInstructions" class="pre-text"></p></section><section class="panel"><div class="panel-heading"><h2>项目会话</h2><span id="projectSessionCount" class="count-badge"></span></div><div id="projectSessions"></div></section></div><div><section class="panel"><div class="panel-heading"><h2>本地文件</h2><span data-icon="folder"></span></div><p id="projectRoot" class="muted path-label"></p><div id="projectFiles"></div></section><section class="panel"><div class="panel-heading"><h2>项目资料</h2><button id="projectImport" class="text-button">＋ 添加</button></div><div id="projectDocuments"></div></section></div></div></section>
-
-    <section id="knowledgePage" class="page content-page hidden"><div class="page-heading"><div><h1>给回答，多一点依据。</h1><p>导入文本与 Markdown，自动分块，在对话中检索并引用。</p></div><button id="importKnowledge" class="primary"><span data-icon="plus"></span>导入资料</button></div><div class="knowledge-stats" id="knowledgeStats"></div><div class="list-toolbar"><select id="knowledgeProject" aria-label="知识库项目范围"><option value="">共享资料</option></select><div class="search-field"><span data-icon="search"></span><input id="knowledgeSearch" placeholder="检索知识内容…" aria-label="检索知识内容"></div><button id="searchKnowledge" class="secondary">检索</button></div><div id="searchResults" class="hidden"></div><div id="documentList" class="document-list"></div></section>
-
-
-    <section id="goalsPage" class="page content-page hidden">
-      <div class="page-heading"><div><h1>让工作接着往前。</h1><p>保存目标和进度，安排下一次工作。计划在 Myth 服务运行时自动唤醒。</p></div><button id="createGoal" class="primary">新建目标</button></div>
-      <p id="schedulerStatus" class="muted" role="status"></p>
-      <div id="goalCards" class="goal-cards"></div>
-    </section>
-    <section id="runtimePage" class="page content-page hidden">
-      <div class="page-heading">
-        <div>
-          <h1>固定事实与边界，不固定智能怎么组织。</h1>
-          <p>Myth 不是一条必须逐层经过的流水线。Core 保持稳定；Domains 正交协作；Intent Pick / Information Resolution / Decision / Routing / Workflow / Multi-Agent 都是可插拔 Strategy；模型、MCP、A2A、存储与执行器都留在 Adapter 外圈。</p>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <meta name="theme-color" content="#f6f2ea" />
+    <title>Myth · Agent Workbench</title>
+    <link rel="stylesheet" href="/app.css" />
+  </head>
+  <body>
+    <!-- 三栏布局：导航、当前工作区、常驻 Runtime Observatory；窄屏入口保留全部观测区域。 -->
+    <div class="shell">
+      <aside id="sidebar" class="sidebar" aria-label="主导航">
+        <a class="brand" href="#chat"
+          ><span class="brand-symbol" aria-hidden="true">m</span
+          ><span>myth<span class="brand-dot">.</span></span></a
+        >
+        <button id="newChat" class="new-chat">
+          <span data-icon="plus"></span>新建对话
+        </button>
+        <div class="nav-section primary-nav">
+          <nav class="navigation" aria-label="主要功能">
+            <a href="#chat" data-page="chat"
+              ><span data-icon="chat"></span><span>对话</span></a
+            >
+            <a href="#goals" data-page="goals"
+              ><span data-icon="spark"></span><span>目标与计划</span></a
+            >
+            <a href="#runtime" data-page="runtime"
+              ><span data-icon="spark"></span><span>Runtime</span></a
+            >
+          </nav>
         </div>
-        <a class="secondary" href="#chat">回到对话</a>
-      </div>
-      <div class="platform-legend">
-        <span><i class="state-dot hardened"></i> hardened · 已强化</span>
-        <span><i class="state-dot usable"></i> usable · 可使用</span>
-        <span><i class="state-dot connected"></i> connected · 已接通</span>
-        <span><i class="state-dot exists"></i> exists · 已存在</span>
-        <span><i class="state-dot planned"></i> planned · 仅规划</span>
-      </div>
-      <section class="architecture-section"><div class="architecture-heading"><h2>Core</h2><p>Goal / Run / Action / Attempt / Ticket / Receipt / Artifact / Verification</p></div><div id="runtimeCore" class="platform-grid"></div></section>
-      <section class="architecture-section"><div class="architecture-heading"><h2>Domains</h2><p>统筹、控制、执行、能力、状态、上下文、记忆、个人状态、验证与观测是正交职责，不是上下层。</p></div><div id="platformLayers" class="platform-grid"></div></section>
-      <section class="architecture-section"><div class="architecture-heading"><h2>Strategies</h2><p>Intent Pick 先决定值得走哪条处理路径；Information Resolution 决定信息展开到 L0/L1/L2 哪一级；其余 Direct、Agent Loop、Routing、Workflow、Parallel、Multi-Agent 等按任务组合。</p></div><div id="runtimeStrategies" class="platform-grid"></div></section>
-      <section class="architecture-section"><div class="architecture-heading"><h2>Adapters</h2><p>OpenAI / Ollama / MCP / A2A / Browser / Shell / SQLite 等通过 Ports 接入，不进入 Core。</p></div><div id="runtimeAdapters" class="platform-grid"></div></section>
-      <section class="panel platform-capabilities">
-        <div class="panel-heading"><div><h2>能力存在，不等于拥有执行权。</h2></div><span id="capabilityCount" class="count-badge"></span></div>
-        <div id="platformCapabilities" class="capability-matrix"></div>
-      </section>
-    </section>
+        <div class="sidebar-context">
+          <span class="sidebar-label">上下文</span>
+          <nav class="navigation secondary-nav" aria-label="上下文与资料">
+            <a href="#projects" data-page="projects"
+              ><span data-icon="folder"></span><span>项目</span></a
+            >
+            <a href="#knowledge" data-page="knowledge"
+              ><span data-icon="book"></span><span>知识库</span></a
+            >
+            <a href="#sessions" data-page="sessions"
+              ><span data-icon="history"></span><span>会话管理</span></a
+            >
+          </nav>
+        </div>
+        <div class="recent-heading">
+          <span>最近对话</span
+          ><a href="#sessions" aria-label="全部会话">查看全部</a>
+        </div>
+        <div id="recentSessions" class="recent-sessions"></div>
+        <div class="sidebar-bottom">
+          <a href="#settings" data-page="settings" class="settings-link"
+            ><span data-icon="settings"></span>模型与设置</a
+          >
+          <div class="local-profile">
+            <span class="local-dot"></span>
+            <div>
+              <strong>Local workspace</strong><small>数据留在本机</small>
+            </div>
+          </div>
+        </div>
+      </aside>
+      <button
+        id="sidebarShade"
+        class="sidebar-shade hidden"
+        aria-label="关闭导航"
+      ></button>
+      <main class="main">
+        <header class="topbar">
+          <div class="topbar-left">
+            <button
+              id="menuToggle"
+              class="icon-button mobile-menu"
+              aria-label="展开导航"
+            >
+              <span data-icon="menu"></span>
+            </button>
+            <div class="workspace-crumb">
+              <span>Myth</span><span>/</span
+              ><strong id="pageTitle">对话</strong>
+            </div>
+          </div>
+          <div class="topbar-right">
+            <button
+              id="inspectorToggle"
+              class="secondary inspector-toggle"
+              aria-controls="runtimeInspector"
+              aria-expanded="false"
+            >
+              Runtime
+            </button>
+            <div id="turnControls" class="turn-controls hidden">
+              <button id="steerTurn" class="control-button">Steer</button
+              ><button id="pauseTurn" class="control-button">Pause</button
+              ><button id="resumeTurn" class="control-button hidden">
+                Resume</button
+              ><button id="compactTurn" class="control-button">Compact</button
+              ><button id="stopRun" class="control-button danger-control">
+                Stop
+              </button>
+            </div>
+            <button id="modelPill" class="model-pill">
+              <span id="connectionDot" class="connection-dot"></span
+              ><span id="modelLabel">连接 Ollama</span
+              ><span data-icon="chevron"></span></button
+            ><button
+              id="sessionMenu"
+              class="icon-button hidden"
+              aria-label="编辑当前会话"
+            >
+              <span data-icon="more"></span>
+            </button>
+          </div>
+        </header>
 
-    <section id="settingsPage" class="page content-page hidden"><div class="page-heading"><div><h1>让工作区，适合你。</h1><p>连接已有模型，设置每轮执行的范围。</p></div></div><div class="settings-layout"><section class="panel settings-panel"><div class="panel-heading"><h2>模型连接</h2></div><label for="provider">模型提供方</label><select id="provider"><option value="ollama">Ollama · 本地模型</option><option value="openai">OpenAI · 环境变量 API Key</option><option value="chatgpt">ChatGPT · Myth OAuth</option></select><div id="chatgptAuthPanel" class="auth-panel hidden"><div><strong id="chatgptAuthState">未连接 ChatGPT</strong><small id="chatgptAuthMeta">OAuth 凭据由 Myth 保存到系统安全凭据库，不进入项目数据库。</small></div><div class="button-row"><button id="chatgptLogin" type="button" class="secondary">Continue with ChatGPT</button><button id="chatgptLogout" type="button" class="text-button hidden">退出 ChatGPT</button></div></div><label for="ollamaUrl">Ollama 服务地址</label><input id="ollamaUrl" value="http://127.0.0.1:11434"><div class="field-with-action"><div><label for="model">模型名称</label><input id="model" list="modelOptions" placeholder="检查连接后选择本地模型"><datalist id="modelOptions"></datalist></div><button id="checkConnection" class="secondary">检查连接</button></div><div id="connectionResult" class="connection-result"></div><div class="two-fields"><div><label for="maxSteps">每轮最多步骤</label><input id="maxSteps" type="number" min="2" max="32" value="12"></div><div><label for="maxTokens">每步输出 Token</label><input id="maxTokens" type="number" min="128" max="8192" value="2048"></div></div><div class="two-fields"><div><label for="numCtx">Ollama 上下文 Token</label><input id="numCtx" type="number" min="2048" max="262144" value="8192"></div><div><label for="temperature">Temperature</label><input id="temperature" type="number" min="0" max="2" step="0.1" value="0"></div></div><label class="check-label"><input id="thinking" type="checkbox">启用模型思考（需模型支持）</label><div class="settings-foot"><button id="saveSettings" class="primary">保存设置</button><span id="settingsSaved" class="muted"></span></div></section><div><section class="panel"><div class="panel-heading"><h2>Agent 可以做什么</h2><span data-icon="spark"></span></div><div class="capability-list"><div><span data-icon="chat"></span><span>多轮对话与澄清</span></div><div><span data-icon="folder"></span><span>浏览、读取项目文件</span></div><div><span data-icon="book"></span><span>检索共享和项目知识</span></div><div><span data-icon="pen"></span><span>写作、生成文件、精确修改副本</span></div><div><span data-icon="code"></span><span>执行受限数学计算</span></div></div></section><section class="panel quiet-panel"><h3>关于数据</h3><p>会话、项目与知识库保存在本机。关联目录仅供读取，修改与生成结果保存在工作区副本中。</p><p>执行可以 Stop、Resume 和核对。模型答复仍需判断；只有文件执行结果有对应收据。</p></section></div></div></section>
-  </main>
+        <section id="chatPage" class="chat-page page">
+          <div id="chatScroll" class="chat-scroll">
+            <div id="welcome" class="welcome">
+              <div class="welcome-mark" aria-hidden="true">
+                <span></span><span></span><span></span><span></span>
+              </div>
+              <h1>把任务交给 Myth。<br /><em>过程与证据，都看得见。</em></h1>
+              <p>
+                对话是入口，Runtime
+                是底座。你可以直接讨论，也可以关联项目、资料和受控工具。
+              </p>
+              <div class="suggestions">
+                <button
+                  data-suggestion="请帮我把一个模糊想法整理成可执行计划。先指出最关键的不确定性。"
+                >
+                  <strong>梳理任务</strong><small>从模糊目标到下一步</small>
+                </button>
+                <button data-action="projects">
+                  <strong>理解项目</strong
+                  ><small>读取本地文件与项目上下文</small>
+                </button>
+                <button data-action="knowledge">
+                  <strong>基于资料回答</strong
+                  ><small>检索本地知识并保留来源</small>
+                </button>
+              </div>
+              <div id="welcomeConnection" class="welcome-connection hidden">
+                <span data-icon="info"></span><span>模型还未连接。</span
+                ><a href="#settings">打开设置</a>
+              </div>
+            </div>
+            <div id="thread" class="thread hidden"></div>
+          </div>
+          <div class="composer-area">
+            <div id="turnNotice" class="turn-notice hidden" role="status"></div>
+            <div id="attachmentChips" class="attachment-chips"></div>
+            <form id="composer" class="composer">
+              <textarea
+                id="prompt"
+                rows="1"
+                aria-label="消息"
+                placeholder="给 Myth 一个任务，或继续当前对话…"
+              ></textarea>
+              <div class="composer-bottom">
+                <div class="composer-options">
+                  <button
+                    id="attachButton"
+                    type="button"
+                    class="icon-button"
+                    aria-label="附加文本资料"
+                  >
+                    <span data-icon="clip"></span></button
+                  ><label class="project-select-label"
+                    ><span data-icon="folder"></span
+                    ><select id="chatProject" aria-label="对话所属项目">
+                      <option value="">独立对话</option>
+                    </select></label
+                  ><label class="project-select-label"
+                    ><span data-icon="spark"></span
+                    ><select id="chatGoal" aria-label="长期 Goal">
+                      <option value="">不绑定 Goal</option>
+                    </select></label
+                  ><button
+                    id="quickGoal"
+                    type="button"
+                    class="icon-button"
+                    aria-label="创建长期 Goal"
+                  >
+                    <span data-icon="plus"></span></button
+                  ><span class="agent-mode"
+                    ><span class="agent-dot"></span>Agent</span
+                  >
+                </div>
+                <div class="send-area">
+                  <span id="inputHint">Enter 发送</span
+                  ><button
+                    id="stopTurn"
+                    type="button"
+                    class="stop-button hidden"
+                    aria-label="停止当前轮次"
+                  >
+                    ■</button
+                  ><button
+                    id="send"
+                    type="submit"
+                    class="send-button"
+                    aria-label="发送消息"
+                  >
+                    <span data-icon="arrow"></span>
+                  </button>
+                </div>
+              </div>
+            </form>
+            <input
+              id="chatFiles"
+              type="file"
+              accept=".txt,.md,.py,.json,.csv,.yaml,.yml,.html,.js,.ts"
+              multiple
+              hidden
+            />
+          </div>
+        </section>
 
-  <aside id="runtimeInspector" class="inspector" aria-label="Runtime Inspector">
-    <div class="inspector-head">
-      <div><span class="inspector-title">Runtime</span><strong id="inspectorState">IDLE</strong></div>
-      <span id="inspectorPulse" class="inspector-pulse"></span>
+        <section id="sessionsPage" class="page content-page hidden">
+          <div class="page-heading">
+            <div>
+              <h1>每次思考，都有来处。</h1>
+              <p>回到之前的讨论，接着往前。</p>
+            </div>
+            <button id="newSession" class="primary">
+              <span data-icon="plus"></span>新建对话
+            </button>
+          </div>
+          <div class="list-toolbar">
+            <div class="tab-group">
+              <button id="activeSessions" class="selected">全部会话</button
+              ><button id="archivedSessions">已归档</button>
+            </div>
+            <div class="search-field">
+              <span data-icon="search"></span
+              ><input
+                id="sessionSearch"
+                placeholder="搜索会话…"
+                aria-label="搜索会话"
+              />
+            </div>
+          </div>
+          <div id="sessionCards" class="session-cards"></div>
+        </section>
+
+        <section id="projectsPage" class="page content-page hidden">
+          <div class="page-heading">
+            <div>
+              <h1>把相关的工作，放在一起。</h1>
+              <p>统一指令、文件和资料，让对话保持上下文。</p>
+            </div>
+            <button id="createProject" class="primary">
+              <span data-icon="plus"></span>新建项目
+            </button>
+          </div>
+          <div id="projectCards" class="project-cards"></div>
+        </section>
+        <section id="projectPage" class="page content-page hidden">
+          <a href="#projects" class="back-link">← 所有项目</a>
+          <div class="page-heading">
+            <div>
+              <h1 id="projectName"></h1>
+              <p id="projectDescription"></p>
+            </div>
+            <div class="button-row">
+              <button id="editProject" class="secondary">编辑项目</button
+              ><button id="projectChat" class="primary">
+                <span data-icon="chat"></span>开始对话
+              </button>
+            </div>
+          </div>
+          <div class="project-layout">
+            <div>
+              <section class="panel">
+                <div class="panel-heading">
+                  <h2>项目指令</h2>
+                  <span data-icon="spark"></span>
+                </div>
+                <p id="projectInstructions" class="pre-text"></p>
+              </section>
+              <section class="panel">
+                <div class="panel-heading">
+                  <h2>项目会话</h2>
+                  <span id="projectSessionCount" class="count-badge"></span>
+                </div>
+                <div id="projectSessions"></div>
+              </section>
+            </div>
+            <div>
+              <section class="panel">
+                <div class="panel-heading">
+                  <h2>本地文件</h2>
+                  <span data-icon="folder"></span>
+                </div>
+                <p id="projectRoot" class="muted path-label"></p>
+                <div id="projectFiles"></div>
+              </section>
+              <section class="panel">
+                <div class="panel-heading">
+                  <h2>项目资料</h2>
+                  <button id="projectImport" class="text-button">
+                    ＋ 添加
+                  </button>
+                </div>
+                <div id="projectDocuments"></div>
+              </section>
+            </div>
+          </div>
+        </section>
+
+        <section id="knowledgePage" class="page content-page hidden">
+          <div class="page-heading">
+            <div>
+              <h1>给回答，多一点依据。</h1>
+              <p>导入文本与 Markdown，自动分块，在对话中检索并引用。</p>
+            </div>
+            <button id="importKnowledge" class="primary">
+              <span data-icon="plus"></span>导入资料
+            </button>
+          </div>
+          <div class="knowledge-stats" id="knowledgeStats"></div>
+          <div class="list-toolbar">
+            <select id="knowledgeProject" aria-label="知识库项目范围">
+              <option value="">共享资料</option>
+            </select>
+            <div class="search-field">
+              <span data-icon="search"></span
+              ><input
+                id="knowledgeSearch"
+                placeholder="检索知识内容…"
+                aria-label="检索知识内容"
+              />
+            </div>
+            <button id="searchKnowledge" class="secondary">检索</button>
+          </div>
+          <div id="searchResults" class="hidden"></div>
+          <div id="documentList" class="document-list"></div>
+        </section>
+
+        <section id="goalsPage" class="page content-page hidden">
+          <div class="page-heading">
+            <div>
+              <h1>让工作接着往前。</h1>
+              <p>
+                保存目标和进度，安排下一次工作。计划在 Myth 服务运行时自动唤醒。
+              </p>
+            </div>
+            <button id="createGoal" class="primary">新建目标</button>
+          </div>
+          <p id="schedulerStatus" class="muted" role="status"></p>
+          <div id="goalCards" class="goal-cards"></div>
+        </section>
+        <section id="runtimePage" class="page content-page hidden">
+          <div class="page-heading">
+            <div>
+              <h1>固定事实与边界，不固定智能怎么组织。</h1>
+              <p>
+                Myth 不是一条必须逐层经过的流水线。Core 保持稳定；Domains
+                正交协作；Intent Pick / Information Resolution / Decision /
+                Routing / Workflow / Multi-Agent 都是可插拔
+                Strategy；模型、MCP、A2A、存储与执行器都留在 Adapter 外圈。
+              </p>
+            </div>
+            <a class="secondary" href="#chat">回到对话</a>
+          </div>
+          <div class="platform-legend">
+            <span><i class="state-dot hardened"></i> hardened · 已强化</span>
+            <span><i class="state-dot usable"></i> usable · 可使用</span>
+            <span><i class="state-dot connected"></i> connected · 已接通</span>
+            <span><i class="state-dot exists"></i> exists · 已存在</span>
+            <span><i class="state-dot planned"></i> planned · 仅规划</span>
+          </div>
+          <section class="architecture-section">
+            <div class="architecture-heading">
+              <h2>Core</h2>
+              <p>
+                Goal / Run / Action / Attempt / Ticket / Receipt / Artifact /
+                Verification
+              </p>
+            </div>
+            <div id="runtimeCore" class="platform-grid"></div>
+          </section>
+          <section class="architecture-section">
+            <div class="architecture-heading">
+              <h2>Domains</h2>
+              <p>
+                统筹、控制、执行、能力、状态、上下文、记忆、个人状态、验证与观测是正交职责，不是上下层。
+              </p>
+            </div>
+            <div id="platformLayers" class="platform-grid"></div>
+          </section>
+          <section class="architecture-section">
+            <div class="architecture-heading">
+              <h2>Strategies</h2>
+              <p>
+                Intent Pick 先决定值得走哪条处理路径；Information Resolution
+                决定信息展开到 L0/L1/L2 哪一级；其余 Direct、Agent
+                Loop、Routing、Workflow、Parallel、Multi-Agent 等按任务组合。
+              </p>
+            </div>
+            <div id="runtimeStrategies" class="platform-grid"></div>
+          </section>
+          <section class="architecture-section">
+            <div class="architecture-heading">
+              <h2>Adapters</h2>
+              <p>
+                OpenAI / Ollama / MCP / A2A / Browser / Shell / SQLite 等通过
+                Ports 接入，不进入 Core。
+              </p>
+            </div>
+            <div id="runtimeAdapters" class="platform-grid"></div>
+          </section>
+          <section class="panel platform-capabilities">
+            <div class="panel-heading">
+              <div><h2>能力存在，不等于拥有执行权。</h2></div>
+              <span id="capabilityCount" class="count-badge"></span>
+            </div>
+            <div id="platformCapabilities" class="capability-matrix"></div>
+          </section>
+        </section>
+
+        <section id="settingsPage" class="page content-page hidden">
+          <div class="page-heading">
+            <div>
+              <h1>让工作区，适合你。</h1>
+              <p>连接已有模型，设置每轮执行的范围。</p>
+            </div>
+          </div>
+          <div class="settings-layout">
+            <section class="panel settings-panel">
+              <div class="panel-heading"><h2>模型连接</h2></div>
+              <label for="provider">模型提供方</label
+              ><select id="provider">
+                <option value="ollama">Ollama · 本地模型</option>
+                <option value="openai">OpenAI · 环境变量 API Key</option>
+                <option value="chatgpt">ChatGPT · Myth OAuth</option>
+              </select>
+              <div id="chatgptAuthPanel" class="auth-panel hidden">
+                <div>
+                  <strong id="chatgptAuthState">未连接 ChatGPT</strong
+                  ><small id="chatgptAuthMeta"
+                    >OAuth 凭据由 Myth
+                    保存到系统安全凭据库，不进入项目数据库。</small
+                  >
+                </div>
+                <div class="button-row">
+                  <button id="chatgptLogin" type="button" class="secondary">
+                    Continue with ChatGPT</button
+                  ><button
+                    id="chatgptLogout"
+                    type="button"
+                    class="text-button hidden"
+                  >
+                    退出 ChatGPT
+                  </button>
+                </div>
+              </div>
+              <label for="ollamaUrl">Ollama 服务地址</label
+              ><input id="ollamaUrl" value="http://127.0.0.1:11434" />
+              <div class="field-with-action">
+                <div>
+                  <label for="model">模型名称</label
+                  ><input
+                    id="model"
+                    list="modelOptions"
+                    placeholder="检查连接后选择本地模型"
+                  /><datalist id="modelOptions"></datalist>
+                </div>
+                <button id="checkConnection" class="secondary">检查连接</button>
+              </div>
+              <div id="connectionResult" class="connection-result"></div>
+              <div class="two-fields">
+                <div>
+                  <label for="maxSteps">每轮最多步骤</label
+                  ><input
+                    id="maxSteps"
+                    type="number"
+                    min="2"
+                    max="32"
+                    value="12"
+                  />
+                </div>
+                <div>
+                  <label for="maxTokens">每步输出 Token</label
+                  ><input
+                    id="maxTokens"
+                    type="number"
+                    min="128"
+                    max="8192"
+                    value="2048"
+                  />
+                </div>
+              </div>
+              <div class="two-fields">
+                <div>
+                  <label for="numCtx">Ollama 上下文 Token</label
+                  ><input
+                    id="numCtx"
+                    type="number"
+                    min="2048"
+                    max="262144"
+                    value="8192"
+                  />
+                </div>
+                <div>
+                  <label for="temperature">Temperature</label
+                  ><input
+                    id="temperature"
+                    type="number"
+                    min="0"
+                    max="2"
+                    step="0.1"
+                    value="0"
+                  />
+                </div>
+              </div>
+              <label class="check-label"
+                ><input
+                  id="thinking"
+                  type="checkbox"
+                />启用模型思考（需模型支持）</label
+              >
+              <div class="settings-foot">
+                <button id="saveSettings" class="primary">保存设置</button
+                ><span id="settingsSaved" class="muted"></span>
+              </div>
+            </section>
+            <div>
+              <section class="panel">
+                <div class="panel-heading">
+                  <h2>Agent 可以做什么</h2>
+                  <span data-icon="spark"></span>
+                </div>
+                <div class="capability-list">
+                  <div>
+                    <span data-icon="chat"></span><span>多轮对话与澄清</span>
+                  </div>
+                  <div>
+                    <span data-icon="folder"></span
+                    ><span>浏览、读取项目文件</span>
+                  </div>
+                  <div>
+                    <span data-icon="book"></span
+                    ><span>检索共享和项目知识</span>
+                  </div>
+                  <div>
+                    <span data-icon="pen"></span
+                    ><span>写作、生成文件、精确修改副本</span>
+                  </div>
+                  <div>
+                    <span data-icon="code"></span><span>执行受限数学计算</span>
+                  </div>
+                </div>
+              </section>
+              <section class="panel quiet-panel">
+                <h3>关于数据</h3>
+                <p>
+                  会话、项目与知识库保存在本机。关联目录仅供读取，修改与生成结果保存在工作区副本中。
+                </p>
+                <p>
+                  执行可以 Stop、Resume
+                  和核对。模型答复仍需判断；只有文件执行结果有对应收据。
+                </p>
+              </section>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <aside
+        id="runtimeInspector"
+        class="inspector"
+        aria-label="Runtime Inspector"
+      >
+        <div class="inspector-head">
+          <div>
+            <span class="inspector-title">Runtime</span
+            ><strong id="inspectorState">IDLE</strong>
+          </div>
+          <span id="inspectorPulse" class="inspector-pulse"></span>
+        </div>
+        <div class="inspector-scroll">
+          <section class="inspector-section">
+            <div class="inspector-label">Goal</div>
+            <div id="inspectorGoal" class="context-facts">
+              <div class="inspector-empty">暂无长期 Goal</div>
+            </div>
+          </section>
+          <section class="inspector-section">
+            <div class="inspector-label">Execution flow</div>
+            <div id="executionSpine" class="execution-spine">
+              <div class="spine-empty">
+                开始一个任务后，这里显示决策与执行事实。
+              </div>
+            </div>
+          </section>
+          <section class="inspector-section">
+            <div class="inspector-label">Recovery</div>
+            <div id="inspectorRecovery" class="context-facts">
+              <div class="inspector-empty">暂无恢复状态</div>
+            </div>
+          </section>
+          <section class="inspector-section">
+            <div class="inspector-label">Trajectory</div>
+            <div id="inspectorTrajectory" class="trajectory-list">
+              <div class="inspector-empty">暂无轨迹</div>
+            </div>
+          </section>
+          <section class="inspector-section">
+            <div class="inspector-label">Tokens</div>
+            <div id="inspectorTokens" class="context-facts">
+              <div class="inspector-empty">暂无 Token 使用</div>
+            </div>
+          </section>
+          <section class="inspector-section">
+            <div class="inspector-label">Context window</div>
+            <div id="inspectorContext" class="context-facts">
+              <div class="inspector-empty">暂无活动上下文</div>
+            </div>
+          </section>
+          <section class="inspector-section">
+            <div class="inspector-label">Tool calls</div>
+            <div id="inspectorTools" class="tool-observatory">
+              <div class="inspector-empty">暂无工具调用</div>
+            </div>
+          </section>
+          <section class="inspector-section">
+            <div class="inspector-label">Control</div>
+            <div id="inspectorControl" class="context-facts">
+              <div class="inspector-empty">暂无 Control state</div>
+            </div>
+          </section>
+          <section class="inspector-section">
+            <div class="inspector-label">Budget</div>
+            <div id="inspectorBudgets" class="budget-list">
+              <div class="inspector-empty">暂无运行预算</div>
+            </div>
+          </section>
+          <section class="inspector-section">
+            <div class="inspector-label">Architecture</div>
+            <div id="inspectorPlatform" class="platform-mini"></div>
+          </section>
+        </div>
+        <div class="inspector-foot">
+          <button id="inspectorClose" class="secondary inspector-close">
+            关闭 Runtime</button
+          ><span>Unknown stays unknown.</span
+          ><a href="#runtime">打开完整 Runtime</a>
+        </div>
+      </aside>
     </div>
-    <div class="inspector-scroll">
-      <section class="inspector-section"><div class="inspector-label">Goal</div><div id="inspectorGoal" class="context-facts"><div class="inspector-empty">暂无长期 Goal</div></div></section>
-      <section class="inspector-section"><div class="inspector-label">Execution flow</div><div id="executionSpine" class="execution-spine"><div class="spine-empty">开始一个任务后，这里显示决策与执行事实。</div></div></section>
-      <section class="inspector-section"><div class="inspector-label">Recovery</div><div id="inspectorRecovery" class="context-facts"><div class="inspector-empty">暂无恢复状态</div></div></section>
-      <section class="inspector-section"><div class="inspector-label">Trajectory</div><div id="inspectorTrajectory" class="trajectory-list"><div class="inspector-empty">暂无轨迹</div></div></section>
-      <section class="inspector-section"><div class="inspector-label">Tokens</div><div id="inspectorTokens" class="context-facts"><div class="inspector-empty">暂无 Token 使用</div></div></section>
-      <section class="inspector-section"><div class="inspector-label">Context window</div><div id="inspectorContext" class="context-facts"><div class="inspector-empty">暂无活动上下文</div></div></section>
-      <section class="inspector-section"><div class="inspector-label">Tool calls</div><div id="inspectorTools" class="tool-observatory"><div class="inspector-empty">暂无工具调用</div></div></section>
-      <section class="inspector-section"><div class="inspector-label">Control</div><div id="inspectorControl" class="context-facts"><div class="inspector-empty">暂无 Control state</div></div></section>
-      <section class="inspector-section"><div class="inspector-label">Budget</div><div id="inspectorBudgets" class="budget-list"><div class="inspector-empty">暂无运行预算</div></div></section>
-      <section class="inspector-section"><div class="inspector-label">Architecture</div><div id="inspectorPlatform" class="platform-mini"></div></section>
-    </div>
-    <div class="inspector-foot"><button id="inspectorClose" class="secondary inspector-close">关闭 Runtime</button><span>Unknown stays unknown.</span><a href="#runtime">打开完整 Runtime</a></div>
-  </aside>
-</div>
-<dialog id="goalDialog"><form id="goalForm"><div class="dialog-heading"><h2>新建长期 Goal</h2><button type="button" data-close="goalDialog" class="icon-button" aria-label="关闭 Goal 表单">×</button></div><p class="muted">Goal 跨会话保存当前状态、下一步与等待项。</p><label for="goalTitleInput">目标</label><input id="goalTitleInput" required maxlength="200" placeholder="例如：持续推进 Myth 的真实任务基线"><label for="goalDescriptionInput">说明</label><textarea id="goalDescriptionInput" rows="4" placeholder="完成标准、范围和长期约束"></textarea><div class="dialog-foot"><button type="button" data-close="goalDialog" class="secondary">取消</button><button type="submit" class="primary">创建并绑定</button></div></form></dialog>
-<dialog id="scheduleDialog"><form id="scheduleForm">
-  <div class="dialog-heading"><h2>安排下一次工作</h2><button type="button" data-close="scheduleDialog" class="icon-button" aria-label="关闭计划表单">×</button></div>
-  <p id="scheduleGoalTitle" class="muted"></p>
-  <label for="scheduleSession">工作会话</label><select id="scheduleSession" required></select>
-  <label for="schedulePrompt">到期执行的任务</label><textarea id="schedulePrompt" rows="4" required placeholder="明确要完成的下一步和验收标准"></textarea>
-  <label for="scheduleDue">首次开始时间（本地时间）</label><input id="scheduleDue" type="datetime-local" required>
-  <label for="scheduleInterval">重复</label><select id="scheduleInterval"><option value="">仅一次</option><option value="600">每 10 分钟</option><option value="3600">每小时</option><option value="86400">每天</option></select>
-  <p id="scheduleModel" class="muted"></p><p class="muted">使用当前选定的模型设置。会话或目标有未完成工作时等待；服务关闭期间的重复计划合并为一次。暂停计划只影响后续工作，当前轮次可在对话中停止。</p>
-  <div class="dialog-foot"><button type="button" data-close="scheduleDialog" class="secondary">取消</button><button type="submit" class="primary">保存计划</button></div>
-</form></dialog>
-<dialog id="projectDialog"><form id="projectForm"><div class="dialog-heading"><h2 id="projectDialogTitle">新建项目</h2><button type="button" data-close="projectDialog" class="icon-button" aria-label="关闭项目表单">×</button></div><p class="muted">为相关工作提供同一份上下文。</p><label for="projectNameInput">项目名称</label><input id="projectNameInput" required maxlength="100" placeholder="例如：Myth 产品开发"><label for="projectDescriptionInput">简介</label><input id="projectDescriptionInput" placeholder="这个项目要做什么"><label for="projectRootInput">本地目录 <span class="muted">选填，赋予文件读取范围</span></label><input id="projectRootInput" placeholder="C:\projects\myth"><label for="projectInstructionsInput">项目指令</label><textarea id="projectInstructionsInput" rows="5" placeholder="例如：使用中文回答，先理解代码，再提出修改建议。"></textarea><div class="dialog-foot"><button type="button" data-close="projectDialog" class="secondary">取消</button><button type="submit" class="primary">保存项目</button></div></form></dialog>
-<dialog id="knowledgeDialog"><form id="knowledgeForm"><div class="dialog-heading"><h2>导入知识</h2><button type="button" data-close="knowledgeDialog" class="icon-button" aria-label="关闭知识表单">×</button></div><label class="upload-zone" for="knowledgeFile"><span data-icon="upload"></span><strong>选择文本文件</strong><small>TXT / MD / 代码 / JSON · 每个文件最多 1 MB</small><input id="knowledgeFile" type="file" accept=".txt,.md,.py,.json,.csv,.yaml,.yml,.html,.js,.ts" multiple></label><label for="documentTitle">资料名称</label><input id="documentTitle" required placeholder="例如：产品需求说明"><label for="documentProject">保存到</label><select id="documentProject"><option value="">共享知识库</option></select><label for="documentContent">内容 <span class="muted">也可以直接粘贴</span></label><textarea id="documentContent" rows="7" required placeholder="在这里粘贴你的资料…"></textarea><div class="dialog-foot"><button type="button" data-close="knowledgeDialog" class="secondary">取消</button><button type="submit" class="primary">导入并索引</button></div></form></dialog>
-<dialog id="sessionDialog"><form id="sessionForm"><div class="dialog-heading"><h2>会话设置</h2><button type="button" data-close="sessionDialog" class="icon-button" aria-label="关闭会话设置">×</button></div><label for="sessionTitleInput">会话名称</label><input id="sessionTitleInput" required maxlength="100"><label for="sessionProjectInput">所属项目</label><select id="sessionProjectInput"><option value="">独立会话</option></select><label class="check-label"><input id="sessionPinned" type="checkbox">置顶会话</label><div class="dialog-foot"><button id="archiveSession" type="button" class="text-button danger">归档会话</button><a id="sessionExport" class="text-button" download="myth-conversation.md">导出会话 ↗</a><button type="submit" class="primary">保存</button></div></form></dialog>
-<dialog id="documentDialog" class="document-dialog"><div class="dialog-heading"><h2 id="previewTitle"></h2><button type="button" data-close="documentDialog" class="icon-button" aria-label="关闭资料预览">×</button></div><div id="previewMeta" class="muted"></div><pre id="previewContent"></pre></dialog>
-<dialog id="controlDialog"><form id="controlForm"><div class="dialog-heading"><h2>当前 Run</h2><button type="button" data-close="controlDialog" class="icon-button" aria-label="关闭控制面">×</button></div><p class="muted">只改变后续安全点。已经发出的模型或工具 Ticket 不会被伪装成“没发生”。</p><label for="steerInput">Steering</label><textarea id="steerInput" rows="3" placeholder="例如：先不要改代码，先比较两种架构方案。"></textarea><button id="applySteer" type="button" class="secondary">应用 Steering</button><label for="turnModelInput">下一步模型</label><input id="turnModelInput" list="modelOptions" placeholder="模型名称"><button id="applyModelSwitch" type="button" class="secondary">切换模型</button><label for="turnThinkingInput">Thinking</label><select id="turnThinkingInput"><option value="default">default</option><option value="on">on</option><option value="off">off</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option></select><button id="applyThinkingSwitch" type="button" class="secondary">切换 Thinking</button><div class="dialog-foot"><span id="controlRevision" class="muted"></span><button type="button" data-close="controlDialog" class="primary">完成</button></div></form></dialog>
-<div id="toast" class="toast hidden" role="alert"></div><script src="/app.js"></script><script src="/inspector.js"></script><script src="/goals.js"></script>
-</body></html>
+    <dialog id="goalDialog">
+      <form id="goalForm">
+        <div class="dialog-heading">
+          <h2>新建长期 Goal</h2>
+          <button
+            type="button"
+            data-close="goalDialog"
+            class="icon-button"
+            aria-label="关闭 Goal 表单"
+          >
+            ×
+          </button>
+        </div>
+        <p class="muted">Goal 跨会话保存当前状态、下一步与等待项。</p>
+        <label for="goalTitleInput">目标</label
+        ><input
+          id="goalTitleInput"
+          required
+          maxlength="200"
+          placeholder="例如：持续推进 Myth 的真实任务基线"
+        /><label for="goalDescriptionInput">说明</label
+        ><textarea
+          id="goalDescriptionInput"
+          rows="4"
+          placeholder="完成标准、范围和长期约束"
+        ></textarea>
+        <div class="dialog-foot">
+          <button type="button" data-close="goalDialog" class="secondary">
+            取消</button
+          ><button type="submit" class="primary">创建并绑定</button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="scheduleDialog">
+      <form id="scheduleForm">
+        <div class="dialog-heading">
+          <h2>安排下一次工作</h2>
+          <button
+            type="button"
+            data-close="scheduleDialog"
+            class="icon-button"
+            aria-label="关闭计划表单"
+          >
+            ×
+          </button>
+        </div>
+        <p id="scheduleGoalTitle" class="muted"></p>
+        <label for="scheduleSession">工作会话</label
+        ><select id="scheduleSession" required></select>
+        <label for="schedulePrompt">到期执行的任务</label
+        ><textarea
+          id="schedulePrompt"
+          rows="4"
+          required
+          placeholder="明确要完成的下一步和验收标准"
+        ></textarea>
+        <label for="scheduleDue">首次开始时间（本地时间）</label
+        ><input id="scheduleDue" type="datetime-local" required />
+        <label for="scheduleInterval">重复</label
+        ><select id="scheduleInterval">
+          <option value="">仅一次</option>
+          <option value="600">每 10 分钟</option>
+          <option value="3600">每小时</option>
+          <option value="86400">每天</option>
+        </select>
+        <p id="scheduleModel" class="muted"></p>
+        <p class="muted">
+          使用当前选定的模型设置。会话或目标有未完成工作时等待；服务关闭期间的重复计划合并为一次。暂停计划只影响后续工作，当前轮次可在对话中停止。
+        </p>
+        <div class="dialog-foot">
+          <button type="button" data-close="scheduleDialog" class="secondary">
+            取消</button
+          ><button type="submit" class="primary">保存计划</button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="projectDialog">
+      <form id="projectForm">
+        <div class="dialog-heading">
+          <h2 id="projectDialogTitle">新建项目</h2>
+          <button
+            type="button"
+            data-close="projectDialog"
+            class="icon-button"
+            aria-label="关闭项目表单"
+          >
+            ×
+          </button>
+        </div>
+        <p class="muted">为相关工作提供同一份上下文。</p>
+        <label for="projectNameInput">项目名称</label
+        ><input
+          id="projectNameInput"
+          required
+          maxlength="100"
+          placeholder="例如：Myth 产品开发"
+        /><label for="projectDescriptionInput">简介</label
+        ><input
+          id="projectDescriptionInput"
+          placeholder="这个项目要做什么"
+        /><label for="projectRootInput"
+          >本地目录 <span class="muted">选填，赋予文件读取范围</span></label
+        ><input id="projectRootInput" placeholder="C:\projects\myth" /><label
+          for="projectInstructionsInput"
+          >项目指令</label
+        ><textarea
+          id="projectInstructionsInput"
+          rows="5"
+          placeholder="例如：使用中文回答，先理解代码，再提出修改建议。"
+        ></textarea>
+        <div class="dialog-foot">
+          <button type="button" data-close="projectDialog" class="secondary">
+            取消</button
+          ><button type="submit" class="primary">保存项目</button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="knowledgeDialog">
+      <form id="knowledgeForm">
+        <div class="dialog-heading">
+          <h2>导入知识</h2>
+          <button
+            type="button"
+            data-close="knowledgeDialog"
+            class="icon-button"
+            aria-label="关闭知识表单"
+          >
+            ×
+          </button>
+        </div>
+        <label class="upload-zone" for="knowledgeFile"
+          ><span data-icon="upload"></span><strong>选择文本文件</strong
+          ><small>TXT / MD / 代码 / JSON · 每个文件最多 1 MB</small
+          ><input
+            id="knowledgeFile"
+            type="file"
+            accept=".txt,.md,.py,.json,.csv,.yaml,.yml,.html,.js,.ts"
+            multiple /></label
+        ><label for="documentTitle">资料名称</label
+        ><input
+          id="documentTitle"
+          required
+          placeholder="例如：产品需求说明"
+        /><label for="documentProject">保存到</label
+        ><select id="documentProject">
+          <option value="">共享知识库</option></select
+        ><label for="documentContent"
+          >内容 <span class="muted">也可以直接粘贴</span></label
+        ><textarea
+          id="documentContent"
+          rows="7"
+          required
+          placeholder="在这里粘贴你的资料…"
+        ></textarea>
+        <div class="dialog-foot">
+          <button type="button" data-close="knowledgeDialog" class="secondary">
+            取消</button
+          ><button type="submit" class="primary">导入并索引</button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="sessionDialog">
+      <form id="sessionForm">
+        <div class="dialog-heading">
+          <h2>会话设置</h2>
+          <button
+            type="button"
+            data-close="sessionDialog"
+            class="icon-button"
+            aria-label="关闭会话设置"
+          >
+            ×
+          </button>
+        </div>
+        <label for="sessionTitleInput">会话名称</label
+        ><input id="sessionTitleInput" required maxlength="100" /><label
+          for="sessionProjectInput"
+          >所属项目</label
+        ><select id="sessionProjectInput">
+          <option value="">独立会话</option></select
+        ><label class="check-label"
+          ><input id="sessionPinned" type="checkbox" />置顶会话</label
+        >
+        <div class="dialog-foot">
+          <button id="archiveSession" type="button" class="text-button danger">
+            归档会话</button
+          ><a
+            id="sessionExport"
+            class="text-button"
+            download="myth-conversation.md"
+            >导出会话 ↗</a
+          ><button type="submit" class="primary">保存</button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="documentDialog" class="document-dialog">
+      <div class="dialog-heading">
+        <h2 id="previewTitle"></h2>
+        <button
+          type="button"
+          data-close="documentDialog"
+          class="icon-button"
+          aria-label="关闭资料预览"
+        >
+          ×
+        </button>
+      </div>
+      <div id="previewMeta" class="muted"></div>
+      <pre id="previewContent"></pre>
+    </dialog>
+    <dialog id="controlDialog">
+      <form id="controlForm">
+        <div class="dialog-heading">
+          <h2>当前 Run</h2>
+          <button
+            type="button"
+            data-close="controlDialog"
+            class="icon-button"
+            aria-label="关闭控制面"
+          >
+            ×
+          </button>
+        </div>
+        <p class="muted">
+          只改变后续安全点。已经发出的模型或工具 Ticket 不会被伪装成“没发生”。
+        </p>
+        <label for="steerInput">Steering</label
+        ><textarea
+          id="steerInput"
+          rows="3"
+          placeholder="例如：先不要改代码，先比较两种架构方案。"
+        ></textarea
+        ><button id="applySteer" type="button" class="secondary">
+          应用 Steering</button
+        ><label for="turnModelInput">下一步模型</label
+        ><input
+          id="turnModelInput"
+          list="modelOptions"
+          placeholder="模型名称"
+        /><button id="applyModelSwitch" type="button" class="secondary">
+          切换模型</button
+        ><label for="turnThinkingInput">Thinking</label
+        ><select id="turnThinkingInput">
+          <option value="default">default</option>
+          <option value="on">on</option>
+          <option value="off">off</option>
+          <option value="low">low</option>
+          <option value="medium">medium</option>
+          <option value="high">high</option></select
+        ><button id="applyThinkingSwitch" type="button" class="secondary">
+          切换 Thinking
+        </button>
+        <div class="dialog-foot">
+          <span id="controlRevision" class="muted"></span
+          ><button type="button" data-close="controlDialog" class="primary">
+            完成
+          </button>
+        </div>
+      </form>
+    </dialog>
+    <div id="toast" class="toast hidden" role="alert"></div>
+    <!-- 装配顺序是依赖合同：主助手与 state 先定义，再装配观测区和 Goal 入口。 -->
+    <script src="/app.js"></script>
+    <script src="/inspector.js"></script>
+    <script src="/goals.js"></script>
+  </body>
+</html>

@@ -1,15 +1,24 @@
-"""工作区持久适配器：项目、会话、消息、知识与对话执行状态的原子所有者。"""
+"""项目、会话、知识与对话步骤的 SQLite 状态所有者。
+协调 Turn 的事务准入和恢复游标；Goal 写入通过个人仓储加入同一事务，检索/快照是数据投影而非权限。"""
+
 from __future__ import annotations
 import json
 import time
 import uuid
 from contextlib import nullcontext
-from ..conversation import chunks, rank_chunks, score_chunk
+from ..conversation import chunks, score_chunk
 from ..domain import canonical_json, digest_json, IdentityConflict, BudgetExceeded
 from ..decision_runtime import DecisionRuntime
 from ..strategies import RuleIntentPicker, RuleResolutionController
 
-SCHEMA="""
+# SCHEMA：本仓储拥有的表、索引与约束；升级补齐旧字段，删除列须有迁移证据。
+# projects.root 是明确项目范围；archived/pinned 只管理未来可见性，不删除既有引用。
+# turns.snapshot_json 冻结准入上下文；settings_json 可经显式 Control 修订，已发出的模型请求对象不改写。
+# steps 的 step/current_step 单位为规划步骤；decision/result 绑定固定机会，不因重新渲染生成另一项执行。
+# documents.digest 绑定原始 UTF-8 对象，bytes 为字节；chunks 的 chunk_index 是字符分片索引。
+# operations 的 reserved_bytes 是写入字节预留；ticket_id 是授权，result_json 不能靠模型自述填成收据。
+# execution_cursors.checkpoint_step 表示已持久消费步骤；leases 时间为 UTC epoch 秒，owner/generation 防迟到释放。
+SCHEMA = """
 CREATE TABLE IF NOT EXISTS workspace_projects(
  id TEXT PRIMARY KEY,name TEXT NOT NULL,description TEXT NOT NULL,instructions TEXT NOT NULL,
  root TEXT,archived INTEGER NOT NULL DEFAULT 0,created_at TEXT DEFAULT CURRENT_TIMESTAMP);
@@ -56,660 +65,1403 @@ CREATE TABLE IF NOT EXISTS workspace_driver_leases(
 """
 
 
-def new_id(prefix):return f"{prefix}_{uuid.uuid4().hex}"
+# 生成带对象类别前缀的新身份；只用于新对象，不能作为重试时的效果证明。
+def new_id(prefix):
+    return f"{prefix}_{uuid.uuid4().hex}"
 
 
+# ACTIVE_TURN_STATUSES：仍占有会话的状态集合；Pause/UNKNOWN 不能通过新 Turn 绕开。
 ACTIVE_TURN_STATUSES = {"RUNNING", "INTERRUPTED", "UNKNOWN", "WAITING_USER", "PAUSED"}
 
 
+# 拥有工作区与 Turn 状态的适配器；准入协调同连接个人仓储，冻结历史快照且维护恢复游标。
 class SqliteWorkspaceRepository:
-    def __init__(self,runtime,*,intent_picker=None,resolution_controller=None,resolution_policy_id=None):
-        self.runtime=runtime
-        self.store=runtime.store
-        self.decisions=DecisionRuntime(runtime)
-        self.intent_picker=intent_picker or RuleIntentPicker()
-        self.resolution_controller=resolution_controller or RuleResolutionController()
-        self.resolution_policy_id=str(resolution_policy_id or "injected/default")
+    # 保存共享连接及个人状态协作者，幂等建表/补齐旧游标字段；跨聚合准入必须加入同连接活动事务。
+    def __init__(
+        self,
+        runtime,
+        *,
+        personal=None,
+        intent_picker=None,
+        resolution_controller=None,
+        resolution_policy_id=None,
+    ):
+        # runtime：共享 Runtime 装配对象；其 SQLite 连接只在所属线程使用。
+        self.runtime = runtime
+        # store：持久事实仓储；短事务维护本地一致性；外部效果不能并入数据库事务。
+        self.store = runtime.store
+        # personal：长期意图及进度的状态所有者；对话准入通过显式事务协作加入。
+        self.personal = personal
+        # decisions：模型请求/收据协调器；提供固定身份，不授予模型直接执行权。
+        self.decisions = DecisionRuntime(runtime)
+        # intent_picker：纯路径选择策略；输出是提案，不改变能力范围。
+        self.intent_picker = intent_picker or RuleIntentPicker()
+        # resolution_controller：同源信息表示策略；L0/L1/L2 不等于验收置信度。
+        self.resolution_controller = resolution_controller or RuleResolutionController()
+        # resolution_policy_id：本次准入固定的表示策略版本身份；活动指针变化不倒写历史 Turn。
+        self.resolution_policy_id = str(resolution_policy_id or "injected/default")
         self.store.db.executescript(SCHEMA)
 
+    # 读取显式产品模型设置并补齐旧字段；旧供应商名称只映射到当前合同，不读取旧应用凭据。
     def settings(self):
-        row=self.store.db.execute("SELECT value_json FROM workspace_settings WHERE id=1").fetchone()
+        row = self.store.db.execute(
+            "SELECT value_json FROM workspace_settings WHERE id=1"
+        ).fetchone()
         if row:
-            value=json.loads(row[0])
-            value.setdefault("num_ctx",8192)
-            value.setdefault("temperature",0.0)
-            if value.get("provider")=="pi-openai": value["provider"]="chatgpt"
+            value = json.loads(row[0])
+            value.setdefault("num_ctx", 8192)
+            value.setdefault("temperature", 0.0)
+            if value.get("provider") == "pi-openai":
+                value["provider"] = "chatgpt"
             return value
-        return {"provider":"ollama","model":"","ollama_url":"http://127.0.0.1:11434","max_steps":12,"max_output_tokens":2048,"thinking":False,"num_ctx":8192,"temperature":0.0}
+        return {
+            "provider": "ollama",
+            "model": "",
+            "ollama_url": "http://127.0.0.1:11434",
+            "max_steps": 12,
+            "max_output_tokens": 2048,
+            "thinking": False,
+            "num_ctx": 8192,
+            "temperature": 0.0,
+        }
 
-    def save_settings(self,value):
-        provider=value.get("provider","ollama")
-        if provider not in {"ollama","openai","chatgpt"}:raise ValueError("unsupported model provider")
+    # 校验 endpoint、模型、窗口与输出/步骤上限后保存白名单字段；拒绝 token 等未声明持久字段。
+    def save_settings(self, value):
+        provider = value.get("provider", "ollama")
+        if provider not in {"ollama", "openai", "chatgpt"}:
+            raise ValueError("unsupported model provider")
         from urllib.parse import urlparse
-        endpoint=str(value.get("ollama_url","http://127.0.0.1:11434")).rstrip("/")
-        parsed=urlparse(endpoint)
-        if parsed.scheme not in {"http","https"} or not parsed.hostname or parsed.username:raise ValueError("invalid model endpoint")
-        model=str(value.get("model","")).strip()
-        if len(model)>200:raise ValueError("model name too long")
-        steps=value.get("max_steps",12);tokens=value.get("max_output_tokens",2048)
-        num_ctx=value.get("num_ctx",8192);temperature=value.get("temperature",0.0)
-        if type(steps) is not int or not 2<=steps<=32 or type(tokens) is not int or not 128<=tokens<=8192:raise ValueError("invalid step or token limit")
-        if type(num_ctx) is not int or not 2048<=num_ctx<=262144 or num_ctx<=tokens+512:raise ValueError("num_ctx must leave room for output tokens and context reserve")
-        if not isinstance(temperature,(int,float)) or not 0<=float(temperature)<=2:raise ValueError("temperature must be between 0 and 2")
-        if type(value.get("thinking",False)) is not bool:raise ValueError("thinking must be boolean")
-        clean={"provider":provider,"model":model,"ollama_url":endpoint,"max_steps":steps,"max_output_tokens":tokens,"thinking":value.get("thinking",False),"num_ctx":num_ctx,"temperature":float(temperature)}
-        with self.store.tx() as db:db.execute("INSERT INTO workspace_settings VALUES(1,?) ON CONFLICT(id) DO UPDATE SET value_json=excluded.value_json",(canonical_json(clean),))
+
+        endpoint = str(value.get("ollama_url", "http://127.0.0.1:11434")).rstrip("/")
+        parsed = urlparse(endpoint)
+        if (
+            parsed.scheme not in {"http", "https"}
+            or not parsed.hostname
+            or parsed.username
+        ):
+            raise ValueError("invalid model endpoint")
+        model = str(value.get("model", "")).strip()
+        if len(model) > 200:
+            raise ValueError("model name too long")
+        steps = value.get("max_steps", 12)
+        tokens = value.get("max_output_tokens", 2048)
+        num_ctx = value.get("num_ctx", 8192)
+        temperature = value.get("temperature", 0.0)
+        if (
+            type(steps) is not int
+            or not 2 <= steps <= 32
+            or type(tokens) is not int
+            or not 128 <= tokens <= 8192
+        ):
+            raise ValueError("invalid step or token limit")
+        if (
+            type(num_ctx) is not int
+            or not 2048 <= num_ctx <= 262144
+            or num_ctx <= tokens + 512
+        ):
+            raise ValueError(
+                "num_ctx must leave room for output tokens and context reserve"
+            )
+        if (
+            not isinstance(temperature, (int, float))
+            or not 0 <= float(temperature) <= 2
+        ):
+            raise ValueError("temperature must be between 0 and 2")
+        if type(value.get("thinking", False)) is not bool:
+            raise ValueError("thinking must be boolean")
+        clean = {
+            "provider": provider,
+            "model": model,
+            "ollama_url": endpoint,
+            "max_steps": steps,
+            "max_output_tokens": tokens,
+            "thinking": value.get("thinking", False),
+            "num_ctx": num_ctx,
+            "temperature": float(temperature),
+        }
+        # 本地事务边界：下列写入一起提交，异常整体回滚；文件/网络效果须在事务外另行核对。
+        with self.store.tx() as db:
+            db.execute(
+                "INSERT INTO workspace_settings VALUES(1,?) ON CONFLICT(id) DO UPDATE SET value_json=excluded.value_json",
+                (canonical_json(clean),),
+            )
         return clean
 
+    # 投影未归档项目及会话/知识数量；统计不授予文件范围。
     def projects(self):
-        return [dict(r) for r in self.store.db.execute("SELECT p.*,(SELECT count(*) FROM workspace_sessions s WHERE s.project_id=p.id AND s.archived=0) session_count,(SELECT count(*) FROM workspace_documents d WHERE d.project_id=p.id AND d.archived=0) document_count FROM workspace_projects p WHERE p.archived=0 ORDER BY p.rowid DESC")]
+        return [
+            dict(r)
+            for r in self.store.db.execute(
+                "SELECT p.*,(SELECT count(*) FROM workspace_sessions s WHERE s.project_id=p.id AND s.archived=0) session_count,(SELECT count(*) FROM workspace_documents d WHERE d.project_id=p.id AND d.archived=0) document_count FROM workspace_projects p WHERE p.archived=0 ORDER BY p.rowid DESC"
+            )
+        ]
 
-    def project(self,pid):
-        row=self.store.db.execute("SELECT * FROM workspace_projects WHERE id=? AND archived=0",(pid,)).fetchone()
-        if not row:raise KeyError(pid)
+    # 取得未归档项目的明确根目录与指令；参数不是任意文件访问授权。
+    def project(self, pid):
+        row = self.store.db.execute(
+            "SELECT * FROM workspace_projects WHERE id=? AND archived=0", (pid,)
+        ).fetchone()
+        if not row:
+            raise KeyError(pid)
         return dict(row)
 
-    def create_project(self,value):
-        name=str(value.get("name","")).strip()
-        if not name or len(name)>100:raise ValueError("project name must contain 1-100 characters")
-        root=value.get("root") or None
+    # 确认显式目录存在后保存项目身份与有界描述；未来 Turn 冻结这一范围。
+    def create_project(self, value):
+        name = str(value.get("name", "")).strip()
+        if not name or len(name) > 100:
+            raise ValueError("project name must contain 1-100 characters")
+        root = value.get("root") or None
         if root:
             from pathlib import Path
-            path=Path(root).expanduser().resolve()
-            if not path.is_dir():raise ValueError("project directory does not exist")
-            root=str(path)
-        pid=new_id("project")
-        with self.store.tx() as db:db.execute("INSERT INTO workspace_projects(id,name,description,instructions,root) VALUES(?,?,?,?,?)",(pid,name,str(value.get("description","")).strip()[:1000],str(value.get("instructions","")).strip()[:12000],root))
+
+            path = Path(root).expanduser().resolve()
+            if not path.is_dir():
+                raise ValueError("project directory does not exist")
+            root = str(path)
+        pid = new_id("project")
+        # 本地事务边界：下列写入一起提交，异常整体回滚；文件/网络效果须在事务外另行核对。
+        with self.store.tx() as db:
+            db.execute(
+                "INSERT INTO workspace_projects(id,name,description,instructions,root) VALUES(?,?,?,?,?)",
+                (
+                    pid,
+                    name,
+                    str(value.get("description", "")).strip()[:1000],
+                    str(value.get("instructions", "")).strip()[:12000],
+                    root,
+                ),
+            )
         return self.project(pid)
 
-    def update_project(self,pid,value):
-        old=self.project(pid)
-        if "name" in value and not str(value["name"]).strip():raise ValueError("name is required")
-        root=value.get("root",old["root"]) or None
+    # 更新未来会话可读取的项目元数据；已准入 Turn 的固定快照不倒写。
+    def update_project(self, pid, value):
+        old = self.project(pid)
+        if "name" in value and not str(value["name"]).strip():
+            raise ValueError("name is required")
+        root = value.get("root", old["root"]) or None
         if root:
             from pathlib import Path
-            path=Path(root).expanduser().resolve()
-            if not path.is_dir():raise ValueError("project directory does not exist")
-            root=str(path)
+
+            path = Path(root).expanduser().resolve()
+            if not path.is_dir():
+                raise ValueError("project directory does not exist")
+            root = str(path)
+        # 本地事务边界：下列写入一起提交，异常整体回滚；文件/网络效果须在事务外另行核对。
         with self.store.tx() as db:
-            db.execute("UPDATE workspace_projects SET name=?,description=?,instructions=?,root=?,archived=? WHERE id=?",(str(value.get("name",old["name"])).strip()[:100],str(value.get("description",old["description"]))[:1000],str(value.get("instructions",old["instructions"]))[:12000],root,int(bool(value.get("archived",False))),pid))
-        return {"id":pid}
+            db.execute(
+                "UPDATE workspace_projects SET name=?,description=?,instructions=?,root=?,archived=? WHERE id=?",
+                (
+                    str(value.get("name", old["name"])).strip()[:100],
+                    str(value.get("description", old["description"]))[:1000],
+                    str(value.get("instructions", old["instructions"]))[:12000],
+                    root,
+                    int(bool(value.get("archived", False))),
+                    pid,
+                ),
+            )
+        return {"id": pid}
 
-    def sessions(self,archived=False):
-        return [dict(r) for r in self.store.db.execute("SELECT s.*,p.name project_name,(SELECT content FROM workspace_messages m WHERE m.session_id=s.id ORDER BY m.rowid DESC LIMIT 1) preview FROM workspace_sessions s LEFT JOIN workspace_projects p ON p.id=s.project_id WHERE s.archived=? ORDER BY pinned DESC,s.updated_at DESC,s.rowid DESC",(int(archived),))]
+    # 按归档、置顶和更新时间生成会话导航；运行状态仍来自 Turn。
+    def sessions(self, archived=False):
+        return [
+            dict(r)
+            for r in self.store.db.execute(
+                "SELECT s.*,p.name project_name,(SELECT content FROM workspace_messages m WHERE m.session_id=s.id ORDER BY m.rowid DESC LIMIT 1) preview FROM workspace_sessions s LEFT JOIN workspace_projects p ON p.id=s.project_id WHERE s.archived=? ORDER BY pinned DESC,s.updated_at DESC,s.rowid DESC",
+                (int(archived),),
+            )
+        ]
 
-    def create_session(self,title="新对话",project_id=None):
-        if project_id:self.project(project_id)
-        sid=new_id("session")
-        with self.store.tx() as db:db.execute("INSERT INTO workspace_sessions(id,title,project_id) VALUES(?,?,?)",(sid,str(title).strip()[:100] or "新对话",project_id))
+    # 验证项目身份后创建独立会话；会话本身没有模型或工具 Ticket。
+    def create_session(self, title="新对话", project_id=None):
+        if project_id:
+            self.project(project_id)
+        sid = new_id("session")
+        # 本地事务边界：下列写入一起提交，异常整体回滚；文件/网络效果须在事务外另行核对。
+        with self.store.tx() as db:
+            db.execute(
+                "INSERT INTO workspace_sessions(id,title,project_id) VALUES(?,?,?)",
+                (sid, str(title).strip()[:100] or "新对话", project_id),
+            )
         return self.session(sid)
 
-    def session(self,sid):
-        row=self.store.db.execute("SELECT s.*,p.name project_name FROM workspace_sessions s LEFT JOIN workspace_projects p ON p.id=s.project_id WHERE s.id=?",(sid,)).fetchone()
-        if not row:raise KeyError(sid)
-        result=dict(row)
-        result["messages"]=[{**dict(r),"metadata":json.loads(r["metadata_json"])} for r in self.store.db.execute("SELECT * FROM workspace_messages WHERE session_id=? ORDER BY rowid",(sid,))]
-        result["turns"]=[self.turn(r[0]) for r in self.store.db.execute("SELECT run_id FROM workspace_turns WHERE session_id=? ORDER BY rowid",(sid,))]
+    # 读取会话及其消息/轮次投影；持久状态仍由仓储操作修改。
+    def session(self, sid):
+        row = self.store.db.execute(
+            "SELECT s.*,p.name project_name FROM workspace_sessions s LEFT JOIN workspace_projects p ON p.id=s.project_id WHERE s.id=?",
+            (sid,),
+        ).fetchone()
+        if not row:
+            raise KeyError(sid)
+        result = dict(row)
+        result["messages"] = [
+            {**dict(r), "metadata": json.loads(r["metadata_json"])}
+            for r in self.store.db.execute(
+                "SELECT * FROM workspace_messages WHERE session_id=? ORDER BY rowid",
+                (sid,),
+            )
+        ]
+        result["turns"] = [
+            self.turn(r[0])
+            for r in self.store.db.execute(
+                "SELECT run_id FROM workspace_turns WHERE session_id=? ORDER BY rowid",
+                (sid,),
+            )
+        ]
         return result
 
-    def update_session(self,sid,value):
-        old=self.session(sid)
-        if any(t["status"] in ACTIVE_TURN_STATUSES for t in old["turns"]) and value.get("archived"):raise ValueError("stop the active turn before archiving")
-        pid=value.get("project_id",old["project_id"])
-        if pid:self.project(pid)
-        with self.store.tx() as db:db.execute("UPDATE workspace_sessions SET title=?,project_id=?,pinned=?,archived=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",(str(value.get("title",old["title"])).strip()[:100] or "新对话",pid,int(bool(value.get("pinned",old["pinned"]))),int(bool(value.get("archived",old["archived"]))),sid))
+    # 保存会话标题/项目/置顶/归档元数据；有未完成工作时不允许归档。
+    def update_session(self, sid, value):
+        old = self.session(sid)
+        if any(t["status"] in ACTIVE_TURN_STATUSES for t in old["turns"]) and value.get(
+            "archived"
+        ):
+            raise ValueError("stop the active turn before archiving")
+        pid = value.get("project_id", old["project_id"])
+        if pid:
+            self.project(pid)
+        # 本地事务边界：下列写入一起提交，异常整体回滚；文件/网络效果须在事务外另行核对。
+        with self.store.tx() as db:
+            db.execute(
+                "UPDATE workspace_sessions SET title=?,project_id=?,pinned=?,archived=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                (
+                    str(value.get("title", old["title"])).strip()[:100] or "新对话",
+                    pid,
+                    int(bool(value.get("pinned", old["pinned"]))),
+                    int(bool(value.get("archived", old["archived"]))),
+                    sid,
+                ),
+            )
         return self.session(sid)
 
-    def documents(self,project_id=None):
-        return [dict(r) for r in self.store.db.execute("SELECT d.*,p.name project_name,(SELECT count(*) FROM workspace_chunks c WHERE c.document_id=d.id) chunks FROM workspace_documents d LEFT JOIN workspace_projects p ON p.id=d.project_id WHERE d.archived=0 ORDER BY d.rowid DESC") if project_id is None or r["project_id"]==project_id]
+    # 读取可见知识文档及 chunk 数；project 过滤决定检索范围。
+    def documents(self, project_id=None):
+        return [
+            dict(r)
+            for r in self.store.db.execute(
+                "SELECT d.*,p.name project_name,(SELECT count(*) FROM workspace_chunks c WHERE c.document_id=d.id) chunks FROM workspace_documents d LEFT JOIN workspace_projects p ON p.id=d.project_id WHERE d.archived=0 ORDER BY d.rowid DESC"
+            )
+            if project_id is None or r["project_id"] == project_id
+        ]
 
-    def import_document(self,value):
-        title=str(value.get("title","")).strip();text=value.get("content","")
-        if not title or len(title)>200 or not isinstance(text,str) or not text.strip() or len(text.encode("utf-8"))>1_000_000:raise ValueError("document requires title and UTF-8 text up to 1 MB")
-        pid=value.get("project_id") or None
-        if pid:self.project(pid)
-        digest=self.runtime.objects.put(text.encode("utf-8"));did=new_id("doc")
+    # 先发布 UTF-8 不可变对象，再同事务保存文档和 chunks；发布后 DB 失败只留下未引用对象。
+    def import_document(self, value):
+        title = str(value.get("title", "")).strip()
+        text = value.get("content", "")
+        if (
+            not title
+            or len(title) > 200
+            or not isinstance(text, str)
+            or not text.strip()
+            or len(text.encode("utf-8")) > 1_000_000
+        ):
+            raise ValueError("document requires title and UTF-8 text up to 1 MB")
+        pid = value.get("project_id") or None
+        if pid:
+            self.project(pid)
+        digest = self.runtime.objects.put(text.encode("utf-8"))
+        did = new_id("doc")
+        # 本地事务边界：下列写入一起提交，异常整体回滚；文件/网络效果须在事务外另行核对。
         with self.store.tx() as db:
-            db.execute("INSERT INTO workspace_documents(id,project_id,title,digest,bytes) VALUES(?,?,?,?,?)",(did,pid,title,digest,len(text.encode("utf-8"))))
-            db.executemany("INSERT INTO workspace_chunks VALUES(?,?,?)",[(did,i,part) for i,part in enumerate(chunks(text))])
-        return {"id":did,"title":title,"digest":digest,"chunks":len(chunks(text))}
+            db.execute(
+                "INSERT INTO workspace_documents(id,project_id,title,digest,bytes) VALUES(?,?,?,?,?)",
+                (did, pid, title, digest, len(text.encode("utf-8"))),
+            )
+            db.executemany(
+                "INSERT INTO workspace_chunks VALUES(?,?,?)",
+                [(did, i, part) for i, part in enumerate(chunks(text))],
+            )
+        return {
+            "id": did,
+            "title": title,
+            "digest": digest,
+            "chunks": len(chunks(text)),
+        }
 
-    def document(self,did):
-        row=self.store.db.execute("SELECT * FROM workspace_documents WHERE id=?",(did,)).fetchone()
-        if not row:raise KeyError(did)
-        return {**dict(row),"content":self.runtime.objects.get(row["digest"]).decode("utf-8")}
+    # 按保存摘要读取完整文档对象；对象库校验字节身份，归档状态由调用者判断。
+    def document(self, did):
+        row = self.store.db.execute(
+            "SELECT * FROM workspace_documents WHERE id=?", (did,)
+        ).fetchone()
+        if not row:
+            raise KeyError(did)
+        return {
+            **dict(row),
+            "content": self.runtime.objects.get(row["digest"]).decode("utf-8"),
+        }
 
-    def archive_document(self,did):
+    # 把文档从未来检索集合撤下；不删除冻结快照引用的原始对象。
+    def archive_document(self, did):
         self.document(did)
-        with self.store.tx() as db:db.execute("UPDATE workspace_documents SET archived=1 WHERE id=?",(did,))
-        return {"id":did}
+        # 本地事务边界：下列写入一起提交，异常整体回滚；文件/网络效果须在事务外另行核对。
+        with self.store.tx() as db:
+            db.execute("UPDATE workspace_documents SET archived=1 WHERE id=?", (did,))
+        return {"id": did}
 
-    def knowledge_candidates(self,project_id=None,*,cursor=0,page_size=512):
-        """Read the next stable page of visible lexical candidates.
-
-        Cursor is the SQLite chunk rowid, not an opaque relevance score. This
-        makes candidate coverage observable and prevents a ranking-time LIMIT
-        from silently deleting later documents from the recall set.
-        """
-        if type(cursor) is not int or cursor<0:
+    def knowledge_candidates(self, project_id=None, *, cursor=0, page_size=512):
+        """按 SQLite rowid 分页扫描所有可见 chunk；cursor 是候选覆盖位置，不是相关度分数。"""
+        if type(cursor) is not int or cursor < 0:
             raise ValueError("cursor must be a non-negative integer")
-        if type(page_size) is not int or not 1<=page_size<=2000:
+        if type(page_size) is not int or not 1 <= page_size <= 2000:
             raise ValueError("page_size must be 1-2000")
-        rows=self.store.db.execute(
+        rows = self.store.db.execute(
             "SELECT c.rowid AS candidate_cursor,c.document_id,c.chunk_index,c.content,"
             "d.title,d.digest FROM workspace_chunks c "
             "JOIN workspace_documents d ON d.id=c.document_id "
             "WHERE c.rowid>? AND d.archived=0 AND (d.project_id IS NULL OR d.project_id=?) "
             "ORDER BY c.rowid LIMIT ?",
-            (cursor,project_id,page_size+1),
+            (cursor, project_id, page_size + 1),
         ).fetchall()
-        values=[dict(row) for row in rows[:page_size]]
-        has_more=len(rows)>page_size
-        next_cursor=values[-1]["candidate_cursor"] if values else cursor
+        values = [dict(row) for row in rows[:page_size]]
+        has_more = len(rows) > page_size
+        next_cursor = values[-1]["candidate_cursor"] if values else cursor
         return {
-            "candidates":values,
-            "cursor":cursor,
-            "next_cursor":next_cursor,
-            "has_more":has_more,
+            "candidates": values,
+            "cursor": cursor,
+            "next_cursor": next_cursor,
+            "has_more": has_more,
         }
 
-    def search_report(self,query,project_id=None,limit=5):
-        if not isinstance(query,str) or len(query)>1000:raise ValueError("query up to 1000 characters")
-        if type(limit) is not int or not 1<=limit<=8:raise ValueError("limit must be 1-8")
-        cursor=0;scanned=0;matched_count=0;pages=0;top=[]
+    # 遍历全可见候选后保留有界 top-k，报告 scanned/matched/pages；不能在排序前用 LIMIT 静默丢候选。
+    def search_report(self, query, project_id=None, limit=5):
+        if not isinstance(query, str) or len(query) > 1000:
+            raise ValueError("query up to 1000 characters")
+        if type(limit) is not int or not 1 <= limit <= 8:
+            raise ValueError("limit must be 1-8")
+        cursor = 0
+        scanned = 0
+        matched_count = 0
+        pages = 0
+        top = []
         while True:
-            page=self.knowledge_candidates(project_id,cursor=cursor,page_size=512)
-            pages+=1
+            page = self.knowledge_candidates(project_id, cursor=cursor, page_size=512)
+            pages += 1
             for item in page["candidates"]:
-                scanned+=1
-                scored=score_chunk(query,item)
-                if scored is None:continue
-                matched_count+=1
+                scanned += 1
+                scored = score_chunk(query, item)
+                if scored is None:
+                    continue
+                matched_count += 1
                 top.append(scored)
-                if len(top)>limit*4:
-                    top=sorted(
+                if len(top) > limit * 4:
+                    top = sorted(
                         top,
-                        key=lambda value:(-value["score"],value["document_id"],value["chunk_index"]),
+                        key=lambda value: (
+                            -value["score"],
+                            value["document_id"],
+                            value["chunk_index"],
+                        ),
                     )[:limit]
-            cursor=page["next_cursor"]
-            if not page["has_more"]:break
-        sources=sorted(
+            cursor = page["next_cursor"]
+            if not page["has_more"]:
+                break
+        sources = sorted(
             top,
-            key=lambda value:(-value["score"],value["document_id"],value["chunk_index"]),
+            key=lambda value: (
+                -value["score"],
+                value["document_id"],
+                value["chunk_index"],
+            ),
         )[:limit]
         for source in sources:
-            source.pop("candidate_cursor",None)
+            source.pop("candidate_cursor", None)
         return {
-            "sources":sources,
-            "retrieval":{
-                "backend":"local-lexical",
-                "candidate_policy":"all-visible-chunks-v2",
-                "scanned":scanned,
-                "matched":matched_count,
-                "pages":pages,
-                "exhausted":True,
-                "truncated_before_ranking":False,
+            "sources": sources,
+            "retrieval": {
+                "backend": "local-lexical",
+                "candidate_policy": "all-visible-chunks-v2",
+                "scanned": scanned,
+                "matched": matched_count,
+                "pages": pages,
+                "exhausted": True,
+                "truncated_before_ranking": False,
             },
         }
 
-    def search(self,query,project_id=None,limit=5):
-        return self.search_report(query,project_id,limit)["sources"]
+    # 读取当前作用域的检索结果；相似度只用于排序，不升级为已验证事实。
+    def search(self, query, project_id=None, limit=5):
+        return self.search_report(query, project_id, limit)["sources"]
 
-    def create_turn(self,sid,text,request_id,document_ids=None,memory_records=None,goal_id=None,goal_context=None,*,_db=None,_settings=None):
-        # Scheduler admission joins its occurrence transaction explicitly. Never
-        # make RuntimeStore.tx nestable: external effects still stay outside it.
+    # 同事务去重入口、校验会话/Goal、冻结上下文、预算、Turn、Goal 关联和游标；调度 occurrence 可加入同一连接事务。
+    def create_turn(
+        self,
+        sid,
+        text,
+        request_id,
+        document_ids=None,
+        memory_records=None,
+        goal_id=None,
+        goal_context=None,
+        *,
+        _db=None,
+        _settings=None,
+    ):
+        # 调度机会显式加入相同连接事务；RuntimeStore.tx 保持不可嵌套，外部效果不因此移入事务。
         if _db is not None and (_db is not self.store.db or not _db.in_transaction):
             raise RuntimeError("admission requires this store's active transaction")
-        if not isinstance(text,str) or not text.strip() or len(text.encode("utf-8"))>16000:raise ValueError("message must contain 1-16000 UTF-8 bytes")
-        if not isinstance(request_id,str) or not 1<=len(request_id)<=200:raise ValueError("request_id is required")
-        settings=dict(_settings) if _settings is not None else self.settings()
-        if not settings["model"]:raise ValueError("请先在模型设置中选择 Ollama 模型。")
-        document_ids=document_ids or []
-        memory_records=memory_records or []
-        if not isinstance(document_ids,list) or len(document_ids)>4 or any(not isinstance(d,str) for d in document_ids):raise ValueError("attach at most four document ids")
-        # Request identity binds caller intent + fixed user-selected settings/attachments.
-        # Retrieved Memory is an execution snapshot derived after admission; changing
-        # ambient memory must not break idempotent retries of the same request_id.
-        identity=digest_json({"session_id":sid,"text":text,"settings":settings,"documents":document_ids,"goal_id":goal_id})
-        with (self.store.tx() if _db is None else nullcontext(_db)) as db:
-            existing=db.execute("SELECT run_id,entry_digest FROM workspace_turns WHERE request_id=?",(request_id,)).fetchone()
+        if (
+            not isinstance(text, str)
+            or not text.strip()
+            or len(text.encode("utf-8")) > 16000
+        ):
+            raise ValueError("message must contain 1-16000 UTF-8 bytes")
+        if not isinstance(request_id, str) or not 1 <= len(request_id) <= 200:
+            raise ValueError("request_id is required")
+        settings = dict(_settings) if _settings is not None else self.settings()
+        if not settings["model"]:
+            raise ValueError("请先在模型设置中选择 Ollama 模型。")
+        document_ids = document_ids or []
+        memory_records = memory_records or []
+        if (
+            not isinstance(document_ids, list)
+            or len(document_ids) > 4
+            or any(not isinstance(d, str) for d in document_ids)
+        ):
+            raise ValueError("attach at most four document ids")
+        # 入口身份绑定用户意图、固定设置和显式附件；召回 Memory 是准入后投影，环境记忆变化不能破坏同 request_id 重试。
+        identity = digest_json(
+            {
+                "session_id": sid,
+                "text": text,
+                "settings": settings,
+                "documents": document_ids,
+                "goal_id": goal_id,
+            }
+        )
+        with self.store.tx() if _db is None else nullcontext(_db) as db:
+            existing = db.execute(
+                "SELECT run_id,entry_digest FROM workspace_turns WHERE request_id=?",
+                (request_id,),
+            ).fetchone()
             if existing:
-                if existing["entry_digest"]!=identity:raise IdentityConflict("request_id reused with different message or settings")
+                if existing["entry_digest"] != identity:
+                    raise IdentityConflict(
+                        "request_id reused with different message or settings"
+                    )
                 return self.turn(existing["run_id"])
-            session=self.session(sid)
-            if session["archived"]:raise ValueError("restore the archived conversation first")
-            if any(t["status"] in ACTIVE_TURN_STATUSES for t in session["turns"]):raise ValueError("本会话仍有未完成一轮，请先继续、答复或停止。")
+            session = self.session(sid)
+            if session["archived"]:
+                raise ValueError("restore the archived conversation first")
+            if any(t["status"] in ACTIVE_TURN_STATUSES for t in session["turns"]):
+                raise ValueError("本会话仍有未完成一轮，请先继续、答复或停止。")
             if goal_id:
-                goal=db.execute("SELECT * FROM goals WHERE goal_id=?",(goal_id,)).fetchone()
-                if goal is None:raise KeyError(goal_id)
-                if goal["state"]!="ACTIVE":raise ValueError("only an active Goal admits new work")
-                # Validate and freeze the persisted identity inside admission.
-                # Caller snapshots cannot impersonate a Goal or bypass Pause.
-                db.execute("INSERT OR IGNORE INTO goal_work_state(goal_id) VALUES(?)",(goal_id,))
-                work=db.execute("SELECT * FROM goal_work_state WHERE goal_id=?",(goal_id,)).fetchone()
-                goal_context={**dict(goal),"work":dict(work)}
-                occupied=db.execute(
+                if self.personal is None:
+                    raise RuntimeError(
+                        "Goal admission requires the personal-state repository"
+                    )
+                # 本仓储协调 Turn 原子准入；个人表的校验和写入交给其状态所有者。
+                goal_context = self.personal.admission_snapshot(db, goal_id)
+                occupied = db.execute(
                     "SELECT 1 FROM goal_runs g JOIN workspace_turns t ON t.run_id=g.run_id "
                     "WHERE g.goal_id=? AND t.status IN ('RUNNING','INTERRUPTED','UNKNOWN','WAITING_USER','PAUSED') LIMIT 1",
                     (goal_id,),
                 ).fetchone()
-                if occupied:raise ValueError("Goal has unfinished work; continue or stop that Run first")
-            project=self.project(session["project_id"]) if session["project_id"] else None
-            retrieval=self.search_report(text,session["project_id"])
-            knowledge=list(retrieval["sources"])
+                if occupied:
+                    raise ValueError(
+                        "Goal has unfinished work; continue or stop that Run first"
+                    )
+            project = (
+                self.project(session["project_id"]) if session["project_id"] else None
+            )
+            retrieval = self.search_report(text, session["project_id"])
+            knowledge = list(retrieval["sources"])
             for did in document_ids:
-                document=self.document(did)
-                if document["archived"]:raise ValueError("attachment was removed from the retrieval index")
-                if document["project_id"] not in {None,session["project_id"]}:raise PermissionError("attachment belongs to another project")
-                if not any(s["document_id"]==did for s in knowledge):
-                    knowledge.append({"document_id":did,"title":document["title"],"content":document["content"][:1800],"chunk_index":0,"digest":document["digest"],"citation":f"doc:{did}:0","score":0})
+                document = self.document(did)
+                if document["archived"]:
+                    raise ValueError("attachment was removed from the retrieval index")
+                if document["project_id"] not in {None, session["project_id"]}:
+                    raise PermissionError("attachment belongs to another project")
+                if not any(s["document_id"] == did for s in knowledge):
+                    knowledge.append(
+                        {
+                            "document_id": did,
+                            "title": document["title"],
+                            "content": document["content"][:1800],
+                            "chunk_index": 0,
+                            "digest": document["digest"],
+                            "citation": f"doc:{did}:0",
+                            "score": 0,
+                        }
+                    )
             if document_ids:
-                # Guarantee at least one representative source per explicit
-                # attachment before ordinary retrieval chunks. Multiple chunks
-                # from one pinned document must not crowd out another attachment.
-                pinned=set(document_ids)
-                representatives=[]
+                # 每份显式附件先保留至少一个代表来源；同文档多片段不能挤掉另一份固定附件。
+                pinned = set(document_ids)
+                representatives = []
                 for did in document_ids:
-                    candidates=[item for item in knowledge if item["document_id"]==did]
+                    candidates = [
+                        item for item in knowledge if item["document_id"] == did
+                    ]
                     if candidates:
-                        representatives.append(max(candidates,key=lambda item:float(item.get("score") or 0.0)))
-                representative_ids={(item["document_id"],item.get("chunk_index")) for item in representatives}
-                remainder=[
-                    item for item in knowledge
-                    if (item["document_id"],item.get("chunk_index")) not in representative_ids
+                        representatives.append(
+                            max(
+                                candidates,
+                                key=lambda item: float(item.get("score") or 0.0),
+                            )
+                        )
+                representative_ids = {
+                    (item["document_id"], item.get("chunk_index"))
+                    for item in representatives
+                }
+                remainder = [
+                    item
+                    for item in knowledge
+                    if (item["document_id"], item.get("chunk_index"))
+                    not in representative_ids
                 ]
-                remainder.sort(key=lambda item:(item["document_id"] not in pinned,-float(item.get("score") or 0.0)))
-                knowledge=representatives+remainder
-            pick=self.intent_picker.pick(text,{
-                "project":project,
-                "sources":knowledge,
-                "attached_document_ids":document_ids,
-            })
-            plan=self.resolution_controller.choose(
+                remainder.sort(
+                    key=lambda item: (
+                        item["document_id"] not in pinned,
+                        -float(item.get("score") or 0.0),
+                    )
+                )
+                knowledge = representatives + remainder
+            pick = self.intent_picker.pick(
+                text,
+                {
+                    "project": project,
+                    "sources": knowledge,
+                    "attached_document_ids": document_ids,
+                },
+            )
+            plan = self.resolution_controller.choose(
                 text,
                 route=pick.route,
                 sources=knowledge,
                 attached_document_ids=document_ids,
             )
-            projected_knowledge=[]
-            effective_max=max(plan.max_sources,len(document_ids))
+            projected_knowledge = []
+            effective_max = max(plan.max_sources, len(document_ids))
             for source in knowledge[:effective_max]:
-                item=dict(source)
-                item["source_ref"]=f"doc:{item['document_id']}@{item['digest']}"
-                if plan.resolution.value=="L0":
-                    item["content"]=item.get("content","")[:plan.max_chars_per_source]
-                elif plan.resolution.value=="L2":
-                    document=self.document(item["document_id"])
-                    chunk_index=int(item.get("chunk_index") or 0)
-                    start=max(0,chunk_index*1600-800)
-                    item["content"]=document["content"][start:start+plan.max_chars_per_source]
-                    item["source_ref"]=f"doc:{item['document_id']}@{document['digest']}"
-                    item["resolution_offset"]=start
-                item["resolution"]=plan.resolution.value
+                item = dict(source)
+                item["source_ref"] = f"doc:{item['document_id']}@{item['digest']}"
+                if plan.resolution.value == "L0":
+                    item["content"] = item.get("content", "")[
+                        : plan.max_chars_per_source
+                    ]
+                elif plan.resolution.value == "L2":
+                    document = self.document(item["document_id"])
+                    chunk_index = int(item.get("chunk_index") or 0)
+                    start = max(0, chunk_index * 1600 - 800)
+                    item["content"] = document["content"][
+                        start : start + plan.max_chars_per_source
+                    ]
+                    item["source_ref"] = (
+                        f"doc:{item['document_id']}@{document['digest']}"
+                    )
+                    item["resolution_offset"] = start
+                item["resolution"] = plan.resolution.value
                 projected_knowledge.append(item)
-            snapshot={
-                "project":project,
-                "knowledge":projected_knowledge,
-                "retrieval_report":retrieval["retrieval"],
-                "intent_pick":{
-                    "route":pick.route.value,
-                    "objective":pick.objective,
-                    "confidence":pick.confidence,
-                    "reason":pick.reason,
-                    "metadata":pick.metadata or {},
+            snapshot = {
+                "project": project,
+                "knowledge": projected_knowledge,
+                "retrieval_report": retrieval["retrieval"],
+                "intent_pick": {
+                    "route": pick.route.value,
+                    "objective": pick.objective,
+                    "confidence": pick.confidence,
+                    "reason": pick.reason,
+                    "metadata": pick.metadata or {},
                 },
-                "information_resolution":plan.serializable(),
-                "policy_bindings":{
-                    "information_resolution":self.resolution_policy_id,
+                "information_resolution": plan.serializable(),
+                "policy_bindings": {
+                    "information_resolution": self.resolution_policy_id,
                 },
-                "attached_document_ids":list(document_ids),
-                "turn_message_start":min(30,len(session["messages"])),
-                "memory":[
+                "attached_document_ids": list(document_ids),
+                "turn_message_start": min(30, len(session["messages"])),
+                "memory": [
                     {
-                        "memory_id":m.get("memory_id"),
-                        "kind":m.get("kind"),
-                        "text":m.get("text",""),
-                        "source_ref":m.get("source_ref"),
-                        "scope_type":m.get("scope_type","global"),
-                        "scope_id":m.get("scope_id"),
-                        "fact_level":m.get("fact_level","context"),
-                        "revision":m.get("revision"),
+                        "memory_id": m.get("memory_id"),
+                        "kind": m.get("kind"),
+                        "text": m.get("text", ""),
+                        "source_ref": m.get("source_ref"),
+                        "scope_type": m.get("scope_type", "global"),
+                        "scope_id": m.get("scope_id"),
+                        "fact_level": m.get("fact_level", "context"),
+                        "revision": m.get("revision"),
                     }
                     for m in memory_records[:8]
                 ],
-                "messages":[{"role":m["role"],"content":m["content"]} for m in session["messages"][-30:]]+[{"role":"user","content":text}],
-                "goal":dict(goal_context or {}),
+                "messages": [
+                    {"role": m["role"], "content": m["content"]}
+                    for m in session["messages"][-30:]
+                ]
+                + [{"role": "user", "content": text}],
+                "goal": dict(goal_context or {}),
             }
-            rid=new_id("run")
-            db.execute("INSERT INTO runs(run_id,request_id,entry_digest,goal,acceptance_version,state) VALUES(?,?,?,?,?,'RUNNING')",(rid,request_id,identity,text,"conversation-v1"))
-            for meter,limit in {"model_calls":settings["max_steps"],"input_tokens":2_000_000,"output_tokens":settings["max_steps"]*settings["max_output_tokens"],"tool_calls":settings["max_steps"],"write_bytes":4_000_000}.items():db.execute("INSERT INTO accounts(run_id,meter,limit_units) VALUES(?,?,?)",(rid,meter,limit))
-            db.execute("INSERT INTO workspace_turns(run_id,session_id,request_id,entry_digest,settings_json,snapshot_json,status,max_steps) VALUES(?,?,?,?,?,?,'RUNNING',?)",(rid,sid,request_id,identity,canonical_json(settings),canonical_json(snapshot),settings["max_steps"]))
-            if goal_id:
-                db.execute("INSERT INTO goal_runs(goal_id,run_id) VALUES(?,?)",(goal_id,rid))
+            rid = new_id("run")
+            db.execute(
+                "INSERT INTO runs(run_id,request_id,entry_digest,goal,acceptance_version,state) VALUES(?,?,?,?,?,'RUNNING')",
+                (rid, request_id, identity, text, "conversation-v1"),
+            )
+            for meter, limit in {
+                "model_calls": settings["max_steps"],
+                "input_tokens": 2_000_000,
+                "output_tokens": settings["max_steps"] * settings["max_output_tokens"],
+                "tool_calls": settings["max_steps"],
+                "write_bytes": 4_000_000,
+            }.items():
                 db.execute(
-                    "UPDATE goal_work_state SET current_state='IN_PROGRESS',last_run_id=?,revision=revision+1,"
-                    "progress_note='A new admitted Turn has started for this Goal.',"
-                    "next_action='Let the current Turn reach a durable checkpoint.',waiting_for='',updated_at=CURRENT_TIMESTAMP WHERE goal_id=?",
-                    (rid,goal_id),
+                    "INSERT INTO accounts(run_id,meter,limit_units) VALUES(?,?,?)",
+                    (rid, meter, limit),
                 )
+            db.execute(
+                "INSERT INTO workspace_turns(run_id,session_id,request_id,entry_digest,settings_json,snapshot_json,status,max_steps) VALUES(?,?,?,?,?,?,'RUNNING',?)",
+                (
+                    rid,
+                    sid,
+                    request_id,
+                    identity,
+                    canonical_json(settings),
+                    canonical_json(snapshot),
+                    settings["max_steps"],
+                ),
+            )
+            if goal_id:
+                self.personal.bind_admitted_run(db, goal_id, rid)
             db.execute(
                 "INSERT INTO workspace_execution_cursors(run_id,step,phase,checkpoint_step,recovery_state,detail) VALUES(?,0,'ADMITTED',0,'NONE','Turn admitted')",
                 (rid,),
             )
-            self._message(db,sid,rid,"user",text,{})
-            db.execute("UPDATE workspace_sessions SET title=CASE WHEN title='新对话' THEN ? ELSE title END,updated_at=CURRENT_TIMESTAMP WHERE id=?",(text[:40],sid))
-            self.store._event(db,rid,"ConversationTurnStarted",{
-                "session_id":sid,
-                "intent_route":pick.route.value,
-                "information_resolution":plan.resolution.value,
-                "retrieval_scanned":retrieval["retrieval"]["scanned"],
-                "retrieval_matched":retrieval["retrieval"]["matched"],
-                "goal_id":goal_id,
-            })
+            self._message(db, sid, rid, "user", text, {})
+            db.execute(
+                "UPDATE workspace_sessions SET title=CASE WHEN title='新对话' THEN ? ELSE title END,updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                (text[:40], sid),
+            )
+            self.store._event(
+                db,
+                rid,
+                "ConversationTurnStarted",
+                {
+                    "session_id": sid,
+                    "intent_route": pick.route.value,
+                    "information_resolution": plan.resolution.value,
+                    "retrieval_scanned": retrieval["retrieval"]["scanned"],
+                    "retrieval_matched": retrieval["retrieval"]["matched"],
+                    "goal_id": goal_id,
+                },
+            )
         return self.turn(rid)
 
-    def _message(self,db,sid,rid,role,text,metadata):
-        db.execute("INSERT INTO workspace_messages(id,session_id,run_id,role,content,metadata_json) VALUES(?,?,?,?,?,?)",(new_id("msg"),sid,rid,role,text,canonical_json(metadata)))
+    # 在调用方事务内写入消息事实及来源元数据；消息与步骤状态不能分开提交。
+    def _message(self, db, sid, rid, role, text, metadata):
+        db.execute(
+            "INSERT INTO workspace_messages(id,session_id,run_id,role,content,metadata_json) VALUES(?,?,?,?,?,?)",
+            (new_id("msg"), sid, rid, role, text, canonical_json(metadata)),
+        )
 
-    def _checkpoint(self,db,rid,step,phase,*,checkpoint_step=None,recovery_state="NONE",detail=""):
-        checkpoint_step=step if checkpoint_step is None else checkpoint_step
+    # 在已有事务中保存 execution cursor/phase/recovery；checkpoint_step 表示已持久消费的步骤。
+    def _checkpoint(
+        self,
+        db,
+        rid,
+        step,
+        phase,
+        *,
+        checkpoint_step=None,
+        recovery_state="NONE",
+        detail="",
+    ):
+        checkpoint_step = step if checkpoint_step is None else checkpoint_step
         db.execute(
             "INSERT INTO workspace_execution_cursors(run_id,step,phase,checkpoint_step,recovery_state,detail,updated_at) "
             "VALUES(?,?,?,?,?,?,CURRENT_TIMESTAMP) "
             "ON CONFLICT(run_id) DO UPDATE SET step=excluded.step,phase=excluded.phase,"
             "checkpoint_step=excluded.checkpoint_step,recovery_state=excluded.recovery_state,"
             "detail=excluded.detail,updated_at=CURRENT_TIMESTAMP",
-            (rid,int(step),str(phase),int(checkpoint_step),str(recovery_state),str(detail)[:1000]),
+            (
+                rid,
+                int(step),
+                str(phase),
+                int(checkpoint_step),
+                str(recovery_state),
+                str(detail)[:1000],
+            ),
         )
 
-    def execution_cursor(self,rid):
+    # 读取持久游标；旧记录缺游标时根据已完成步骤返回兼容投影，不据投影重复发出效果。
+    def execution_cursor(self, rid):
         self.turn(rid)
-        row=self.store.db.execute(
-            "SELECT * FROM workspace_execution_cursors WHERE run_id=?",(rid,)
+        row = self.store.db.execute(
+            "SELECT * FROM workspace_execution_cursors WHERE run_id=?", (rid,)
         ).fetchone()
         if row:
             return dict(row)
-        turn=self.turn(rid)
-        completed=max(
-            [int(item["step"]) for item in turn["activities"] if item["state"]=="DONE"] or [0]
+        turn = self.turn(rid)
+        completed = max(
+            [
+                int(item["step"])
+                for item in turn["activities"]
+                if item["state"] == "DONE"
+            ]
+            or [0]
         )
-        phase=(
-            "COMPLETED" if turn["status"]=="COMPLETED"
-            else "WAITING_USER" if turn["status"]=="WAITING_USER"
-            else "LEGACY"
+        phase = (
+            "COMPLETED"
+            if turn["status"] == "COMPLETED"
+            else "WAITING_USER" if turn["status"] == "WAITING_USER" else "LEGACY"
         )
-        recovery="RECONCILE" if turn["status"]=="UNKNOWN" else "RESUME" if turn["status"]=="INTERRUPTED" else "NONE"
+        recovery = (
+            "RECONCILE"
+            if turn["status"] == "UNKNOWN"
+            else "RESUME" if turn["status"] == "INTERRUPTED" else "NONE"
+        )
         return {
-            "run_id":rid,"step":int(turn["current_step"]),"phase":phase,
-            "checkpoint_step":completed,"recovery_state":recovery,
-            "detail":"Legacy cursor inferred from durable steps.","updated_at":turn["created_at"],
+            "run_id": rid,
+            "step": int(turn["current_step"]),
+            "phase": phase,
+            "checkpoint_step": completed,
+            "recovery_state": recovery,
+            "detail": "Legacy cursor inferred from durable steps.",
+            "updated_at": turn["created_at"],
         }
 
-    def claim_driver(self,rid,owner_id,ttl_seconds=12):
-        if not isinstance(owner_id,str) or not owner_id:
+    # 在写事务竞争 owner/generation/到期时间；租约只声明负责人，真实互斥另由本机 Run 锁负责。
+    def claim_driver(self, rid, owner_id, ttl_seconds=12):
+        if not isinstance(owner_id, str) or not owner_id:
             raise ValueError("owner_id is required")
-        now=time.time();lease_until=now+float(ttl_seconds)
+        now = time.time()
+        lease_until = now + float(ttl_seconds)
+        # 本地事务边界：下列写入一起提交，异常整体回滚；文件/网络效果须在事务外另行核对。
         with self.store.tx() as db:
-            turn=self.turn(rid)
-            if turn["status"] not in {"RUNNING","INTERRUPTED","UNKNOWN"}:
+            turn = self.turn(rid)
+            if turn["status"] not in {"RUNNING", "INTERRUPTED", "UNKNOWN"}:
                 return False
-            old=db.execute("SELECT * FROM workspace_driver_leases WHERE run_id=?",(rid,)).fetchone()
-            if old and old["owner_id"]!=owner_id and float(old["lease_until"])>now:
+            old = db.execute(
+                "SELECT * FROM workspace_driver_leases WHERE run_id=?", (rid,)
+            ).fetchone()
+            if old and old["owner_id"] != owner_id and float(old["lease_until"]) > now:
                 return False
-            generation=(int(old["generation"])+1) if old and old["owner_id"]!=owner_id else (int(old["generation"]) if old else 1)
+            generation = (
+                (int(old["generation"]) + 1)
+                if old and old["owner_id"] != owner_id
+                else (int(old["generation"]) if old else 1)
+            )
             db.execute(
                 "INSERT INTO workspace_driver_leases(run_id,owner_id,generation,lease_until,heartbeat_at) VALUES(?,?,?,?,?) "
                 "ON CONFLICT(run_id) DO UPDATE SET owner_id=excluded.owner_id,generation=excluded.generation,"
                 "lease_until=excluded.lease_until,heartbeat_at=excluded.heartbeat_at",
-                (rid,owner_id,generation,lease_until,now),
+                (rid, owner_id, generation, lease_until, now),
             )
-            self.store._event(db,rid,"DriverLeaseAcquired",{"owner_id":owner_id,"generation":generation})
+            self.store._event(
+                db,
+                rid,
+                "DriverLeaseAcquired",
+                {"owner_id": owner_id, "generation": generation},
+            )
         return True
 
-    def heartbeat_driver(self,rid,owner_id,ttl_seconds=12):
-        now=time.time()
+    # 仅当前 owner 更新 TTL；心跳失败停止本机持有资格，不能篡改其他 Driver 的租约。
+    def heartbeat_driver(self, rid, owner_id, ttl_seconds=12):
+        now = time.time()
+        # 本地事务边界：下列写入一起提交，异常整体回滚；文件/网络效果须在事务外另行核对。
         with self.store.tx() as db:
-            changed=db.execute(
+            changed = db.execute(
                 "UPDATE workspace_driver_leases SET heartbeat_at=?,lease_until=? WHERE run_id=? AND owner_id=?",
-                (now,now+float(ttl_seconds),rid,owner_id),
+                (now, now + float(ttl_seconds), rid, owner_id),
             )
             return bool(changed.rowcount)
 
-    def release_driver(self,rid,owner_id):
+    # 只释放匹配 owner 的租约；旧 Driver 退出不能删除新一代负责人。
+    def release_driver(self, rid, owner_id):
+        # 本地事务边界：下列写入一起提交，异常整体回滚；文件/网络效果须在事务外另行核对。
         with self.store.tx() as db:
-            row=db.execute("SELECT owner_id,generation FROM workspace_driver_leases WHERE run_id=?",(rid,)).fetchone()
-            if not row or row["owner_id"]!=owner_id:
+            row = db.execute(
+                "SELECT owner_id,generation FROM workspace_driver_leases WHERE run_id=?",
+                (rid,),
+            ).fetchone()
+            if not row or row["owner_id"] != owner_id:
                 return False
-            db.execute("DELETE FROM workspace_driver_leases WHERE run_id=?",(rid,))
-            self.store._event(db,rid,"DriverLeaseReleased",{"owner_id":owner_id,"generation":row["generation"]})
+            db.execute("DELETE FROM workspace_driver_leases WHERE run_id=?", (rid,))
+            self.store._event(
+                db,
+                rid,
+                "DriverLeaseReleased",
+                {"owner_id": owner_id, "generation": row["generation"]},
+            )
         return True
 
-    def driver_lease(self,rid):
-        row=self.store.db.execute("SELECT * FROM workspace_driver_leases WHERE run_id=?",(rid,)).fetchone()
+    # 读取 owner/generation/epoch 到期时间，并派生 expired；派生布尔值不是执行结果。
+    def driver_lease(self, rid):
+        row = self.store.db.execute(
+            "SELECT * FROM workspace_driver_leases WHERE run_id=?", (rid,)
+        ).fetchone()
         if not row:
             return None
-        value=dict(row)
-        value["expired"]=float(value["lease_until"])<=time.time()
+        value = dict(row)
+        value["expired"] = float(value["lease_until"]) <= time.time()
         return value
 
-    def _has_uncertain_effect(self,rid):
-        models=self.decisions.status(rid)["model_invocations"]
-        if any(item["state"] in {"TICKETED","UNKNOWN"} for item in models):
+    # 从已获 Ticket 的模型/工具机会判断效果不明；UI active 缓存不能替代此事实。
+    def _has_uncertain_effect(self, rid):
+        models = self.decisions.status(rid)["model_invocations"]
+        if any(item["state"] in {"TICKETED", "UNKNOWN"} for item in models):
             return True
-        return any(item["state"] in {"TICKETED","UNKNOWN"} for item in self.pending_operations(rid))
+        return any(
+            item["state"] in {"TICKETED", "UNKNOWN"}
+            for item in self.pending_operations(rid)
+        )
 
-    def interrupt(self,rid,reason):
+    # 根据持久未决效果选择 INTERRUPTED 或 UNKNOWN，保存恢复游标；安全中断才可继续规划。
+    def interrupt(self, rid, reason):
+        # 本地事务边界：下列写入一起提交，异常整体回滚；文件/网络效果须在事务外另行核对。
         with self.store.tx() as db:
-            turn=self.turn(rid)
-            if turn["status"] not in {"RUNNING","INTERRUPTED","UNKNOWN"}:
+            turn = self.turn(rid)
+            if turn["status"] not in {"RUNNING", "INTERRUPTED", "UNKNOWN"}:
                 return turn
-            uncertain=self._has_uncertain_effect(rid)
-            status="UNKNOWN" if uncertain else "INTERRUPTED"
-            recovery="RECONCILE" if uncertain else "RESUME"
+            uncertain = self._has_uncertain_effect(rid)
+            status = "UNKNOWN" if uncertain else "INTERRUPTED"
+            recovery = "RECONCILE" if uncertain else "RESUME"
             if uncertain:
                 for op in self.pending_operations(rid):
-                    if op["state"]!="TICKETED":
+                    if op["state"] != "TICKETED":
                         continue
-                    for meter,cost in {"tool_calls":1,"write_bytes":op["reserved_bytes"]}.items():
+                    for meter, cost in {
+                        "tool_calls": 1,
+                        "write_bytes": op["reserved_bytes"],
+                    }.items():
                         db.execute(
                             "UPDATE accounts SET reserved=reserved-?,unknown_held=unknown_held+? WHERE run_id=? AND meter=?",
-                            (cost,cost,rid,meter),
+                            (cost, cost, rid, meter),
                         )
-                    db.execute("UPDATE workspace_operations SET state='UNKNOWN' WHERE decision_id=?",(op["decision_id"],))
-            db.execute("UPDATE workspace_turns SET status=?,error=? WHERE run_id=?",(status,str(reason)[:2000],rid))
-            db.execute("UPDATE runs SET state='RECOVERING',control_revision=control_revision+1 WHERE run_id=?",(rid,))
-            self._checkpoint(
-                db,rid,turn["current_step"],"INTERRUPTED" if not uncertain else "OUTCOME_UNKNOWN",
-                checkpoint_step=max([int(item["step"]) for item in turn["activities"] if item["state"]=="DONE"] or [0]),
-                recovery_state=recovery,detail=reason,
-            )
-            self.store._event(db,rid,"ConversationInterrupted",{"status":status,"reason":str(reason)[:500],"recovery_state":recovery})
-        return self.turn(rid)
-
-    def sweep_expired_driver(self,rid):
-        turn=self.turn(rid)
-        if turn["status"]!="RUNNING":
-            return turn
-        lease=self.driver_lease(rid)
-        if lease is None or lease["expired"]:
-            return self.interrupt(rid,"Driver heartbeat expired; durable checkpoint preserved.")
-        return turn
-
-    def turn(self,rid):
-        row=self.store.db.execute("SELECT * FROM workspace_turns WHERE run_id=?",(rid,)).fetchone()
-        if not row:raise KeyError(rid)
-        result=dict(row);result["settings"]=json.loads(result.pop("settings_json"));result["snapshot"]=json.loads(result.pop("snapshot_json"))
-        if "turn_message_start" not in result["snapshot"]:
-            # Legacy snapshots contain recent history followed by this turn's
-            # task/questions/answers. Infer the boundary without rewriting DBs.
-            count=self.store.db.execute("SELECT count(*) FROM workspace_messages WHERE run_id=?",(rid,)).fetchone()[0]
-            result["snapshot"]["turn_message_start"]=max(0,len(result["snapshot"]["messages"])-count)
-        result["activities"]=[{**dict(r),"decision":json.loads(r["decision_json"]) if r["decision_json"] else None,"result":json.loads(r["result_json"]) if r["result_json"] else None} for r in self.store.db.execute("SELECT * FROM workspace_steps WHERE run_id=? ORDER BY step",(rid,))]
-        result["budgets"]=self.store.get_accounts(rid)
-        cursor=self.store.db.execute("SELECT * FROM workspace_execution_cursors WHERE run_id=?",(rid,)).fetchone()
-        result["execution_cursor"]=dict(cursor) if cursor else None
-        return result
-
-    def begin_step(self,rid):
-        with self.store.tx() as db:
-            turn=self.turn(rid)
-            if turn["status"]!="RUNNING":return None
-            unfinished=next((s for s in turn["activities"] if s["state"]!="DONE"),None)
-            if unfinished:return unfinished
-            number=turn["current_step"]+1
-            if number>turn["max_steps"]:return None
-            db.execute("INSERT INTO workspace_steps(run_id,step,state) VALUES(?,?,'STARTED')",(rid,number))
-            db.execute("UPDATE workspace_turns SET current_step=? WHERE run_id=?",(number,rid))
-            self._checkpoint(db,rid,number,"STEP_STARTED",checkpoint_step=number-1,detail=f"Step {number} started")
-            self.store._event(db,rid,"ExecutionCheckpoint",{"step":number,"phase":"STEP_STARTED","checkpoint_step":number-1})
-            return {"step":number}
-
-    def record_route_fallback(self,rid,step,route,reason):
-        with self.store.tx() as db:
-            turn=self.turn(rid)
-            snapshot=turn["snapshot"]
-            fallbacks=list(snapshot.get("route_fallbacks") or [])
-            fallbacks.append({"step":step,"route":route,"reason":reason})
-            snapshot["route_fallbacks"]=fallbacks[-8:]
+                    db.execute(
+                        "UPDATE workspace_operations SET state='UNKNOWN' WHERE decision_id=?",
+                        (op["decision_id"],),
+                    )
             db.execute(
-                "UPDATE workspace_turns SET snapshot_json=? WHERE run_id=?",
-                (canonical_json(snapshot),rid),
+                "UPDATE workspace_turns SET status=?,error=? WHERE run_id=?",
+                (status, str(reason)[:2000], rid),
+            )
+            db.execute(
+                "UPDATE runs SET state='RECOVERING',control_revision=control_revision+1 WHERE run_id=?",
+                (rid,),
+            )
+            self._checkpoint(
+                db,
+                rid,
+                turn["current_step"],
+                "INTERRUPTED" if not uncertain else "OUTCOME_UNKNOWN",
+                checkpoint_step=max(
+                    [
+                        int(item["step"])
+                        for item in turn["activities"]
+                        if item["state"] == "DONE"
+                    ]
+                    or [0]
+                ),
+                recovery_state=recovery,
+                detail=reason,
             )
             self.store._event(
-                db,rid,"RouteFallback",
-                {"step":step,"route":route,"reason":reason},
+                db,
+                rid,
+                "ConversationInterrupted",
+                {
+                    "status": status,
+                    "reason": str(reason)[:500],
+                    "recovery_state": recovery,
+                },
             )
+        return self.turn(rid)
 
-    def bind(self,rid,step,decision_id,decision):
-        with self.store.tx() as db:
-            db.execute("UPDATE workspace_steps SET state='DECIDED',decision_id=?,decision_json=? WHERE run_id=? AND step=?",(decision_id,canonical_json(decision.serializable()),rid,step))
-            self._checkpoint(db,rid,step,"DECISION_BOUND",checkpoint_step=max(0,step-1),detail=decision.decision_type)
-            self.store._event(db,rid,"ExecutionCheckpoint",{"step":step,"phase":"DECISION_BOUND","decision_id":decision_id})
-
-    def finish_tool(self,rid,step,result):
-        with self.store.tx() as db:
-            db.execute("UPDATE workspace_steps SET state='DONE',result_json=? WHERE run_id=? AND step=?",(canonical_json(result),rid,step))
-            self._checkpoint(db,rid,step,"TOOL_RECORDED",checkpoint_step=step,detail=result.get("capability_id") or "tool")
-            self.store._event(db,rid,"ConversationToolRecorded",{"step":step,"capability":result.get("capability_id")})
-            self.store._event(db,rid,"ExecutionCheckpoint",{"step":step,"phase":"TOOL_RECORDED","checkpoint_step":step})
-
-    def reject(self,rid,step,reason):self.finish_tool(rid,step,{"error":reason})
-
-    def finish_reply(self,rid,step,text,question_id=None):
-        with self.store.tx() as db:
-            turn=self.turn(rid)
-            if turn["status"]!="RUNNING":return
-            status="WAITING_USER" if question_id else "COMPLETED"
-            db.execute("UPDATE workspace_steps SET state='DONE' WHERE run_id=? AND step=?",(rid,step))
-            self._message(db,turn["session_id"],rid,"assistant",text,{"kind":"question" if question_id else "answer","citations":turn["snapshot"]["knowledge"],"execution_verified":False})
-            if question_id:
-                snapshot=turn["snapshot"];snapshot["messages"].append({"role":"assistant","content":text})
-                db.execute("UPDATE workspace_turns SET snapshot_json=? WHERE run_id=?",(canonical_json(snapshot),rid))
-            db.execute("UPDATE workspace_turns SET status=?,question_id=?,error=NULL WHERE run_id=?",(status,question_id,rid))
-            db.execute("UPDATE runs SET state=? WHERE run_id=?",("WAITING" if question_id else "SUCCEEDED",rid))
-            db.execute("UPDATE workspace_sessions SET updated_at=CURRENT_TIMESTAMP WHERE id=?",(turn["session_id"],))
-            self._checkpoint(
-                db,rid,step,"WAITING_USER" if question_id else "COMPLETED",
-                checkpoint_step=step,recovery_state="WAIT_USER" if question_id else "NONE",
-                detail="Waiting for user input" if question_id else "Conversation answer persisted",
+    # 过期 Lease 的 Run 按效果事实收束；不能仅因浏览器关闭就宣称失败或可重发。
+    def sweep_expired_driver(self, rid):
+        turn = self.turn(rid)
+        if turn["status"] != "RUNNING":
+            return turn
+        lease = self.driver_lease(rid)
+        if lease is None or lease["expired"]:
+            return self.interrupt(
+                rid, "Driver heartbeat expired; durable checkpoint preserved."
             )
-            self.store._event(db,rid,"ConversationAnswered",{"semantic_verification":"not_claimed","question_id":question_id})
-            self.store._event(db,rid,"ExecutionCheckpoint",{"step":step,"phase":"WAITING_USER" if question_id else "COMPLETED","checkpoint_step":step})
+        return turn
 
-    def answer(self,rid,text,question_id):
-        if not isinstance(text,str) or not text.strip() or len(text.encode("utf-8"))>16000:raise ValueError("invalid answer")
-        with self.store.tx() as db:
-            turn=self.turn(rid)
-            if turn["status"]!="WAITING_USER" or turn["question_id"]!=question_id:raise ValueError("answer must match current question")
-            self._message(db,turn["session_id"],rid,"user",text,{})
-            snapshot=turn["snapshot"];snapshot["messages"].append({"role":"user","content":text})
-            db.execute("UPDATE workspace_turns SET status='RUNNING',question_id=NULL,snapshot_json=? WHERE run_id=?",(canonical_json(snapshot),rid))
-            db.execute("UPDATE runs SET state='RUNNING' WHERE run_id=?",(rid,))
-            self._checkpoint(db,rid,turn["current_step"],"USER_ANSWERED",checkpoint_step=turn["current_step"],detail="User answer persisted")
-
-    def block(self,rid,status,reason):
-        with self.store.tx() as db:
-            if self.turn(rid)["status"] not in {"RUNNING","UNKNOWN","WAITING_USER","PAUSED"}:return
-            if status in {"UNKNOWN","CANCELLED"}:
-                for op in self.pending_operations(rid):
-                    if op["state"]!="TICKETED":continue
-                    for meter,cost in {"tool_calls":1,"write_bytes":op["reserved_bytes"]}.items():
-                        db.execute("UPDATE accounts SET reserved=reserved-?,unknown_held=unknown_held+? WHERE run_id=? AND meter=?",(cost,cost,rid,meter))
-                    db.execute("UPDATE workspace_operations SET state='UNKNOWN' WHERE decision_id=?",(op["decision_id"],))
-            db.execute("UPDATE workspace_turns SET status=?,error=? WHERE run_id=?",(status,reason,rid))
-            db.execute("UPDATE runs SET state=?,control_revision=control_revision+1 WHERE run_id=?",("RECOVERING" if status=="UNKNOWN" else status,rid))
-            recovery="RECONCILE" if status=="UNKNOWN" else "NONE"
-            self._checkpoint(
-                db,rid,self.turn(rid)["current_step"],status,
-                checkpoint_step=max([int(item["step"]) for item in self.turn(rid)["activities"] if item["state"]=="DONE"] or [0]),
-                recovery_state=recovery,detail=reason,
+    # 读取 Turn、固定快照与步骤结果；返回值为投影，修改它不会提交持久事实。
+    def turn(self, rid):
+        row = self.store.db.execute(
+            "SELECT * FROM workspace_turns WHERE run_id=?", (rid,)
+        ).fetchone()
+        if not row:
+            raise KeyError(rid)
+        result = dict(row)
+        result["settings"] = json.loads(result.pop("settings_json"))
+        result["snapshot"] = json.loads(result.pop("snapshot_json"))
+        if "turn_message_start" not in result["snapshot"]:
+            # 旧快照的近期历史后跟当前任务/问答；从持久边界推断，不能为兼容倒写数据库。
+            count = self.store.db.execute(
+                "SELECT count(*) FROM workspace_messages WHERE run_id=?", (rid,)
+            ).fetchone()[0]
+            result["snapshot"]["turn_message_start"] = max(
+                0, len(result["snapshot"]["messages"]) - count
             )
-            self.store._event(db,rid,"ConversationBlocked",{"status":status,"reason":reason})
-
-    def reopen(self,rid):
-        with self.store.tx() as db:
-            turn=self.turn(rid)
-            if turn["status"] not in {"UNKNOWN","INTERRUPTED","RUNNING"}:return
-            db.execute("UPDATE workspace_turns SET status='RUNNING',error=NULL WHERE run_id=?",(rid,))
-            db.execute("UPDATE runs SET state='RUNNING' WHERE run_id=?",(rid,))
-            self._checkpoint(
-                db,rid,turn["current_step"],"RESUMED",
-                checkpoint_step=max([int(item["step"]) for item in turn["activities"] if item["state"]=="DONE"] or [0]),
-                recovery_state="NONE",detail="Run resumed from durable checkpoint",
+        result["activities"] = [
+            {
+                **dict(r),
+                "decision": (
+                    json.loads(r["decision_json"]) if r["decision_json"] else None
+                ),
+                "result": json.loads(r["result_json"]) if r["result_json"] else None,
+            }
+            for r in self.store.db.execute(
+                "SELECT * FROM workspace_steps WHERE run_id=? ORDER BY step", (rid,)
             )
-            self.store._event(db,rid,"ConversationResumed",{"step":turn["current_step"]})
-
-    def operation(self,decision_id):
-        row=self.store.db.execute("SELECT * FROM workspace_operations WHERE decision_id=?",(decision_id,)).fetchone()
-        return None if not row else {**dict(row),"intent":json.loads(row["intent_json"]),"result":json.loads(row["result_json"]) if row["result_json"] else None}
-
-    def start_operation(self,rid,decision_id,capability,intent):
-        with self.store.tx() as db:
-            old=self.operation(decision_id)
-            if old:return old
-            if self.turn(rid)["status"]!="RUNNING":raise ValueError("turn stopped")
-            owner=db.execute("SELECT run_id FROM step_decisions WHERE decision_id=?",(decision_id,)).fetchone()
-            if not owner or owner[0]!=rid:raise ValueError("decision belongs to another turn")
-            amount=intent.get("write_bytes",0)
-            for meter,cost in {"tool_calls":1,"write_bytes":amount}.items():
-                changed=db.execute("UPDATE accounts SET reserved=reserved+? WHERE run_id=? AND meter=? AND limit_units-settled-reserved-unknown_held>=?",(cost,rid,meter,cost))
-                if not changed.rowcount:raise BudgetExceeded(f"insufficient {meter}")
-            db.execute("INSERT INTO workspace_operations(decision_id,run_id,capability,state,intent_json,ticket_id,reserved_bytes) VALUES(?,?,?,'TICKETED',?,?,?)",(decision_id,rid,capability,canonical_json(intent),new_id("ctkt"),amount))
-            self._checkpoint(db,rid,self.turn(rid)["current_step"],"TOOL_TICKETED",checkpoint_step=max(0,self.turn(rid)["current_step"]-1),detail=capability)
-            self.store._event(db,rid,"ConversationToolTicket",{"decision_id":decision_id,"capability":capability})
-        return self.operation(decision_id)
-
-    def settle_operation(self,decision_id,result):
-        with self.store.tx() as db:
-            op=self.operation(decision_id)
-            if op["state"]=="RESOLVED":return op["result"]
-            if result!=op["intent"]["result"]:raise IdentityConflict("tool result differs from admitted intent")
-            liability="unknown_held" if op["state"]=="UNKNOWN" else "reserved"
-            for meter,cost in {"tool_calls":1,"write_bytes":op["reserved_bytes"]}.items():db.execute(f"UPDATE accounts SET {liability}={liability}-?,settled=settled+? WHERE run_id=? AND meter=?",(cost,cost,op["run_id"],meter))
-            db.execute("UPDATE workspace_operations SET state='RESOLVED',result_json=? WHERE decision_id=?",(canonical_json(result),decision_id))
-            turn=self.turn(op["run_id"])
-            self._checkpoint(db,op["run_id"],turn["current_step"],"TOOL_SETTLED",checkpoint_step=turn["current_step"],detail=op["capability"])
+        ]
+        result["budgets"] = self.store.get_accounts(rid)
+        cursor = self.store.db.execute(
+            "SELECT * FROM workspace_execution_cursors WHERE run_id=?", (rid,)
+        ).fetchone()
+        result["execution_cursor"] = dict(cursor) if cursor else None
         return result
 
-    def pending_operations(self,rid):
-        return [self.operation(r[0]) for r in self.store.db.execute("SELECT decision_id FROM workspace_operations WHERE run_id=? AND state IN ('TICKETED','UNKNOWN')",(rid,))]
+    # 原子分配或复用当前未完成步骤；耗尽步数返回空值，恢复不跳过未消费的决定。
+    def begin_step(self, rid):
+        # 本地事务边界：下列写入一起提交，异常整体回滚；文件/网络效果须在事务外另行核对。
+        with self.store.tx() as db:
+            turn = self.turn(rid)
+            if turn["status"] != "RUNNING":
+                return None
+            unfinished = next(
+                (s for s in turn["activities"] if s["state"] != "DONE"), None
+            )
+            if unfinished:
+                return unfinished
+            number = turn["current_step"] + 1
+            if number > turn["max_steps"]:
+                return None
+            db.execute(
+                "INSERT INTO workspace_steps(run_id,step,state) VALUES(?,?,'STARTED')",
+                (rid, number),
+            )
+            db.execute(
+                "UPDATE workspace_turns SET current_step=? WHERE run_id=?",
+                (number, rid),
+            )
+            self._checkpoint(
+                db,
+                rid,
+                number,
+                "STEP_STARTED",
+                checkpoint_step=number - 1,
+                detail=f"Step {number} started",
+            )
+            self.store._event(
+                db,
+                rid,
+                "ExecutionCheckpoint",
+                {
+                    "step": number,
+                    "phase": "STEP_STARTED",
+                    "checkpoint_step": number - 1,
+                },
+            )
+            return {"step": number}
 
-    def operations(self,rid):
-        rows=self.store.db.execute("SELECT decision_id FROM workspace_operations WHERE run_id=? ORDER BY rowid",(rid,)).fetchall()
+    # 记录确定路径回退原因，供运行观测与评测审计；不改变权限范围。
+    def record_route_fallback(self, rid, step, route, reason):
+        # 本地事务边界：下列写入一起提交，异常整体回滚；文件/网络效果须在事务外另行核对。
+        with self.store.tx() as db:
+            turn = self.turn(rid)
+            snapshot = turn["snapshot"]
+            fallbacks = list(snapshot.get("route_fallbacks") or [])
+            fallbacks.append({"step": step, "route": route, "reason": reason})
+            snapshot["route_fallbacks"] = fallbacks[-8:]
+            db.execute(
+                "UPDATE workspace_turns SET snapshot_json=? WHERE run_id=?",
+                (canonical_json(snapshot), rid),
+            )
+            self.store._event(
+                db,
+                rid,
+                "RouteFallback",
+                {"step": step, "route": route, "reason": reason},
+            )
+
+    # 把当前步骤与固定决定关联，并推进 durable cursor；禁止不同决定复用同一步。
+    def bind(self, rid, step, decision_id, decision):
+        # 本地事务边界：下列写入一起提交，异常整体回滚；文件/网络效果须在事务外另行核对。
+        with self.store.tx() as db:
+            db.execute(
+                "UPDATE workspace_steps SET state='DECIDED',decision_id=?,decision_json=? WHERE run_id=? AND step=?",
+                (decision_id, canonical_json(decision.serializable()), rid, step),
+            )
+            self._checkpoint(
+                db,
+                rid,
+                step,
+                "DECISION_BOUND",
+                checkpoint_step=max(0, step - 1),
+                detail=decision.decision_type,
+            )
+            self.store._event(
+                db,
+                rid,
+                "ExecutionCheckpoint",
+                {"step": step, "phase": "DECISION_BOUND", "decision_id": decision_id},
+            )
+
+    # 原子记入工具结果与步骤完成事实；之后安全点才可派发新动作。
+    def finish_tool(self, rid, step, result):
+        # 本地事务边界：下列写入一起提交，异常整体回滚；文件/网络效果须在事务外另行核对。
+        with self.store.tx() as db:
+            db.execute(
+                "UPDATE workspace_steps SET state='DONE',result_json=? WHERE run_id=? AND step=?",
+                (canonical_json(result), rid, step),
+            )
+            self._checkpoint(
+                db,
+                rid,
+                step,
+                "TOOL_RECORDED",
+                checkpoint_step=step,
+                detail=result.get("capability_id") or "tool",
+            )
+            self.store._event(
+                db,
+                rid,
+                "ConversationToolRecorded",
+                {"step": step, "capability": result.get("capability_id")},
+            )
+            self.store._event(
+                db,
+                rid,
+                "ExecutionCheckpoint",
+                {"step": step, "phase": "TOOL_RECORDED", "checkpoint_step": step},
+            )
+
+    # 记录已知参数/权限拒绝为反馈；拒绝不冒充 Ticket 后的 UNKNOWN。
+    def reject(self, rid, step, reason):
+        self.finish_tool(rid, step, {"error": reason})
+
+    # 把回答/问题、步骤状态及游标一起提交；普通 COMPLETED 只表示对话回答已结束。
+    def finish_reply(self, rid, step, text, question_id=None):
+        # 本地事务边界：下列写入一起提交，异常整体回滚；文件/网络效果须在事务外另行核对。
+        with self.store.tx() as db:
+            turn = self.turn(rid)
+            if turn["status"] != "RUNNING":
+                return
+            status = "WAITING_USER" if question_id else "COMPLETED"
+            db.execute(
+                "UPDATE workspace_steps SET state='DONE' WHERE run_id=? AND step=?",
+                (rid, step),
+            )
+            self._message(
+                db,
+                turn["session_id"],
+                rid,
+                "assistant",
+                text,
+                {
+                    "kind": "question" if question_id else "answer",
+                    "citations": turn["snapshot"]["knowledge"],
+                    "execution_verified": False,
+                },
+            )
+            if question_id:
+                snapshot = turn["snapshot"]
+                snapshot["messages"].append({"role": "assistant", "content": text})
+                db.execute(
+                    "UPDATE workspace_turns SET snapshot_json=? WHERE run_id=?",
+                    (canonical_json(snapshot), rid),
+                )
+            db.execute(
+                "UPDATE workspace_turns SET status=?,question_id=?,error=NULL WHERE run_id=?",
+                (status, question_id, rid),
+            )
+            db.execute(
+                "UPDATE runs SET state=? WHERE run_id=?",
+                ("WAITING" if question_id else "SUCCEEDED", rid),
+            )
+            db.execute(
+                "UPDATE workspace_sessions SET updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                (turn["session_id"],),
+            )
+            self._checkpoint(
+                db,
+                rid,
+                step,
+                "WAITING_USER" if question_id else "COMPLETED",
+                checkpoint_step=step,
+                recovery_state="WAIT_USER" if question_id else "NONE",
+                detail=(
+                    "Waiting for user input"
+                    if question_id
+                    else "Conversation answer persisted"
+                ),
+            )
+            self.store._event(
+                db,
+                rid,
+                "ConversationAnswered",
+                {"semantic_verification": "not_claimed", "question_id": question_id},
+            )
+            self.store._event(
+                db,
+                rid,
+                "ExecutionCheckpoint",
+                {
+                    "step": step,
+                    "phase": "WAITING_USER" if question_id else "COMPLETED",
+                    "checkpoint_step": step,
+                },
+            )
+
+    # 校验待答问题身份并消费明确用户回答；不同问题不能相互代答。
+    def answer(self, rid, text, question_id):
+        if (
+            not isinstance(text, str)
+            or not text.strip()
+            or len(text.encode("utf-8")) > 16000
+        ):
+            raise ValueError("invalid answer")
+        # 本地事务边界：下列写入一起提交，异常整体回滚；文件/网络效果须在事务外另行核对。
+        with self.store.tx() as db:
+            turn = self.turn(rid)
+            if turn["status"] != "WAITING_USER" or turn["question_id"] != question_id:
+                raise ValueError("answer must match current question")
+            self._message(db, turn["session_id"], rid, "user", text, {})
+            snapshot = turn["snapshot"]
+            snapshot["messages"].append({"role": "user", "content": text})
+            db.execute(
+                "UPDATE workspace_turns SET status='RUNNING',question_id=NULL,snapshot_json=? WHERE run_id=?",
+                (canonical_json(snapshot), rid),
+            )
+            db.execute("UPDATE runs SET state='RUNNING' WHERE run_id=?", (rid,))
+            self._checkpoint(
+                db,
+                rid,
+                turn["current_step"],
+                "USER_ANSWERED",
+                checkpoint_step=turn["current_step"],
+                detail="User answer persisted",
+            )
+
+    # 持久记录阻塞/结束状态及原因；不抹掉已签发凭证和晚到收据。
+    def block(self, rid, status, reason):
+        # 本地事务边界：下列写入一起提交，异常整体回滚；文件/网络效果须在事务外另行核对。
+        with self.store.tx() as db:
+            if self.turn(rid)["status"] not in {
+                "RUNNING",
+                "UNKNOWN",
+                "WAITING_USER",
+                "PAUSED",
+            }:
+                return
+            if status in {"UNKNOWN", "CANCELLED"}:
+                for op in self.pending_operations(rid):
+                    if op["state"] != "TICKETED":
+                        continue
+                    for meter, cost in {
+                        "tool_calls": 1,
+                        "write_bytes": op["reserved_bytes"],
+                    }.items():
+                        db.execute(
+                            "UPDATE accounts SET reserved=reserved-?,unknown_held=unknown_held+? WHERE run_id=? AND meter=?",
+                            (cost, cost, rid, meter),
+                        )
+                    db.execute(
+                        "UPDATE workspace_operations SET state='UNKNOWN' WHERE decision_id=?",
+                        (op["decision_id"],),
+                    )
+            db.execute(
+                "UPDATE workspace_turns SET status=?,error=? WHERE run_id=?",
+                (status, reason, rid),
+            )
+            db.execute(
+                "UPDATE runs SET state=?,control_revision=control_revision+1 WHERE run_id=?",
+                ("RECOVERING" if status == "UNKNOWN" else status, rid),
+            )
+            recovery = "RECONCILE" if status == "UNKNOWN" else "NONE"
+            self._checkpoint(
+                db,
+                rid,
+                self.turn(rid)["current_step"],
+                status,
+                checkpoint_step=max(
+                    [
+                        int(item["step"])
+                        for item in self.turn(rid)["activities"]
+                        if item["state"] == "DONE"
+                    ]
+                    or [0]
+                ),
+                recovery_state=recovery,
+                detail=reason,
+            )
+            self.store._event(
+                db, rid, "ConversationBlocked", {"status": status, "reason": reason}
+            )
+
+    # 按当前持久状态重新进入驱动；恢复核对由执行端口负责，不凭重开动作重发未知效果。
+    def reopen(self, rid):
+        # 本地事务边界：下列写入一起提交，异常整体回滚；文件/网络效果须在事务外另行核对。
+        with self.store.tx() as db:
+            turn = self.turn(rid)
+            if turn["status"] not in {"UNKNOWN", "INTERRUPTED", "RUNNING"}:
+                return
+            db.execute(
+                "UPDATE workspace_turns SET status='RUNNING',error=NULL WHERE run_id=?",
+                (rid,),
+            )
+            db.execute("UPDATE runs SET state='RUNNING' WHERE run_id=?", (rid,))
+            self._checkpoint(
+                db,
+                rid,
+                turn["current_step"],
+                "RESUMED",
+                checkpoint_step=max(
+                    [
+                        int(item["step"])
+                        for item in turn["activities"]
+                        if item["state"] == "DONE"
+                    ]
+                    or [0]
+                ),
+                recovery_state="NONE",
+                detail="Run resumed from durable checkpoint",
+            )
+            self.store._event(
+                db, rid, "ConversationResumed", {"step": turn["current_step"]}
+            )
+
+    # 取得 decision_id 的工具机会；相同决定恢复必须复用这条记录。
+    def operation(self, decision_id):
+        row = self.store.db.execute(
+            "SELECT * FROM workspace_operations WHERE decision_id=?", (decision_id,)
+        ).fetchone()
+        return (
+            None
+            if not row
+            else {
+                **dict(row),
+                "intent": json.loads(row["intent_json"]),
+                "result": (
+                    json.loads(row["result_json"]) if row["result_json"] else None
+                ),
+            }
+        )
+
+    # 同事务登记工具意图、资源预留与唯一 Ticket；外部文件/Git 效果随后才发生。
+    def start_operation(self, rid, decision_id, capability, intent):
+        # 本地事务边界：下列写入一起提交，异常整体回滚；文件/网络效果须在事务外另行核对。
+        with self.store.tx() as db:
+            old = self.operation(decision_id)
+            if old:
+                return old
+            if self.turn(rid)["status"] != "RUNNING":
+                raise ValueError("turn stopped")
+            owner = db.execute(
+                "SELECT run_id FROM step_decisions WHERE decision_id=?", (decision_id,)
+            ).fetchone()
+            if not owner or owner[0] != rid:
+                raise ValueError("decision belongs to another turn")
+            amount = intent.get("write_bytes", 0)
+            for meter, cost in {"tool_calls": 1, "write_bytes": amount}.items():
+                changed = db.execute(
+                    "UPDATE accounts SET reserved=reserved+? WHERE run_id=? AND meter=? AND limit_units-settled-reserved-unknown_held>=?",
+                    (cost, rid, meter, cost),
+                )
+                if not changed.rowcount:
+                    raise BudgetExceeded(f"insufficient {meter}")
+            db.execute(
+                "INSERT INTO workspace_operations(decision_id,run_id,capability,state,intent_json,ticket_id,reserved_bytes) VALUES(?,?,?,'TICKETED',?,?,?)",
+                (
+                    decision_id,
+                    rid,
+                    capability,
+                    canonical_json(intent),
+                    new_id("ctkt"),
+                    amount,
+                ),
+            )
+            self._checkpoint(
+                db,
+                rid,
+                self.turn(rid)["current_step"],
+                "TOOL_TICKETED",
+                checkpoint_step=max(0, self.turn(rid)["current_step"] - 1),
+                detail=capability,
+            )
+            self.store._event(
+                db,
+                rid,
+                "ConversationToolTicket",
+                {"decision_id": decision_id, "capability": capability},
+            )
+        return self.operation(decision_id)
+
+    # 以已发布收据原子完成工具记录和计量；记录晚到结果，不抹去先前 Stop/Pause。
+    def settle_operation(self, decision_id, result):
+        # 本地事务边界：下列写入一起提交，异常整体回滚；文件/网络效果须在事务外另行核对。
+        with self.store.tx() as db:
+            op = self.operation(decision_id)
+            if op["state"] == "RESOLVED":
+                return op["result"]
+            if result != op["intent"]["result"]:
+                raise IdentityConflict("tool result differs from admitted intent")
+            liability = "unknown_held" if op["state"] == "UNKNOWN" else "reserved"
+            for meter, cost in {
+                "tool_calls": 1,
+                "write_bytes": op["reserved_bytes"],
+            }.items():
+                db.execute(
+                    f"UPDATE accounts SET {liability}={liability}-?,settled=settled+? WHERE run_id=? AND meter=?",
+                    (cost, cost, op["run_id"], meter),
+                )
+            db.execute(
+                "UPDATE workspace_operations SET state='RESOLVED',result_json=? WHERE decision_id=?",
+                (canonical_json(result), decision_id),
+            )
+            turn = self.turn(op["run_id"])
+            self._checkpoint(
+                db,
+                op["run_id"],
+                turn["current_step"],
+                "TOOL_SETTLED",
+                checkpoint_step=turn["current_step"],
+                detail=op["capability"],
+            )
+        return result
+
+    # 列出仍待核对的工具机会；定时器不得绕过它创建替代工作。
+    def pending_operations(self, rid):
+        return [
+            self.operation(r[0])
+            for r in self.store.db.execute(
+                "SELECT decision_id FROM workspace_operations WHERE run_id=? AND state IN ('TICKETED','UNKNOWN')",
+                (rid,),
+            )
+        ]
+
+    # 按 Run 读取工具状态与参数/结果投影；用于观测，不再次派发。
+    def operations(self, rid):
+        rows = self.store.db.execute(
+            "SELECT decision_id FROM workspace_operations WHERE run_id=? ORDER BY rowid",
+            (rid,),
+        ).fetchall()
         return [self.operation(r[0]) for r in rows]
 
-    def events(self,rid):
-        result=[]
-        for row in self.store.db.execute("SELECT * FROM events WHERE run_id=? ORDER BY sequence",(rid,)).fetchall():
-            item=dict(row);item["payload"]=json.loads(item.pop("payload_json"))
+    # 读取 Run 持久有序事件供 Runtime 面板展示；页面刷新不会生成执行效果。
+    def events(self, rid):
+        result = []
+        for row in self.store.db.execute(
+            "SELECT * FROM events WHERE run_id=? ORDER BY sequence", (rid,)
+        ).fetchall():
+            item = dict(row)
+            item["payload"] = json.loads(item.pop("payload_json"))
             result.append(item)
         return result
 
-    def artifacts(self,sid):
-        results=[];versions={}
-        for r in self.store.db.execute("SELECT o.result_json,t.run_id FROM workspace_operations o JOIN workspace_turns t USING(run_id) WHERE t.session_id=? AND o.state='RESOLVED'",(sid,)):
-            value=json.loads(r[0])
+    # 从已结算工具结果投影会话产物；下载按固定对象摘要读取，避免受管文件后续版本串台。
+    def artifacts(self, sid):
+        results = []
+        versions = {}
+        for r in self.store.db.execute(
+            "SELECT o.result_json,t.run_id FROM workspace_operations o JOIN workspace_turns t USING(run_id) WHERE t.session_id=? AND o.state='RESOLVED'",
+            (sid,),
+        ):
+            value = json.loads(r[0])
             if value.get("artifact"):
-                artifact=value["artifact"];versions[artifact["name"]]=versions.get(artifact["name"],0)+1
-                results.append({**artifact,"run_id":r[1],"version":versions[artifact["name"]]})
+                artifact = value["artifact"]
+                versions[artifact["name"]] = versions.get(artifact["name"], 0) + 1
+                results.append(
+                    {**artifact, "run_id": r[1], "version": versions[artifact["name"]]}
+                )
         return results

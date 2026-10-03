@@ -1,7 +1,5 @@
-"""Orthogonal Myth domains.
-
-Domains are peers around the durable core, not mandatory sequential layers.
-"""
+"""同级纯领域合同包入口。
+包导出本身不启动业务工作；具体状态归属、I/O 和恢复合同见被导出模块。"""
 
 from .coordination import (
     CoordinationStrategy,
@@ -22,6 +20,7 @@ from .information import (
 )
 from .intent import IntentPicker
 
+# __all__：公开导出名单；兼容别名只有在确认外部迁移完成后才删除。
 __all__ = [
     "CoordinationStrategy",
     "RouteTarget",

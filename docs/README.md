@@ -8,6 +8,7 @@
 | --- | --- |
 | 30 秒理解项目 | [README](../README.md) |
 | 理解当前架构 | [ARCHITECTURE.md](ARCHITECTURE.md) |
+| 按协作链读中文源码 | [CODE_GUIDE.md](CODE_GUIDE.md) |
 | 理解不可破坏的边界 | [ARCHITECTURE_CONSTITUTION.md](ARCHITECTURE_CONSTITUTION.md) |
 | 看 Runtime / 第三栏观测合同 | [OBSERVABILITY.md](OBSERVABILITY.md) |
 | 看产品视觉与交互原则 | [DESIGN.md](DESIGN.md) |

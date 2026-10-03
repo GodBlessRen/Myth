@@ -1,4 +1,5 @@
-"""Built-in model providers."""
+"""统一供应商适配器导出。
+包导出本身不启动业务工作；具体状态归属、I/O 和恢复合同见被导出模块。"""
 
 from __future__ import annotations
 
@@ -8,7 +9,10 @@ from .openai import ChatGPTPlanProvider, OpenAIApiKeyProvider
 from .scripted import ScriptedPatchProvider
 
 
-def create_provider(name: str, *, ollama_base_url: str | None = None, runtime_root: str | None = None) -> ModelProvider:
+# 按明确 provider_id 在装配边界创建具体供应商；配置不携带其他应用认证文件或扩大工具权限。
+def create_provider(
+    name: str, *, ollama_base_url: str | None = None, runtime_root: str | None = None
+) -> ModelProvider:
     if name == "scripted":
         return ScriptedPatchProvider()
     if name == "ollama":
@@ -26,6 +30,7 @@ def create_provider(name: str, *, ollama_base_url: str | None = None, runtime_ro
     raise ValueError(f"unknown provider: {name}")
 
 
+# __all__：公开导出名单；兼容别名只有在确认外部迁移完成后才删除。
 __all__ = [
     "ModelProvider",
     "OllamaProvider",

@@ -1,8 +1,9 @@
-"""Reproduce review findings in disposable databases; no model/network calls.
+"""v0.10 历史诊断：在临时数据库复现当时的已知限制。
 
-Run with PYTHONPATH=src. These probes report observed limitations rather than
-asserting that all probes are supposed to pass. Regression tests live in tests/.
+检出当时版本并设置 PYTHONPATH=src 后使用；不连接模型/网络，不读取用户项目。
+这些探针报告历史观测，不要求当前版本仍产生相同缺陷。当前回归入口在 tests/。
 """
+
 from __future__ import annotations
 
 import json
@@ -19,6 +20,7 @@ from myth.workspace import Workspace
 SETTINGS = {"provider": "ollama", "model": "test"}
 
 
+# 装配临时真实仓储和可控替身，逐项记录当时的失败窗口；固定报告不代表当前能力。
 def diagnose(root):
     report = {}
     with MythRuntime(root) as runtime:
@@ -31,15 +33,27 @@ def diagnose(root):
         rid_a = repo.create_turn(sid_a, "ORCHID source", "memory-origin")["run_id"]
         step = repo.begin_step(rid_a)
         repo.finish_reply(rid_a, step["step"], "ORCHID belongs to project A")
-        workspace.memory.record_episode(rid_a, "ORCHID source", "ORCHID belongs to project A")
+        workspace.memory.record_episode(
+            rid_a, "ORCHID source", "ORCHID belongs to project A"
+        )
         sid_b = repo.create_session(project_id=b["id"])["id"]
         service = ConversationWebService(root)
-        with patch.object(service, "connection", return_value={"ready": True, "details": {"models": ["test"]}}), \
-             patch.object(service, "_spawn"):
-            result = service.send(sid_b, {"text": "ORCHID source?", "request_id": "cross-project"})
+        with (
+            patch.object(
+                service,
+                "connection",
+                return_value={"ready": True, "details": {"models": ["test"]}},
+            ),
+            patch.object(service, "_spawn"),
+        ):
+            result = service.send(
+                sid_b, {"text": "ORCHID source?", "request_id": "cross-project"}
+            )
         recalled = repo.turn(result["run_id"])["snapshot"]["memory"]
         report["global_episodic_memory"] = {
-            "other_project_episode_recalled": any(m["source_ref"] == f"run:{rid_a}" for m in recalled),
+            "other_project_episode_recalled": any(
+                m["source_ref"] == f"run:{rid_a}" for m in recalled
+            ),
             "interpretation": "Memory is workspace-global; Knowledge project filtering does not apply to episodes.",
         }
 
@@ -54,33 +68,52 @@ def diagnose(root):
                 return apply(state, command, payload)
 
             try:
-                with patch.object(workspace.control.machine, "apply", side_effect=interleave):
+                with patch.object(
+                    workspace.control.machine, "apply", side_effect=interleave
+                ):
                     workspace.control.command(rid, "steer", "retain this steering")
                 error = None
             except Exception as exc:
                 error = type(exc).__name__ + ": " + str(exc)
         report["control_command_interleaving"] = {
             "first_command_error": error,
-            "steering_persisted": workspace.control.view(rid)["steering_note"] is not None,
+            "steering_persisted": workspace.control.view(rid)["steering_note"]
+            is not None,
             "interpretation": "Two connections interleaved after snapshot read and before command transaction.",
         }
 
         sid = repo.create_session()["id"]
-        with patch.object(service, "connection", return_value={"ready": True, "details": {"models": ["test"]}}), \
-             patch.object(service, "_spawn") as spawn:
+        with (
+            patch.object(
+                service,
+                "connection",
+                return_value={"ready": True, "details": {"models": ["test"]}},
+            ),
+            patch.object(service, "_spawn") as spawn,
+        ):
             try:
-                service.send(sid, {"text": "goal task", "request_id": "bad-goal", "goal_id": "missing"})
+                service.send(
+                    sid,
+                    {
+                        "text": "goal task",
+                        "request_id": "bad-goal",
+                        "goal_id": "missing",
+                    },
+                )
                 error = None
             except Exception as exc:
                 error = type(exc).__name__
         turns = repo.session(sid)["turns"]
         report["goal_binding_submission"] = {
-            "error": error, "created_turns": len(turns),
+            "error": error,
+            "created_turns": len(turns),
             "turn_status": turns[0]["status"] if turns else None,
             "worker_started": spawn.called,
         }
 
-        doc = repo.import_document({"title": "Synthetic recall fixture", "content": "ordinary material"})
+        doc = repo.import_document(
+            {"title": "Synthetic recall fixture", "content": "ordinary material"}
+        )
         with runtime.store.tx() as db:
             db.executemany(
                 "INSERT INTO workspace_chunks(document_id,chunk_index,content) VALUES (?,?,?)",
@@ -96,15 +129,26 @@ def diagnose(root):
 
     snapshot = {
         "messages": [{"role": "user", "content": "CURRENT-TASK"}],
-        "memory": [{"memory_id": f"m{i}", "text": "旧资料" * 880,
-                    "source_ref": f"run:{i}", "revision": 1} for i in range(6)],
+        "memory": [
+            {
+                "memory_id": f"m{i}",
+                "text": "旧资料" * 880,
+                "source_ref": f"run:{i}",
+                "revision": 1,
+            }
+            for i in range(6)
+        ],
     }
     request = conversation_request(SETTINGS, snapshot, snapshot["messages"], [])
     report["context_pressure_after_fix"] = {
-        "recalled_memory_bytes": sum(len(m["text"].encode("utf-8")) for m in snapshot["memory"]),
+        "recalled_memory_bytes": sum(
+            len(m["text"].encode("utf-8")) for m in snapshot["memory"]
+        ),
         "model_context_bytes": request.context_report["bytes_used"],
         "max_bytes": request.context_report["max_bytes"],
-        "selected_memory_count": sum(ref.startswith("memory:") for ref in request.context_report["selected"]),
+        "selected_memory_count": sum(
+            ref.startswith("memory:") for ref in request.context_report["selected"]
+        ),
         "dropped_count": len(request.context_report["dropped"]),
     }
     return report

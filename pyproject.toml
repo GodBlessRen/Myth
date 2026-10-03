@@ -1,10 +1,12 @@
+# 包装入口：src/myth 是唯一生产代码根；版本须与 myth.__version__ 同步，并用安装包 smoke 核对。
+# 构建不启动 Runtime/模型；webui 静态文件必须随 wheel 一起交付。
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "myth-runtime"
-version = "0.21.0"
+version = "0.21.1"
 description = "A composable runtime for durable agents with pluggable intent and information strategies."
 readme = "README.md"
 requires-python = ">=3.12"

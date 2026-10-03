@@ -313,3 +313,13 @@ History / Context | Conversation / Task | Runtime Observatory
 - 语义上“万能”的 completion verifier。
 
 这些由真实任务需求决定是否进入下一阶段。
+
+## 17. 状态所有权与原子准入
+
+个人状态仓储拥有 Goal/进度/关联写入；对话仓储协调 Turn admission，通过个人仓储加入同连接活动事务，不能复制对方写表逻辑。计划机会加入同一事务，初始进度缺失也在这个事务内补齐。
+
+独立精确文件入口先在事务外准备摘要对象及私有基线，再把 Run/账号/Action/Attempt/预留/事件一起提交；失败不留下只有 Run 的新入口。未引用私有准备不具有 Ticket，也不代表已修改原项目。
+
+应用对 Control、Memory 和 Goal checkpoint 依赖明确端口；Exact/Conversation 共用独立本机 Run 锁，不互相实例化业务执行器。包入口按需导出，纯领域冷导入不加载数据库/认证/供应商依赖。
+
+当前仍保留 Control 对 Core/对话表的跨聚合写入，以及回答、记忆、长期进度和 Driver 清理的分别提交。目录和端口分离不等于全面状态隔离；文件、凭据库与数据库也不是一个事务。详细协作表与剩余耦合见 [CODE_GUIDE.md](CODE_GUIDE.md)。
