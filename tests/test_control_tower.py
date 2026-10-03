@@ -177,11 +177,17 @@ class ControlTowerTests(unittest.TestCase):
             try:
                 executable = set(workspace.kernel.capabilities.executable_ids())
                 self.assertTrue(
-                    {"project.search", "diff.preview", "git.status", "git.diff"}
+                    {
+                        "project.search",
+                        "diff.preview",
+                        "git.status",
+                        "git.diff",
+                        "test.run",
+                    }
                     <= executable
                 )
+                # 任意 shell 仍未获得执行资格；test.run 只接受显式受信的固定 profile。
                 self.assertNotIn("shell.exec", executable)
-                self.assertNotIn("test.run", executable)
             finally:
                 runtime.close()
 
