@@ -310,19 +310,28 @@ class BestPathLedger:
             else:
                 tool_wall_complete = False
 
-        path = self.path(run_id)
         files = set()
         code_added = 0
         code_removed = 0
         tool_proposals = 0
         ask_user = 0
-        for item in path:
-            if item["kind"] == "tool":
+        decision_rows = self.store.db.execute(
+            "SELECT decision_id,decision_json FROM workspace_steps "
+            "WHERE run_id=? AND decision_json IS NOT NULL ORDER BY step",
+            (run_id,),
+        ).fetchall()
+        for row in decision_rows:
+            try:
+                decision = json.loads(row["decision_json"])
+            except json.JSONDecodeError:
+                continue
+            kind = decision.get("decision_type")
+            if kind == "tool_call":
                 tool_proposals += 1
-                if item.get("decision_id") not in resolved_decisions:
+                if row["decision_id"] not in resolved_decisions:
                     continue
-                args = item.get("arguments") or {}
-                capability = item.get("capability")
+                args = decision.get("arguments") or {}
+                capability = decision.get("capability_id")
                 target = args.get("path")
                 if isinstance(target, str) and target:
                     files.add(target.replace("\\", "/"))
@@ -331,7 +340,7 @@ class BestPathLedger:
                     code_removed += _line_count(args.get("old_text"))
                 elif capability == "artifact.write":
                     code_added += _line_count(args.get("content"))
-            elif item["kind"] == "ask":
+            elif kind == "ask_user":
                 ask_user += 1
 
         attention = self.store.db.execute(
@@ -392,12 +401,19 @@ class BestPathLedger:
                 continue
             kind = decision.get("decision_type")
             if kind == "tool_call":
+                args = decision.get("arguments") or {}
+                # 路径账本只保存可观察动作和小型定位字段，不复制源码、Prompt 或工具大参数。
+                safe_args = {
+                    key: args.get(key)
+                    for key in ("path", "document_id", "profile_id", "resolution")
+                    if isinstance(args.get(key), (str, int, float, bool))
+                }
                 item = {
                     "step": int(row["step"]),
                     "kind": "tool",
                     "decision_id": row["decision_id"],
                     "capability": decision.get("capability_id"),
-                    "arguments": decision.get("arguments") or {},
+                    "arguments": safe_args,
                 }
             elif kind == "ask_user":
                 item = {
@@ -522,6 +538,8 @@ class BestPathLedger:
         ):
             raise ValueError("Best Path subject digest does not match current acceptance")
         turn = self._turn(run_id)
+        if turn.get("status") != "COMPLETED":
+            raise ValueError("Best Path requires a completed delivery")
         task = self._task_for_turn(turn)
         identity = self.identity(task, turn["settings"], turn["snapshot"])
         metrics = self.metrics(run_id)
