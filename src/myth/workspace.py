@@ -61,6 +61,7 @@ class Workspace:
             self.repository,
             capability_registry=self.components.capabilities,
         )
+        # verification：与 execution 共用同一 profile 状态所有者，避免双写真相。
         self.verification = self.execution.verification
         # agent：Exact Agent 用例装配对象；保留固定验收合同。
         self.agent = ConversationAgent(
