@@ -93,6 +93,30 @@ class NetworkRecoveryTests(unittest.TestCase):
         executor = DurableExecutor(self.root)
         self.assertEqual(executor._next_poll_delay(), executor.poll_seconds)
 
+    # 尚未准入 Run 的计划也使用短探测；异常进入持久退避，不能每次 tick 立即重查或保存异常正文。
+    def test_goal_probe_is_bounded_and_exception_enters_backoff(self):
+        self.repo.block(self.rid, "CANCELLED", "isolate scheduled probe")
+        scheduler = GoalScheduler(self.workspace)
+        goal = self.workspace.personal.create_goal("Probe before admission")
+        entry = scheduler.create(goal["goal_id"], {"session_id": self.sid, "prompt": "Resume", "due_at": "2026-01-01T00:00:00Z"})
+        provider = ChatProvider()
+        provider.timeout = 180
+        executor = DurableExecutor(self.root)
+        now = time.time()
+        with patch("myth.durable_executor.create_provider", return_value=provider), patch.object(provider, "check", side_effect=RuntimeError("synthetic private detail")) as probe, patch("time.time", return_value=now):
+            self.assertTrue(executor.claim())
+            try:
+                self.assertEqual(executor.tick(), 0)
+                state = scheduler.get(entry["schedule_id"])
+                self.assertEqual(provider.timeout, 5)
+                self.assertEqual(state["retry_at"], now + 1)
+                self.assertEqual(state["retry_failures"], 1)
+                self.assertNotIn("private detail", state["last_error"])
+                self.assertEqual(executor.tick(), 0)
+                self.assertEqual(probe.call_count, 1)
+            finally:
+                executor.release()
+
     # Exact CLI 没有后台自动发现，但显式再次驱动复用原 Run/step，并保留真实工具验收。
     def test_exact_agent_resumes_same_step_after_pre_dispatch_disconnect(self):
         source = self.root / "exact.txt"

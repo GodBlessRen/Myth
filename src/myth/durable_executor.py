@@ -297,8 +297,8 @@ class DurableExecutor:
             runtime_root=str(self.root),
         )
 
-    # 在持有 Driver 心跳的工作线程检查供应商；检查失败提交退避，不消费模型 Ticket。
-    def _provider_ready(self, run_id: str, settings) -> bool:
+    # 普通 Run/计划共用有界只读探测；单次探测异常按连接不可用处理，不持久保存异常正文。
+    def _connection_ready(self, settings) -> bool:
         provider = self._provider(settings)
         # 生产探测有界；调用使用另一个 provider 的原始推理超时，工厂替身不被修改。
         if self.provider_factory is None and hasattr(provider, "timeout"):
@@ -311,6 +311,11 @@ class DurableExecutor:
                 ready = False
         except Exception:
             ready = False
+        return ready
+
+    # 在持有 Driver 心跳的工作线程检查供应商；检查失败提交退避，不消费模型 Ticket。
+    def _provider_ready(self, run_id: str, settings) -> bool:
+        ready = self._connection_ready(settings)
         if not ready:
             with MythRuntime(self.root) as runtime:
                 Workspace(runtime).repository.defer_network(run_id)
@@ -471,16 +476,7 @@ class DurableExecutor:
                     if len(self.active) >= self.max_active:
                         break
                 try:
-                    provider = self._provider(schedule["settings"])
-                    status = provider.check()
-                    ready = bool(status.ready)
-                    if (
-                        ready
-                        and schedule["settings"].get("provider") == "ollama"
-                        and schedule["settings"].get("model")
-                        not in (status.details or {}).get("models", [])
-                    ):
-                        ready = False
+                    ready = self._connection_ready(schedule["settings"])
                     if not ready:
                         with MythRuntime(self.root) as runtime:
                             GoalScheduler(Workspace(runtime)).defer(
