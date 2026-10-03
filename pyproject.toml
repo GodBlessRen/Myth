@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "myth-runtime"
-version = "0.21.1"
+version = "0.22.0"
 description = "A composable runtime for durable agents with pluggable intent and information strategies."
 readme = "README.md"
 requires-python = ">=3.12"
