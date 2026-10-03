@@ -634,6 +634,7 @@ class ConversationWebService:
         with MythRuntime(self.root) as runtime:
             return Workspace(runtime).verification.list(project_id)
 
+    # 创建明确受信项目的固定测试 profile；不接受任意命令文本。
     def create_verification_profile(self, project_id, value):
         with MythRuntime(self.root) as runtime:
             return Workspace(runtime).verification.create(project_id, value)
