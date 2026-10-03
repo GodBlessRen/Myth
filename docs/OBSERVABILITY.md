@@ -222,3 +222,15 @@ Durable progress    -> Execution Cursor / Event 的 checkpoint 实际推进
 ```
 
 因此“worker 心跳正常”绝不等价于“任务正在有效前进”。默认观察阈值到达后只报告 **suspected no progress**；如果当前存在 UNKNOWN/TICKETED 外部效果，仍必须先 RECONCILE。这个规则用于发现“线程还活着但执行卡死”的情况，同时避免把看门狗变成重复调用制造器。
+
+
+## Worked Time / Model Wall
+
+Myth 把两种时间分开显示：
+
+- Assistant 回复旁的 `用时 Xm Ys`：从本轮用户输入持久化到对应 Assistant 回复持久化的整轮 wall-clock。
+- Runtime Observatory 的 `Model wall`：Runtime 围绕每次 `provider.invoke` 实测并聚合的调用 wall-clock。
+
+两者都不是“模型内部纯推理时间”。前者包含工具、Runtime、排队和网络；后者只覆盖 provider 调用边界，但仍可能包含网络与供应商排队。若供应商报告内部 duration，应作为第三类独立 metric 保留。
+
+运行中的“用时”由服务端持久消息起点投影，每次会话轮询刷新；页面刷新不会重置计时。
