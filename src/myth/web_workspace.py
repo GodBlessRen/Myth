@@ -273,17 +273,17 @@ class ConversationWebService:
 
     # 为每条 Assistant 回复投影从最近一条同 Run 用户消息到回复落库的 wall-clock 用时；不伪装成纯模型推理时间。
     def _reply_timings(self, messages):
-        last_user = {}
+        pending_user = {}
         now = time.time()
         for message in messages:
             stamp = self._timestamp_epoch(message.get("created_at"))
             rid = message.get("run_id")
             if message.get("role") == "user" and rid and stamp is not None:
-                last_user[rid] = stamp
+                pending_user[rid] = stamp
                 continue
             if message.get("role") != "assistant" or not rid or stamp is None:
                 continue
-            started = last_user.get(rid)
+            started = pending_user.pop(rid, None)
             if started is None:
                 continue
             metadata = dict(message.get("metadata") or {})
@@ -296,7 +296,7 @@ class ConversationWebService:
                 "started_at": started,
                 "elapsed_seconds": max(0, int(now - started)),
             }
-            for rid, started in last_user.items()
+            for rid, started in pending_user.items()
         }
 
     # 读取会话及其消息/轮次投影；持久状态仍由仓储操作修改。
