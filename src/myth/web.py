@@ -524,6 +524,10 @@ def serve(
             "Myth Web binds to loopback only; use a reverse proxy after adding authentication"
         )
     service = AgentWebService(root)
+    # 常驻执行器与 HTTP 生命周期分离；Web 崩溃/重启后 worker 仍可按持久 Lease/游标接续。
+    from .durable_executor import ensure_executor_process
+
+    executor = ensure_executor_process(root)
     server_type = ThreadingHTTPServer
     if ":" in host:
 
@@ -537,7 +541,11 @@ def serve(
     display_host = f"[{host}]" if ":" in host else host
     url = f"http://{display_host}:{server.server_port}/"
     print(f"Myth Web: {url}")
-    service.workspace.start_scheduler()
+    print(
+        "Myth Executor: "
+        + ("active" if executor.get("active") else executor.get("state", "unknown"))
+        + (f" pid={executor.get('pid')}" if executor.get("pid") else "")
+    )
     if open_browser:
         threading.Timer(0.35, lambda: webbrowser.open(url)).start()
     try:
@@ -545,5 +553,6 @@ def serve(
     except KeyboardInterrupt:
         pass
     finally:
+        # 关闭 Web 不停止独立执行器；Run 生命周期不再绑定 HTTP 生命周期。
         service.workspace.stop_scheduler()
         server.server_close()

@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.22 — Detached Durable Executor
+
+- Conversation / Goal 的已准入长任务改由独立 Durable Executor 驱动，Web 只负责确保 worker 存在；关闭页面或 Web 进程不再主动停止任务。
+- worker 使用 SQLite 全局短租约；每个 Run 继续复用既有 Driver Lease / generation / heartbeat，同一个 `run_id` 在租约过期后从 durable Execution Cursor 接管，不创建替代 Run。
+- 普通 Turn 与 Goal Wake-up 共用同一恢复路径；`UNKNOWN / RECONCILE` 永不自动派发，避免 ambiguous provider/tool effect 被重复执行。
+- Runtime Observatory 新增 Executor heartbeat、last durable progress 与 suspected no-progress；明确区分“worker 活着 / Driver 活着 / checkpoint 真正推进”。
+- 新增独立 worker CLI：`myth --root <root> worker`；Web 启动时可自动拉起 detached worker。当前仍不是操作系统级开机服务，也不是分布式 worker。
+- 增加 Web 生命周期外同 Run 恢复、UNKNOWN no-replay、Goal due admission 与 heartbeat-not-progress 回归测试。
+
 ## v0.21.1 — 中文工程指导与准入原子性
 
 - 宪法强制简体中文指导性注释；生产源码、前端、测试与维护脚本补职责/协作/字段/恢复说明，CI 增加说明覆盖守卫。

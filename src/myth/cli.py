@@ -253,6 +253,13 @@ def build_parser() -> argparse.ArgumentParser:
     web.add_argument("--host", default="127.0.0.1")
     web.add_argument("--port", type=int, default=8765)
     web.add_argument("--no-browser", action="store_true")
+
+    worker = sub.add_parser(
+        "worker",
+        help="run the standalone durable executor for admitted/recoverable work",
+    )
+    worker.add_argument("--poll-seconds", type=float, default=2.0)
+    worker.add_argument("--max-active", type=int, default=4)
     return parser
 
 
@@ -507,6 +514,16 @@ def main() -> None:
             open_browser=not args.no_browser,
         )
         return
+    if args.command == "worker":
+        from .durable_executor import DurableExecutor
+
+        raise SystemExit(
+            DurableExecutor(
+                args.root,
+                poll_seconds=args.poll_seconds,
+                max_active=args.max_active,
+            ).serve_forever()
+        )
 
     with MythRuntime(args.root) as runtime:
         if args.command == "patch":

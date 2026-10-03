@@ -44,8 +44,11 @@ Flow 是对 durable facts 的投影，不创建新的执行真相。
 - last durable checkpoint；
 - current phase；
 - recovery state；
+- Durable Executor active / stale、PID 与 heartbeat age；
 - Driver active / detached / expired；
 - lease generation / remaining time（适用时）；
+- last durable progress age；
+- suspected no progress（只作为观察信号）；
 - 下一步是 RESUME 还是 RECONCILE。
 
 必须区分：
@@ -55,7 +58,7 @@ INTERRUPTED -> RESUME
 UNKNOWN     -> RECONCILE
 ```
 
-页面刷新、浏览器断开或 Driver 消失不能把 Run 事实抹掉。
+页面刷新、浏览器断开或 Web 进程退出不能把 Run 事实抹掉，也不能停止独立 Durable Executor。执行器 heartbeat 只能证明 worker 进程活着；业务进度必须来自 Execution Cursor / durable events。若 heartbeat 正常但 checkpoint 长时间不变化，UI 标记 `suspected no progress`，不得仅凭时间自动 replay 已发 Ticket。
 
 ### Trajectory
 
@@ -206,3 +209,16 @@ Observatory 不拥有状态，不写业务真相。
 9. “完成”基于什么 Artifact / Receipt / Verification？
 
 答不上来，就不是合格的 Runtime Observatory。
+
+
+## Durable Executor / Progress Watch
+
+长任务把三种“活着”严格分开：
+
+```text
+Executor heartbeat  -> 独立 worker 进程仍持有全局短租约
+Driver heartbeat    -> 某个 Run 当前有负责人
+Durable progress    -> Execution Cursor / Event 的 checkpoint 实际推进
+```
+
+因此“worker 心跳正常”绝不等价于“任务正在有效前进”。默认观察阈值到达后只报告 **suspected no progress**；如果当前存在 UNKNOWN/TICKETED 外部效果，仍必须先 RECONCILE。这个规则用于发现“线程还活着但执行卡死”的情况，同时避免把看门狗变成重复调用制造器。
