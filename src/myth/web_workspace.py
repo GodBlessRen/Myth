@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import threading
 import time
 import uuid
@@ -257,11 +258,53 @@ class ConversationWebService:
             except Exception:
                 return
 
+    # 将 SQLite UTC 时间转成 epoch 秒；失败返回空值，展示层不得据无效时间伪造耗时。
+    @staticmethod
+    def _timestamp_epoch(value):
+        if not value:
+            return None
+        try:
+            parsed = datetime.fromisoformat(str(value).replace(" ", "T"))
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.timestamp()
+
+    # 为每条 Assistant 回复投影从最近一条同 Run 用户消息到回复落库的 wall-clock 用时；不伪装成纯模型推理时间。
+    def _reply_timings(self, messages):
+        last_user = {}
+        now = time.time()
+        for message in messages:
+            stamp = self._timestamp_epoch(message.get("created_at"))
+            rid = message.get("run_id")
+            if message.get("role") == "user" and rid and stamp is not None:
+                last_user[rid] = stamp
+                continue
+            if message.get("role") != "assistant" or not rid or stamp is None:
+                continue
+            started = last_user.get(rid)
+            if started is None:
+                continue
+            metadata = dict(message.get("metadata") or {})
+            metadata["reply_elapsed_seconds"] = max(0, int(stamp - started))
+            metadata["reply_started_at"] = started
+            metadata["reply_finished_at"] = stamp
+            message["metadata"] = metadata
+        return {
+            rid: {
+                "started_at": started,
+                "elapsed_seconds": max(0, int(now - started)),
+            }
+            for rid, started in last_user.items()
+        }
+
     # 读取会话及其消息/轮次投影；持久状态仍由仓储操作修改。
     def session(self, sid):
         with MythRuntime(self.root) as runtime:
             workspace = Workspace(runtime)
             value = workspace.repository.session(sid)
+            reply_timings = self._reply_timings(value["messages"])
             with self.lock:
                 active = set(self.active)
             for turn in value["turns"]:
@@ -271,10 +314,11 @@ class ConversationWebService:
                     turn.clear()
                     turn.update(swept)
                     lease = workspace.repository.driver_lease(turn["run_id"])
-                turn["driver_active"] = bool(
-                    turn["run_id"] in active and lease and not lease["expired"]
-                )
+                # driver_active 来自持久 Lease，而不是当前 Web 进程的线程缓存；独立 Durable Executor 也应显示为 active。
+                turn["driver_active"] = bool(lease and not lease["expired"])
+                turn["driver_local"] = bool(turn["run_id"] in active)
                 turn["driver_lease"] = lease
+                turn["reply_timing"] = reply_timings.get(turn["run_id"])
                 turn["execution_cursor"] = workspace.repository.execution_cursor(
                     turn["run_id"]
                 )
