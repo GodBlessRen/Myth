@@ -40,6 +40,12 @@ class ConversationRepository(Protocol):
     # 按当前持久状态重新进入驱动；恢复核对由执行端口负责，不凭重开动作重发未知效果。
     def reopen(self, run_id: str) -> None: ...
 
+    # 保存可安全继续的连接等待；拒绝将未决 Ticket 转成自动重放。
+    def defer_network(self, run_id: str) -> dict | None: ...
+
+    # 实际取得模型决定后清除等待，连接探测本身不算任务进展。
+    def network_restored(self, run_id: str) -> None: ...
+
 
 # 对话工具/模型执行与恢复端口；已获凭证的不明效果不能盲重发。
 class ConversationExecution(Protocol):

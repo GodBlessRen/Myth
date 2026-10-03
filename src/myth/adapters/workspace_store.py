@@ -10,6 +10,7 @@ from ..conversation import chunks, score_chunk
 from ..domain import canonical_json, digest_json, IdentityConflict, BudgetExceeded
 from ..decision_runtime import DecisionRuntime
 from ..strategies import RuleIntentPicker, RuleResolutionController
+from ..network_recovery import reconnect_delay
 
 # SCHEMA：本仓储拥有的表、索引与约束；升级补齐旧字段，删除列须有迁移证据。
 # projects.root 是明确项目范围；archived/pinned 只管理未来可见性，不删除既有引用。
@@ -62,6 +63,10 @@ CREATE TABLE IF NOT EXISTS workspace_driver_leases(
  generation INTEGER NOT NULL DEFAULT 1,
  lease_until REAL NOT NULL,
  heartbeat_at REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS workspace_network_retries(
+ run_id TEXT PRIMARY KEY REFERENCES workspace_turns(run_id),
+ failures INTEGER NOT NULL,offline_since REAL NOT NULL,
+ last_checked_at REAL NOT NULL,retry_at REAL NOT NULL,reason TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS workspace_messages_session ON workspace_messages(session_id);
 CREATE INDEX IF NOT EXISTS workspace_messages_run ON workspace_messages(run_id);
 CREATE INDEX IF NOT EXISTS workspace_turns_session ON workspace_turns(session_id);
@@ -757,7 +762,7 @@ class SqliteWorkspaceRepository:
             (new_id("msg"), sid, rid, role, text, canonical_json(metadata)),
         )
 
-    # 在已有事务中保存 execution cursor/phase/recovery；checkpoint_step 表示已持久消费的步骤。
+    # 在已有事务中保存游标；checkpoint_step 是已消费步骤，纯连接恢复用 record_progress=False 保留进度时间。
     def _checkpoint(
         self,
         db,
@@ -768,6 +773,7 @@ class SqliteWorkspaceRepository:
         checkpoint_step=None,
         recovery_state="NONE",
         detail="",
+        record_progress=True,
     ):
         checkpoint_step = step if checkpoint_step is None else checkpoint_step
         db.execute(
@@ -775,7 +781,7 @@ class SqliteWorkspaceRepository:
             "VALUES(?,?,?,?,?,?,CURRENT_TIMESTAMP) "
             "ON CONFLICT(run_id) DO UPDATE SET step=excluded.step,phase=excluded.phase,"
             "checkpoint_step=excluded.checkpoint_step,recovery_state=excluded.recovery_state,"
-            "detail=excluded.detail,updated_at=CURRENT_TIMESTAMP",
+            "detail=excluded.detail,updated_at=CASE WHEN ? THEN CURRENT_TIMESTAMP ELSE workspace_execution_cursors.updated_at END",
             (
                 rid,
                 int(step),
@@ -783,6 +789,7 @@ class SqliteWorkspaceRepository:
                 int(checkpoint_step),
                 str(recovery_state),
                 str(detail)[:1000],
+                int(record_progress),
             ),
         )
 
@@ -899,6 +906,49 @@ class SqliteWorkspaceRepository:
         value["expired"] = float(value["lease_until"]) <= time.time()
         return value
 
+    # 只读持久等待；时间为 UTC epoch 秒，失败次数是连接机会而非模型消费，暂停/UNKNOWN 不获重发权。
+    def network_retry(self, rid):
+        row = self.store.db.execute("SELECT * FROM workspace_network_retries WHERE run_id=?", (rid,)).fetchone()
+        if not row:
+            return None
+        value = dict(row)
+        value["delay_seconds"] = reconnect_delay(int(value["failures"]))
+        value["remaining_seconds"] = max(0, value["retry_at"] - time.time())
+        return value
+
+    # 原子提交等待和下次检查时间；没有未决效果才可自动继续，反复连接失败不推进业务 checkpoint。
+    def defer_network(self, rid, *, now=None):
+        now = time.time() if now is None else float(now)
+        with self.store.tx() as db:
+            turn = self.turn(rid)
+            if turn["status"] not in {"RUNNING", "INTERRUPTED"} or self._has_uncertain_effect(rid):
+                return None
+            previous = db.execute("SELECT * FROM workspace_network_retries WHERE run_id=?", (rid,)).fetchone()
+            # 同一次等待到期前的重复回调不增加退避，也不缩短已提交的截止时间。
+            if previous and previous["retry_at"] > now:
+                return dict(previous)
+            failures = min(1_000_000, int(previous["failures"]) + 1) if previous else 1
+            delay = reconnect_delay(failures)
+            reason = "Provider unavailable; waiting to reconnect"
+            db.execute("INSERT INTO workspace_network_retries VALUES(?,?,?,?,?,?) "
+                "ON CONFLICT(run_id) DO UPDATE SET failures=excluded.failures,last_checked_at=excluded.last_checked_at,"
+                "retry_at=excluded.retry_at,reason=excluded.reason",
+                (rid, failures, previous["offline_since"] if previous else now, now, now + delay, reason))
+            db.execute("UPDATE workspace_turns SET status='INTERRUPTED',error=? WHERE run_id=?", (reason, rid))
+            db.execute("UPDATE runs SET state='RECOVERING' WHERE run_id=?", (rid,))
+            # 观察字段不更新 updated_at/checkpoint_step；重连心跳不能冒充真实任务进展。
+            db.execute("UPDATE workspace_execution_cursors SET phase='WAITING_CONNECTION',recovery_state='RESUME',detail=? WHERE run_id=?",
+                       (reason, rid))
+            self.store._event(db, rid, "ReconnectScheduled", {"failures": failures, "delay_seconds": delay, "retry_at": now + delay})
+        return self.network_retry(rid)
+
+    # 只有工作真实继续（取得决定）才清除退避；凭据存在或健康检查通过不足以证明推理网络恢复。
+    def network_restored(self, rid):
+        with self.store.tx() as db:
+            changed = db.execute("DELETE FROM workspace_network_retries WHERE run_id=?", (rid,))
+            if changed.rowcount:
+                self.store._event(db, rid, "ReconnectRestored", {})
+
     # 从已获 Ticket 的模型/工具机会判断效果不明；UI active 缓存不能替代此事实。
     def _has_uncertain_effect(self, rid):
         models = self.decisions.status(rid)["model_invocations"]
@@ -911,6 +961,8 @@ class SqliteWorkspaceRepository:
 
     # 根据持久未决效果选择 INTERRUPTED 或 UNKNOWN，保存恢复游标；安全中断才可继续规划。
     def interrupt(self, rid, reason):
+        # 崩溃可能发生在收据发布与数据库结算之间；先核对已有模型证据，不能把已知零派发永久锁在 UNKNOWN。
+        self.decisions.recover(rid)
         # 本地事务边界：下列写入一起提交，异常整体回滚；文件/网络效果须在事务外另行核对。
         with self.store.tx() as db:
             turn = self.turn(rid)
@@ -1018,6 +1070,7 @@ class SqliteWorkspaceRepository:
             "SELECT * FROM workspace_execution_cursors WHERE run_id=?", (rid,)
         ).fetchone()
         result["execution_cursor"] = dict(cursor) if cursor else None
+        result["network_retry"] = self.network_retry(rid)
         return result
 
     # 原子分配或复用当前未完成步骤；耗尽步数返回空值，恢复不跳过未消费的决定。
@@ -1248,6 +1301,7 @@ class SqliteWorkspaceRepository:
         with self.store.tx() as db:
             if self.turn(rid)["status"] not in {
                 "RUNNING",
+                "INTERRUPTED",
                 "UNKNOWN",
                 "WAITING_USER",
                 "PAUSED",
@@ -1273,6 +1327,8 @@ class SqliteWorkspaceRepository:
                 "UPDATE workspace_turns SET status=?,error=? WHERE run_id=?",
                 (status, reason, rid),
             )
+            if status in {"FAILED", "CANCELLED", "BUDGET_EXHAUSTED", "COMPLETED"}:
+                db.execute("DELETE FROM workspace_network_retries WHERE run_id=?", (rid,))
             db.execute(
                 "UPDATE runs SET state=?,control_revision=control_revision+1 WHERE run_id=?",
                 ("RECOVERING" if status == "UNKNOWN" else status, rid),
@@ -1325,6 +1381,7 @@ class SqliteWorkspaceRepository:
                 ),
                 recovery_state="NONE",
                 detail="Run resumed from durable checkpoint",
+                record_progress=not bool(turn.get("network_retry")),
             )
             self.store._event(
                 db, rid, "ConversationResumed", {"step": turn["current_step"]}

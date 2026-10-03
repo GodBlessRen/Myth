@@ -264,7 +264,7 @@ class SqliteControlService:
                 )
             return "CANCELLED"
         if snap.paused:
-            if turn["status"] in {"RUNNING", "UNKNOWN"}:
+            if turn["status"] in {"RUNNING", "INTERRUPTED", "UNKNOWN"}:
                 # 本地事务边界：下列写入一起提交，异常整体回滚；文件/网络效果须在事务外另行核对。
                 with self.store.tx() as db:
                     db.execute(

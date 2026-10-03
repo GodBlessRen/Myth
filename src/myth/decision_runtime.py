@@ -22,6 +22,7 @@ from .domain import (
 from .models import (
     ContextTruncated,
     ProviderKnownFailure,
+    ProviderUnavailable,
     DecisionValidationError,
     ModelMessage,
     ModelRequest,
@@ -352,6 +353,7 @@ class DecisionRuntime:
         response_ref: str,
         reason: str,
         usage: dict[str, int],
+        retryable: bool = False,
     ) -> dict[str, Any]:
         receipt = {
             "model_attempt_id": attempt_id,
@@ -361,6 +363,7 @@ class DecisionRuntime:
             "outcome": "FAILED",
             "reason": reason,
             "usage": usage,
+            "retryable": retryable,
         }
         encoded = json.dumps(receipt, ensure_ascii=False, sort_keys=True).encode(
             "utf-8"
@@ -386,24 +389,33 @@ class DecisionRuntime:
                 raise RuntimeError(
                     "model failure receipt does not match the frozen request"
                 )
+            # 收据恢复必须幂等；已结算的失败不能再次释放/扣减预算。
+            if row["state"] == AttemptState.RESOLVED.value:
+                return
             usage = (
                 receipt.get("usage") if isinstance(receipt.get("usage"), dict) else {}
             )
+            retryable = receipt.get("retryable") is True
+            if retryable and any(type(usage.get(meter)) is not int or usage[meter] != 0
+                                 for meter in ("model_calls", "input_tokens", "output_tokens")):
+                raise ValueError("retryable failure requires measured zero dispatch and token usage")
             for reservation in db.execute(
                 "SELECT * FROM model_reservations WHERE model_attempt_id=?",
                 (attempt_id,),
             ).fetchall():
                 meter = str(reservation["meter"])
                 reserved = int(reservation["reserved_amount"])
+                # 迟到失败证据可能来自 UNKNOWN；其预留已迁入 unknown_held，不能再次减 reserved。
+                bucket = "unknown_held" if reservation["closed"] else "reserved"
                 if meter in usage:
                     actual = int(usage[meter])
                     if actual < 0:
                         raise ValueError("model usage cannot be negative")
                     db.execute(
-                        "UPDATE accounts SET reserved=reserved-?,settled=settled+? WHERE run_id=? AND meter=?",
+                        f"UPDATE accounts SET {bucket}={bucket}-?,settled=settled+? WHERE run_id=? AND meter=?",
                         (reserved, actual, reservation["run_id"], meter),
                     )
-                else:
+                elif not reservation["closed"]:
                     db.execute(
                         "UPDATE accounts SET reserved=reserved-?,unknown_held=unknown_held+? WHERE run_id=? AND meter=?",
                         (reserved, reserved, reservation["run_id"], meter),
@@ -423,6 +435,9 @@ class DecisionRuntime:
                     attempt_id,
                 ),
             )
+            if retryable:
+                # 原机会与零派发收据保留审计；仅解开当前 step 的请求键，下一次须重新准入预算/Ticket。
+                db.execute("DELETE FROM model_request_keys WHERE model_attempt_id=?", (attempt_id,))
             self._event(
                 db,
                 row["run_id"],
@@ -602,6 +617,8 @@ class DecisionRuntime:
                 if receipt_path.exists():
                     receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
                     if receipt.get("outcome") == "FAILED":
+                        if receipt.get("retryable") is True:
+                            raise ProviderUnavailable()
                         raise ProviderKnownFailure(receipt["reason"], usage=receipt.get("usage"))
                     decision = parse_step_decision(receipt["text"])
                     return (
@@ -656,6 +673,7 @@ class DecisionRuntime:
                 response_ref=response_ref,
                 reason=str(exc),
                 usage={**exc.usage, "provider_wall_ms": provider_wall_ms},
+                retryable=isinstance(exc, ProviderUnavailable),
             )
             self._settle_failed(attempt_id, receipt)
             if isinstance(exc, ContextTruncated):
@@ -711,6 +729,10 @@ class DecisionRuntime:
                 recovered.append({"model_attempt_id": attempt_id, "state": "UNKNOWN"})
                 continue
             receipt = json.loads(path.read_text(encoding="utf-8"))
+            if receipt.get("outcome") == "FAILED":
+                self._settle_failed(attempt_id, receipt)
+                recovered.append({"model_attempt_id": attempt_id, "state": "RESOLVED", "outcome": "FAILED"})
+                continue
             self._settle(attempt_id, receipt)
             try:
                 decision = parse_step_decision(str(receipt["text"]))

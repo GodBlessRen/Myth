@@ -32,6 +32,7 @@ Long-term Goal
 - Artifact 生成与固定对象下载；
 - durable Ticket / Receipt / UNKNOWN / Recovery；
 - durable Execution Cursor + Driver Lease / Heartbeat，页面或 Driver 中断后可从 checkpoint 恢复；
+- [断网恢复](docs/NETWORK_RECOVERY.md)：保存同一 Run，按 1、2、4、8、16、32、60 秒重连，之后每分钟一次；已派发而结果不明的调用先核对；
 - 固定 EvalSuite、Eval Ledger、Policy Candidate / Promote / Rollback；
 - 三栏工作台，第三栏常驻 Runtime Observatory。
 

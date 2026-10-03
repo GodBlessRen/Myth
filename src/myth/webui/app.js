@@ -32,8 +32,10 @@ const state = {
   attached: [],
   // 本地发送互斥标志；不代替服务器准入约束。
   busy: false,
-  // 当前轮询定时器句柄；与业务 Run 生命周期独立。
+  // 单个只读重连控制器；与业务 Run 生命周期独立。
   poll: null,
+  // 首次 bootstrap 失败后继续只读重连；已有内容和 request_id 保留到服务恢复。
+  initialized: false,
 };
 // 既有图标的固定矢量目录；新增图标沿用此系统。
 const iconPaths = {
@@ -740,7 +742,7 @@ function renderChat(session) {
     !!turn &&
       !control.paused &&
       !(control.stopped ?? control.aborted) &&
-      status === "RUNNING",
+      ["RUNNING", "INTERRUPTED"].includes(status),
   );
   show("resumeTurn", !!turn && control.paused && status === "PAUSED");
   $("steerTurn").disabled =
@@ -763,7 +765,7 @@ function renderChat(session) {
       : status === "PAUSED"
         ? "Run 已暂停。Resume 后继续。"
         : status === "INTERRUPTED"
-          ? "Run 已中断；请从 durable checkpoint 继续。"
+          ? turn.network_retry ? "连接中断，正在自动重连；原任务已保存。" : "Run 已中断；请从 durable checkpoint 继续。"
           : "给 Myth 一个任务，或继续当前对话…";
 
   if (turn?.settings?.model) $("modelLabel").textContent = turn.settings.model;
@@ -780,7 +782,9 @@ function renderChat(session) {
           )
         : 0;
     const text =
-      status === "UNKNOWN"
+      turn.network_retry && status === "INTERRUPTED"
+        ? "连接中断，" + Math.max(0, Math.ceil(turn.network_retry.retry_at - Date.now() / 1000)) + " 秒后自动重试；已完成步骤保留。"
+        : status === "UNKNOWN"
         ? turn.error || "存在结果不明确的执行，必须先核对再继续。"
         : status === "INTERRUPTED"
           ? turn.error || "Driver 已中断；durable checkpoint 已保留，可以继续。"
@@ -1442,33 +1446,38 @@ async function route() {
     toast(e.message);
   }
 }
-// 周期读取当前会话与连接变化；读取不重新发出任务，失败不会清除持久恢复信息。
-async function poll() {
-  clearTimeout(state.poll);
-  if (state.page === "chat" && state.id) {
-    try {
-      const id = state.id,
-        generation = state.generation;
-      await openSession(id, generation);
-    } catch (e) {
-      console.warn("conversation", e.message);
-    }
+// 恢复 bootstrap 或读取当前会话；不重发任务/控制/登录提交，迟到页面仍受 generation 约束。
+async function readWorkspace() {
+  if (!state.initialized) {
+    await refresh();
+    loadSettings();
+    await refreshChatGPTAuth();
+    fillGoals($("chatGoal"), "");
+    await route();
+    await checkConnection(true);
+    state.initialized = true;
+  } else if (state.page === "chat" && state.id) {
+    await openSession(state.id, state.generation);
+  } else if (state.page === "goals") {
+    await renderGoals();
+  } else {
+    // 没有选中会话也须能观察服务断开/重启；只读取共享产品投影。
+    await refresh();
   }
-  if (state.page === "goals") {
-    try {
-      await renderGoals();
-    } catch (e) {
-      console.warn("goals", e.message);
-    }
-  }
-  state.poll = setTimeout(
-    poll,
-    document.hidden
-      ? 6000
-      : state.session?.turns.at(-1)?.driver_active
-        ? 1000
-        : 3000,
-  );
+}
+// 只启动一个可恢复读循环；失败按 1/2/4/8/16/32/60 秒等待，成功恢复原会话视图。
+function poll() {
+  if (!state.poll) state.poll = createReadReconnector({
+    read: readWorkspace,
+    normalDelay: () => document.hidden ? 6000 : state.session?.turns.at(-1)?.driver_active ? 1000 : 3000,
+    onWaiting: ({failures, delayMs}) => {
+      if (failures === 1) toast("工作区连接中断，保留当前内容并自动重连。");
+      $("connectionDot").className = "connection-dot disconnected";
+      $("modelLabel").textContent = "工作区断连 · " + delayMs / 1000 + " 秒后重试";
+    },
+    onRestored: () => { renderConnection(); toast("工作区连接已恢复。"); },
+  });
+  return state.poll.start();
 }
 
 // 事件绑定只消费明确用户操作；业务身份、参数和状态仍经服务器校验。
@@ -1721,16 +1730,4 @@ window.addEventListener("hashchange", route);
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") closeNavigation();
 });
-(async () => {
-  try {
-    await refresh();
-    loadSettings();
-    await refreshChatGPTAuth();
-    fillGoals($("chatGoal"), "");
-    await route();
-    await checkConnection(true);
-    poll();
-  } catch (e) {
-    toast("工作区未连接：" + e.message);
-  }
-})();
+poll();

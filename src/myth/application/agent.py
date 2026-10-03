@@ -4,7 +4,7 @@
 from __future__ import annotations
 from ..acceptance import ContextBudgetError, compile_context, verify_goal
 from ..domain import BudgetExceeded, PatchContractError, RecoveryRequired
-from ..models import DecisionValidationError, StepDecision, ProviderKnownFailure
+from ..models import DecisionValidationError, StepDecision, ProviderKnownFailure, ProviderUnavailable
 from ..ports import AgentExecution, AgentRepository
 
 
@@ -101,6 +101,10 @@ class AgentDriver:
                     self.repository.finish_step(
                         run_id, number, "tool_rejected", {"error": str(exc)}
                     )
+                except ProviderUnavailable as exc:
+                    # Exact CLI 不拥有常驻调度器；保留原步骤，后续显式驱动可继续同 Run。
+                    self.repository.block(run_id, "INTERRUPTED", str(exc))
+                    break
                 except (ContextBudgetError, ProviderKnownFailure) as exc:
                     self.repository.block(run_id, "FAILED", str(exc))
                     break

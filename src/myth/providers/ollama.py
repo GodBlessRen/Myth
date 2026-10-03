@@ -4,10 +4,10 @@
 from __future__ import annotations
 
 import json
-import socket
 from urllib import error, request, parse
 
-from ..models import ContextTruncated, ModelRequest, ModelResult, ProviderStatus, ProviderKnownFailure
+from ..models import ContextTruncated, ModelRequest, ModelResult, ProviderStatus, ProviderKnownFailure, ProviderUnavailable
+from ..network_recovery import is_pre_dispatch_disconnect
 from ..auth.transport import open_credential_request, read_bounded
 
 
@@ -34,7 +34,7 @@ class OllamaProvider:
         # keep_alive：Ollama 模型驻留选项；控制加载生命周期，不代表业务状态。
         self.keep_alive = keep_alive
 
-    # 执行有界 HTTP JSON 请求；只重试可证明未被接收的拒连/DNS，超时和派发后异常保留不明结果。
+    # 单次有界传输；派发前断连交 Runtime 持久退避，响应开始后异常保留不明结果。
     def _json_request(
         self, method: str, path: str, payload: dict | None = None
     ) -> dict:
@@ -49,30 +49,21 @@ class OllamaProvider:
             method=method,
             headers={"content-type": "application/json", "accept": "application/json"},
         )
-        raw = None
-        for attempt in range(2):
-            try:
-                with open_credential_request(req, timeout=self.timeout) as response:
-                    raw = read_bounded(response)
-                break
-            except error.HTTPError as exc:
-                exc.close()
-                # 远端拒绝消息可能回显提交内容；只投影状态码，明确 4xx 不伪造成 UNKNOWN。
-                if exc.code in {400, 401, 403, 404, 422, 429}:
-                    raise ProviderKnownFailure(f"Ollama request rejected ({exc.code})",
-                        usage={"model_calls": int(method == "POST")}, raw={"http_status": exc.code}) from None
-                raise RuntimeError("Ollama request failed before completion") from None
-            except error.URLError as exc:
-                # 仅连接拒绝/DNS 等能证明请求未被接受的情况可本地重试；超时等派发后不确定保持单次调用，交 Runtime 记为 UNKNOWN。
-                reason = getattr(exc, "reason", None)
-                pre_dispatch = isinstance(
-                    reason, (ConnectionRefusedError, socket.gaierror)
-                )
-                if attempt == 0 and pre_dispatch:
-                    continue
-                raise RuntimeError("Ollama endpoint could not complete the request") from None
-        if raw is None:
-            raise RuntimeError("Ollama request produced no response bytes")
+        response_started = False
+        try:
+            with open_credential_request(req, timeout=self.timeout) as response:
+                response_started = True
+                raw = read_bounded(response)
+        except error.HTTPError as exc:
+            exc.close()
+            if exc.code in {400, 401, 403, 404, 422, 429}:
+                raise ProviderKnownFailure(f"Ollama request rejected ({exc.code})",
+                    usage={"model_calls": int(method == "POST")}, raw={"http_status": exc.code}) from None
+            raise RuntimeError("Ollama request failed before completion") from None
+        except error.URLError as exc:
+            if not response_started and is_pre_dispatch_disconnect(exc.reason):
+                raise ProviderUnavailable() from None
+            raise RuntimeError("Ollama endpoint could not complete the request") from None
         try:
             value = json.loads(raw.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError):

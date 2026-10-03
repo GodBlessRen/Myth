@@ -10,6 +10,7 @@ import time
 import uuid
 
 from .domain import canonical_json, digest_json, IdentityConflict
+from .network_recovery import reconnect_delay
 
 
 # SCHEMA：本仓储拥有的表、索引与约束；升级补齐旧字段，删除列须有迁移证据。
@@ -26,7 +27,7 @@ CREATE TABLE IF NOT EXISTS goal_schedules(
  due_at REAL NOT NULL,interval_seconds INTEGER,
  enabled INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0,1)),
  sequence INTEGER NOT NULL DEFAULT 1,
- retry_at REAL NOT NULL DEFAULT 0,last_error TEXT,
+ retry_at REAL NOT NULL DEFAULT 0,last_error TEXT,retry_failures INTEGER NOT NULL DEFAULT 0,
  request_id TEXT,entry_digest TEXT,
  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
 CREATE INDEX IF NOT EXISTS goal_schedules_due ON goal_schedules(enabled,due_at,retry_at);
@@ -77,6 +78,8 @@ class GoalScheduler:
             for column in ("request_id", "entry_digest"):
                 if column not in columns:
                     db.execute(f"ALTER TABLE goal_schedules ADD COLUMN {column} TEXT")
+            if "retry_failures" not in columns:
+                db.execute("ALTER TABLE goal_schedules ADD COLUMN retry_failures INTEGER NOT NULL DEFAULT 0")
             db.execute(
                 "CREATE UNIQUE INDEX IF NOT EXISTS goal_schedule_requests ON goal_schedules(request_id)"
             )
@@ -194,7 +197,7 @@ class GoalScheduler:
                     "a fired one-shot timer cannot be rearmed; create another timer"
                 )
             db.execute(
-                "UPDATE goal_schedules SET enabled=?,retry_at=0,last_error=NULL WHERE schedule_id=?",
+                "UPDATE goal_schedules SET enabled=?,retry_at=0,last_error=NULL,retry_failures=0 WHERE schedule_id=?",
                 (int(enabled), schedule_id),
             )
         return self.get(schedule_id)
@@ -210,14 +213,18 @@ class GoalScheduler:
             )
         ]
 
-    # 保留 due/sequence，记录原因并将检查延后三十秒；拒绝不消费工作机会。
+    # 保留 due/sequence，持久指数退避到每分钟一次；重复扫描不能重复增加失败次数或消费机会。
     def defer(self, schedule_id, reason, now=None):
         now = time.time() if now is None else float(now)
         # 本地事务边界：下列写入一起提交，异常整体回滚；文件/网络效果须在事务外另行核对。
         with self.store.tx() as db:
+            row = db.execute("SELECT * FROM goal_schedules WHERE schedule_id=? AND enabled=1", (schedule_id,)).fetchone()
+            if row is None or row["retry_at"] > now:
+                return
+            failures = min(1_000_000, row["retry_failures"] + 1)
             db.execute(
-                "UPDATE goal_schedules SET retry_at=?,last_error=? WHERE schedule_id=? AND enabled=1",
-                (now + 30, str(reason)[:1000], schedule_id),
+                "UPDATE goal_schedules SET retry_at=?,last_error=?,retry_failures=? WHERE schedule_id=? AND enabled=1",
+                (now + reconnect_delay(failures), str(reason)[:1000], failures, schedule_id),
             )
 
     # 同事务提交 occurrence、Turn/预算、Goal 关联/进度并返回 Run 身份；未到期返回 None，忙/等待明确拒绝且不消费机会。
@@ -273,7 +280,7 @@ class GoalScheduler:
                 else row["due_at"]
             )
             db.execute(
-                "UPDATE goal_schedules SET enabled=?,due_at=?,sequence=sequence+1,retry_at=0,last_error=NULL WHERE schedule_id=?",
+                "UPDATE goal_schedules SET enabled=?,due_at=?,sequence=sequence+1,retry_at=0,last_error=NULL,retry_failures=0 WHERE schedule_id=?",
                 (int(interval is not None), next_due, schedule_id),
             )
             self.store._event(
@@ -298,8 +305,10 @@ class GoalScheduler:
             for r in self.store.db.execute(
                 "SELECT w.run_id FROM goal_wakeups w JOIN workspace_turns t ON t.run_id=w.run_id "
                 "LEFT JOIN workspace_driver_leases d ON d.run_id=w.run_id "
+                "LEFT JOIN workspace_network_retries n ON n.run_id=w.run_id "
                 "WHERE t.status IN ('RUNNING','INTERRUPTED') AND (d.run_id IS NULL OR d.lease_until<=?) "
+                "AND (n.run_id IS NULL OR n.retry_at<=?) "
                 "ORDER BY w.admitted_at LIMIT ?",
-                (time.time(), limit),
+                (time.time(), time.time(), limit),
             )
         ]

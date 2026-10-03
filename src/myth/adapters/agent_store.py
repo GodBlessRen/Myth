@@ -278,7 +278,7 @@ class SqliteAgentRepository:
     def reopen(self, run_id):
         # 本地事务边界：下列写入一起提交，异常整体回滚；文件/网络效果须在事务外另行核对。
         with self.store.tx() as db:
-            if self.row(run_id)["status"] not in {"RUNNING", "UNKNOWN"}:
+            if self.row(run_id)["status"] not in {"RUNNING", "INTERRUPTED", "UNKNOWN"}:
                 return
             db.execute(
                 "UPDATE agent_runs SET status='RUNNING',error=NULL WHERE run_id=?",

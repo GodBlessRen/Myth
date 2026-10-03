@@ -34,6 +34,16 @@ class ProviderKnownFailure(RuntimeError):
         self.raw = dict(raw or {})
 
 
+class ProviderUnavailable(ProviderKnownFailure):
+    """传输证明推理请求未派发；固定零用量证据允许 Runtime 结算后另准入机会，不能代表超时。"""
+
+    # 消除自由文本和任意 usage；此类型只能由 adapter 的明确派发前错误分支产生。
+    def __init__(self):
+        super().__init__("Provider connection unavailable before dispatch", usage={
+            "model_calls": 0, "input_tokens": 0, "output_tokens": 0,
+        }, raw={"status": "not_dispatched"})
+
+
 class ContextTruncated(ProviderKnownFailure):
     """已准入提示达到供应商窗口上限的已知失败；不能信任被截断上下文产生的决定。"""
 
