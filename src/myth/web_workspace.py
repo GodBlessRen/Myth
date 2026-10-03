@@ -192,6 +192,8 @@ class ConversationWebService:
         input_tokens = 0
         output_tokens = 0
         cached_input_tokens = 0
+        provider_wall_ms = 0
+        provider_wall_reported = False
         cache_reported = False
         for item in invocations:
             usage = item.get("usage") if isinstance(item.get("usage"), dict) else {}
@@ -202,6 +204,9 @@ class ConversationWebService:
                 cached_input_tokens += max(
                     0, int(usage.get("cached_input_tokens") or 0)
                 )
+            if "provider_wall_ms" in usage:
+                provider_wall_reported = True
+                provider_wall_ms += max(0, int(usage.get("provider_wall_ms") or 0))
         hit_rate = (
             cached_input_tokens / input_tokens
             if cache_reported and input_tokens > 0
@@ -213,6 +218,8 @@ class ConversationWebService:
             "cached_input_tokens": cached_input_tokens if cache_reported else None,
             "cache_hit_rate": hit_rate,
             "cache_metrics_available": cache_reported,
+            "provider_wall_ms": provider_wall_ms if provider_wall_reported else None,
+            "provider_wall_available": provider_wall_reported,
             "model_calls": len(invocations),
         }
 
