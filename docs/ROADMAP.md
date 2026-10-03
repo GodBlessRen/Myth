@@ -61,3 +61,12 @@ Workflow、Routing/Parallel、Multi-Agent、MCP/A2A 和更复杂 Evolution 暂�
 ## v0.24 — Delivery workflow
 
 实现说明见 [DELIVERY_WORKFLOW_V024.md](DELIVERY_WORKFLOW_V024.md)。本阶段增加终态收尾补偿、绑定交付摘要的验收、持久 Work item、受信项目 `test.run` profile、人工关注计量与 Runtime Delivery 观测。真实 2–4 周连续自用仍是发布闸门，不以测试夹具替代。
+
+
+## v0.25 — Best Path
+
+同任务重复执行不再只看成功率。已验收成功 Run 进入 Best Path 账本，比较工具调用、步骤、Token、写入、耗时、改动行数和人工关注；新 Run 可读取冻结的历史较省路径作为效率参考，明显绕路时只发 Drift / Replan 信号，不强杀。
+
+术语保持简单：`Best / Beaten / Learning / Drift`。完整边界见 [BEST_PATH.md](BEST_PATH.md)。
+
+下一阶段固定任务每题继续重复多次，但必须同时报告 trajectory variance，验证 Best Path 提示能否降低同模型执行方差，而不是只提高平均成功率。
