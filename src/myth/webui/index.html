@@ -585,6 +585,14 @@
           <span id="inspectorPulse" class="inspector-pulse"></span>
         </div>
         <div class="inspector-scroll">
+          <!-- 会话统计覆盖整段会话；下方 Runtime 区域继续展示最新 Turn 的执行事实。 -->
+          <section class="inspector-section session-statistics">
+            <div class="inspector-label">会话统计</div>
+            <div id="sessionStatistics" class="context-facts" aria-live="polite">
+              <div class="inspector-empty">选择会话后显示统计</div>
+            </div>
+            <div class="statistics-note">端到端 TPS · 包含首 token 等待</div>
+          </section>
           <section class="inspector-section">
             <div class="inspector-label">Goal</div>
             <div id="inspectorGoal" class="context-facts">
@@ -918,6 +926,7 @@
     <!-- 装配顺序是依赖合同：主助手与 state 先定义，再装配观测区和 Goal 入口。 -->
     <script src="/reconnect.js"></script>
     <script src="/app.js"></script>
+    <script src="/statistics.js"></script>
     <script src="/inspector.js"></script>
     <script src="/goals.js"></script>
   </body>

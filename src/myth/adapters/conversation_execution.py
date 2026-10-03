@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import subprocess
 import threading
+import time
 
 from ..artifacts import atomic_write
 from .driver_lock import local_run_lock
@@ -584,6 +585,8 @@ class LocalConversationExecution:
         if spec.state is not CapabilityState.EXECUTABLE:
             raise PermissionError(f"capability is not executable: {capability}")
 
+        # 单调时钟只测本次真实执行/结果准备；已结算的稳定决定在上方直接复用，不重复测量或累加。
+        tool_started = time.monotonic()
         result = {"capability_id": capability}
         intent = {"write_bytes": 0}
         if capability == "knowledge.search":
@@ -655,6 +658,8 @@ class LocalConversationExecution:
             atomic_write(
                 Path(intent["target"]), self.runtime.objects.get(intent["digest"])
             )
+        # 时间与结果一起先发布到收据；崩溃后的恢复复用原毫秒，不把等待/重启时间算为工具耗时。
+        tool_wall_ms = max(0, int((time.monotonic() - tool_started) * 1000))
         atomic_write(
             self.receipts / f"{decision_id}.json",
             json.dumps(
@@ -662,11 +667,12 @@ class LocalConversationExecution:
                     "decision_id": decision_id,
                     "ticket_id": op["ticket_id"],
                     "result": result,
+                    "tool_wall_ms": tool_wall_ms,
                 },
                 ensure_ascii=False,
             ).encode("utf-8"),
         )
-        return self.repository.settle_operation(decision_id, result)
+        return self.repository.settle_operation(decision_id, result, tool_wall_ms=tool_wall_ms)
 
     # 用已有请求、Ticket、收据和对象核对执行状态；没有足够事实时保留 UNKNOWN，不盲目重发。
     def recover(self, rid):
@@ -675,6 +681,7 @@ class LocalConversationExecution:
         if any(m["state"] in {"TICKETED", "UNKNOWN"} for m in models):
             return False
         for op in self.repository.pending_operations(rid):
+            tool_wall_ms = None
             receipt = self.receipts / f"{op['decision_id']}.json"
             if receipt.is_file():
                 value = json.loads(receipt.read_text(encoding="utf-8"))
@@ -685,6 +692,8 @@ class LocalConversationExecution:
                 ):
                     raise RecoveryRequired("receipt differs from fixed tool intent")
                 result = value["result"]
+                # 旧收据缺计量保持未报告；坏观测字段由仓储忽略，不能改变工具效果核对/预算结算。
+                tool_wall_ms = value.get("tool_wall_ms")
             elif op["intent"].get("target"):
                 target = Path(op["intent"]["target"])
                 if (
@@ -695,5 +704,5 @@ class LocalConversationExecution:
                 result = op["intent"]["result"]
             else:
                 result = op["intent"]["result"]
-            self.repository.settle_operation(op["decision_id"], result)
+            self.repository.settle_operation(op["decision_id"], result, tool_wall_ms=tool_wall_ms)
         return True

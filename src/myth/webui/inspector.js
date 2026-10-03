@@ -156,6 +156,26 @@ function inspectorFact(box, key, value) {
   box.append(row);
 }
 
+// 当前会话统计独立于最新 Turn；只有计量/身份变化才重绘，700ms 观测心跳不反复创建相同 DOM。
+function renderSessionStatistics(session) {
+  const box = $("sessionStatistics");
+  if (!box) return;
+  const signature = JSON.stringify([session?.id, session?.statistics]);
+  if (box.dataset.signature === signature) return;
+  box.dataset.signature = signature;
+  box.replaceChildren();
+  if (!session) {
+    box.append(el("div", "inspector-empty", "选择会话后显示统计"));
+    return;
+  }
+  sessionStatisticsRows(session.statistics).forEach(({label, value, title}) => {
+    const row = el("div", "context-fact");
+    row.title = title;
+    row.append(el("span", "", label), el("span", "", value));
+    box.append(row);
+  });
+}
+
 // 展示当前 Turn 冻结 Goal 及长期进度；回答 COMPLETED 不表示整项 Goal 验收通过。
 function renderInspectorGoal(turn) {
   const box = $("inspectorGoal");
@@ -569,6 +589,7 @@ function renderRuntimeInspector(session = state.session) {
   if ($("inspectorState")) $("inspectorState").textContent = label;
   if ($("inspectorPulse"))
     $("inspectorPulse").className = "inspector-pulse " + cls;
+  renderSessionStatistics(session);
   renderInspectorGoal(turn);
   renderExecutionSpine(turn);
   renderInspectorRecovery(turn);

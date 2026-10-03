@@ -33,6 +33,7 @@ Long-term Goal
 - durable Ticket / Receipt / UNKNOWN / Recovery；
 - durable Execution Cursor + Driver Lease / Heartbeat，页面或 Driver 中断后可从 checkpoint 恢复；
 - [断网恢复](docs/NETWORK_RECOVERY.md)：保存同一 Run，按 1、2、4、8、16、32、60 秒重连，之后每分钟一次；已派发而结果不明的调用先核对；
+- [会话统计](docs/SESSION_STATISTICS.md)：模型/工具累计用时、平均 TTFT 和端到端 TPS，刷新/重启复用实测计量；
 - 固定 EvalSuite、Eval Ledger、Policy Candidate / Promote / Rollback；
 - 三栏工作台，第三栏常驻 Runtime Observatory。
 

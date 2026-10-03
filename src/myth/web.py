@@ -408,6 +408,9 @@ def make_handler(service: AgentWebService):
                 if path == "/inspector.js":
                     self._asset("inspector.js", "text/javascript; charset=utf-8")
                     return
+                if path == "/statistics.js":
+                    self._asset("statistics.js", "text/javascript; charset=utf-8")
+                    return
                 if path == "/goals.js":
                     self._asset("goals.js", "text/javascript; charset=utf-8")
                     return

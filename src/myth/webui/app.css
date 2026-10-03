@@ -1532,6 +1532,11 @@ dialog textarea {
   color: #999083;
   overflow-wrap: anywhere;
 }
+/* 会话统计与既有暖色 Runtime 风格一致；数值对齐，窄屏仍保留标签与单位。 */
+.session-statistics .inspector-label { font-size: 12px; color: #726a5f; }
+.session-statistics .context-fact { font-size: 11px; }
+.session-statistics .context-fact span:last-child { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.statistics-note { color: #9a9185; font-size: 9px; margin-top: 5px; }
 .platform-mini {
   display: grid;
   grid-template-columns: repeat(5, 1fr);
