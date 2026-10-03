@@ -1,0 +1,581 @@
+"""Best Path：从已验收成功 Run 中学习更省的可观察执行路径。
+只比较同任务/同冻结环境键；不读取或保存模型隐藏推理，不把低成本当成质量证据。
+"""
+
+from __future__ import annotations
+
+import json
+from typing import Any
+
+from .domain import canonical_json, digest_json
+
+
+# BEST_PATH_SCHEMA：保存已验收路径快照；历史 Run 不因未来新纪录而被改写执行事实。
+BEST_PATH_SCHEMA = r"""
+CREATE TABLE IF NOT EXISTS best_path_runs(
+    run_id TEXT PRIMARY KEY NOT NULL REFERENCES workspace_turns(run_id),
+    comparison_key TEXT NOT NULL,
+    task_key TEXT NOT NULL,
+    model_key TEXT NOT NULL,
+    environment_key TEXT NOT NULL,
+    environment_scope TEXT NOT NULL,
+    subject_digest TEXT NOT NULL,
+    metrics_json TEXT NOT NULL,
+    path_json TEXT NOT NULL,
+    eligible INTEGER NOT NULL DEFAULT 1 CHECK(eligible IN (0,1)),
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS best_path_runs_group
+ON best_path_runs(comparison_key, eligible);
+"""
+
+# CORE_COSTS：同质量通过后才比较的基础成本；这些字段都来自持久预算/步骤事实。
+CORE_COSTS = (
+    "model_calls",
+    "tool_calls",
+    "steps",
+    "total_tokens",
+    "write_bytes",
+)
+
+# OPTIONAL_COSTS：双方都真实测到时才加入比较；缺测不会被当成零。
+OPTIONAL_COSTS = (
+    "work_ms",
+    "code_churn_lines",
+    "human_attention_seconds",
+)
+
+
+# 只做轻量文本稳定化；不重写用户任务语义，代码/空格差异仍保留。
+def _task_text(value: str) -> str:
+    return str(value or "").replace("\r\n", "\n").strip()
+
+
+# 安全读取非负整数；bool/文本/负数不是实测成本。
+def _measured_int(value) -> int | None:
+    return value if type(value) is int and value >= 0 else None
+
+
+# 统计文本行；空字符串不伪造一行代码。
+def _line_count(value) -> int:
+    text = value if isinstance(value, str) else ""
+    return len(text.splitlines()) if text else 0
+
+
+# Best Path 状态所有者；负责路径快照、同条件比较和下一 Run 的冻结提示。
+class BestPathLedger:
+    # 保存共享 Runtime 连接并幂等建表；不拥有模型/工具执行权。
+    def __init__(self, runtime) -> None:
+        # runtime：对象库和 SQLite 生命周期仍由外层 Workspace 管理。
+        self.runtime = runtime
+        # store：只读取既有执行事实并保存 Best Path 派生账本。
+        self.store = runtime.store
+        self.store.db.executescript(BEST_PATH_SCHEMA)
+
+    # 从固定设置生成模型条件键；不同模型/思考/上下文预算不混为同一比赛。
+    def _model_key(self, settings: dict[str, Any]) -> str:
+        fixed = {
+            key: settings.get(key)
+            for key in (
+                "provider",
+                "model",
+                "thinking",
+                "temperature",
+                "num_ctx",
+                "max_output_tokens",
+                "max_steps",
+            )
+        }
+        return digest_json(fixed)
+
+    # 从冻结 Snapshot 生成环境键；显式排除 Best Path 自己，避免提示递归改变比较身份。
+    def _environment_key(self, snapshot: dict[str, Any]) -> tuple[str, str]:
+        project = snapshot.get("project") or {}
+        history_end = int(snapshot.get("turn_message_start") or 0)
+        history = list(snapshot.get("messages") or [])[:history_end]
+        knowledge = [
+            {
+                "source_ref": item.get("source_ref"),
+                "citation": item.get("citation"),
+                "resolution": item.get("resolution"),
+                "resolution_offset": item.get("resolution_offset"),
+            }
+            for item in snapshot.get("knowledge") or []
+        ]
+        memory = [
+            {
+                "memory_id": item.get("memory_id"),
+                "revision": item.get("revision"),
+                "source_ref": item.get("source_ref"),
+                "scope_type": item.get("scope_type"),
+                "scope_id": item.get("scope_id"),
+                "text_digest": digest_json({"text": item.get("text") or ""}),
+            }
+            for item in snapshot.get("memory") or []
+        ]
+        goal = snapshot.get("goal") or {}
+        work = goal.get("work") or {}
+        environment = {
+            "project": {
+                "id": project.get("id"),
+                "root": project.get("root"),
+                "instructions": project.get("instructions"),
+            },
+            "history": history,
+            "knowledge": knowledge,
+            "attached_document_ids": snapshot.get("attached_document_ids") or [],
+            "memory": memory,
+            "goal": {
+                "goal_id": goal.get("goal_id"),
+                "title": goal.get("title"),
+                "description": goal.get("description"),
+                "work": {
+                    "revision": work.get("revision"),
+                    "current_state": work.get("current_state"),
+                    "progress_note": work.get("progress_note"),
+                    "next_action": work.get("next_action"),
+                    "waiting_for": work.get("waiting_for"),
+                },
+            },
+            "intent_pick": snapshot.get("intent_pick") or {},
+            "information_resolution": snapshot.get("information_resolution") or {},
+            "policy_bindings": snapshot.get("policy_bindings") or {},
+        }
+        # 本地项目文件正文目前不是 Turn Snapshot 的不可变对象，因此范围名称明确不声称“物理环境完全相同”。
+        scope = (
+            "frozen-context+project-identity-v1"
+            if project.get("root")
+            else "frozen-context-v1"
+        )
+        return digest_json(environment), scope
+
+    # 为候选任务生成比较身份；只有三个键都相同的 Run 才会进入同一 Best Path 组。
+    def identity(
+        self,
+        task: str,
+        settings: dict[str, Any],
+        snapshot: dict[str, Any],
+    ) -> dict[str, str]:
+        task_key = digest_json({"task": _task_text(task)})
+        model_key = self._model_key(settings)
+        environment_key, environment_scope = self._environment_key(snapshot)
+        comparison_key = digest_json(
+            {
+                "task_key": task_key,
+                "model_key": model_key,
+                "environment_key": environment_key,
+            }
+        )
+        return {
+            "comparison_key": comparison_key,
+            "task_key": task_key,
+            "model_key": model_key,
+            "environment_key": environment_key,
+            "environment_scope": environment_scope,
+        }
+
+    # 读取 Run 当前用户任务；历史会话同样从准入 Snapshot 的本轮边界确定。
+    def _task_for_turn(self, turn: dict[str, Any]) -> str:
+        messages = list((turn.get("snapshot") or {}).get("messages") or [])
+        start = int((turn.get("snapshot") or {}).get("turn_message_start") or 0)
+        for item in reversed(messages[start:]):
+            if item.get("role") == "user":
+                return str(item.get("content") or "")
+        for item in reversed(messages):
+            if item.get("role") == "user":
+                return str(item.get("content") or "")
+        return ""
+
+    # 读取 workspace_turns 原始行并还原设置/Snapshot；不经过 UI 投影，也不修改 Run。
+    def _turn(self, run_id: str) -> dict[str, Any]:
+        row = self.store.db.execute(
+            "SELECT * FROM workspace_turns WHERE run_id=?", (run_id,)
+        ).fetchone()
+        if row is None:
+            raise KeyError(run_id)
+        value = dict(row)
+        value["settings"] = json.loads(value.pop("settings_json"))
+        value["snapshot"] = json.loads(value.pop("snapshot_json"))
+        return value
+
+    # 从持久 Account、Step、Receipt 和人工关注记录汇总成本；缺失耗时保持 None。
+    def metrics(self, run_id: str) -> dict[str, Any]:
+        turn = self._turn(run_id)
+        accounts = {
+            row["meter"]: int(row["settled"])
+            for row in self.store.db.execute(
+                "SELECT meter,settled FROM accounts WHERE run_id=?", (run_id,)
+            ).fetchall()
+        }
+        invocations = self.store.db.execute(
+            "SELECT usage_json FROM model_invocations WHERE run_id=? ORDER BY rowid",
+            (run_id,),
+        ).fetchall()
+        model_wall_values = []
+        model_wall_complete = True
+        for row in invocations:
+            try:
+                usage = json.loads(row["usage_json"] or "{}")
+            except json.JSONDecodeError:
+                usage = {}
+            calls = _measured_int(usage.get("model_calls"))
+            wall = _measured_int(usage.get("provider_wall_ms"))
+            if calls and wall is None:
+                model_wall_complete = False
+            if wall is not None:
+                model_wall_values.append(wall)
+
+        operations = self.store.db.execute(
+            "SELECT decision_id,capability,state,tool_wall_ms FROM workspace_operations "
+            "WHERE run_id=? ORDER BY rowid",
+            (run_id,),
+        ).fetchall()
+        tool_wall_complete = True
+        tool_wall_values = []
+        resolved_decisions = set()
+        for row in operations:
+            if row["state"] == "RESOLVED":
+                resolved_decisions.add(row["decision_id"])
+                wall = _measured_int(row["tool_wall_ms"])
+                if wall is None:
+                    tool_wall_complete = False
+                else:
+                    tool_wall_values.append(wall)
+            else:
+                tool_wall_complete = False
+
+        path = self.path(run_id)
+        files = set()
+        code_added = 0
+        code_removed = 0
+        tool_proposals = 0
+        ask_user = 0
+        for item in path:
+            if item["kind"] == "tool":
+                tool_proposals += 1
+                if item.get("decision_id") not in resolved_decisions:
+                    continue
+                args = item.get("arguments") or {}
+                capability = item.get("capability")
+                target = args.get("path")
+                if isinstance(target, str) and target:
+                    files.add(target.replace("\\", "/"))
+                if capability in {"project.patch_exact", "file.patch_exact"}:
+                    code_added += _line_count(args.get("new_text"))
+                    code_removed += _line_count(args.get("old_text"))
+                elif capability == "artifact.write":
+                    code_added += _line_count(args.get("content"))
+            elif item["kind"] == "ask":
+                ask_user += 1
+
+        attention = self.store.db.execute(
+            "SELECT coalesce(sum(seconds),0) AS seconds,count(*) AS entries "
+            "FROM delivery_attention WHERE run_id=?",
+            (run_id,),
+        ).fetchone()
+        human_attention = (
+            int(attention["seconds"]) if int(attention["entries"]) > 0 else None
+        )
+        model_wall = (
+            sum(model_wall_values) if model_wall_complete else None
+        )
+        tool_wall = (
+            sum(tool_wall_values) if tool_wall_complete else None
+        )
+        work_ms = (
+            model_wall + tool_wall
+            if model_wall is not None and tool_wall is not None
+            else None
+        )
+        input_tokens = int(accounts.get("input_tokens", 0))
+        output_tokens = int(accounts.get("output_tokens", 0))
+        return {
+            "model_calls": int(accounts.get("model_calls", 0)),
+            "tool_calls": int(accounts.get("tool_calls", 0)),
+            "tool_proposals": tool_proposals,
+            "steps": int(turn.get("current_step") or 0),
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "total_tokens": input_tokens + output_tokens,
+            "write_bytes": int(accounts.get("write_bytes", 0)),
+            "model_wall_ms": model_wall,
+            "tool_wall_ms": tool_wall,
+            "work_ms": work_ms,
+            "code_added_lines": code_added,
+            "code_removed_lines": code_removed,
+            "code_churn_lines": code_added + code_removed,
+            "files_written": len(files),
+            "ask_user_count": ask_user,
+            "human_attention_seconds": human_attention,
+        }
+
+    # 把可观察决定压成工具/提问/完成序列；不保存或推断模型隐藏 Chain-of-Thought。
+    def path(self, run_id: str) -> list[dict[str, Any]]:
+        rows = self.store.db.execute(
+            "SELECT step,decision_id,decision_json FROM workspace_steps "
+            "WHERE run_id=? ORDER BY step",
+            (run_id,),
+        ).fetchall()
+        result = []
+        for row in rows:
+            if not row["decision_json"]:
+                continue
+            try:
+                decision = json.loads(row["decision_json"])
+            except json.JSONDecodeError:
+                continue
+            kind = decision.get("decision_type")
+            if kind == "tool_call":
+                item = {
+                    "step": int(row["step"]),
+                    "kind": "tool",
+                    "decision_id": row["decision_id"],
+                    "capability": decision.get("capability_id"),
+                    "arguments": decision.get("arguments") or {},
+                }
+            elif kind == "ask_user":
+                item = {
+                    "step": int(row["step"]),
+                    "kind": "ask",
+                    "decision_id": row["decision_id"],
+                }
+            else:
+                item = {
+                    "step": int(row["step"]),
+                    "kind": "reply",
+                    "decision_id": row["decision_id"],
+                }
+            result.append(item)
+        return result
+
+    # 比较两个同质量 Run 的成本：A 所有基础成本不高于 B 且至少一项更低时，A beats B。
+    def _beats(self, a: dict[str, Any], b: dict[str, Any]) -> bool:
+        keys = list(CORE_COSTS)
+        for key in OPTIONAL_COSTS:
+            if a.get(key) is not None and b.get(key) is not None:
+                keys.append(key)
+        if not all(
+            isinstance(a.get(key), (int, float))
+            and isinstance(b.get(key), (int, float))
+            for key in keys
+        ):
+            return False
+        return all(a[key] <= b[key] for key in keys) and any(
+            a[key] < b[key] for key in keys
+        )
+
+    # 读取一个比较组的已验收 Run，并标出当前 Best group；不强行把不同权衡压成单一总分。
+    def group(self, comparison_key: str) -> list[dict[str, Any]]:
+        rows = self.store.db.execute(
+            "SELECT * FROM best_path_runs WHERE comparison_key=? AND eligible=1 "
+            "ORDER BY rowid",
+            (comparison_key,),
+        ).fetchall()
+        values = []
+        for row in rows:
+            item = dict(row)
+            item["metrics"] = json.loads(item.pop("metrics_json"))
+            item["path"] = json.loads(item.pop("path_json"))
+            values.append(item)
+        for item in values:
+            beaten_by = [
+                other["run_id"]
+                for other in values
+                if other["run_id"] != item["run_id"]
+                and self._beats(other["metrics"], item["metrics"])
+            ]
+            beats = [
+                other["run_id"]
+                for other in values
+                if other["run_id"] != item["run_id"]
+                and self._beats(item["metrics"], other["metrics"])
+            ]
+            item["status"] = "BEST" if not beaten_by else "BEATEN"
+            item["beaten_by"] = beaten_by[:8]
+            item["beats"] = beats[:8]
+        return values
+
+    # 选择给模型看的短路径样本；只从 BEST 且已 PASSED 的 Run 提取动作名与成本上界。
+    def hint_for_snapshot(
+        self,
+        task: str,
+        settings: dict[str, Any],
+        snapshot: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        identity = self.identity(task, settings, snapshot)
+        group = self.group(identity["comparison_key"])
+        best = [item for item in group if item["status"] == "BEST"]
+        if not best:
+            return None
+        routes = []
+        for item in best:
+            route = [
+                (
+                    entry.get("capability")
+                    if entry["kind"] == "tool"
+                    else "ask_user" if entry["kind"] == "ask" else "reply"
+                )
+                for entry in item["path"]
+            ]
+            if route and route not in routes:
+                routes.append(route)
+            if len(routes) >= 2:
+                break
+        minima = {}
+        for key in CORE_COSTS + ("work_ms", "code_churn_lines"):
+            values = [
+                item["metrics"].get(key)
+                for item in best
+                if isinstance(item["metrics"].get(key), (int, float))
+            ]
+            minima[key] = min(values) if values else None
+        return {
+            "comparison_key": identity["comparison_key"],
+            "environment_scope": identity["environment_scope"],
+            "passed_runs": len(group),
+            "best_runs": len(best),
+            "best_costs": minima,
+            "routes": routes,
+            "rule": (
+                "Use as an efficiency prior only. Do not skip required evidence or verification; "
+                "deviate when current evidence requires it."
+            ),
+        }
+
+    # 保存一个 PASSED Run 的路径和成本快照；重复同步只更新同一 run_id，不产生第二条冠军记录。
+    def observe(self, run_id: str, *, subject_digest: str | None = None) -> dict[str, Any]:
+        acceptance = self.store.db.execute(
+            "SELECT state,subject_digest FROM delivery_acceptance WHERE run_id=?",
+            (run_id,),
+        ).fetchone()
+        if acceptance is None or acceptance["state"] != "PASSED":
+            raise ValueError("Best Path only admits PASSED delivery")
+        if (
+            subject_digest is not None
+            and subject_digest != acceptance["subject_digest"]
+        ):
+            raise ValueError("Best Path subject digest does not match current acceptance")
+        turn = self._turn(run_id)
+        task = self._task_for_turn(turn)
+        identity = self.identity(task, turn["settings"], turn["snapshot"])
+        metrics = self.metrics(run_id)
+        path = self.path(run_id)
+        with self.store.tx() as db:
+            db.execute(
+                "INSERT INTO best_path_runs("
+                "run_id,comparison_key,task_key,model_key,environment_key,environment_scope,"
+                "subject_digest,metrics_json,path_json,eligible"
+                ") VALUES(?,?,?,?,?,?,?,?,?,1) "
+                "ON CONFLICT(run_id) DO UPDATE SET "
+                "comparison_key=excluded.comparison_key,task_key=excluded.task_key,"
+                "model_key=excluded.model_key,environment_key=excluded.environment_key,"
+                "environment_scope=excluded.environment_scope,"
+                "subject_digest=excluded.subject_digest,metrics_json=excluded.metrics_json,"
+                "path_json=excluded.path_json,eligible=1,updated_at=CURRENT_TIMESTAMP",
+                (
+                    run_id,
+                    identity["comparison_key"],
+                    identity["task_key"],
+                    identity["model_key"],
+                    identity["environment_key"],
+                    identity["environment_scope"],
+                    acceptance["subject_digest"],
+                    canonical_json(metrics),
+                    canonical_json(path),
+                ),
+            )
+        return self.view(run_id)
+
+    # Acceptance 离开 PASSED 时取消比较资格；历史快照仍保留审计，不从数据库抹除。
+    def sync_acceptance(
+        self,
+        run_id: str,
+        state: str,
+        *,
+        subject_digest: str | None = None,
+    ) -> dict[str, Any] | None:
+        if str(state).upper() == "PASSED":
+            return self.observe(run_id, subject_digest=subject_digest)
+        with self.store.tx() as db:
+            db.execute(
+                "UPDATE best_path_runs SET eligible=0,updated_at=CURRENT_TIMESTAMP "
+                "WHERE run_id=?",
+                (run_id,),
+            )
+        return self.view(run_id)
+
+    # 启动时补齐历史 PASSED 记录；只读取已有事实，不重跑模型、工具或验收。
+    def sync_existing(self, limit: int = 200) -> int:
+        rows = self.store.db.execute(
+            "SELECT run_id,subject_digest FROM delivery_acceptance "
+            "WHERE state='PASSED' ORDER BY rowid DESC LIMIT ?",
+            (max(1, min(int(limit), 1000)),),
+        ).fetchall()
+        synced = 0
+        for row in rows:
+            try:
+                self.observe(row["run_id"], subject_digest=row["subject_digest"])
+                synced += 1
+            except (KeyError, ValueError):
+                continue
+        return synced
+
+    # 读取当前 Run 与同组 Best Path 对比；未验收 Run 只做实时偏离观察，不进入历史冠军组。
+    def view(self, run_id: str) -> dict[str, Any]:
+        turn = self._turn(run_id)
+        task = self._task_for_turn(turn)
+        identity = self.identity(task, turn["settings"], turn["snapshot"])
+        metrics = self.metrics(run_id)
+        group = self.group(identity["comparison_key"])
+        current = next((item for item in group if item["run_id"] == run_id), None)
+        best = [item for item in group if item["status"] == "BEST"]
+        historical_best = [item for item in best if item["run_id"] != run_id]
+        minima = {}
+        for key in CORE_COSTS + ("work_ms", "code_churn_lines"):
+            values = [
+                item["metrics"].get(key)
+                for item in historical_best or best
+                if isinstance(item["metrics"].get(key), (int, float))
+            ]
+            minima[key] = min(values) if values else None
+
+        drift_reasons = []
+        if historical_best:
+            best_tools = minima.get("tool_calls")
+            best_steps = minima.get("steps")
+            best_tokens = minima.get("total_tokens")
+            if best_tools is not None and metrics["tool_calls"] > best_tools + 2:
+                drift_reasons.append("tool_calls")
+            if best_steps is not None and metrics["steps"] > best_steps + 2:
+                drift_reasons.append("steps")
+            if (
+                best_tokens is not None
+                and best_tokens > 0
+                and metrics["total_tokens"] > best_tokens * 1.5
+            ):
+                drift_reasons.append("tokens")
+
+        return {
+            **identity,
+            "eligible": bool(current and current.get("eligible")),
+            "status": current["status"] if current else "LEARNING",
+            "metrics": metrics,
+            "path": self.path(run_id),
+            "peer_count": len(group),
+            "best_count": len(best),
+            "best_costs": minima,
+            "beaten_by": current["beaten_by"] if current else [],
+            "beats": current["beats"] if current else [],
+            "drift": bool(drift_reasons),
+            "drift_reasons": drift_reasons,
+            "frozen_hint": (turn.get("snapshot") or {}).get("best_path_hint"),
+        }
+
+    # 返回最近 Best Path 账本供诊断；列表不触发比较组重写或策略发布。
+    def list(self, limit: int = 50) -> list[dict[str, Any]]:
+        rows = self.store.db.execute(
+            "SELECT run_id FROM best_path_runs ORDER BY rowid DESC LIMIT ?",
+            (max(1, min(int(limit), 200)),),
+        ).fetchall()
+        return [self.view(row["run_id"]) for row in rows]
