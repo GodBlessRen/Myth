@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.23 — Long-run Soak + Worked Time
+
+- Assistant 回复下方新增“用时 X分 X秒 / X小时 X分 X秒”，基于服务端持久消息时间计算整轮 wall-clock；运行中同步显示当前已处理时长。
+- Runtime 对每次 `provider.invoke` 增加 `provider_wall_ms` 实测，并在第三栏显示聚合 `Model wall`；明确区分整轮 Worked time 与模型/provider 调用耗时。
+- Web 的 `driver_active` 改为读取持久 Driver Lease，而不是只看当前 Web 进程线程集合，独立 Durable Executor 在页面上不再被误显示为 detached。
+- 新增 `scripts/soak_long_run.py`：一个输入、一个 Run、最多 30 个工具 checkpoint，可配置 120–180 分钟真实浸泡；使用本地确定性 Provider，不访问真实模型。
+- soak harness 支持 post-Ticket ambiguous provider fault 注入；必须进入 `UNKNOWN / RECONCILE`，后续 Executor tick 验证 no-replay。
+- CI 只运行秒级 quick soak，真实 2–3 小时结果必须通过同一脚本显式执行，不能把 quick test 冒充长跑证据。
+
 ## v0.22 — Detached Durable Executor
 
 - Conversation / Goal 的已准入长任务改由独立 Durable Executor 驱动，Web 只负责确保 worker 存在；关闭页面或 Web 进程不再主动停止任务。

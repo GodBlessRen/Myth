@@ -306,6 +306,16 @@ function renderInspectorTokens(turn) {
   } else {
     inspectorFact(box, "Cache hit", "N/A · provider not reported");
   }
+  if (modelUsage.provider_wall_available) {
+    const modelSeconds = Number(modelUsage.provider_wall_ms || 0) / 1000;
+    inspectorFact(
+      box,
+      "Model wall",
+      workedTime(modelSeconds).replace(/^用时 /, "") + " · runtime measured",
+    );
+  } else {
+    inspectorFact(box, "Model wall", "N/A");
+  }
   inspectorFact(
     box,
     "Model calls",

@@ -143,6 +143,38 @@ class RecoveryFirstRuntimeTests(unittest.TestCase):
         self.assertIn("DriverLeaseReleased", events)
         self.assertIsNone(lease)
 
+    # 回归断言：回复“用时”来自持久用户/助手消息时间，不依赖浏览器计时器，也不冒充模型纯推理时延。
+    def test_reply_elapsed_projection_uses_persisted_message_times(self):
+        service = ConversationWebService(self.root)
+        messages = [
+            {
+                "role": "user",
+                "run_id": "run_fixture",
+                "created_at": "2026-10-03 00:00:00",
+                "metadata": {},
+            },
+            {
+                "role": "assistant",
+                "run_id": "run_fixture",
+                "created_at": "2026-10-03 00:02:55",
+                "metadata": {},
+            },
+        ]
+        live = service._reply_timings(messages)
+        self.assertEqual(messages[1]["metadata"]["reply_elapsed_seconds"], 175)
+        self.assertNotIn("run_fixture", live)
+
+    # 回归断言：回复旁和运行中均保留 Worked-time 展示合同；文案明确为整轮 wall-clock。
+    def test_worked_time_ui_contract_is_present(self):
+        webui = Path(__file__).resolve().parents[1] / "src" / "myth" / "webui"
+        app = (webui / "app.js").read_text(encoding="utf-8")
+        css = (webui / "app.css").read_text(encoding="utf-8")
+        self.assertIn("function workedTime", app)
+        self.assertIn("reply_elapsed_seconds", app)
+        self.assertIn("message-worked", app)
+        self.assertIn("wall-clock", app)
+        self.assertIn(".message-worked", css)
+
     # 回归断言：恢复区域/renderer/继续按钮存在；不把静态检查当浏览器视觉验收。
     def test_recovery_observability_contract_is_present(self):
         webui = Path(__file__).resolve().parents[1] / "src" / "myth" / "webui"
