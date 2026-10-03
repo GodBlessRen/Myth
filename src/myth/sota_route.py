@@ -445,7 +445,7 @@ class SotaRouteLedger:
         reasoning_tokens_measured = False
         for row in self.store.db.execute(
             "SELECT model_attempt_id,model_id,response_ref,usage_json FROM model_invocations "
-            "WHERE run_id=? AND outcome='SUCCESS' ORDER BY rowid",
+            "WHERE run_id=? AND outcome='SUCCEEDED' ORDER BY rowid",
             (run_id,),
         ).fetchall():
             try:
@@ -504,7 +504,7 @@ class SotaRouteLedger:
             a[key] < b[key] for key in keys
         )
 
-    # 读取一个比较组的已验收 Run，并标出当前 Best group；不强行把不同权衡压成单一总分。
+    # 读取一个比较组的已验收 Run，并标出当前 Champion group；不强行把不同权衡压成单一总分。
     def group(self, comparison_key: str) -> list[dict[str, Any]]:
         rows = self.store.db.execute(
             "SELECT * FROM sota_route_runs WHERE comparison_key=? AND eligible=1 "
