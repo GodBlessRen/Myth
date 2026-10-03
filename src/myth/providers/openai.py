@@ -16,7 +16,8 @@ from ..auth.transport import (
     MAX_RESPONSE_BYTES, open_credential_request, read_bounded,
     public_error_code, redact_response,
 )
-from ..models import ModelRequest, ModelResult, ProviderStatus, ProviderKnownFailure
+from ..models import ModelRequest, ModelResult, ProviderStatus, ProviderKnownFailure, ProviderUnavailable
+from ..network_recovery import is_pre_dispatch_disconnect
 
 
 # TokenSupplier：短期访问 token 的传输回调类型；调用/返回内容不能持久记录。
@@ -191,8 +192,10 @@ class OpenAIResponsesProvider:
                 "user-agent": f"myth-runtime/{__version__}",
             },
         )
+        response_started = False
         try:
             with open_credential_request(req, timeout=self.timeout) as response:
+                response_started = True
                 # 明确 JSON 响应兼容固定测试/网关；OAuth 仍强制流式完成合同。
                 content_type = getattr(response, "headers", {}).get("Content-Type", "")
                 if self.chatgpt_plan or "text/event-stream" in content_type:
@@ -220,7 +223,10 @@ class OpenAIResponsesProvider:
                     "http_status": exc.code, "error": {"code": detail},
                 }) from None
             raise RuntimeError(message) from None
-        except error.URLError:
+        except error.URLError as exc:
+            # 仅 HTTP 尚未建立且原因证明未派发时允许后续另准入；流内错误仍是 UNKNOWN。
+            if not response_started and is_pre_dispatch_disconnect(exc.reason):
+                raise ProviderUnavailable() from None
             raise RuntimeError(
                 "OpenAI Responses request failed before completion"
             ) from None

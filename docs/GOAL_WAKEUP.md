@@ -50,7 +50,7 @@ due schedule
 ```
 
 - admission 失败时事务整体回滚，sequence 和 due time 不消费。
-- unavailable provider、忙会话、暂停/等待/阻塞 Goal 保留计划，30 秒后再检查，原因可见。
+- unavailable provider、忙会话、暂停/等待/阻塞 Goal 保留计划，按 1、2、4、8、16、32、60 秒退避，之后每分钟检查一次；次数与截止时间持久保存，原因可见。
 - 同一个 Goal 跨会话也不能创建重叠未完成轮次。
 - 同一机会只有一个 Run。两个连接争抢由 SQLite 写事务和 occurrence 主键串行化。
 - commit 后、Driver 启动前进程退出，重启服务会找到原 Run 并恢复。
@@ -70,4 +70,4 @@ python -m unittest discover -s tests -p test_v021_goal_scheduler.py -v
 python -m unittest discover -s tests -p test_schedule_web.py -v
 ```
 
-测试覆盖回滚、两连接竞争、commit 后 `os._exit`、服务重启、暂停、模型快照、入口去重、30 秒断连退避、正常 Driver/Control、UNKNOWN 不自动重放。
+测试覆盖回滚、两连接竞争、commit 后 `os._exit`、服务重启、暂停、模型快照、入口去重、持久指数退避、正常 Driver/Control、UNKNOWN 不自动重放。断网边界见 [NETWORK_RECOVERY.md](NETWORK_RECOVERY.md)。

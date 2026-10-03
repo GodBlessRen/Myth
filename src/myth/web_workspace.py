@@ -389,7 +389,13 @@ class ConversationWebService:
             self.active.add(rid)
         try:
             with MythRuntime(self.root) as runtime:
-                claimed = Workspace(runtime).repository.claim_driver(
+                workspace = Workspace(runtime)
+                retry = workspace.repository.network_retry(rid)
+                if retry and retry["retry_at"] > time.time():
+                    with self.lock:
+                        self.active.discard(rid)
+                    return
+                claimed = workspace.repository.claim_driver(
                     rid, owner_id, self.driver_ttl
                 )
             if not claimed:

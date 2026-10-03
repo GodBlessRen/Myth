@@ -38,5 +38,8 @@ jobs:
           node --check src/myth/webui/app.js
           node --check src/myth/webui/inspector.js
           node --check src/myth/webui/goals.js
+          node --check src/myth/webui/reconnect.js
+      - name: Browser reconnect timing and lifecycle tests
+        run: node --test tests/test_reconnect_ui.cjs
       - name: Unit and crash-recovery tests
         run: python -m unittest discover -s tests -v

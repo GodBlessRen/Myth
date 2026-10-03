@@ -402,6 +402,9 @@ def make_handler(service: AgentWebService):
                 if path == "/app.js":
                     self._asset("app.js", "text/javascript; charset=utf-8")
                     return
+                if path == "/reconnect.js":
+                    self._asset("reconnect.js", "text/javascript; charset=utf-8")
+                    return
                 if path == "/inspector.js":
                     self._asset("inspector.js", "text/javascript; charset=utf-8")
                     return

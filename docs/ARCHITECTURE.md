@@ -309,6 +309,8 @@ History / Context | Conversation / Task | Runtime Observatory
 
 详见 [GOAL_WAKEUP.md](GOAL_WAKEUP.md)。
 
+断连等待归 Workspace/Goal 仓储，使用持久失败次数及 UTC 截止时间，间隔为 1/2/4/8/16/32/60 秒。供应商只报告派发前错误证据，DecisionRuntime 结算零用量失败后才释放当前请求键；未知效果不自动重发。后台线程按原 Run/step 接续，浏览器读取独立重连。详见 [NETWORK_RECOVERY.md](NETWORK_RECOVERY.md)。
+
 ## 16. 当前明确不做
 
 当前没有：

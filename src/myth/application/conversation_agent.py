@@ -3,7 +3,7 @@
 
 from ..acceptance import ContextBudgetError
 from ..domain import BudgetExceeded, RecoveryRequired, PatchContractError
-from ..models import StepDecision, DecisionValidationError, ProviderKnownFailure
+from ..models import StepDecision, DecisionValidationError, ProviderKnownFailure, ProviderUnavailable
 from ..conversation_ports import (
     ConversationRepository,
     ConversationExecution,
@@ -72,6 +72,8 @@ class ConversationAgent:
             turn = self.repository.turn(run_id)
             if turn["status"] == "PAUSED":
                 return
+            if (turn.get("network_retry") or {}).get("remaining_seconds", 0) > 0:
+                return
             if turn["status"] not in {"RUNNING", "INTERRUPTED", "UNKNOWN"}:
                 return
             if provider.provider_id != turn["settings"]["provider"]:
@@ -124,6 +126,7 @@ class ConversationAgent:
                         self.repository.bind(
                             run_id, step["step"], decision_id, decision
                         )
+                        self.repository.network_restored(run_id)
                         self.control.consume_compaction(run_id, decision_id=decision_id)
 
                     # 模型在途时到达的 Pause/Stop 在这里被观察；新工具派发前再次检查安全点。
@@ -167,6 +170,14 @@ class ConversationAgent:
                             next_action="Review the result and continue the next unfinished part of this goal.",
                         )
                         return
+                except ProviderUnavailable:
+                    # 明确零派发收据已经结算；保留同一 step，退出线程等待后台按持久截止时间继续。
+                    if not self._gate(run_id):
+                        self.repository.defer_network(run_id)
+                        self._checkpoint_goal(run_id, status="INTERRUPTED",
+                            summary="Provider disconnected before dispatch; checkpoint preserved.",
+                            next_action="Wait for the scheduled reconnection check.")
+                    return
                 except (ContextBudgetError, ProviderKnownFailure) as exc:
                     self.repository.block(run_id, "FAILED", str(exc))
                     self._checkpoint_goal(

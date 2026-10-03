@@ -219,6 +219,12 @@ function renderInspectorRecovery(turn) {
       Number(cursor.checkpoint_step || 0),
   );
   inspectorFact(box, "Recovery", cursor.recovery_state || "NONE");
+  const retry = turn.network_retry;
+  if (retry) {
+    inspectorFact(box, "Connection", (turn.status === "PAUSED" ? "已暂停重连" : "等待重连") + " · 第 " + Number(retry.failures) + " 次失败");
+    inspectorFact(box, "Next check", Math.max(0, Math.ceil(Number(retry.retry_at) - Date.now() / 1000)) + "s");
+    inspectorFact(box, "Retry interval", Number(retry.delay_seconds) + "s · 上限 60s");
+  }
   if (liveness.seconds_since_progress != null)
     inspectorFact(
       box,

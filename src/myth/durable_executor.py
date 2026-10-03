@@ -190,10 +190,10 @@ class DurableExecutor:
         self.provider_factory = provider_factory
         # active：本 worker 已启动的 Run 集；跨进程重复仍由 Driver Lease 阻止。
         self.active: set[str] = set()
-        # lock：仅保护 active/retry_after 等进程内缓存。
+        # lock：仅保护 active 线程集合；重连次数/截止时间归持久 Run 仓储。
         self.lock = threading.Lock()
-        # retry_after：供应商暂不可用时的本机退避；不会改写 Run 身份或 UNKNOWN。
-        self.retry_after: dict[str, float] = {}
+        # wake_event：线程交还工作时唤醒扫描，避免默认两秒轮询拉长首次一秒重连。
+        self.wake_event = threading.Event()
         # stop_event：显式停止 worker 主循环；不撤销已经签发的模型/工具效果。
         self.stop_event = threading.Event()
 
@@ -297,25 +297,23 @@ class DurableExecutor:
             runtime_root=str(self.root),
         )
 
-    # 在真正竞争 Driver 前检查固定供应商可用性；检查失败只触发退避，不消费新 Ticket。
+    # 在持有 Driver 心跳的工作线程检查供应商；检查失败提交退避，不消费模型 Ticket。
     def _provider_ready(self, run_id: str, settings) -> bool:
-        now = time.time()
-        if self.retry_after.get(run_id, 0) > now:
-            return False
         provider = self._provider(settings)
-        status = provider.check()
-        ready = bool(status.ready)
-        if (
-            ready
-            and settings.get("provider") == "ollama"
-            and settings.get("model")
-            and settings["model"] not in (status.details or {}).get("models", [])
-        ):
+        # 生产探测有界；调用使用另一个 provider 的原始推理超时，工厂替身不被修改。
+        if self.provider_factory is None and hasattr(provider, "timeout"):
+            provider.timeout = min(provider.timeout, 5.0)
+        try:
+            status = provider.check()
+            ready = bool(status.ready)
+            if (ready and settings.get("provider") == "ollama" and settings.get("model")
+                    and settings["model"] not in (status.details or {}).get("models", [])):
+                ready = False
+        except Exception:
             ready = False
         if not ready:
-            self.retry_after[run_id] = now + 30.0
-        else:
-            self.retry_after.pop(run_id, None)
+            with MythRuntime(self.root) as runtime:
+                Workspace(runtime).repository.defer_network(run_id)
         return ready
 
     # 读取所有普通/计划 Turn 的可恢复候选；UNKNOWN/PAUSED/WAITING_USER 永远不自动派发。
@@ -327,10 +325,12 @@ class DurableExecutor:
             rows = runtime.store.db.execute(
                 "SELECT t.run_id,t.status FROM workspace_turns t "
                 "LEFT JOIN workspace_driver_leases d ON d.run_id=t.run_id "
+                "LEFT JOIN workspace_network_retries n ON n.run_id=t.run_id "
                 "WHERE t.status IN ('RUNNING','INTERRUPTED') "
                 "AND (d.run_id IS NULL OR d.lease_until<=?) "
+                "AND (n.run_id IS NULL OR n.retry_at<=?) "
                 "ORDER BY t.rowid LIMIT ?",
-                (now, int(limit)),
+                (now, now, int(limit)),
             ).fetchall()
             for row in rows:
                 rid = row["run_id"]
@@ -363,7 +363,10 @@ class DurableExecutor:
             turn = workspace.repository.turn(run_id)
             if turn["status"] not in {"RUNNING", "INTERRUPTED"}:
                 return False
-            if not self._provider_ready(run_id, turn["settings"]):
+            retry = workspace.repository.network_retry(run_id)
+            if retry and retry["retry_at"] > time.time():
+                return False
+            if workspace.control.gate(run_id) is not None:
                 return False
             owner_id = f"{self.owner_id}:{run_id}"
             if not workspace.repository.claim_driver(run_id, owner_id, 8.0):
@@ -386,6 +389,12 @@ class DurableExecutor:
                 with MythRuntime(self.root) as runtime:
                     workspace = Workspace(runtime)
                     turn = workspace.repository.turn(run_id)
+                    # 探测与真实调用都在有心跳的 Run 线程中；慢网络不阻塞全局 worker 心跳/其他 Run。
+                    pending_local = any(item.get("decision") and item["state"] != "DONE" for item in turn["activities"])
+                    local_intent = (turn["current_step"] == 0
+                        and (turn["snapshot"].get("intent_pick") or {}).get("route") == "deterministic")
+                    if not pending_local and not local_intent and not self._provider_ready(run_id, turn["settings"]):
+                        return
                     workspace.run(run_id, self._provider(turn["settings"]))
                     after = workspace.repository.turn(run_id)
                     if after["status"] == "RUNNING":
@@ -429,6 +438,7 @@ class DurableExecutor:
                     pass
                 with self.lock:
                     self.active.discard(run_id)
+                self.wake_event.set()
 
         threading.Thread(
             target=work,
@@ -503,20 +513,50 @@ class DurableExecutor:
             )
         return dispatched
 
-    # 常驻运行直到显式停止/进程结束；崩溃后全局/Run 租约过期即可由下一进程接管。
+    # 找最近可恢复连接截止时间；仅调整扫描节奏，不在轮询线程睡眠一整分钟或伪造任务进度。
+    def _next_poll_delay(self):
+        with MythRuntime(self.root) as runtime:
+            GoalScheduler(Workspace(runtime))
+            row = runtime.store.db.execute(
+                "SELECT MIN(n.retry_at) FROM workspace_network_retries n "
+                "JOIN workspace_turns t USING(run_id) LEFT JOIN workspace_driver_leases d USING(run_id) "
+                "WHERE t.status='INTERRUPTED' AND (d.run_id IS NULL OR d.lease_until<=?)",
+                (time.time(),)).fetchone()
+            scheduled = runtime.store.db.execute(
+                "SELECT MIN(retry_at) FROM goal_schedules WHERE enabled=1 AND due_at<=? AND retry_at>0",
+                (time.time(),)).fetchone()
+        deadlines = [value for value in (row[0], scheduled[0]) if value is not None]
+        return min(self.poll_seconds, max(0.05, min(deadlines) - time.time())) if deadlines else self.poll_seconds
+
+    # 常驻运行直到显式停止/进程结束；按持久重连时间唤醒，崩溃后原 Run/截止时间可由下一进程接管。
     def serve_forever(self) -> int:
         if not self.claim():
             return 0
+        # 到期 Goal 的外部探测也可能慢于全局 TTL；独立续租不冒充业务进度，失去 owner 后停止未来扫描。
+        def keep_alive():
+            while not self.stop_event.wait(2.0):
+                try:
+                    if not self.heartbeat():
+                        self.stop()
+                        return
+                except Exception:
+                    self.stop()
+                    return
+        heartbeat = threading.Thread(target=keep_alive, name="executor-heartbeat", daemon=True)
+        heartbeat.start()
         try:
             while not self.stop_event.is_set():
+                self.wake_event.clear()
                 try:
                     self.tick()
                 except KeyboardInterrupt:
                     break
                 except Exception as exc:
                     self._record_tick(error=f"{type(exc).__name__}: {exc}")
-                self.stop_event.wait(self.poll_seconds)
+                self.wake_event.wait(self._next_poll_delay())
         finally:
+            self.stop()
+            heartbeat.join(timeout=3.0)
             self.release()
         return 0
 
@@ -534,3 +574,4 @@ class DurableExecutor:
     # 请求 worker 停止未来扫描；在途线程不被强杀，外部效果继续按真实收据处理。
     def stop(self) -> None:
         self.stop_event.set()
+        self.wake_event.set()
