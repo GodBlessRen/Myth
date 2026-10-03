@@ -533,6 +533,14 @@ select:focus-visible {
   gap: 12px;
   margin-top: 11px;
 }
+.message-worked {
+  padding-right: 12px;
+  margin-right: 2px;
+  border-right: 1px solid var(--line-soft);
+  color: #8f8578;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
 .message-actions button,
 .message-actions a,
 .source-list button {
