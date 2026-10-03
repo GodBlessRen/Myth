@@ -14,6 +14,7 @@ from .providers.ollama import OllamaProvider
 from .platform.control import ControlCommand
 from .strategies import RuleIntentPicker
 from .goal_scheduler import GoalScheduler
+from .durable_executor import executor_snapshot, run_liveness
 
 
 # HTTP 产品与后台线程门面；线程内独立连接，active 为本机缓存，Lease 与游标为持久恢复事实。
@@ -138,6 +139,11 @@ class ConversationWebService:
             values = memory.list(active_only=True, limit=min(int(limit), 100))
             return [item for item in values if not kind or item["kind"] == kind]
 
+    # 读取独立执行器心跳/租约投影；只反映 worker 生命，不把它冒充业务进度。
+    def executor(self):
+        with MythRuntime(self.root) as runtime:
+            return executor_snapshot(runtime)
+
     # 装配页面初始项目/会话/设置/Goal/恢复和调度投影；刷新不驱动未授权效果。
     def bootstrap(self):
         return {
@@ -150,6 +156,7 @@ class ConversationWebService:
             "goals": self.goals(),
             "goal_count": len(self.goals()),
             "recoverable_runs": self.recoverable_runs(),
+            "executor": self.executor(),
             "scheduler": dict(self.scheduler_state),
         }
 
@@ -270,6 +277,9 @@ class ConversationWebService:
                 turn["driver_lease"] = lease
                 turn["execution_cursor"] = workspace.repository.execution_cursor(
                     turn["run_id"]
+                )
+                turn["liveness"] = run_liveness(
+                    workspace.repository, turn["run_id"]
                 )
                 turn["control"] = workspace.control.view(turn["run_id"])
                 turn["operations"] = workspace.repository.operations(turn["run_id"])
