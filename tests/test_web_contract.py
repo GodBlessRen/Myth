@@ -151,10 +151,6 @@ class WebContractTests(unittest.TestCase):
                     "source": "myth",
                 },
             ) as save,
-            patch.object(
-                self.service,
-                "_provider",
-            ),
         ):
             # provider_key_save uses create_provider directly for candidate validation,
             # so patch the factory at the module boundary rather than the service helper.
