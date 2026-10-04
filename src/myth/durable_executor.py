@@ -14,6 +14,7 @@ import time
 import uuid
 
 from .goal_scheduler import GoalScheduler
+from .mental_model_refresh import MentalModelRefreshScheduler
 from .providers import create_provider
 from .runtime import MythRuntime
 from .workspace import Workspace
@@ -452,6 +453,61 @@ class DurableExecutor:
         ).start()
         return True
 
+    # _spawn_refresh：后台 Mental Model 刷新复用同一全局 worker/并发上限；模型 Ticket/Receipt 由 DecisionRuntime 持久恢复。
+    def _spawn_refresh(self, run_id: str) -> bool:
+        with self.lock:
+            if run_id in self.active or len(self.active) >= self.max_active:
+                return False
+            self.active.add(run_id)
+
+        # refresh 不是 Conversation Turn，不竞争 workspace_driver_leases；单机唯一 DurableExecutor 租约阻止跨进程重复扫描。
+        def work() -> None:
+            try:
+                with MythRuntime(self.root) as runtime:
+                    workspace = Workspace(runtime)
+                    occurrence = workspace.mental_model_refresh.occurrence(run_id)
+                    policy = workspace.mental_model_refresh.policy(
+                        str(occurrence["model_id"])
+                    )
+                    settings = policy["settings"]
+                    if not self._connection_ready(settings):
+                        workspace.mental_model_refresh.defer(
+                            str(occurrence["model_id"]),
+                            "scheduled provider is not connected",
+                        )
+                        return
+                    workspace.mental_model_refresh.run(
+                        run_id, self._provider(settings)
+                    )
+            except Exception as exc:
+                # 线程异常不能制造替代 occurrence；若状态仍可重试，标已知失败并保留旧 materialized content。
+                try:
+                    with MythRuntime(self.root) as runtime:
+                        workspace = Workspace(runtime)
+                        occurrence = workspace.mental_model_refresh.occurrence(run_id)
+                        if occurrence["state"] not in {
+                            "SUCCEEDED",
+                            "FAILED",
+                            "UNKNOWN",
+                            "SUPERSEDED",
+                        }:
+                            workspace.mental_model_refresh.fail(
+                                run_id, f"{type(exc).__name__}: {exc}"
+                            )
+                except Exception:
+                    pass
+            finally:
+                with self.lock:
+                    self.active.discard(run_id)
+                self.wake_event.set()
+
+        threading.Thread(
+            target=work,
+            name=f"executor-mental-model-{run_id[:12]}",
+            daemon=True,
+        ).start()
+        return True
+
     # 执行一次恢复/计划扫描；普通 Turn 与 Goal wakeup 共用同一 Driver/Lease/UNKNOWN 语义。
     def tick(self) -> int:
         if not self.heartbeat():
@@ -468,6 +524,56 @@ class DurableExecutor:
                         dispatched += 1
                 except Exception as exc:
                     errors.append(f"{run_id}: {type(exc).__name__}: {exc}")
+
+            # 先恢复/驱动已准入的 Mental Model refresh；UNKNOWN 不在可派发集合，避免盲重放。
+            with MythRuntime(self.root) as runtime:
+                refresh_runs = MentalModelRefreshScheduler(
+                    Workspace(runtime)
+                ).dispatchable_runs(limit=self.max_active * 4)
+            for run_id in refresh_runs:
+                with self.lock:
+                    if len(self.active) >= self.max_active:
+                        break
+                try:
+                    if self._spawn_refresh(run_id):
+                        dispatched += 1
+                except Exception as exc:
+                    errors.append(f"{run_id}: {type(exc).__name__}: {exc}")
+
+            # stale/unmaterialized + opt-in policy 形成新 occurrence；先探测 Provider，断连只退避 policy，不制造空 Run。
+            with MythRuntime(self.root) as runtime:
+                refresh_due = MentalModelRefreshScheduler(
+                    Workspace(runtime)
+                ).due(limit=self.max_active * 4)
+            for item in refresh_due:
+                with self.lock:
+                    if len(self.active) >= self.max_active:
+                        break
+                model_id = str(item["model"]["model_id"])
+                settings = item["policy"]["settings"]
+                try:
+                    if not self._connection_ready(settings):
+                        with MythRuntime(self.root) as runtime:
+                            Workspace(runtime).mental_model_refresh.defer(
+                                model_id, "scheduled provider is not connected"
+                            )
+                        continue
+                    with MythRuntime(self.root) as runtime:
+                        run_id = Workspace(runtime).mental_model_refresh.admit(model_id)
+                    if run_id and self._spawn_refresh(run_id):
+                        dispatched += 1
+                except (ValueError, KeyError, PermissionError) as exc:
+                    try:
+                        with MythRuntime(self.root) as runtime:
+                            Workspace(runtime).mental_model_refresh.defer(
+                                model_id, str(exc)
+                            )
+                    except Exception:
+                        pass
+                except Exception as exc:
+                    errors.append(
+                        f"mental-model:{model_id}: {type(exc).__name__}: {exc}"
+                    )
 
             with MythRuntime(self.root) as runtime:
                 due = GoalScheduler(Workspace(runtime)).due(limit=self.max_active * 4)
@@ -521,7 +627,17 @@ class DurableExecutor:
             scheduled = runtime.store.db.execute(
                 "SELECT MIN(retry_at) FROM goal_schedules WHERE enabled=1 AND due_at<=? AND retry_at>0",
                 (time.time(),)).fetchone()
-        deadlines = [value for value in (row[0], scheduled[0]) if value is not None]
+            MentalModelRefreshScheduler(Workspace(runtime))
+            mental_refresh = runtime.store.db.execute(
+                "SELECT MIN(retry_at) FROM mental_model_refresh_policies "
+                "WHERE enabled=1 AND retry_at>?",
+                (time.time(),),
+            ).fetchone()
+        deadlines = [
+            value
+            for value in (row[0], scheduled[0], mental_refresh[0])
+            if value is not None
+        ]
         return min(self.poll_seconds, max(0.05, min(deadlines) - time.time())) if deadlines else self.poll_seconds
 
     # 常驻运行直到显式停止/进程结束；按持久重连时间唤醒，崩溃后原 Run/截止时间可由下一进程接管。
