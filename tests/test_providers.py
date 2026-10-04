@@ -329,6 +329,7 @@ class DeepSeekProviderTests(unittest.TestCase):
             },
         }
 
+        # 固定 DeepSeek HTTP/SSE 替身只捕获 wire 请求并返回终结事件；不代表真实远端连通或模型质量。
         def fake_urlopen(req, timeout):
             captured["url"] = req.full_url
             captured["auth"] = req.headers.get("Authorization") or req.headers.get(
