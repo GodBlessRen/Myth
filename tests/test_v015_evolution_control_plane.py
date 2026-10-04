@@ -347,6 +347,79 @@ class EvolutionControlPlaneTests(unittest.TestCase):
             )
             self.assertFalse(value["causal_attribution"])
 
+    # 回归断言：Harness 变体身份和机制集合持久进 Eval Ledger，one-mechanism/leave-one-out 可在重开后做受控归因。
+    def test_controlled_harness_attribution_survives_ledger_round_trip(self):
+        with MythRuntime(self.root) as runtime:
+            ledger = SqliteEvaluationLedger(runtime)
+
+            # 同一固定题只改变 Harness 机制集合与 verdict，确保归因来自受控变体而不是名称猜测。
+            def result(harness_id, mechanisms, verdict):
+                passed = 1 if verdict == "PASS" else 0
+                return {
+                    "suite_id": "harness-attribution-v1",
+                    "version": 1,
+                    "policy_id": "same-policy",
+                    "harness_id": harness_id,
+                    "harness_mechanisms": mechanisms,
+                    "evaluation_partition": "discovery",
+                    "suite_case_count": 1,
+                    "selected_case_count": 1,
+                    "complete_suite": True,
+                    "report": {
+                        "suite_id": "harness-attribution-v1",
+                        "pass_count": passed,
+                        "fail_count": 1 - passed,
+                        "inconclusive_count": 0,
+                        "safety_regressions": 0,
+                        "measured_cost": 0,
+                        "unsupported_count": 0,
+                    },
+                    "release_gate": {"passed": verdict == "PASS", "reason": "fixture"},
+                    "observations": [
+                        {
+                            "case_id": "case-1",
+                            "verdict": verdict,
+                            "reason": "fixture",
+                            "metrics": {"input_tokens": 10},
+                            "evidence_refs": ["eval:case-1"],
+                            "comparison_key": "case-1",
+                        }
+                    ],
+                }
+
+            base = ledger.record(
+                result("h:none", [], "PASS"), policy_id="same-policy"
+            )
+            full = ledger.record(
+                result("h:compact+recall", ["compact", "recall"], "FAIL"),
+                policy_id="same-policy",
+            )
+            only_compact = ledger.record(
+                result("h:compact", ["compact"], "FAIL"),
+                policy_id="same-policy",
+            )
+            only_recall = ledger.record(
+                result("h:recall", ["recall"], "PASS"),
+                policy_id="same-policy",
+            )
+            value = ledger.controlled_attribution(
+                baseline_eval_run_id=base["eval_run_id"],
+                full_eval_run_id=full["eval_run_id"],
+                variant_eval_run_ids=(
+                    only_compact["eval_run_id"],
+                    only_recall["eval_run_id"],
+                ),
+            )
+            compact = next(
+                item for item in value["effects"] if item["mechanism"] == "compact"
+            )
+            self.assertEqual(compact["classification"], "supported_harm")
+            self.assertTrue(compact["controlled"])
+            self.assertEqual(
+                ledger.run(full["eval_run_id"])["harness_mechanisms"],
+                ["compact", "recall"],
+            )
+
     # 回归断言：显式发布只改变未来 Turn，旧快照固定策略，回退也保留历史。
     def test_candidate_promote_freezes_future_turn_policy_and_rollback(self):
         with MythRuntime(self.root) as runtime:
