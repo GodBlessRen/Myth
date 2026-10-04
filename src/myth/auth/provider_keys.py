@@ -24,6 +24,7 @@ class ProviderApiKeyVault:
 
     # 构造只保存系统凭据适配器；真正读写发生在用户连接或 Provider 调用边界。
     def __init__(self, store=None) -> None:
+        # store：系统安全凭据端口；只拥有 API Key 秘钥字节，Runtime/Workspace 不取得读取权。
         self.store = store or KeyringCredentialStore(service=API_KEY_SERVICE)
 
     # Provider 名必须属于实际适配器白名单；不能用前端文本扩大系统凭据命名空间。
