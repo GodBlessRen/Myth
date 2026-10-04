@@ -47,3 +47,30 @@ Oracle 只检查可明确自动验收的内容：
 ## 发布判断
 
 先查看全部试次和失败，而不是只看通过率。当前 Run COMPLETED 表示对话已结束；只有独立 checks 能支撑对应的任务验收。任务基线不自动 promote policy、扩大工具权限或开启未声明计划。
+## Harness efficiency 与机制归因
+
+效率候选不能只比较 aggregate pass count。固定比较至少保留：
+
+- 同 suite / case / environment 的 baseline 与 candidate policy identity；
+- task × policy verdict matrix；
+- outcome flip；
+- 每题实际 mechanism activation / fallback reason；
+- 共同测量的 Token / Tool / Step / wall time 等成本向量；
+- capability floor；
+- safety/runtime invariant regression；
+- one-mechanism 或 leave-one-out 复跑，用于真正的机制因果归因。
+
+发布顺序固定为：
+
+```text
+fixed capability / safety floor
+  -> paired task outcomes
+  -> Pareto-nonworse measured cost
+  -> at least one measured efficiency improvement
+  -> held-out final evaluation
+  -> explicit release decision
+```
+
+Discovery/Search case 与 final held-out case 的身份必须不相交。Final 只产生接受/拒绝证据，不能回流指导同一候选继续修改；否则它已经不再是 held-out。
+
+Historical Replay、SOTA Route 和单次漂亮轨迹可以产生 hypothesis，但不能替代新的固定评测。
