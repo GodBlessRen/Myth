@@ -46,11 +46,16 @@ class ProviderApiKeyVault:
             raise ValueError("API key contains control characters")
         return value
 
+    # 在任何网络验证前只做本地形状校验；返回值仅限同一次服务调用使用，不能写日志或 Web 状态。
+    def prepare(self, provider: str, secret: Any) -> str:
+        self._spec(str(provider).strip().lower())
+        return self._clean_secret(secret)
+
     # 保存到系统凭据库；记录只含 provider + key，不进入项目根或 Runtime 数据库。
     def save(self, provider: str, secret: str) -> dict[str, Any]:
         provider_id = str(provider).strip().lower()
         spec = self._spec(provider_id)
-        value = self._clean_secret(secret)
+        value = self.prepare(provider_id, secret)
         self.store.save(
             provider_id,
             {"kind": "api_key", "provider": provider_id, "api_key": value},
