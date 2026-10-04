@@ -6,6 +6,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 import json
+from math import ceil
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -472,6 +473,19 @@ def controlled_harness_variants(
         result.append(HarnessVariant(f"{prefix}:{suffix}", tuple(sorted(enabled))))
     return tuple(result)
 
+# 只比较双方共同测量的数值 metric；缺测不能补零进入机制成本归因。
+def _observed_metric_delta(
+    before: EvalObservation, after: EvalObservation
+) -> dict[str, float]:
+    left = before.metrics or {}
+    right = after.metrics or {}
+    result = {}
+    for key in sorted(set(left) & set(right)):
+        if isinstance(left[key], (int, float)) and isinstance(right[key], (int, float)):
+            result[key] = float(right[key]) - float(left[key])
+    return result
+
+
 # 受控归因只接受同题不同 Harness 变体的真实观测；没有对应消融 Run 时保持 insufficient，不靠总分猜原因。
 def controlled_attribution(
     observations: Iterable[EvalObservation],
@@ -549,6 +563,29 @@ def controlled_attribution(
                         classification = "supported_harm"
                     else:
                         classification = "mixed_or_interaction"
+            full_vs_leave = (
+                _observed_metric_delta(leave, full) if leave is not None else {}
+            )
+            one_vs_baseline = (
+                _observed_metric_delta(baseline, one) if one is not None else {}
+            )
+            input_saving = (
+                -full_vs_leave["input_tokens"]
+                if full_vs_leave.get("input_tokens") is not None
+                and full_vs_leave["input_tokens"] < 0
+                else None
+            )
+            cache_write_delta = full_vs_leave.get("cache_write_input_tokens")
+            cache_debt = (
+                max(0.0, cache_write_delta)
+                if cache_write_delta is not None
+                else None
+            )
+            breakeven = (
+                ceil(cache_debt / input_saving)
+                if cache_debt is not None and input_saving is not None and input_saving > 0
+                else None
+            )
             effects.append(
                 {
                     "case_id": case_id,
@@ -563,6 +600,11 @@ def controlled_attribution(
                     "leave_one_out_verdict": leave.verdict.value if leave else None,
                     "classification": classification,
                     "controlled": one is not None and leave is not None,
+                    "full_vs_leave_cost_delta": full_vs_leave,
+                    "one_vs_baseline_cost_delta": one_vs_baseline,
+                    "input_token_saving_per_request": input_saving,
+                    "cache_write_debt_tokens": cache_debt,
+                    "breakeven_requests": breakeven,
                 }
             )
 
