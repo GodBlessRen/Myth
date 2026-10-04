@@ -134,6 +134,16 @@ class ConversationWebService:
             value["policy_history"] = workspace.evolution.history(
                 "information_resolution", 10
             )
+            value["vector_index"] = (
+                workspace.vector_index.status()
+                if workspace.vector_index is not None
+                else {
+                    "backend": "milvus",
+                    "configured": False,
+                    "healthy": False,
+                    "last_error": None,
+                }
+            )
             return value
 
     # 按显式 query/kind 返回可见记忆；文本仅作为上下文，不授予能力。
