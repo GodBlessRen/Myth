@@ -8,8 +8,7 @@ import json
 from .acceptance import ContextBudgetError
 from .domain import canonical_json, sha256_bytes
 from .models import ModelMessage
-from .platform.efficiency import OptimizationOutcome, optimization_event, semantic_boundary
-from .platform.context import ContextCompiler, ContextItem
+from .platform.context import ContextCompiler, ContextItem, context_boundary
 from .platform.context_anchor import render_context_anchor
 
 
@@ -101,7 +100,7 @@ def _grounded_compaction_seed(snapshot, activities):
                 "candidate_digest": fused.get("candidate_digest"),
                 "semantic_verification": bool(fused.get("semantic_verification")),
             }
-        boundary = semantic_boundary(activity)
+        boundary = context_boundary(activity)
         if boundary:
             item["semantic_boundary"] = boundary
             boundaries.append({"step": activity.get("step"), "kind": boundary})
@@ -126,10 +125,18 @@ def _grounded_compaction_seed(snapshot, activities):
 
 # 按优先级投影 Goal/任务/指令/工具/知识/记忆/历史，保留 selected/folded/dropped 报告；必需内容过大提前失败。
 def compile_conversation_context(
-    system, snapshot, messages, activities, control=None, *, max_bytes=None
+    system,
+    snapshot,
+    messages,
+    activities,
+    control=None,
+    *,
+    max_bytes=None,
+    compact_mode: bool | None = None,
 ):
     control = control or {}
-    compact = bool(control.get("compact_requested"))
+    compact_requested = bool(control.get("compact_requested"))
+    compact = compact_requested if compact_mode is None else bool(compact_mode)
     project = snapshot.get("project") or {}
     system += (
         "\n项目："
@@ -371,21 +378,16 @@ def compile_conversation_context(
             "recall_capability": "observation.read",
             "fold_reason_code": "older_observation_preview" if folded else None,
         },
-        "optimizations": (
-            ([optimization_event(
-                mechanism_id="observation_projection",
-                outcome=OptimizationOutcome.APPLIED,
-                reason_code="older_observation_preview",
-                metrics={"folded_items": len([ref for ref in folded if ref in selected])},
-            )] if folded else [])
-            + ([optimization_event(
-                mechanism_id="context_compaction",
-                outcome=OptimizationOutcome.APPLIED,
-                reason_code="explicit_user_control",
-                metrics={"grounded_seed_selected": int("compaction-seed" in selected)},
-            )] if compact else [])
+        "fold_reason": (
+            {
+                "reason_code": "older_observation_preview",
+                "folded_items": len([ref for ref in folded if ref in selected]),
+            }
+            if folded
+            else None
         ),
-        "compact_requested": compact,
+        "compact_requested": compact_requested,
+        "compact_applied": compact,
         "control_revision": control.get("revision"),
         "intent_route": intent_pick.get("route"),
         "information_resolution": resolution.get("resolution"),
