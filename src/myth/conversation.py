@@ -515,6 +515,7 @@ def conversation_request(settings, snapshot, messages, activities, control=None)
             projected, report = normal_projected, normal_report
 
     report["context_mode"] = context_decision["mode"]
+    report["previous_context_mode"] = previous_mode
     report["context_decision"] = context_decision
     report["num_ctx"] = num_ctx
     report["max_output_tokens"] = max_output_tokens
