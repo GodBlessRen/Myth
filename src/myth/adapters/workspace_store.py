@@ -559,6 +559,8 @@ class SqliteWorkspaceRepository:
         if self.vector_index is None or not str(query).strip():
             return lexical
         try:
+            # 首次启用 Milvus 时补齐已有文档；适配器按 source version 幂等跳过本进程已同步项。
+            self.rebuild_vector_index(project_id)
             hits = self.vector_index.search_knowledge(
                 str(query), limit=max(32, int(limit) * 8)
             )
@@ -652,9 +654,9 @@ class SqliteWorkspaceRepository:
         request_id,
         document_ids=None,
         memory_records=None,
-        memory_retrieval_report=None,
         goal_id=None,
         goal_context=None,
+        memory_retrieval_report=None,
         *,
         _db=None,
         _settings=None,
