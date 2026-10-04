@@ -503,7 +503,9 @@ class DurableExecutor:
                         )
                         return
                     workspace.mental_model_refresh.run(
-                        run_id, self._provider(settings)
+                        run_id,
+                        self._provider(settings),
+                        owner_id=owner_id,
                     )
             except Exception as exc:
                 # 线程异常只收束原 occurrence；已 UNKNOWN/SUPERSEDED/终态时不覆盖更精确事实。
