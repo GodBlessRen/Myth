@@ -453,15 +453,41 @@ class DurableExecutor:
         ).start()
         return True
 
-    # _spawn_refresh：后台 Mental Model 刷新复用同一全局 worker/并发上限；模型 Ticket/Receipt 由 DecisionRuntime 持久恢复。
+    # _spawn_refresh：后台 Mental Model 刷新复用全局并发上限，并额外竞争 occurrence lease 防止失租后的双驱动。
     def _spawn_refresh(self, run_id: str) -> bool:
         with self.lock:
             if run_id in self.active or len(self.active) >= self.max_active:
                 return False
+        owner_id = f"{self.owner_id}:mental:{run_id}"
+        with MythRuntime(self.root) as runtime:
+            scheduler = Workspace(runtime).mental_model_refresh
+            if not scheduler.claim(run_id, owner_id, ttl_seconds=8.0):
+                return False
+        with self.lock:
             self.active.add(run_id)
 
-        # refresh 不是 Conversation Turn，不竞争 workspace_driver_leases；单机唯一 DurableExecutor 租约阻止跨进程重复扫描。
+        stop_heartbeat = threading.Event()
+
+        # occurrence heartbeat 与全局 worker heartbeat 分离；前者证明“谁在驱动此刷新”，不证明模型已成功。
+        def refresh_heartbeat() -> None:
+            while not stop_heartbeat.wait(2.0):
+                try:
+                    with MythRuntime(self.root) as runtime:
+                        if not Workspace(runtime).mental_model_refresh.heartbeat(
+                            run_id, owner_id, ttl_seconds=8.0
+                        ):
+                            return
+                except Exception:
+                    return
+
+        # 模型调用/提交都按原 occurrence 恢复；异常不能创建替代工作绕开旧 Ticket。
         def work() -> None:
+            heartbeat = threading.Thread(
+                target=refresh_heartbeat,
+                name=f"executor-mental-heartbeat-{run_id[:12]}",
+                daemon=True,
+            )
+            heartbeat.start()
             try:
                 with MythRuntime(self.root) as runtime:
                     workspace = Workspace(runtime)
@@ -480,7 +506,7 @@ class DurableExecutor:
                         run_id, self._provider(settings)
                     )
             except Exception as exc:
-                # 线程异常不能制造替代 occurrence；若状态仍可重试，标已知失败并保留旧 materialized content。
+                # 线程异常只收束原 occurrence；已 UNKNOWN/SUPERSEDED/终态时不覆盖更精确事实。
                 try:
                     with MythRuntime(self.root) as runtime:
                         workspace = Workspace(runtime)
@@ -497,6 +523,15 @@ class DurableExecutor:
                 except Exception:
                     pass
             finally:
+                stop_heartbeat.set()
+                heartbeat.join(timeout=1.0)
+                try:
+                    with MythRuntime(self.root) as runtime:
+                        Workspace(runtime).mental_model_refresh.release(
+                            run_id, owner_id
+                        )
+                except Exception:
+                    pass
                 with self.lock:
                     self.active.discard(run_id)
                 self.wake_event.set()
