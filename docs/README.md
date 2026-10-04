@@ -12,6 +12,7 @@
 | 理解不可破坏的边界 | [ARCHITECTURE_CONSTITUTION.md](ARCHITECTURE_CONSTITUTION.md) |
 | 看 Runtime / 第三栏观测合同 | [OBSERVABILITY.md](OBSERVABILITY.md) |
 | 看产品视觉与交互原则 | [DESIGN.md](DESIGN.md) |
+| 看前端重构取舍与实际浏览器证据 | [UI_REDESIGN.md](UI_REDESIGN.md) |
 | 看当前下一步 | [ROADMAP.md](ROADMAP.md) |
 | 看验证边界 | [VALIDATION.md](VALIDATION.md) |
 | 安排 Goal 后续工作 | [GOAL_WAKEUP.md](GOAL_WAKEUP.md) |

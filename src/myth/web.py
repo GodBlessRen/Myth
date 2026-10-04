@@ -435,6 +435,13 @@ def make_handler(service: AgentWebService):
                 if path == "/app.js":
                     self._asset("app.js", "text/javascript; charset=utf-8")
                     return
+                # 主题引导只读取浏览器偏好；静态白名单保持封闭，CSP 不开放内联脚本。
+                if path == "/theme.js":
+                    self._asset("theme.js", "text/javascript; charset=utf-8")
+                    return
+                if path == "/favicon.svg":
+                    self._asset("favicon.svg", "image/svg+xml")
+                    return
                 if path == "/reconnect.js":
                     self._asset("reconnect.js", "text/javascript; charset=utf-8")
                     return

@@ -1,140 +1,53 @@
-# Myth Product Design
+# Myth 界面设计
 
-## Product identity
+本文件是当前视觉与交互合同。产品事实见 [PRODUCT.md](../PRODUCT.md)，观测语义见 [OBSERVABILITY.md](OBSERVABILITY.md)。界面属于 Operate：让使用者完成工作、理解状态、作出决定。
 
-Myth 是一个 **Agent Workbench / Personal Work Runtime**。
+## 设计方向
 
-主界面不是营销 Hero，也不是“知识库 + AI 聊天框”，而是一个持续工作的三栏工作台：
+采用“纸面工作台”：紧凑导航、宽松工作面、常驻 Runtime Observatory。焦点是当前对话和输入操作；信息通过字重、间距、细线与明度分层。奶油白与星空黑共享结构、组件和状态语义。星空黑是深色工作环境，不使用粒子、星点或发光装饰。
 
-```text
-History / Context | Conversation / Task | Runtime Observatory
-```
+五个方向的选择记录见 [UI_REDESIGN.md](UI_REDESIGN.md)，离线比较见 [设计方向](../output/playwright/design-directions.html)。
 
-核心体验：
+## 结构与密度
 
-> 工作在中间发生，执行事实在右侧持续可见。
+- 宽屏三栏：左栏约 220–236 px，中栏弹性伸展，右栏约 300 px；主工作面承担主要视觉权重。
+- 左栏按工作、资料、最近会话组织；底部放设置与本机工作区。当前页、悬停与键盘焦点有不同表现。
+- 对话按发言顺序阅读，输入区稳定可达；附件、项目、Goal 与发送动作在同一输入上下文。
+- 列表优先使用行、标题、元数据与细分隔线；卡片用于确有边界的对象，不给每条文字套框。
+- 观测台摘要常驻，长 payload 与证据渐进展开。禁止为了简洁移除事实类别。
+- 窄屏将导航与观测台转换为可关闭面板；入口、关闭、焦点、滚动与 `Escape` 行为一致。内容真实重排，不缩小整张桌面画布。
 
-## Visual system
+## 颜色与文字
 
-### Color
+| 角色 | 奶油白 | 星空黑 | 使用规则 |
+| --- | --- | --- | --- |
+| 页面底色 | `#f8f6f0` | `#101216` | 大面积稳定底色 |
+| 主要表面 | 暖白、细微明度差 | 略亮的石墨色 | 输入、面板、弹窗 |
+| 正文与主动作 | 深墨色 | 柔白正文、浅色主动作 | 主按钮保持清晰反差 |
+| 正常与成功 | 鼠尾草绿 | 更明亮的鼠尾草绿 | 只用于有事实支持的状态 |
+| 运行与等待 | 克制琥珀色 | 克制琥珀色 | 状态文本辅助区分 |
+| 明确失败 | 深红 | 可读的柔红 | 不与 UNKNOWN 合并 |
 
-- Paper `#F6F2EA` — application canvas；
-- Surface `#FCFAF6` — composer / panel；
-- Ink `#25231F` — primary structure；
-- Muted `#7C756A` — secondary facts；
-- Signal Orange `#C77732` — running / selected execution cut-point；
-- Success `#5E7A63` — durable positive state。
+实际颜色以 `app.css` 的语义变量为单一来源，两套主题不另外复制组件规则。分隔线可低对比，正文和交互文本需保持可读。不可用降低整体透明度隐藏重要状态。
 
-橙色不是装饰色。Runtime state 才能获得强调。
+采用本机可用的中文无衬线字体及可靠 fallback，避免依赖在线字体。正文 14–15 px，辅助文本不低于 12 px；手机输入 16 px，避免浏览器自动放大。标题短而明确，不用大字口号占据工作空间。ID、Token、预算与计量数字使用等宽或等宽数字。中文负责动作与解释；Myth、Goal、Run、Runtime、Ticket、Receipt、Artifact、Token、Provider、OAuth 等已定义名词保留原义，不创造中英混合口号。
 
-### Type
+## 组件与反馈
 
-- System Sans：navigation / conversation / controls；
-- Georgia / Noto Serif SC fallback：major title；
-- Monospace：ID / token / budget / machine facts。
+按钮分主操作、次操作、轻量操作和危险操作。控件标签描述实际动作；不可点击的状态不伪装成按钮。表单保留可见标签、说明和错误位置，提交中明确禁用重复动作。列表空态只说明当前缺少什么并给出对应入口；错误状态说明已知失败及可执行下一步，不用笼统“出错了”覆盖证据。
 
-## Information architecture
+弹窗和抽屉具备名称、明确关闭入口与焦点恢复；键盘可完成导航和主要操作。触控目标保持易点选的尺寸。会话切换、连接变化、附加资料和删除等反馈不靠颜色或短暂动画单独表达。
 
-左栏：
+## 状态与计量
 
-- Sessions；
-- Projects；
-- Knowledge；
-- secondary context。
+保留 idle、RUNNING、WAITING_USER、PAUSED、INTERRUPTED、UNKNOWN、COMPLETED / SUCCEEDED、FAILED、BUDGET_EXHAUSTED、CANCELLED 的差异。恢复动作分别展示 RESUME 与 RECONCILE，不能用统一“重试”掩盖外部效果风险。
 
-中栏：
+观测台只投影 Runtime 提供的事实。Tokens 与 bytes 分开；Cache Hit 仅使用 Provider 报告；TTFT、TPS、Model wall、工具用时与整轮用时保留原始口径；部分统计显示覆盖次数。无数据用“未报告”或 `N/A`，不把缺失当零，不通过动画制造推进感。详细字段仍遵循 [观测合同](OBSERVABILITY.md)。
 
-- Goal-bound Conversation；
-- Task；
-- Artifact / result；
-- user decision。
+摘要区显示 Turn 状态及独立验收状态；Turn 已完成、回答已保存与交付已验收不得合并为一个成功标签。
 
-右栏：
+## 动效与验收
 
-- Goal；
-- Execution Flow；
-- Trajectory；
-- Tokens；
-- Context Window；
-- Tool Calls；
-- Control；
-- Budget。
+交互反馈以短时颜色、透明度与少量位移为主；过渡服务于状态变化，不延迟任务。打开面板、展开内容、控件悬停保持同一节奏；尊重 `prefers-reduced-motion`，避免持续闪烁和装饰性循环。不引入滚动劫持、自动轮播或营销入场。
 
-详细观测语义见 [OBSERVABILITY.md](OBSERVABILITY.md)。
-
-## Signature move — Runtime Observatory
-
-过去的 Execution Spine 已扩展成完整 Runtime Observatory。
-
-它的目标不是“显示 Agent 很忙”，而是显示因果：
-
-```text
-Goal
-  ↓
-Intent / Context
-  ↓
-Model / Decision
-  ↓
-Authority / Ticket
-  ↓
-Tool / Effect
-  ↓
-Receipt / Artifact
-  ↓
-Verification / Completion
-```
-
-只有源码/Runtime 暴露的事实才能显示。
-
-不要伪造：
-
-- Ticket；
-- Receipt；
-- Verification；
-- Token；
-- progress。
-
-## Density
-
-第三栏采用：
-
-> **摘要常驻 + 细节渐进展开**
-
-允许折叠 payload，不允许删除事实类别。
-
-桌面必须能访问 Runtime Observatory；窄屏可以折叠为 drawer / secondary surface，不能永久隐藏。
-
-## State design
-
-必须视觉区分：
-
-- idle；
-- RUNNING；
-- WAITING_USER；
-- PAUSED；
-- COMPLETED / SUCCEEDED；
-- FAILED；
-- BUDGET_EXHAUSTED；
-- CANCELLED；
-- UNKNOWN / RECONCILE。
-
-UNKNOWN 不与 FAILED 共用语义。
-
-## UI discipline
-
-- 不堆相同 card；
-- 不用装饰动画模拟执行进度；
-- 重要状态文字 + 图形共同表达，不只靠颜色；
-- IDs / token / budgets 用 monospace；
-- 主任务视觉优先，观测台克制但持续可见；
-- UI refinement 修改源 token / primitive，不追加无穷 override。
-
-## Accessibility floor
-
-- visible keyboard focus；
-- usable touch targets；
-- readable metadata；
-- `prefers-reduced-motion`；
-- mobile 不产生水平溢出；
-- critical state 不只靠颜色；
-- Runtime Observatory 的事实在窄屏仍有可达入口。
+实际浏览器验收覆盖双主题、宽屏与窄屏、键盘、长中文、长 ID、空态、错误态、弹窗与 Runtime 可达性。截图只能证明画面；动作、恢复和计量必须另有行为证据。实现与检查结果统一记录于 [UI_REDESIGN.md](UI_REDESIGN.md)。

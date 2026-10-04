@@ -1,0 +1,2 @@
+<!-- 固定品牌图形，仅用于标签页，不加载外部资源。 -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="#282b27"/><path d="M7 25V7l9 11L25 7v18M7 7l9 5 9-5" fill="none" stroke="#f8f6f0" stroke-width="1.5" stroke-linejoin="round"/></svg>

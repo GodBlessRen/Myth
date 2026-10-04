@@ -4,20 +4,23 @@
 from __future__ import annotations
 
 from pathlib import Path
+from http.server import ThreadingHTTPServer
+import threading
 import tempfile
 import unittest
 import re
+from urllib.request import urlopen
 
 from myth.agent_runtime import AgentRuntime
 from myth.runtime import MythRuntime
-from myth.web import ASSET_DIR, AgentWebService, serve
+from myth.web import ASSET_DIR, AgentWebService, make_handler, serve
 
 
 # 包资源、HTTP 绑定与第三栏 DOM的固定测试集合/替身；临时资源由本用例拥有，生产状态必须从实际仓储核对。
 class WebSurfaceTests(unittest.TestCase):
     # 回归断言：包内静态资源及 renderer 入口存在；只证明打包合同，不证明视觉质量。
     def test_packaged_web_assets_exist(self) -> None:
-        for name in ("index.html", "app.css", "app.js", "inspector.js"):
+        for name in ("index.html", "app.css", "app.js", "inspector.js", "goals.js", "statistics.js", "reconnect.js", "theme.js", "favicon.svg"):
             path = ASSET_DIR / name
             self.assertTrue(path.is_file(), path)
             self.assertGreater(path.stat().st_size, 100)
@@ -25,13 +28,38 @@ class WebSurfaceTests(unittest.TestCase):
     # 回归断言：既有 HTML id/脚本依赖和第三栏结构继续存在。
     def test_v07_shell_preserves_app_contract_and_loads_inspector(self) -> None:
         html = (ASSET_DIR / "index.html").read_text(encoding="utf-8")
-        app = (ASSET_DIR / "app.js").read_text(encoding="utf-8")
-        required = set(re.findall(r'\\$\\("([^"]+)"\\)', app))
+        app = "\n".join((ASSET_DIR / name).read_text(encoding="utf-8") for name in ("app.js", "inspector.js", "goals.js"))
+        required = set(re.findall(r'\$\("([^"]+)"\)', app))
         missing = sorted(item for item in required if f'id="{item}"' not in html)
         self.assertEqual(missing, [])
         self.assertIn('<script src="/inspector.js"></script>', html)
         self.assertIn('id="runtimeInspector"', html)
         self.assertIn('id="executionSpine"', html)
+
+    # 固定资源由真实 Handler 提供，首屏主题不能因 CSP 或遗漏打包再次闪白。
+    def test_theme_bootstrap_and_icon_are_served_under_existing_csp(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            service = AgentWebService(Path(tmp))
+            server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(service))
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                base = f"http://127.0.0.1:{server.server_port}"
+                with urlopen(base + "/", timeout=3) as response:
+                    html = response.read().decode("utf-8")
+                    self.assertIn("script-src 'self'", response.headers["Content-Security-Policy"])
+                    self.assertLess(html.index('src="/theme.js"'), html.index('href="/app.css"'))
+                    self.assertNotRegex(html, r"<script(?![^>]*src=)[^>]*>\s*\S")
+                for path, content_type in (("/theme.js", "text/javascript"), ("/favicon.svg", "image/svg+xml")):
+                    with urlopen(base + path, timeout=3) as response:
+                        self.assertEqual(response.status, 200)
+                        self.assertIn(content_type, response.headers["Content-Type"])
+                        self.assertGreater(len(response.read()), 100)
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=3)
+                service.workspace.stop_scheduler()
 
     # 回归断言：本地服务拒绝非 loopback 绑定，不能自动变成公网服务。
     def test_web_server_rejects_non_loopback_bind(self) -> None:
