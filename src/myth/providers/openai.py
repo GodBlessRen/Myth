@@ -18,6 +18,41 @@ from ..auth.transport import (
 )
 from ..models import ModelRequest, ModelResult, ProviderStatus, ProviderKnownFailure, ProviderUnavailable
 from ..network_recovery import is_pre_dispatch_disconnect
+from .capabilities import model_capability, reasoning_capability
+
+
+
+# 将 OpenAI 公开模型族能力投影留在 adapter；Core/UI 不识别 GPT 命名，也不把这些档位推广为全局标准。
+def _openai_model_capability(model_id: str, display_name: str | None = None) -> dict:
+    model = model_id.strip().lower()
+    reasoning = None
+    context_window = None
+    max_output_tokens = None
+    if model.startswith("gpt-5.6"):
+        reasoning = reasoning_capability(
+            kind="effort",
+            levels=["none", "low", "medium", "high", "xhigh", "max"],
+            default="none",
+            off="none",
+            source="provider",
+        )
+        context_window = 1_050_000
+        max_output_tokens = 131_072
+    elif model.startswith(("gpt-5", "gpt-6", "o1", "o3", "o4")):
+        reasoning = reasoning_capability(
+            kind="effort",
+            levels=["none", "low", "medium", "high", "xhigh"],
+            off="none",
+            source="provider",
+        )
+    return model_capability(
+        model_id,
+        display_name=display_name,
+        context_window=context_window,
+        max_output_tokens=max_output_tokens,
+        reasoning=reasoning,
+        source="provider",
+    )
 
 
 # TokenSupplier：短期访问 token 的传输回调类型；调用/返回内容不能持久记录。
@@ -188,11 +223,15 @@ class OpenAIResponsesProvider:
     def _message_role(self, role: str) -> str:
         return "developer" if role == "system" else role
 
-    # 生成供应商推理参数；公开 summary 是可观察摘要，不是隐藏 Chain-of-Thought。
+    # 将用户显式选择直接传给 OpenAI effort；档位属于 OpenAI adapter，不由 Myth Core 重命名。
     def _reasoning_options(self, model_request: ModelRequest) -> dict | None:
-        if _wants_reasoning_summary(model_request):
-            return {"summary": "auto"}
-        return None
+        result = {"summary": "auto"} if _wants_reasoning_summary(model_request) else {}
+        thinking = model_request.thinking
+        if thinking is False:
+            result["effort"] = "none"
+        elif isinstance(thinking, str) and thinking.strip().lower() not in {"", "default"}:
+            result["effort"] = thinking.strip().lower()
+        return result or None
 
     # 注入供应商专属但非秘钥的请求参数；默认保持现有 OpenAI Responses 合同。
     def _extra_payload(self, model_request: ModelRequest) -> dict:
@@ -426,6 +465,13 @@ class ChatGPTPlanProvider(OpenAIResponsesProvider):
                 )
             details["models"] = [item["slug"] for item in models]
             details["model_details"] = models
+            details["model_capabilities"] = {
+                item["slug"]: _openai_model_capability(
+                    item["slug"], item.get("display_name")
+                )
+                for item in models
+            }
+            details["capability_source"] = "provider"
             return ProviderStatus(
                 self.provider_id, True, auth_type="oauth", details=details
             )
@@ -454,10 +500,51 @@ class OpenAIApiKeyProvider(OpenAIResponsesProvider):
                 raise RuntimeError(f"{env_var} is not set")
             return value
 
+        # API key 路径读取官方模型目录；OpenAI /models 不含 effort 元数据，因此能力由本 adapter 的公开模型族规则补充。
+        def status_check() -> ProviderStatus:
+            try:
+                access_token = token()
+                req = request.Request(
+                    "https://api.openai.com/v1/models",
+                    method="GET",
+                    headers={
+                        "authorization": f"Bearer {access_token}",
+                        "accept": "application/json",
+                    },
+                )
+                with open_credential_request(req, timeout=min(timeout, 30.0)) as response:
+                    value = json.loads(read_bounded(response).decode("utf-8"))
+                rows = value.get("data") if isinstance(value, dict) else None
+                if not isinstance(rows, list):
+                    raise ValueError("invalid model catalog")
+                models = sorted({
+                    item["id"] for item in rows
+                    if isinstance(item, dict) and isinstance(item.get("id"), str)
+                })
+                profiles = {model: _openai_model_capability(model) for model in models}
+                return ProviderStatus(
+                    self.provider_id,
+                    True,
+                    auth_type="api_key",
+                    details={
+                        "models": models,
+                        "model_capabilities": profiles,
+                        "capability_source": "provider",
+                    },
+                )
+            except Exception:
+                return ProviderStatus(
+                    self.provider_id,
+                    False,
+                    auth_type="api_key",
+                    details={"error": "OpenAI model catalog is unavailable"},
+                )
+
         super().__init__(
             provider_id=self.provider_id,
             token_supplier=token,
             timeout=timeout,
             chatgpt_plan=False,
             auth_type="api_key",
+            status_check=status_check,
         )
