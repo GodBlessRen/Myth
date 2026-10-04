@@ -1364,11 +1364,19 @@ class SqliteWorkspaceRepository:
                 checkpoint_step=step,
                 detail=result.get("capability_id") or "tool",
             )
+            tool_event = {"step": step, "capability": result.get("capability_id")}
+            fused = result.get("fused_successor")
+            if isinstance(fused, dict):
+                tool_event["fused_successor"] = {
+                    "kind": fused.get("kind"),
+                    "status": fused.get("status"),
+                    "reason_code": fused.get("reason_code"),
+                }
             self.store._event(
                 db,
                 rid,
                 "ConversationToolRecorded",
-                {"step": step, "capability": result.get("capability_id")},
+                tool_event,
             )
             self.store._event(
                 db,
