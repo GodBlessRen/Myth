@@ -278,11 +278,7 @@ class MentalModelRefreshScheduler:
             thinking=settings.get("thinking"),
             num_ctx=settings.get("num_ctx"),
             temperature=float(settings.get("temperature") or 0.0),
-            context_report={
-                "kind": "mental-model-refresh",
-                "source_count": len(sources),
-                "source_change_seq": prepared["observed_change_seq"],
-            },
+            context_report=None,
         )
 
     # run：驱动一个 refresh occurrence；模型调用由 DecisionRuntime 记 Ticket/Receipt，发布前再次核对水位。
@@ -311,11 +307,12 @@ class MentalModelRefreshScheduler:
                     "error='source changed before dispatch' WHERE run_id=?",
                     (time.time(), run_id),
                 )
-                db.execute("UPDATE runs SET state=? WHERE run_id=?", (RunState.CANCELLED.value, run_id))
-                self.store._event(
-                    db, run_id, "MentalModelRefreshSuperseded",
-                    {"model_id": occurrence["model_id"]},
-                )
+            self.store.transition_run(
+                run_id,
+                RunState.CANCELLED,
+                event_kind="MentalModelRefreshSuperseded",
+                payload={"model_id": occurrence["model_id"]},
+            )
             return self.occurrence(run_id)
 
         with self.store.tx() as db:
@@ -348,11 +345,12 @@ class MentalModelRefreshScheduler:
                     "UPDATE mental_model_refresh_occurrences SET state='UNKNOWN',updated_at=?,error=? WHERE run_id=?",
                     (time.time(), str(exc)[:1000], run_id),
                 )
-                db.execute("UPDATE runs SET state=? WHERE run_id=?", (RunState.RECOVERING.value, run_id))
-                self.store._event(
-                    db, run_id, "MentalModelRefreshUnknown",
-                    {"reason": str(exc)[:500]},
-                )
+            self.store.transition_run(
+                run_id,
+                RunState.RECOVERING,
+                event_kind="MentalModelRefreshUnknown",
+                payload={"reason": str(exc)[:500]},
+            )
             return self.occurrence(run_id)
         except Exception as exc:
             # Ticket 后的未知异常由 DecisionRuntime 已转 UNKNOWN；已知解析/供应商失败则显式 FAILED。
@@ -366,17 +364,12 @@ class MentalModelRefreshScheduler:
                     "UPDATE mental_model_refresh_occurrences SET state=?,updated_at=?,error=? WHERE run_id=?",
                     (state, time.time(), f"{type(exc).__name__}: {exc}"[:1000], run_id),
                 )
-                db.execute(
-                    "UPDATE runs SET state=? WHERE run_id=?",
-                    (
-                        RunState.RECOVERING.value if state == "UNKNOWN" else RunState.FAILED.value,
-                        run_id,
-                    ),
-                )
-                self.store._event(
-                    db, run_id, "MentalModelRefreshFailed",
-                    {"state": state, "reason": f"{type(exc).__name__}: {exc}"[:500]},
-                )
+            self.store.transition_run(
+                run_id,
+                RunState.RECOVERING if state == "UNKNOWN" else RunState.FAILED,
+                event_kind="MentalModelRefreshFailed",
+                payload={"state": state, "reason": f"{type(exc).__name__}: {exc}"[:500]},
+            )
             if state == "FAILED":
                 self.defer(str(occurrence["model_id"]), str(exc))
             return self.occurrence(run_id)
@@ -413,8 +406,12 @@ class MentalModelRefreshScheduler:
                         "UPDATE mental_model_refresh_occurrences SET state='SUPERSEDED',updated_at=?,error=? WHERE run_id=?",
                         (time.time(), str(exc)[:1000], run_id),
                     )
-                    db.execute("UPDATE runs SET state=? WHERE run_id=?", (RunState.CANCELLED.value, run_id))
-                    self.store._event(db, run_id, "MentalModelRefreshSuperseded", {"reason": str(exc)[:500]})
+                self.store.transition_run(
+                    run_id,
+                    RunState.CANCELLED,
+                    event_kind="MentalModelRefreshSuperseded",
+                    payload={"reason": str(exc)[:500]},
+                )
                 return self.occurrence(run_id)
             self.fail(run_id, str(exc))
             return self.occurrence(run_id)
@@ -426,11 +423,12 @@ class MentalModelRefreshScheduler:
             )
             db.execute("UPDATE mental_model_refresh_policies SET retry_at=0,retry_failures=0,last_error=NULL,updated_at=CURRENT_TIMESTAMP WHERE model_id=?",
                        (occurrence["model_id"],))
-            db.execute("UPDATE runs SET state=? WHERE run_id=?", (RunState.SUCCEEDED.value, run_id))
-            self.store._event(
-                db, run_id, "MentalModelRefreshCommitted",
-                {"model_id": occurrence["model_id"], "evidence_count": len(cited_ids)},
-            )
+        self.store.transition_run(
+            run_id,
+            RunState.SUCCEEDED,
+            event_kind="MentalModelRefreshCommitted",
+            payload={"model_id": occurrence["model_id"], "evidence_count": len(cited_ids)},
+        )
         return self.occurrence(run_id)
 
     # fail：已知失败终止本 occurrence 并进入有界退避；不会覆盖已有 materialized content。
@@ -441,8 +439,12 @@ class MentalModelRefreshScheduler:
                 "UPDATE mental_model_refresh_occurrences SET state='FAILED',updated_at=?,error=? WHERE run_id=?",
                 (time.time(), str(reason)[:1000], run_id),
             )
-            db.execute("UPDATE runs SET state=? WHERE run_id=?", (RunState.FAILED.value, run_id))
-            self.store._event(db, run_id, "MentalModelRefreshFailed", {"state": "FAILED", "reason": str(reason)[:500]})
+        self.store.transition_run(
+            run_id,
+            RunState.FAILED,
+            event_kind="MentalModelRefreshFailed",
+            payload={"state": "FAILED", "reason": str(reason)[:500]},
+        )
         self.defer(str(occurrence["model_id"]), reason)
 
     # defer：失败只推迟未来新水位机会；UNKNOWN occurrence 不会靠 retry_at 绕过原结果核对。
