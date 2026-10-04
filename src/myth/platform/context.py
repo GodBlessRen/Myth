@@ -125,6 +125,7 @@ def choose_context_mode(
         else projected - measured_debt
     )
 
+    # 统一生成 Context 选择投影，确保所有分支都保留相同经济字段与原因码。
     def result(mode: str, outcome: str, reason_code: str) -> dict[str, object]:
         return {
             "mode": mode,
