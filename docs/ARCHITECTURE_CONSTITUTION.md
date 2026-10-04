@@ -196,7 +196,7 @@ SEEK    寻找新的候选来源或导航范围
 EXPAND  展开已知来源的更多细节/证据
 ```
 
-当前实现把既有 `knowledge.search / project.search / project.list` 视为 SEEK，把 `knowledge.resolve / knowledge.read / project.read` 视为 EXPAND。LLM 只提出信息需求；Context 侧策略在 Tool Ticket 前执行准入，Runtime 仍负责真正的 Ticket / Receipt / Budget。
+当前实现把既有 `knowledge.search / memory.search / project.search / project.list` 视为 SEEK，把 `knowledge.resolve / knowledge.read / memory.timeline / memory.resolve / project.read` 视为 EXPAND。LLM 只提出信息需求；Context 侧策略在 Tool Ticket 前执行准入，Runtime 仍负责真正的 Ticket / Receipt / Budget。
 
 第一版坚持四个不变量：
 
@@ -228,6 +228,10 @@ Core/Domain 依赖 Port，不依赖具体厂商。
 - InformationResolutionPort
 - InformationGainPort
 - InformationDeltaPort
+- TextEmbeddingPort
+- VectorIndexPort
+
+向量数据库必须保持**派生索引语义**：权威正文、作用域、revision、archive/revoke 与事实等级继续由所属状态仓储拥有；Vector hit 必须回权威源 hydration。Milvus 等 Adapter 不得因为相似度更高而升级事实、权限或 Verification。
 
 Adapters 可以随生态变化替换：
 
