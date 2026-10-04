@@ -417,6 +417,7 @@ function renderInspectorModel(turn) {
   details.classList.add("hidden");
   details.open = false;
   details.dataset.runId = "";
+  details.dataset.loadedFor = "";
   body.replaceChildren(el("div", "inspector-empty", "展开后读取完整脱敏元数据"));
   if (!turn) {
     box.append(el("div", "inspector-empty", "暂无模型证据"));
