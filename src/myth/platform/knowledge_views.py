@@ -83,8 +83,11 @@ def _clean_scope(scope_type: str, scope_id: str | None) -> tuple[str, str | None
 class SqliteKnowledgeViews:
     # 复用同一 Runtime/MemoryStore；所有派生正文仍通过 MemoryStore 写入，Milvus/证据/freshness 合同不复制。
     def __init__(self, runtime, memory_store) -> None:
+        # runtime：共享 Runtime 装配对象；这里只复用其 SQLite 生命周期，不取得执行授权。
         self.runtime = runtime
+        # store：持久 SQLite 状态所有者；Mental Model/Page 的事务都通过同一连接提交。
         self.store = runtime.store
+        # memory：现有权威 Memory Store；派生视图复用其 Evidence/revision/freshness，不复制正文生命周期。
         self.memory = memory_store
         self.store.db.executescript(SCHEMA)
 
