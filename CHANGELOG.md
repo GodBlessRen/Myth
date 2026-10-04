@@ -1,5 +1,11 @@
 # Changelog
 
+## 未发布 — Eval Reliability Evidence
+
+- 固定日常任务的重复试次新增 `pass@k`（Capability）与 `pass^k`（Reliability），不再用单一平均通过率替代稳定性。
+- 对两个指标同时报告 Wilson 95% 区间，并显式列出 mixed outcome / all-failed / incomplete cases；未跑满 k 次不进入可靠性分母。
+- Benchmark 汇总新增 `model_calls_per_success` 与 failure taxonomy；计量不完整时保持 `None`，不把未知成本补成零。
+- 架构宪法加入 **Evidence Before Score**：质量结论必须可追溯到 Case、Execution、Verification 与 grader/oracle 身份，单次漂亮 Run 不构成发布证据。
 ## 未发布 — Live Information Control v1
 
 - 把现有信息工具接成 bounded live loop，不新增 Tool 或强制 Layer：`knowledge.search / project.search / project.list` 作为 SEEK，`knowledge.resolve / knowledge.read / project.read` 作为 EXPAND，模型停止取信息并继续任务即 KEEP。
