@@ -8,7 +8,7 @@ import json
 from .acceptance import ContextBudgetError
 from .domain import canonical_json, sha256_bytes
 from .models import ModelMessage
-from .platform.efficiency import OptimizationOutcome, optimization_event
+from .platform.efficiency import OptimizationOutcome, optimization_event, semantic_boundary
 from .platform.context import ContextCompiler, ContextItem
 from .platform.context_anchor import render_context_anchor
 
@@ -68,6 +68,7 @@ def _grounded_compaction_seed(snapshot, activities):
     goal = snapshot.get("goal") or {}
     work = goal.get("work") or {}
     observations = []
+    boundaries = []
     for activity in activities:
         result = activity.get("result") if isinstance(activity.get("result"), dict) else {}
         decision = activity.get("decision") if isinstance(activity.get("decision"), dict) else {}
@@ -100,6 +101,10 @@ def _grounded_compaction_seed(snapshot, activities):
                 "candidate_digest": fused.get("candidate_digest"),
                 "semantic_verification": bool(fused.get("semantic_verification")),
             }
+        boundary = semantic_boundary(activity)
+        if boundary:
+            item["semantic_boundary"] = boundary
+            boundaries.append({"step": activity.get("step"), "kind": boundary})
         if len(item) > 3:
             observations.append(item)
     return {
@@ -114,6 +119,7 @@ def _grounded_compaction_seed(snapshot, activities):
             "revision": work.get("revision"),
         },
         "observations": observations[-12:],
+        "semantic_boundaries": boundaries[-12:],
         "invariant": "representation transition does not imply task progress or verification",
     }
 
@@ -390,6 +396,7 @@ def compile_conversation_context(
             {
                 "digest": sha256_bytes(compaction_seed_text.encode("utf-8")),
                 "observations": len(compaction_seed.get("observations") or []),
+                "semantic_boundaries": len(compaction_seed.get("semantic_boundaries") or []),
                 "selected": "compaction-seed" in selected,
                 "source": "durable-facts",
             }
