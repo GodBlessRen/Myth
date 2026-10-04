@@ -82,6 +82,19 @@ _TOOL_ARGUMENTS = {
         }
     ),
     "math.calculate": object_schema({"expression": _TEXT}),
+    "agent.delegate": object_schema(
+        {
+            "task": {"type": "string", "minLength": 1, "maxLength": 4000},
+            "context": {"type": "string", "maxLength": 12000},
+            "expected_output": {"type": "string", "maxLength": 2000},
+            "source_refs": {
+                "type": "array",
+                "items": {"type": "string"},
+                "maxItems": 20,
+            },
+        },
+        ["task"],
+    ),
 }
 # CONVERSATION_SCHEMA：Conversation 的统一决定传输合同；不能替代工具参数专用校验。
 CONVERSATION_SCHEMA = {
@@ -161,6 +174,12 @@ TOOL_CATALOG = {
         "expected_count": "integer",
     },
     "math.calculate": {"expression": "arithmetic expression, no code"},
+    "agent.delegate": {
+        "task": "one independent subtask for an isolated read-only worker",
+        "context": "minimal context needed by the child; parent history is not inherited",
+        "expected_output": "optional concise result contract",
+        "source_refs": "0-20 source/evidence refs already observed by the parent",
+    },
 }
 
 
@@ -264,6 +283,9 @@ def conversation_request(settings, snapshot, messages, activities, control=None)
         "若上下文已给出项目与读取范围，文件内容未知时先用 project.read/project.search 观察，不要要求用户再次提供已有路径或搜索词。"
         "Goal 中的 progress_note 是上一轮持久进度；需要延续工作时先检查这些已给出的事实。"
         "工具校验失败后，先读取相关文件核对真实内容，再纠正参数；不要声称失败的修改已经成功。\n"
+        "你可以自行判断是否使用 agent.delegate。只有独立子任务、上下文隔离或独立复核明显有价值时才委派；简单任务直接完成。"
+        "Sub-Agent 是只读隔离 worker：只收到你显式传入的 task/context/source_refs，不继承完整父对话、Memory 或工具目录，不能写入、调用工具、再次委派或向用户提问。"
+        "子 Agent 返回的是观察/建议，不是验收；最终结论、工具执行与交付责任仍属于父 Agent。\n"
         "可用工具参数：" + canonical_json(TOOL_CATALOG)
     )
     schema = (
