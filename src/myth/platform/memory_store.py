@@ -60,6 +60,18 @@ CREATE TABLE IF NOT EXISTS workspace_memory_revisions(
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY(memory_id, revision)
 );
+
+CREATE TABLE IF NOT EXISTS workspace_memory_changes(
+    change_seq INTEGER PRIMARY KEY AUTOINCREMENT,
+    memory_id TEXT NOT NULL REFERENCES workspace_memories(memory_id),
+    revision INTEGER NOT NULL,
+    scope_type TEXT NOT NULL,
+    scope_id TEXT,
+    active INTEGER NOT NULL CHECK(active IN (0,1)),
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_workspace_memory_changes_scope
+    ON workspace_memory_changes(scope_type, scope_id, change_seq);
 """
 
 
@@ -115,6 +127,7 @@ class SqliteMemoryStore:
         scope_id: str | None = None,
         fact_level: str = "context",
         evidence: Iterable[Mapping[str, Any]] | None = None,
+        _db=None,
     ) -> dict:
         memory_kind = kind if isinstance(kind, MemoryKind) else MemoryKind(str(kind))
         value = str(text).strip()
@@ -133,8 +146,8 @@ class SqliteMemoryStore:
         if level not in {"context", "user_asserted", "verified"}:
             raise ValueError("memory fact_level must be context/user_asserted/verified")
 
-        # 本地事务边界：正文、当前 evidence 与 immutable revision snapshot 一起提交。
-        with self.store.tx() as db:
+        # 本地事务边界：正文、当前 evidence 与 immutable revision snapshot 一起提交；Memory Domain 内部可加入同连接活动事务。
+        with self.store.admission_transaction(_db) as db:
             row = db.execute(
                 "SELECT * FROM workspace_memories WHERE kind=? AND source_ref=?",
                 (memory_kind.value, source),
@@ -170,10 +183,12 @@ class SqliteMemoryStore:
                 self._replace_evidence(db, memory_id, prepared)
 
             self._snapshot_revision(db, memory_id)
+            self._record_change(db, memory_id)
 
         record = self.get(memory_id)
-        # 外部向量索引不是同一事务；失败只降级未来语义召回，权威记忆仍已提交。
-        self._sync_vector_record(record)
+        # 外部向量索引不是同一事务；只有最外层提交后才同步，内部事务协作者负责在提交后调用。
+        if _db is None:
+            self._sync_vector_record(record)
         return record
 
     # _backfill_revision_snapshots：旧库第一次升级只为当前 revision 建快照；历史未知 revision 不伪造。
@@ -283,6 +298,59 @@ class SqliteMemoryStore:
                 evidence_json(evidence),
             ),
         )
+
+    # _record_change：每次已提交 revision 追加单调水位；派生 Mental Model 用它判断 scope 是否出现新变化。
+    def _record_change(self, db, memory_id: str) -> int:
+        row = db.execute(
+            "SELECT memory_id,revision,scope_type,scope_id,active FROM workspace_memories WHERE memory_id=?",
+            (memory_id,),
+        ).fetchone()
+        if row is None:
+            raise KeyError(memory_id)
+        cursor = db.execute(
+            "INSERT INTO workspace_memory_changes(memory_id,revision,scope_type,scope_id,active) "
+            "VALUES (?,?,?,?,?)",
+            (
+                memory_id,
+                int(row["revision"]),
+                str(row["scope_type"] or "global"),
+                row["scope_id"],
+                int(row["active"]),
+            ),
+        )
+        return int(cursor.lastrowid)
+
+    # current_change_seq：返回当前 Memory Domain 的持久变化水位；零表示尚无已记录变化。
+    def current_change_seq(self) -> int:
+        row = self.store.db.execute(
+            "SELECT COALESCE(MAX(change_seq),0) AS seq FROM workspace_memory_changes"
+        ).fetchone()
+        return int(row["seq"] if row else 0)
+
+    # changes_since：按可见作用域读取水位后的变化身份；只用于派生 freshness，不把 change log 当正文。
+    def changes_since(
+        self,
+        change_seq: int,
+        *,
+        project_id: str | None = None,
+        session_id: str | None = None,
+        limit: int = 1000,
+    ) -> list[dict[str, Any]]:
+        if type(change_seq) is not int or change_seq < 0:
+            raise ValueError("change_seq must be a non-negative integer")
+        if type(limit) is not int or not 1 <= limit <= 5000:
+            raise ValueError("limit must be 1-5000")
+        rows = self.store.db.execute(
+            "SELECT * FROM workspace_memory_changes WHERE change_seq>? "
+            "ORDER BY change_seq LIMIT ?",
+            (change_seq, limit),
+        ).fetchall()
+        result = []
+        for row in rows:
+            item = dict(row)
+            if self._visible(item, project_id, session_id):
+                result.append(item)
+        return result
 
     # evidence：返回当前 revision 的证据链；Evidence 证明来源，不等同 Verification。
     def evidence(self, memory_id: str) -> list[dict[str, Any]]:
@@ -848,6 +916,7 @@ class SqliteMemoryStore:
                 (memory_id,),
             )
             self._snapshot_revision(db, memory_id)
+            self._record_change(db, memory_id)
         return self.get(memory_id)
 
     # 以 Run 来源幂等记录结束经历，按冻结项目/会话范围保存；不宣称回答为 verified。

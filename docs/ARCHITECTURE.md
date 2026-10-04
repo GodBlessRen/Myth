@@ -233,6 +233,22 @@ Memory：
 - `apply_delta(expected_revision, ops)` 只接受受约束 Delta，Runtime 原子校验后应用；空 Delta 是机械 no-op，非法操作整批失败；
 - `memory.search → memory.timeline → memory.resolve` progressive disclosure，初始召回只进入 L0 compact view。
 
+Mental Model / Knowledge Page 是 Memory Domain 的派生高阶视图，不增加新的 Runtime Layer：
+
+```text
+Memory + Evidence + revision
+        ↓
+Mental Model (materialized memory view)
+        ↓
+Knowledge Page (tree/navigation only)
+```
+
+- Mental Model 保存“持续回答的问题”、作用域、backing Memory、水位与刷新历史；正文仍由现有 Semantic Memory 承载；
+- refresh 使用 `prepare → external synthesis → commit`，模型调用发生在 Store 外；提交时重新核对 model revision 与 scope change watermark；
+- backing Memory 不参与自己的下一轮 source set，避免 synthetic self-feedback；
+- Knowledge Page 只保存 folder/page 树和 `mental_model_id`，不复制正文；
+- source scope 有新 Memory revision / revoke 后，Mental Model 只变 stale，不自动偷偷调用模型。
+
 Milvus 是**可重建的派生 Vector Adapter**，不是新的事实数据库：
 
 ```text

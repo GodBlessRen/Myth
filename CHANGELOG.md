@@ -1,5 +1,14 @@
 # Changelog
 
+## 未发布 — Mental Model / Knowledge Page
+
+- 新增 Mental Model：作为 Memory Domain 内的 materialized view，保存 source query / scope / backing Memory / refresh watermark；正文继续复用 Semantic Memory，不新建第二套内容真相。
+- Memory revision/revoke 新增单调 change sequence；Mental Model 用 scope-aware watermark 判断 stale，不用“时间看起来新”冒充 freshness。
+- refresh 固定为 prepare → synthesis → commit：模型调用在 SQLite 事务外，提交时重新核对 model revision 与 scope watermark；源数据中途变化则拒绝发布旧 synthesis。
+- 禁止 Mental Model 把自身 backing Memory 作为下一次刷新来源，减少 synthetic self-feedback / prose drift。
+- 新增 Knowledge Page 树：folder/page 只拥有层级、顺序与 mental_model_id；正文仍由 backing Mental Model/Memory 持有。
+- Workspace 暴露 mental_models / knowledge_pages 发现性入口，两者指向同一 Knowledge Views 深模块，不复制状态。
+
 ## 未发布 — Evidence-backed Memory Lifecycle
 
 - Memory 当前 revision 支持显式 Evidence；Memory-linked Evidence 在提交时固定 source revision，来源更新/撤销后确定性标记 stale，外部 provenance 无版本水位时保持 untracked。

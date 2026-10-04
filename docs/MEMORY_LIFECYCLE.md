@@ -91,3 +91,30 @@ Context projection
 ```
 
 删除 Milvus 后，Memory revision、Evidence、freshness、Delta 和历史快照仍完整成立。
+
+
+## Mental Model / Knowledge Page
+
+Mental Model 是 **Materialized Memory View**，不是第五种 Memory Kind。
+
+```text
+source query + scope
+        ↓
+prepare_refresh()
+        ↓ fixed Memory sources + observed_change_seq
+        ↓
+LLM / deterministic synthesis outside SQLite
+        ↓
+commit_refresh()
+  - expected model revision
+  - scope watermark check
+  - evidence validation
+        ↓
+backing Semantic Memory
+```
+
+Mental Model 的正文唯一落在 backing Semantic Memory，因此原有 Evidence、revision、Milvus hydration、L0/L1/L2 和 revoke 语义全部复用，不复制一套内容生命周期。
+
+Memory 每次 revision/revoke 都追加单调 `change_seq`。Mental Model 保存 `last_seen_change_seq`；自身作用域后来出现新变化就确定性变为 stale。刷新不会自动发生，避免后台隐式模型成本与不可观测副作用。
+
+Knowledge Page 更薄：只保存 folder/page hierarchy 与 `mental_model_id`。树结构和内容状态分离，移动/重命名页面不会重写 Mental Model 正文。
