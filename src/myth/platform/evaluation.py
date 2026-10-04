@@ -80,6 +80,8 @@ class EvalObservation:
     safety_regression: bool = False
     # policy_id：受测策略的固定身份，供配对和发布核对。
     policy_id: str | None = None
+    # harness_id：本次受控评测的完整 Harness 变体身份；普通评测可为空。
+    harness_id: str | None = None
     # comparison_key：包含同题/同版本身份的配对键，防止跨条件刷分。
     comparison_key: str | None = None
     # mechanism_events：本题实际触发/应用/回退的优化机制身份；只做归因线索，不自动证明因果。
@@ -431,6 +433,136 @@ def attribution_matrix(
         "note": "mechanism causality requires one-mechanism/leave-one-out or equivalent controlled reruns",
     }
 
+
+
+
+# HarnessVariant 只描述一次受控评测使用的完整 Runtime/Harness 机制集合；它是 Evaluation 数据，不新增 Runtime 层。
+@dataclass(frozen=True)
+class HarnessVariant:
+    # harness_id：受控实验中的稳定变体身份；同一身份必须代表同一机制集合。
+    harness_id: str
+    # mechanisms：本变体明确启用的机制身份；排序后参与比较，不从结果反推。
+    mechanisms: tuple[str, ...] = ()
+
+    # 构造时固定身份和机制集合；重复机制会让 one-mechanism/leave-one-out 语义含糊，因此拒绝。
+    def __post_init__(self) -> None:
+        if not self.harness_id.strip():
+            raise ValueError("harness_id is required")
+        values = tuple(item.strip() for item in self.mechanisms if item.strip())
+        if len(values) != len(self.mechanisms) or len(values) != len(set(values)):
+            raise ValueError("harness mechanisms must be unique non-empty strings")
+
+
+# 受控归因只接受同题不同 Harness 变体的真实观测；没有对应消融 Run 时保持 insufficient，不靠总分猜原因。
+def controlled_attribution(
+    observations: Iterable[EvalObservation],
+    variants: Iterable[HarnessVariant],
+    *,
+    baseline_harness_id: str,
+    full_harness_id: str,
+) -> dict[str, object]:
+    values = tuple(observations)
+    variant_map = {item.harness_id: item for item in variants}
+    if len(variant_map) != len(tuple(variants)):
+        raise ValueError("controlled attribution requires unique harness ids")
+    if baseline_harness_id not in variant_map or full_harness_id not in variant_map:
+        raise ValueError("baseline/full harness variants are required")
+    baseline_variant = variant_map[baseline_harness_id]
+    full_variant = variant_map[full_harness_id]
+    if baseline_variant.mechanisms:
+        raise ValueError("baseline harness must contain no candidate mechanisms")
+    full_mechanisms = frozenset(full_variant.mechanisms)
+    if not full_mechanisms:
+        raise ValueError("full harness must contain at least one mechanism")
+
+    by_harness_case: dict[tuple[str, str], EvalObservation] = {}
+    for item in values:
+        harness_id = getattr(item, "harness_id", None)
+        if not harness_id:
+            continue
+        key = (str(harness_id), item.case_id)
+        if key in by_harness_case:
+            raise ValueError("duplicate controlled observation for harness/case")
+        by_harness_case[key] = item
+
+    one_by_mechanism = {}
+    leave_out_by_mechanism = {}
+    for variant in variant_map.values():
+        enabled = frozenset(variant.mechanisms)
+        if len(enabled) == 1:
+            one_by_mechanism[next(iter(enabled))] = variant.harness_id
+        missing = full_mechanisms - enabled
+        if len(missing) == 1 and enabled == full_mechanisms - missing:
+            leave_out_by_mechanism[next(iter(missing))] = variant.harness_id
+
+    cases = sorted(
+        {
+            item.case_id
+            for item in values
+            if getattr(item, "harness_id", None)
+            in {baseline_harness_id, full_harness_id}
+        }
+    )
+    effects = []
+    for mechanism in sorted(full_mechanisms):
+        one_id = one_by_mechanism.get(mechanism)
+        leave_id = leave_out_by_mechanism.get(mechanism)
+        for case_id in cases:
+            baseline = by_harness_case.get((baseline_harness_id, case_id))
+            full = by_harness_case.get((full_harness_id, case_id))
+            one = by_harness_case.get((one_id, case_id)) if one_id else None
+            leave = by_harness_case.get((leave_id, case_id)) if leave_id else None
+            if baseline is None or full is None:
+                continue
+            classification = "insufficient"
+            if one is not None and leave is not None:
+                b = _verdict_quality(baseline.verdict)
+                f = _verdict_quality(full.verdict)
+                o = _verdict_quality(one.verdict)
+                l = _verdict_quality(leave.verdict)
+                if None not in {b, f, o, l}:
+                    # Full 优于去掉 M 且 M 单独不差于 baseline，支持 M 对该题有正贡献。
+                    if f > l and o >= b:
+                        classification = "supported_benefit"
+                    # Full 差于去掉 M 且 M 单独不优于 baseline，支持 M 对该题有负贡献。
+                    elif f < l and o <= b:
+                        classification = "supported_harm"
+                    else:
+                        classification = "mixed_or_interaction"
+            effects.append(
+                {
+                    "case_id": case_id,
+                    "mechanism": mechanism,
+                    "baseline_harness_id": baseline_harness_id,
+                    "full_harness_id": full_harness_id,
+                    "one_mechanism_harness_id": one_id,
+                    "leave_one_out_harness_id": leave_id,
+                    "baseline_verdict": baseline.verdict.value,
+                    "full_verdict": full.verdict.value,
+                    "one_mechanism_verdict": one.verdict.value if one else None,
+                    "leave_one_out_verdict": leave.verdict.value if leave else None,
+                    "classification": classification,
+                    "controlled": one is not None and leave is not None,
+                }
+            )
+
+    return {
+        "baseline_harness_id": baseline_harness_id,
+        "full_harness_id": full_harness_id,
+        "mechanisms": sorted(full_mechanisms),
+        "effects": effects,
+        "controlled_effects": sum(item["controlled"] for item in effects),
+        "supported_benefits": sum(
+            item["classification"] == "supported_benefit" for item in effects
+        ),
+        "supported_harms": sum(
+            item["classification"] == "supported_harm" for item in effects
+        ),
+        "note": (
+            "supported_* requires both one-mechanism and leave-one-out observations; "
+            "missing controlled reruns remain insufficient"
+        ),
+    }
 
 # Search/Evolution 与最终发布评测必须物理上保持 case identity 不相交；final 结果不能反馈回候选搜索。
 @dataclass(frozen=True)
