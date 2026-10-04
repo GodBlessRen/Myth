@@ -13,7 +13,8 @@ from .conversation_context import (
     conversation_budget_bytes,
 )
 from .platform.tool_discovery import visible_tool_ids
-from .platform.efficiency import assess_reachability
+from .platform.capabilities import capability_reachability, default_capabilities
+from .platform.context import choose_context_mode, context_boundary
 
 
 # 构造统一工具参数 schema；目录描述参数形状，不替代实际参数/范围校验。
@@ -415,9 +416,93 @@ def conversation_request(settings, snapshot, messages, activities, control=None)
     max_bytes = (
         conversation_budget_bytes(num_ctx, max_output_tokens) if is_ollama else 42_000
     )
-    projected, report = compile_conversation_context(
-        system, snapshot, messages, activities, control, max_bytes=max_bytes
+    control = control or {}
+    manual_compact = bool(control.get("compact_requested"))
+    remaining_requests = max(
+        0,
+        int(settings.get("max_steps", 0) or 0) - len(activities),
     )
+    previous_mode = str(snapshot.get("previous_context_mode") or "") or None
+
+    if manual_compact:
+        projected, report = compile_conversation_context(
+            system,
+            snapshot,
+            messages,
+            activities,
+            control,
+            max_bytes=max_bytes,
+            compact_mode=True,
+        )
+        try:
+            _, normal_report = compile_conversation_context(
+                system,
+                snapshot,
+                messages,
+                activities,
+                control,
+                max_bytes=max_bytes,
+                compact_mode=False,
+            )
+            normal_bytes = int(normal_report["bytes_used"])
+        except Exception:
+            normal_bytes = int(report["bytes_used"])
+        context_decision = choose_context_mode(
+            normal_bytes=normal_bytes,
+            compact_bytes=int(report["bytes_used"]),
+            max_bytes=max_bytes,
+            remaining_requests=remaining_requests,
+            previous_mode=previous_mode,
+            manual_compact=True,
+        )
+    else:
+        normal_projected, normal_report = compile_conversation_context(
+            system,
+            snapshot,
+            messages,
+            activities,
+            control,
+            max_bytes=max_bytes,
+            compact_mode=False,
+        )
+        boundary_count = sum(
+            1 for activity in activities if context_boundary(activity) is not None
+        )
+        compact_projected = None
+        compact_report = None
+        if boundary_count:
+            try:
+                compact_projected, compact_report = compile_conversation_context(
+                    system,
+                    snapshot,
+                    messages,
+                    activities,
+                    control,
+                    max_bytes=max_bytes,
+                    compact_mode=True,
+                )
+            except ContextBudgetError:
+                compact_projected = None
+                compact_report = None
+        context_decision = choose_context_mode(
+            normal_bytes=int(normal_report["bytes_used"]),
+            compact_bytes=(
+                int(compact_report["bytes_used"])
+                if compact_report is not None
+                else None
+            ),
+            max_bytes=max_bytes,
+            remaining_requests=remaining_requests,
+            previous_mode=previous_mode,
+            manual_compact=False,
+        )
+        if context_decision["mode"] == "compact" and compact_report is not None:
+            projected, report = compact_projected, compact_report
+        else:
+            projected, report = normal_projected, normal_report
+
+    report["context_mode"] = context_decision["mode"]
+    report["context_decision"] = context_decision
     report["num_ctx"] = num_ctx
     report["max_output_tokens"] = max_output_tokens
     report["budget_formula"] = (
@@ -427,25 +512,15 @@ def conversation_request(settings, snapshot, messages, activities, control=None)
     )
     report["visible_tools"] = list(visible_ids)
     report["deferred_tools"] = deferred_ids
-    report["mechanism_reachability"] = [
-        assess_reachability(
-            "action_fusion",
+    registry = default_capabilities()
+    report["capability_reachability"] = [
+        capability_reachability(
+            registry,
+            capability_id,
             enabled=True,
-            available="project.patch_exact" in TOOL_CATALOG,
-            exposed="project.patch_exact" in visible_catalog,
-        ).as_dict(),
-        assess_reachability(
-            "observation_recall",
-            enabled=True,
-            available="observation.read" in TOOL_CATALOG,
-            exposed="observation.read" in visible_catalog,
-        ).as_dict(),
-        assess_reachability(
-            "context_compaction",
-            enabled=True,
-            available=True,
-            exposed=True,
-        ).as_dict(),
+            exposed=capability_id in visible_catalog,
+        ).as_dict()
+        for capability_id in ("project.patch_exact", "observation.read", "test.run")
     ]
     return ModelRequest(
         settings["model"],
