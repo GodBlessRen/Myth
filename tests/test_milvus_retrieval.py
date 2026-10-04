@@ -65,6 +65,7 @@ class FakeVectorIndex:
         ]
 
 
+# 固定 Milvus 派生索引与渐进 Memory 的本地不变量；不把替身结果宣传为真实服务验证。
 class MilvusRetrievalTests(unittest.TestCase):
     # 为每个测试创建独立 Runtime，并只在被测仓储上注入 Vector Adapter 替身。
     def setUp(self):
