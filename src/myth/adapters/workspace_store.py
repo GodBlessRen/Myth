@@ -10,6 +10,7 @@ from ..conversation import chunks, score_chunk
 from ..domain import canonical_json, digest_json, IdentityConflict, BudgetExceeded
 from ..decision_runtime import DecisionRuntime
 from ..strategies import RuleIntentPicker, RuleResolutionController
+from ..platform.context_anchor import build_context_anchor
 from ..network_recovery import reconnect_delay
 from ..session_statistics import measured_integer
 
@@ -674,6 +675,32 @@ class SqliteWorkspaceRepository:
                     item["resolution_offset"] = start
                 item["resolution"] = plan.resolution.value
                 projected_knowledge.append(item)
+            # 长会话在 Turn 准入时增量推进 Context Anchor；原始消息仍保存在 workspace_messages。
+            history_messages = [
+                {"role": m["role"], "content": m["content"]}
+                for m in session["messages"]
+            ]
+            previous_anchor = None
+            previous_row = db.execute(
+                "SELECT snapshot_json FROM workspace_turns WHERE session_id=? ORDER BY rowid DESC LIMIT 1",
+                (sid,),
+            ).fetchone()
+            if previous_row:
+                previous_anchor = json.loads(previous_row["snapshot_json"]).get(
+                    "context_anchor"
+                )
+            context_anchor = (
+                build_context_anchor(
+                    previous_anchor,
+                    history_messages,
+                    cover_count=max(0, len(history_messages) - 8),
+                )
+                if len(history_messages) > 12
+                else previous_anchor
+            )
+            recent_history = (
+                history_messages[-8:] if context_anchor else history_messages[-30:]
+            )
             snapshot = {
                 "project": project,
                 "knowledge": projected_knowledge,
@@ -690,7 +717,8 @@ class SqliteWorkspaceRepository:
                     "information_resolution": self.resolution_policy_id,
                 },
                 "attached_document_ids": list(document_ids),
-                "turn_message_start": min(30, len(session["messages"])),
+                "context_anchor": context_anchor,
+                "turn_message_start": len(recent_history),
                 "memory": [
                     {
                         "memory_id": m.get("memory_id"),
@@ -704,10 +732,7 @@ class SqliteWorkspaceRepository:
                     }
                     for m in memory_records[:8]
                 ],
-                "messages": [
-                    {"role": m["role"], "content": m["content"]}
-                    for m in session["messages"][-30:]
-                ]
+                "messages": recent_history
                 + [{"role": "user", "content": text}],
                 "goal": dict(goal_context or {}),
             }
