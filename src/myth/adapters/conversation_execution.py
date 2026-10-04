@@ -1031,26 +1031,26 @@ class LocalConversationExecution:
             result["information_control"] = self.information_controller.record_result(
                 information_decision, result
             )
+        # Fused successor 在 Tool intent 固定前最后一次重查源身份；一旦 start_operation 提交，
+        # intent/result 就不能再被本进程悄悄改写，否则崩溃恢复会看到 Receipt 与 fixed intent 冲突。
+        if intent.get("source_path") and intent.get("precondition_digest"):
+            current = Path(intent["source_path"]).read_bytes()
+            if sha256_bytes(current) != intent["precondition_digest"]:
+                fused = result.get("fused_successor")
+                if isinstance(fused, dict):
+                    fused.update(
+                        {
+                            "status": "SKIPPED",
+                            "reason_code": "precondition_changed",
+                            "diff": "",
+                            "truncated": False,
+                        }
+                    )
         intent["result"] = result
         op = self.repository.start_operation(
             turn["run_id"], decision_id, capability, intent
         )
         if intent.get("target"):
-            # Fused successor 在真正发布受管副本前重查源身份；源已变化时只跳过该后继，
-            # mutation 候选仍按先前明确输入保存，避免把部分成功错误折叠成“什么都没发生”。
-            if intent.get("source_path") and intent.get("precondition_digest"):
-                current = Path(intent["source_path"]).read_bytes()
-                if sha256_bytes(current) != intent["precondition_digest"]:
-                    fused = result.get("fused_successor")
-                    if isinstance(fused, dict):
-                        fused.update(
-                            {
-                                "status": "SKIPPED",
-                                "reason_code": "precondition_changed",
-                                "diff": "",
-                                "truncated": False,
-                            }
-                        )
             atomic_write(
                 Path(intent["target"]), self.runtime.objects.get(intent["digest"])
             )
