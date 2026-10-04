@@ -8,7 +8,7 @@ import uuid
 from typing import Any
 
 from ..domain import canonical_json
-from .evaluation import EvalObservation, EvalVerdict, compare_observations
+from .evaluation import EvalObservation, EvalVerdict, attribution_matrix, compare_observations
 
 
 # SCHEMA：本仓储拥有的表、索引与约束；升级补齐旧字段，删除列须有迁移证据。
@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS evaluation_observations(
     reason TEXT NOT NULL,
     metrics_json TEXT NOT NULL,
     evidence_refs_json TEXT NOT NULL,
+    mechanism_events_json TEXT NOT NULL DEFAULT '[]',
     safety_regression INTEGER NOT NULL DEFAULT 0,
     comparison_key TEXT,
     PRIMARY KEY(eval_run_id, case_id)
@@ -62,6 +63,14 @@ class SqliteEvaluationLedger:
                 self.store.db.execute(
                     f"ALTER TABLE evaluation_runs ADD COLUMN {name} {ddl}"
                 )
+        observation_columns = {
+            row["name"]
+            for row in self.store.db.execute("PRAGMA table_info(evaluation_observations)")
+        }
+        if "mechanism_events_json" not in observation_columns:
+            self.store.db.execute(
+                "ALTER TABLE evaluation_observations ADD COLUMN mechanism_events_json TEXT NOT NULL DEFAULT '[]'"
+            )
 
     # 生成带类型前缀的新身份；重试去重使用已固定的 request/decision 身份，不靠新 UUID 判断已执行。
     @staticmethod
@@ -105,8 +114,8 @@ class SqliteEvaluationLedger:
             for item in observations:
                 db.execute(
                     "INSERT INTO evaluation_observations("
-                    "eval_run_id,case_id,verdict,reason,metrics_json,evidence_refs_json,safety_regression,comparison_key"
-                    ") VALUES (?,?,?,?,?,?,?,?)",
+                    "eval_run_id,case_id,verdict,reason,metrics_json,evidence_refs_json,mechanism_events_json,safety_regression,comparison_key"
+                    ") VALUES (?,?,?,?,?,?,?,?,?)",
                     (
                         eval_run_id,
                         str(item.get("case_id") or ""),
@@ -114,6 +123,7 @@ class SqliteEvaluationLedger:
                         str(item.get("reason") or ""),
                         canonical_json(item.get("metrics") or {}),
                         canonical_json(item.get("evidence_refs") or []),
+                        canonical_json(item.get("mechanism_events") or []),
                         int(bool(item.get("safety_regression", False))),
                         item.get("comparison_key") or item.get("case_id"),
                     ),
@@ -149,6 +159,7 @@ class SqliteEvaluationLedger:
                 **dict(item),
                 "metrics": json.loads(item["metrics_json"]),
                 "evidence_refs": json.loads(item["evidence_refs_json"]),
+                "mechanism_events": json.loads(item["mechanism_events_json"]),
                 "safety_regression": bool(item["safety_regression"]),
             }
             for item in self.store.db.execute(
@@ -175,6 +186,7 @@ class SqliteEvaluationLedger:
             safety_regression=bool(row.get("safety_regression")),
             policy_id=policy_id,
             comparison_key=row.get("comparison_key") or row["case_id"],
+            mechanism_events=tuple(row.get("mechanism_events") or ()),
         )
 
     # 要求两个 run 的 suite/version 完全一致再按同题配对；不能跨版本比较刷分。
@@ -221,3 +233,27 @@ class SqliteEvaluationLedger:
                 }
             )
         return rows
+
+
+    # 从持久逐题观测生成 task×policy outcome flip 与实际机制线索；相关性仍不等于因果。
+    def attribution(
+        self, baseline_eval_run_id: str, candidate_eval_run_id: str
+    ) -> dict[str, object]:
+        baseline = self.run(baseline_eval_run_id)
+        candidate = self.run(candidate_eval_run_id)
+        if (
+            baseline["suite_id"] != candidate["suite_id"]
+            or baseline["suite_version"] != candidate["suite_version"]
+        ):
+            raise ValueError("policy attribution requires the same suite id/version")
+        observations = tuple(
+            self._observation(item, baseline["policy_id"])
+            for item in baseline["observations"]
+        ) + tuple(
+            self._observation(item, candidate["policy_id"])
+            for item in candidate["observations"]
+        )
+        return attribution_matrix(
+            observations,
+            baseline_policy_id=baseline["policy_id"],
+        )
