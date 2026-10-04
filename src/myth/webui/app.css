@@ -412,6 +412,20 @@ input[type="checkbox"] { accent-color: var(--success); width: 16px; height: 16px
 .spine-copy strong { font-size: 12px; font-weight: 550; display: block; }
 .spine-copy small { display: block; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; margin-top: 3px; }
 .spine-state { font-size: 12px; color: var(--muted); padding-top: 2px; }
+.inspector-experimental { margin-left: 6px; color: var(--muted); font-size: 10px; font-weight: 500; }
+.execution-graph { display: flex; flex-direction: column; }
+.execution-graph-row { display: grid; grid-template-columns: 14px minmax(0,1fr) auto; gap: 8px; align-items: start; margin-left: calc(var(--graph-depth,0) * 12px); padding: 7px 0; }
+.execution-graph-lead { color: var(--muted); font: 11px/1.5 var(--mono); text-align: center; }
+.execution-graph-row.subagent .execution-graph-lead { color: var(--signal); }
+.execution-graph-copy { min-width: 0; }
+.execution-graph-copy strong { display: block; font-size: 12px; font-weight: 550; overflow-wrap: anywhere; }
+.execution-graph-copy small { display: block; margin-top: 2px; color: var(--muted); font-size: 11px; line-height: 1.55; overflow-wrap: anywhere; }
+.execution-graph-state { color: var(--muted); font-size: 11px; white-space: nowrap; }
+.execution-graph-state.running { color: var(--signal); }
+.execution-graph-state.success { color: var(--success); }
+.execution-graph-state.unknown { color: var(--unknown); }
+.execution-graph-state.danger { color: var(--danger); }
+.execution-graph-note { margin-top: 7px; color: var(--muted); font-size: 11px; line-height: 1.65; }
 .budget-row { margin: 0 0 13px; }
 .budget-head { display: flex; justify-content: space-between; gap: 8px; color: var(--muted); font-size: 12px; margin-bottom: 6px; }
 .budget-head strong { color: var(--ink-2); font: 12px var(--mono); }

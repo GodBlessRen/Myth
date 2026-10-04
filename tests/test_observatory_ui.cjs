@@ -138,6 +138,36 @@ test("budget segments retain reserved and UNKNOWN without inventing missing limi
   assert.equal(missing.children.some(node => node.className === "budget-track"), false);
 });
 
+
+// Execution Graph 只展示服务端投影；Sub-Agent 分支保持显式，缺失覆盖不会被 UI 悄悄补全。
+test("execution graph renders parent tool and sub-agent branch without inventing coverage", () => {
+  const {context, nodes} = controller(["inspectorExecutionGraph"]);
+  context.renderExecutionGraph({
+    execution_graph: {
+      experimental: true,
+      nodes: [
+        {id: "run:1", kind: "run", label: "Run", detail: "run-1", state: "RUNNING", depth: 0},
+        {id: "model:1", kind: "model", label: "Parent model · step 1", detail: "agent.delegate", state: "SETTLED", depth: 0},
+        {id: "tool:1", kind: "tool", label: "agent.delegate", detail: "ticket-1", state: "RESOLVED", depth: 1},
+        {id: "subagent:1", kind: "subagent", label: "Sub-Agent · isolated_worker", detail: "isolated delegated model call", state: "SETTLED", depth: 2},
+      ],
+      edges: [
+        {source: "run:1", target: "model:1", kind: "next"},
+        {source: "model:1", target: "tool:1", kind: "tool"},
+        {source: "tool:1", target: "subagent:1", kind: "delegate"},
+      ],
+      coverage: {model_calls: 3, mapped_model_calls: 2, unmapped_model_calls: 1},
+    },
+  });
+  const box = nodes.get("inspectorExecutionGraph");
+  assert.match(box.textContent, /Parent model · step 1/);
+  assert.match(box.textContent, /agent\.delegate/);
+  assert.match(box.textContent, /Sub-Agent · isolated_worker/);
+  assert.match(box.textContent, /投影未覆盖 1 次模型调用/);
+  const child = box.children.find(node => node.className.includes("subagent"));
+  assert.equal(child.style["--graph-depth"], "2");
+});
+
 // 同一观测事实不重建 DOM；下一真实记录到达后才替换该区域。
 test("unchanged inspector facts preserve DOM while new facts render", () => {
   const {context, nodes} = controller(["inspectorTools"]);

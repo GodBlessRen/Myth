@@ -184,6 +184,45 @@ function renderExecutionSpine(turn) {
   );
 }
 
+// 展示服务端从 durable facts 生成的实验性 Execution Graph；UI 不自行推断缺失边或创建执行真相。
+function renderExecutionGraph(turn) {
+  const graph = turn?.execution_graph;
+  const box = inspectorRegion("inspectorExecutionGraph", graph || null);
+  if (!box) return;
+  if (!graph?.nodes?.length) {
+    box.append(el("div", "inspector-empty", "暂无可投影执行图"));
+    return;
+  }
+  const edgeByTarget = new Map(
+    (graph.edges || []).map((edge) => [edge.target, edge]),
+  );
+  graph.nodes.forEach((node, index) => {
+    const row = el("div", "execution-graph-row " + (node.kind || ""));
+    row.style["--graph-depth"] = String(Math.max(0, Number(node.depth) || 0));
+    const edge = edgeByTarget.get(node.id);
+    const lead = el("span", "execution-graph-lead", index === 0 ? "●" : edge?.kind === "delegate" ? "↳" : "↓");
+    const copy = el("div", "execution-graph-copy");
+    copy.append(
+      el("strong", "", node.label || node.kind || "node"),
+      el("small", "", node.detail || ""),
+    );
+    const [, stateClass] = inspectorStatus(node.state || "");
+    const state = el("span", "execution-graph-state " + stateClass, inspectorStateText(node.state || "UNKNOWN"));
+    row.append(lead, copy, state);
+    box.append(row);
+  });
+  const coverage = graph.coverage || {};
+  if (coverage.unmapped_model_calls) {
+    box.append(
+      el(
+        "div",
+        "execution-graph-note",
+        "投影未覆盖 " + inspectorNumber(coverage.unmapped_model_calls) + " 次模型调用；保留原始 Trajectory 作为完整事实入口。",
+      ),
+    );
+  }
+}
+
 // 用安全文本建立一项事实键值；对象只序列化展示，不作为新授权。
 function inspectorFact(box, key, value) {
   // 英文键与协议/测试保持一致；阅读层显示简中，专业名词保留既定拼写。
@@ -897,6 +936,7 @@ function renderRuntimeInspector(session = state.session) {
   renderInspectorDelivery(turn);
   renderInspectorSotaRoute(turn);
   renderExecutionSpine(turn);
+  renderExecutionGraph(turn);
   renderInspectorRecovery(turn);
   renderInspectorTrajectory(turn);
   renderInspectorTokens(turn);

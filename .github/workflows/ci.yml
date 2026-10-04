@@ -40,7 +40,7 @@ jobs:
           node --check src/myth/webui/goals.js
           node --check src/myth/webui/reconnect.js
           node --check src/myth/webui/statistics.js
-      - name: Browser reconnect and session statistics tests
-        run: node --test tests/test_reconnect_ui.cjs tests/test_statistics_ui.cjs
+      - name: Browser observability, reconnect and session statistics tests
+        run: node --test tests/test_observatory_ui.cjs tests/test_reconnect_ui.cjs tests/test_statistics_ui.cjs
       - name: Unit and crash-recovery tests
         run: python -m unittest discover -s tests -v
