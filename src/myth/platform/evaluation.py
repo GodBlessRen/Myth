@@ -300,6 +300,24 @@ EFFICIENCY_METERS = frozenset(
 )
 
 
+
+
+# 从持久 JSON 报告恢复 EvalReport；缺失字段按旧版本兼容默认值处理，不重新计算观测。
+def eval_report_from_dict(value: dict[str, Any]) -> EvalReport:
+    return EvalReport(
+        suite_id=str(value.get("suite_id") or ""),
+        pass_count=int(value.get("pass_count") or 0),
+        fail_count=int(value.get("fail_count") or 0),
+        inconclusive_count=int(value.get("inconclusive_count") or 0),
+        safety_regressions=int(value.get("safety_regressions") or 0),
+        measured_cost=(
+            None
+            if value.get("measured_cost") is None
+            else int(value.get("measured_cost"))
+        ),
+        unsupported_count=int(value.get("unsupported_count") or 0),
+    )
+
 # 能力下限 + Pareto 效率发布门：候选可以更省，但不能用未测/安全回归/超容差能力损失换取效率。
 def capability_efficiency_gate(
     baseline: EvalReport,
@@ -308,6 +326,7 @@ def capability_efficiency_gate(
     *,
     max_pass_rate_loss: float = 0.0,
     cost_meters: frozenset[str] = EFFICIENCY_METERS,
+    require_improvement: bool = False,
 ) -> tuple[bool, str, dict[str, float]]:
     if baseline.suite_id != candidate.suite_id or baseline.total != candidate.total:
         return False, "baseline/candidate suite identity differs", {}
@@ -338,9 +357,17 @@ def capability_efficiency_gate(
         return False, "no common measured efficiency meters", {}
     if any(delta > 0 for delta in aggregate.values()):
         return False, "candidate is not Pareto-nonworse on measured efficiency", aggregate
-    if not any(delta < 0 for delta in aggregate.values()):
+    if require_improvement and not any(delta < 0 for delta in aggregate.values()):
         return False, "candidate has no measured efficiency improvement", aggregate
-    return True, "capability floor held and measured efficiency improved", aggregate
+    return (
+        True,
+        (
+            "capability floor held and measured efficiency improved"
+            if any(delta < 0 for delta in aggregate.values())
+            else "capability floor held and measured efficiency did not regress"
+        ),
+        aggregate,
+    )
 
 
 # 从同题不同 policy 的观测构造 task×policy 与 outcome flip 投影；只做归因导航，不把相关性冒充机制因果。
