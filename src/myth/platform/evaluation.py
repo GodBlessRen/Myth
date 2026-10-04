@@ -82,6 +82,8 @@ class EvalObservation:
     policy_id: str | None = None
     # comparison_key：包含同题/同版本身份的配对键，防止跨条件刷分。
     comparison_key: str | None = None
+    # mechanism_events：本题实际触发/应用/回退的优化机制身份；只做归因线索，不自动证明因果。
+    mechanism_events: tuple[str, ...] = ()
 
 
 # 同题同版本身份下的策略配对结果；未测量质量保留 None，成本差异保持向量。
@@ -353,6 +355,15 @@ def attribution_matrix(
                             "candidate_policy_id": candidate,
                             "baseline_verdict": before,
                             "candidate_verdict": after,
+                            "candidate_mechanisms": sorted(
+                                {
+                                    mechanism
+                                    for item in values
+                                    if item.case_id == case_id
+                                    and item.policy_id == candidate
+                                    for mechanism in item.mechanism_events
+                                }
+                            ),
                         }
                     )
     return {
@@ -363,3 +374,25 @@ def attribution_matrix(
         "causal_attribution": False,
         "note": "mechanism causality requires one-mechanism/leave-one-out or equivalent controlled reruns",
     }
+
+
+# Search/Evolution 与最终发布评测必须物理上保持 case identity 不相交；final 结果不能反馈回候选搜索。
+@dataclass(frozen=True)
+class HeldOutEvalBoundary:
+    discovery_case_ids: tuple[str, ...]
+    final_case_ids: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        discovery = set(self.discovery_case_ids)
+        final = set(self.final_case_ids)
+        if len(discovery) != len(self.discovery_case_ids) or len(final) != len(self.final_case_ids):
+            raise ValueError("eval partition contains duplicate case ids")
+        overlap = discovery & final
+        if overlap:
+            raise ValueError(
+                "held-out final cases overlap discovery cases: " + ",".join(sorted(overlap))
+            )
+
+    # 只有 discovery 身份允许影响候选生成；final 只产生最终接受/拒绝证据。
+    def may_feed_back(self, case_id: str) -> bool:
+        return case_id in set(self.discovery_case_ids)
