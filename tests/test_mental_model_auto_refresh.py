@@ -308,6 +308,47 @@ class MentalModelAutoRefreshTests(unittest.TestCase):
         )
         self.assertTrue(selected["auto_refresh"]["enabled"])
 
+    # 已知 FAILED 退避后可在同一 source watermark 建 attempt #2；UNKNOWN 则仍被永久挡在自动重试外。
+    def test_known_failure_can_retry_same_watermark_as_new_attempt(self):
+        self.refresh.configure(self.model["model_id"], enabled=True, min_interval_seconds=60)
+        first_run = self.refresh.admit(self.model["model_id"], now=1000.0)
+
+        class NoEvidenceProvider(RefreshProvider):
+            # 返回结构合法但没有底层 Evidence 的 synthesis；Runtime 应已知失败而不是 UNKNOWN。
+            def invoke(self, request):
+                self.calls += 1
+                decision = {
+                    "decision_type": "request_completion",
+                    "reason": "Invalid fixture without evidence.",
+                    "capability_id": "",
+                    "arguments_json": "{}",
+                    "question": "",
+                    "missing_info_category": "",
+                    "claim": "Unsupported synthesis.",
+                    "goal_coverage": "mental-model-refresh",
+                    "evidence_refs": [],
+                    "remaining": [],
+                }
+                return ModelResult(
+                    text=json.dumps(decision),
+                    usage={"model_calls": 1, "input_tokens": 30, "output_tokens": 10},
+                    raw={"id": "no-evidence", "status": "completed"},
+                    response_id="no-evidence",
+                )
+
+        failed = self.refresh.run(first_run, NoEvidenceProvider())
+        self.assertEqual(failed["state"], "FAILED")
+        policy = self.refresh.policy(self.model["model_id"])
+
+        second_run = self.refresh.admit(
+            self.model["model_id"], now=float(policy["retry_at"]) + 0.1
+        )
+        self.assertIsNotNone(second_run)
+        self.assertNotEqual(second_run, first_run)
+        second = self.refresh.occurrence(second_run)
+        self.assertEqual(second["source_change_seq"], failed["source_change_seq"])
+        self.assertEqual(second["attempt_no"], 2)
+
     # policy retry_at 必须约束已准入 occurrence 的重新派发，不能每两秒忽略退避再次探测。
     def test_dispatchable_respects_policy_backoff(self):
         self.refresh.configure(self.model["model_id"], enabled=True, min_interval_seconds=60)
