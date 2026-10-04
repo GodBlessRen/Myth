@@ -188,7 +188,8 @@ def compile_conversation_context(
             "user",
             render_context_anchor(anchor),
             priority=25_000,
-            required=True,
+            # Anchor 是派生导航；极小窗口可丢弃它，不能挤掉本轮任务/固定约束。
+            required=False,
         )
     pinned = snapshot.get("attached_document_ids")
     for index, source in enumerate(snapshot.get("knowledge", [])):
