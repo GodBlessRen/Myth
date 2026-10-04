@@ -167,6 +167,7 @@ class SqliteEvaluationLedger:
                 **dict(row),
                 "report": json.loads(row["report_json"]),
                 "release_gate": json.loads(row["release_gate_json"]),
+                "harness_mechanisms": json.loads(row["harness_mechanisms_json"]),
             }
             for row in self.store.db.execute(
                 "SELECT * FROM evaluation_runs ORDER BY rowid DESC LIMIT ?",
