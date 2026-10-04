@@ -55,6 +55,7 @@ def model_capability(
     input_modalities: list[str] | tuple[str, ...] = (),
     output_modalities: list[str] | tuple[str, ...] = (),
     reasoning: dict[str, Any] | None = None,
+    provider_metadata: dict[str, Any] | None = None,
     source: str = "provider",
 ) -> dict[str, Any]:
     result: dict[str, Any] = {
@@ -70,6 +71,9 @@ def model_capability(
         result["max_output_tokens"] = max_output_tokens
     if reasoning is not None:
         result["reasoning"] = dict(reasoning)
+    if isinstance(provider_metadata, dict):
+        # provider_metadata：目录中的厂商特有公开字段；只用于折叠展示/分析，不改变 Core 能力语义。
+        result["provider_metadata"] = dict(provider_metadata)
     return result
 
 
