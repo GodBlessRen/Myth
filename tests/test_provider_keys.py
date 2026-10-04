@@ -12,21 +12,28 @@ from myth.auth.provider_keys import ProviderApiKeyVault
 
 
 # 内存凭据替身；只实现 ProviderApiKeyVault 依赖的 load/save/delete 端口。
+# API Key 安全库的内存替身；只保存本测试进程内字典，不模拟系统 keyring 的安全属性。
 class MemoryCredentialStore:
+    # 建立每个测试独立的凭据字典；测试结束即销毁，不能代表生产持久存储。
     def __init__(self):
+        # values：测试替身内部凭据；断言只验证调用语义，绝不写入 Runtime。
         self.values = {}
 
+    # 按 provider/profile 身份读取测试凭据副本，避免调用方修改替身内部状态。
     def load(self, profile_id):
         value = self.values.get(profile_id)
         return dict(value) if value else None
 
+    # 保存测试凭据副本；只模拟 CredentialStore 端口，不声称安全持久化。
     def save(self, profile_id, value):
         self.values[profile_id] = dict(value)
 
+    # 幂等删除测试凭据；用于核对断开连接不影响其他 provider。
     def delete(self, profile_id):
         self.values.pop(profile_id, None)
 
 
+# 应用内 Provider API Key 的固定回归集合；验证秘钥边界、优先级与兼容迁移。
 class ProviderApiKeyVaultTests(unittest.TestCase):
     # 应用内保存后状态只暴露来源，不返回 key 或其片段。
     def test_save_resolve_and_status_never_echo_secret(self):
