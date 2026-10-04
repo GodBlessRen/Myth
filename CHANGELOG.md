@@ -1,5 +1,13 @@
 # Changelog
 
+## 未发布 — Adaptive Sub-Agent v1
+
+- 新增 `agent.delegate`：主 LLM 在正常 Agent Loop 中自行判断是否需要委派，不引入强制 Supervisor 或固定 Multi-Agent 层。
+- 第一版 Child 为只读隔离 worker，只接收显式 task / bounded context / 已准入 source refs；不继承完整父对话、Memory、工具目录，不可写入、调用工具、再次委派或向用户提问。
+- Child 使用同一父 Run 的 durable model Ticket / receipt / budget 账本和稳定 request key；返回 contracted result 作为 Observation，最终验收与交付仍归父 Agent / Runtime。
+- Runtime 模型调用投影新增 request key，便于区分普通决策与 `subagent:` 调用；Multi-Agent Strategy 成熟度提升为 connected。
+- 增加上下文隔离与递归委派拒绝回归测试；架构宪法记录 “Context Isolation + Contracted Return” 不变量。
+
 ## 未发布 — 前端工作台重构
 
 - 完整替换工作台视觉与布局，提供奶油白、星空黑及跟随系统主题；对话、项目、知识、会话、Goal 与计划、设置和 Runtime 统一简体中文与响应式控件。
