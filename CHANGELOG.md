@@ -1,5 +1,15 @@
 # Changelog
 
+## 未发布 — Harness Efficiency Gold
+
+- 把 SoL-Pi 可长期复用的机制吸收到现有 Myth 骨架，不新增平行 Runtime：State/Context 分离、exact Observation recall、grounded Compact seed、deterministic successor fusion、Evidence Receipt verifier、Optimization economics/reachability、bounded recovery、capability floor 与 held-out eval。
+- 新增 `observation.read`：按当前 Run 已结算 decision/field 精确分页回读原 Tool Observation，绑定 source digest，不重跑 Tool。
+- `project.patch_exact` 融合 deterministic diff successor；mutation 与 successor 状态分开，source precondition 变化时 successor 显式 SKIPPED，不开放任意 shell。
+- Context fold/Compact 在已有 `ConversationContextCompiled` 报告 reason-coded optimization 与 mechanism reachability；Runtime Observatory 展示 Optimization、Reachability 与 grounded seed。
+- Sub-Agent 协作明确为 Evidence Bus：共享 bounded context + admitted source refs，不继承完整父聊天历史。
+- Evaluation 新增 capability-floor + Pareto efficiency gate、task×policy outcome flip/机制线索和 held-out identity boundary；Evolution 新增 disposable Discover/Harden experiment contract。
+- 架构宪法固定 fail-open optimization、provider-visible economics、optimization debt/hysteresis、representation transition ≠ semantic transition 等不变量。
+
 ## 未发布 — Historical Replay World
 
 - 新增实验性 Replay World：把同一 SOTA Route `comparison_key` 下的 eligible PASSED Action Path 合并成共享前缀树，让历史从日志升级为可计算的“已实现搜索空间”。
