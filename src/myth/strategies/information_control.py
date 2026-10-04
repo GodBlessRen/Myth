@@ -82,10 +82,13 @@ class LiveInformationController:
     # _ACTIONS：只控制会把新信息带回模型的既有工具；写入/测试/Sub-Agent 不归本策略。
     _ACTIONS = {
         "knowledge.search": InformationControlAction.SEEK,
+        "memory.search": InformationControlAction.SEEK,
         "project.search": InformationControlAction.SEEK,
         "project.list": InformationControlAction.SEEK,
         "knowledge.resolve": InformationControlAction.EXPAND,
         "knowledge.read": InformationControlAction.EXPAND,
+        "memory.timeline": InformationControlAction.EXPAND,
+        "memory.resolve": InformationControlAction.EXPAND,
         "project.read": InformationControlAction.EXPAND,
     }
 
@@ -97,10 +100,20 @@ class LiveInformationController:
     @staticmethod
     def _normalized(capability: str, args: dict[str, Any]) -> dict[str, Any]:
         value = dict(args or {})
-        if capability == "knowledge.search":
+        if capability in {"knowledge.search", "memory.search"}:
             return {
                 "query": str(value.get("query") or "").strip().casefold(),
                 "limit": value.get("limit", 5),
+            }
+        if capability == "memory.timeline":
+            return {
+                "memory_id": str(value.get("memory_id") or "").strip(),
+                "radius": value.get("radius", 2),
+            }
+        if capability == "memory.resolve":
+            return {
+                "memory_id": str(value.get("memory_id") or "").strip(),
+                "resolution": str(value.get("resolution") or "L2").upper(),
             }
         if capability == "project.search":
             return {
@@ -137,8 +150,12 @@ class LiveInformationController:
     # 生成单 target 身份；分页参数不进入 target，使同一问题/来源共享局部预算。
     @staticmethod
     def _target_key(capability: str, normalized: dict[str, Any]) -> str:
-        if capability == "knowledge.search":
+        if capability in {"knowledge.search", "memory.search"}:
             return canonical_json({"kind": capability, "query": normalized["query"]})
+        if capability in {"memory.timeline", "memory.resolve"}:
+            return canonical_json(
+                {"kind": "memory", "memory_id": normalized["memory_id"]}
+            )
         if capability == "project.search":
             return canonical_json(
                 {

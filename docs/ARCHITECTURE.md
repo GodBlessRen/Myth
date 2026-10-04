@@ -168,7 +168,7 @@ KEEP when no more information action is needed
 
 Controller 是纯策略：不执行 I/O、不调用模型、不拥有新的持久表。它只从当前 Turn 已持久的 activities 重建消费状态，因此进程退出/恢复不会重置信息预算。拒绝发生在 Tool Ticket 前，属于已知准入失败，不制造 UNKNOWN，也不消耗一次真实 tool call。
 
-第一版故意不把 offline Information Gain 数字接入 live admission；先用可验证的 novelty / progress / boundedness 建立稳定控制面，再由固定 Eval 证明后决定是否让 Gain 影响排序或升级。
+第一版故意不把 offline Information Gain 数字接入 live admission；先用可验证的 novelty / progress / boundedness 建立稳定控制面，再由固定 Eval 证明后决定是否让 Gain 影响排序或升级。Memory 同样遵循该控制面：search 属于 SEEK，timeline/resolve 属于 EXPAND。
 
 Conversation context 是从 durable facts 生成的 bounded projection，不是执行记录本身。
 
@@ -226,7 +226,30 @@ Memory：
 - Working / Episodic / Semantic / Procedural；
 - revision / provenance / revoke；
 - global / project / session scope；
-- `fact_level=context` 不自动升级为 verified fact。
+- `fact_level=context` 不自动升级为 verified fact；
+- `memory.search → memory.timeline → memory.resolve` progressive disclosure，初始召回只进入 L0 compact view。
+
+Milvus 是**可重建的派生 Vector Adapter**，不是新的事实数据库：
+
+```text
+SQLite documents / Memory revisions
+        ↓ authoritative source + scope + active/version
+optional embedding
+        ↓
+Milvus derived vector candidates
+        ↓
+SQLite hydration / freshness / permission check
+        ↓
+lexical + vector RRF
+        ↓
+L0 → L1 → L2 Context projection
+```
+
+- lexical baseline 始终保留；Milvus 不可用时明确 degraded 到 lexical；
+- 不直接比较 lexical score 与 cosine distance，Hybrid 使用 rank fusion；
+- 每个 vector hit 必须回 SQLite 核对 document digest / memory revision / archive / revoke / scope；
+- 旧数据可重建索引；Milvus collection 丢失不丢业务事实；
+- Context report 同时记录 retrieved 与**实际 delivered** Knowledge / Memory 数量。
 
 Retrieval / Memory 都不能授予执行权限。
 

@@ -9,6 +9,7 @@ import uuid
 from typing import Iterable
 
 from .memory import MemoryKind
+from .retrieval import reciprocal_rank_scores
 
 
 # SCHEMA：本仓储拥有的表、索引与约束；升级补齐旧字段，删除列须有迁移证据。
@@ -43,11 +44,13 @@ def _terms(text: str) -> set[str]:
 # 真实记忆聚合的 SQLite 所有者；作用域与事实等级显式保存，检索全可见候选。
 class SqliteMemoryStore:
     # 复用 Runtime 连接建立持久有来源记忆表；检索是词面扫描，写入不会自动升级 verified。
-    def __init__(self, runtime) -> None:
+    def __init__(self, runtime, *, vector_index=None) -> None:
         # runtime：共享 Runtime 装配对象；其 SQLite 连接只在所属线程使用。
         self.runtime = runtime
         # store：持久事实仓储；短事务维护本地一致性；外部效果不能并入数据库事务。
         self.store = runtime.store
+        # vector_index：可选派生索引；Memory 行、scope、revision、active 才是权威事实。
+        self.vector_index = vector_index
         self.store.db.executescript(SCHEMA)
         columns = {
             row["name"]
@@ -122,7 +125,56 @@ class SqliteMemoryStore:
                         level,
                     ),
                 )
-        return self.get(memory_id)
+        record = self.get(memory_id)
+        # 外部向量索引不是同一事务；失败只降级未来语义召回，权威记忆仍已提交。
+        self._sync_vector_record(record)
+        return record
+
+    # 将当前 active revision 幂等投影到 Milvus；正文只用于 embedding，查询结果仍需回 SQLite hydration。
+    def _sync_vector_record(self, record: dict) -> dict:
+        if self.vector_index is None:
+            return {"configured": False, "synced": 0}
+        if not record.get("active"):
+            return {"configured": True, "synced": 0}
+        payload = [
+            {
+                "record_id": str(record["memory_id"]),
+                "source_version": str(record["revision"]),
+                "text": str(record["text"]),
+                "scope_type": str(record.get("scope_type") or "global"),
+                "scope_id": str(record.get("scope_id") or ""),
+                "fact_level": str(record.get("fact_level") or "context"),
+                "memory_kind": str(record.get("kind") or ""),
+            }
+        ]
+        try:
+            result = self.vector_index.sync_memories(payload)
+            return {"configured": True, "synced": result.get("upserted", 0)}
+        except RuntimeError:
+            return {"configured": True, "synced": 0, "degraded": True}
+
+    # 显式重建 active Memory 的派生向量索引；安装/迁移后可调用，失败不改变任何记忆事实。
+    def rebuild_vector_index(self) -> dict:
+        rows = self.store.db.execute(
+            "SELECT * FROM workspace_memories WHERE active=1 ORDER BY rowid"
+        ).fetchall()
+        if self.vector_index is None:
+            return {"configured": False, "memories": len(rows), "synced": 0}
+        synced = 0
+        degraded = False
+        seen = 0
+        # 重建是显式维护动作，扫描所有 active scope；实际召回仍在 hydration 时重新检查 scope。
+        for row in rows:
+            seen += 1
+            result = self._sync_vector_record(dict(row))
+            synced += int(result.get("synced") or 0)
+            degraded = degraded or bool(result.get("degraded"))
+        return {
+            "configured": True,
+            "memories": seen,
+            "synced": synced,
+            "degraded": degraded,
+        }
 
     # 按身份取得已登记数据；缺失身份显式失败，调用方不能据此捏造已存在对象。
     def get(self, memory_id: str) -> dict:
@@ -207,7 +259,7 @@ class SqliteMemoryStore:
         }
 
     # 遍历所有可见候选后稳定排 top-k，返回扫描覆盖；Memory 内容只作上下文。
-    def search_report(
+    def _lexical_search_report(
         self,
         query: str,
         *,
@@ -266,6 +318,248 @@ class SqliteMemoryStore:
                 "exhausted": True,
                 "truncated_before_ranking": False,
             },
+        }
+
+    # 校验 Memory 当前是否对作用域可见；向量 metadata 不能代替这一权威检查。
+    @staticmethod
+    def _visible(item: dict, project_id: str | None, session_id: str | None) -> bool:
+        scope = item.get("scope_type") or "global"
+        scope_id = item.get("scope_id")
+        return (
+            scope == "global"
+            or (scope == "project" and project_id is not None and scope_id == project_id)
+            or (scope == "session" and session_id is not None and scope_id == session_id)
+        )
+
+    # 词面召回始终保底；Milvus 只贡献候选排名，命中经 active/revision/scope/kind hydration 后用 RRF 融合。
+    def search_report(
+        self,
+        query: str,
+        *,
+        kinds: Iterable[str | MemoryKind] | None = None,
+        limit: int = 6,
+        project_id: str | None = None,
+        session_id: str | None = None,
+    ) -> dict:
+        lexical = self._lexical_search_report(
+            query,
+            kinds=kinds,
+            limit=limit,
+            project_id=project_id,
+            session_id=session_id,
+        )
+        if self.vector_index is None or not str(query).strip():
+            return lexical
+
+        allowed = None
+        if kinds is not None:
+            allowed = {
+                item.value if isinstance(item, MemoryKind) else MemoryKind(str(item)).value
+                for item in kinds
+            }
+        try:
+            # 首次启用 Milvus 时补齐已有 active Memory；source revision 让更新项重新 upsert。
+            self.rebuild_vector_index()
+            hits = self.vector_index.search_memories(
+                str(query), limit=max(32, int(limit) * 8)
+            )
+        except RuntimeError:
+            lexical["retrieval"]["vector_status"] = "unavailable"
+            lexical["retrieval"]["degraded"] = True
+            return lexical
+
+        vector_rows = []
+        stale_rejected = 0
+        for hit in hits:
+            memory_id = str(hit.get("record_id") or "")
+            row = self.store.db.execute(
+                "SELECT * FROM workspace_memories WHERE memory_id=?", (memory_id,)
+            ).fetchone()
+            if row is None:
+                stale_rejected += 1
+                continue
+            item = dict(row)
+            if (
+                not item.get("active")
+                or str(item.get("revision")) != str(hit.get("source_version") or "")
+                or not self._visible(item, project_id, session_id)
+                or (allowed and item.get("kind") not in allowed)
+            ):
+                stale_rejected += 1
+                continue
+            item["vector_distance"] = hit.get("distance")
+            vector_rows.append(item)
+
+        lexical_rows = list(lexical["memories"])
+        identity = lambda item: str(item["memory_id"])
+        rrf = reciprocal_rank_scores(
+            (
+                tuple(identity(item) for item in lexical_rows),
+                tuple(identity(item) for item in vector_rows),
+            )
+        )
+        merged = {}
+        for item in lexical_rows + vector_rows:
+            key = identity(item)
+            if key not in merged:
+                merged[key] = dict(item)
+        memories = []
+        for key, item in merged.items():
+            item["hybrid_score"] = round(rrf.get(key, 0.0), 8)
+            memories.append(item)
+        memories.sort(
+            key=lambda item: (
+                -float(item.get("hybrid_score") or 0.0),
+                -int(item.get("revision") or 0),
+                item["memory_id"],
+            )
+        )
+        return {
+            "memories": memories[:limit],
+            "retrieval": {
+                **lexical["retrieval"],
+                "backend": "memory-lexical+milvus",
+                "candidate_policy": "visible-active-lexical+milvus-hydrated-rrf-v1",
+                "vector_candidates": len(hits),
+                "vector_hydrated": len(vector_rows),
+                "vector_stale_rejected": stale_rejected,
+                "vector_status": "ready",
+                "degraded": False,
+            },
+        }
+
+    # 把同一 Memory 投影为 L0/L1/L2；source_ref 固定 memory_id@revision，表示粒度不会悄悄换源。
+    def resolve(
+        self,
+        memory_id: str,
+        *,
+        resolution: str = "L2",
+        project_id: str | None = None,
+        session_id: str | None = None,
+    ) -> dict:
+        item = self.get(str(memory_id))
+        if not item.get("active") or not self._visible(item, project_id, session_id):
+            raise PermissionError("memory is not visible in the admitted scope")
+        level = str(resolution or "L2").upper()
+        if level not in {"L0", "L1", "L2"}:
+            raise ValueError("resolution must be L0/L1/L2")
+        text = str(item.get("text") or "")
+        stable_ref = f"memory:{item['memory_id']}@{item['revision']}"
+        base = {
+            "memory_id": item["memory_id"],
+            "kind": item["kind"],
+            "source_ref": stable_ref,
+            "provenance_ref": item["source_ref"],
+            "scope_type": item.get("scope_type") or "global",
+            "scope_id": item.get("scope_id"),
+            "fact_level": item.get("fact_level") or "context",
+            "revision": item["revision"],
+            "resolution": level,
+        }
+        if level == "L0":
+            return {**base, "text": text[:360], "bytes": len(text.encode("utf-8"))}
+        if level == "L1":
+            segments = [text[start : start + 800] for start in range(0, len(text), 800)]
+            return {
+                **base,
+                "text": text[:1200],
+                "segments": [
+                    {"index": index, "preview": segment[:240]}
+                    for index, segment in enumerate(segments[:12])
+                ],
+                "segment_count": len(segments),
+                "bytes": len(text.encode("utf-8")),
+            }
+        return {**base, "text": text, "bytes": len(text.encode("utf-8"))}
+
+    # 搜索先只返回 L0 索引视图和同一次召回报告；避免为了观测元数据重复执行向量查询。
+    def search_view_report(
+        self,
+        query: str,
+        *,
+        kinds: Iterable[str | MemoryKind] | None = None,
+        limit: int = 6,
+        project_id: str | None = None,
+        session_id: str | None = None,
+    ) -> dict:
+        report = self.search_report(
+            query,
+            kinds=kinds,
+            limit=limit,
+            project_id=project_id,
+            session_id=session_id,
+        )
+        views = [
+            self.resolve(
+                item["memory_id"],
+                resolution="L0",
+                project_id=project_id,
+                session_id=session_id,
+            )
+            for item in report["memories"]
+        ]
+        return {"memories": views, "retrieval": report["retrieval"]}
+
+    # 兼容调用只取 L0 结果；完整观测使用 search_view_report，避免把正文直接塞进初始 Context。
+    def search_views(
+        self,
+        query: str,
+        *,
+        kinds: Iterable[str | MemoryKind] | None = None,
+        limit: int = 6,
+        project_id: str | None = None,
+        session_id: str | None = None,
+    ) -> list[dict]:
+        return self.search_view_report(
+            query,
+            kinds=kinds,
+            limit=limit,
+            project_id=project_id,
+            session_id=session_id,
+        )["memories"]
+
+    # 以命中 Memory 为锚点读取邻近同作用域记录，提供 chronology/navigation；不是新事实，也不改变 revision。
+    def timeline(
+        self,
+        memory_id: str,
+        *,
+        radius: int = 2,
+        project_id: str | None = None,
+        session_id: str | None = None,
+    ) -> dict:
+        if type(radius) is not int or not 0 <= radius <= 5:
+            raise ValueError("radius must be 0-5")
+        anchor = self.get(str(memory_id))
+        if not anchor.get("active") or not self._visible(anchor, project_id, session_id):
+            raise PermissionError("memory is not visible in the admitted scope")
+        row = self.store.db.execute(
+            "SELECT rowid FROM workspace_memories WHERE memory_id=?", (memory_id,)
+        ).fetchone()
+        center = int(row["rowid"])
+        rows = self.store.db.execute(
+            "SELECT rowid,* FROM workspace_memories WHERE active=1 AND rowid BETWEEN ? AND ? ORDER BY rowid",
+            (max(1, center - radius * 3), center + radius * 3),
+        ).fetchall()
+        visible = [
+            dict(item)
+            for item in rows
+            if self._visible(dict(item), project_id, session_id)
+        ]
+        before = [item for item in visible if int(item["rowid"]) < center][-radius:]
+        after = [item for item in visible if int(item["rowid"]) > center][:radius]
+        ordered = before + [dict(anchor)] + after
+        return {
+            "anchor": f"memory:{anchor['memory_id']}@{anchor['revision']}",
+            "memories": [
+                self.resolve(
+                    item["memory_id"],
+                    resolution="L0",
+                    project_id=project_id,
+                    session_id=session_id,
+                )
+                for item in ordered
+            ],
+            "radius": radius,
         }
 
     # 读取当前作用域的检索结果；相似度只用于排序，不升级为已验证事实。

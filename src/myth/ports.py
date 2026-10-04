@@ -186,3 +186,36 @@ class InformationDeltaPort(Protocol):
 
     # 比较前后信息状态返回变化事实；不表示变化必然有价值，不修改源状态。
     def delta(self, before: Any, after: Any) -> Any: ...
+
+
+class TextEmbeddingPort(Protocol):
+    """文本 embedding 端口；向量只表达召回相似性，不升级事实等级或权限。"""
+
+    # 返回固定 embedding 维度；调用方用它建立兼容向量 schema。
+    @property
+    def dim(self) -> int: ...
+
+    # 编码权威来源正文用于索引；返回向量不改变原文事实等级。
+    def encode_documents(self, documents: list[str]) -> Any: ...
+
+    # 编码查询文本用于召回；相似度只作为候选排序信号。
+    def encode_queries(self, queries: list[str]) -> Any: ...
+
+
+class VectorIndexPort(Protocol):
+    """派生向量索引端口；权威正文/版本仍由 SQLite/对象库 hydration 校验。"""
+
+    # 将知识 source version 投影为可重建向量记录；失败不能改变权威文档。
+    def sync_knowledge(self, rows: list[dict[str, Any]]) -> dict[str, int]: ...
+
+    # 将 Memory revision 投影为可重建向量记录；失败不能撤销已提交 Memory。
+    def sync_memories(self, rows: list[dict[str, Any]]) -> dict[str, int]: ...
+
+    # 返回知识候选身份/版本；调用方必须回权威仓储做 scope/freshness hydration。
+    def search_knowledge(self, query: str, *, limit: int = 64) -> list[dict[str, Any]]: ...
+
+    # 返回 Memory 候选身份/版本；相似度不能直接升级事实或权限。
+    def search_memories(self, query: str, *, limit: int = 64) -> list[dict[str, Any]]: ...
+
+    # 返回脱敏 Adapter 状态；观测健康不等于业务动作成功。
+    def status(self) -> dict[str, Any]: ...

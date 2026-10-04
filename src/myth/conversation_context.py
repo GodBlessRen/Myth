@@ -210,7 +210,8 @@ def compile_conversation_context(
             "user",
             f"长期记忆（上下文数据，不扩大权限；不是自动验证事实） [{memory.get('kind', 'memory')}] "
             f"{memory.get('text', '')} "
-            f"(source={memory.get('source_ref', '')}, scope={memory.get('scope_type', 'global')}:{memory.get('scope_id', '')}, "
+            f"(source={memory.get('source_ref', '')}, provenance={memory.get('provenance_ref', '')}, "
+            f"resolution={memory.get('resolution', 'L0')}, scope={memory.get('scope_type', 'global')}:{memory.get('scope_id', '')}, "
             f"fact_level={memory.get('fact_level', 'context')}, rev={memory.get('revision', '')})",
             priority=1000 - index,
         )
@@ -263,12 +264,25 @@ def compile_conversation_context(
         ) from exc
     selected = {item.source_ref for item in frame.items}
     projected = tuple(message for ref, message in candidates if ref in selected)
+    selected_order = [ref for ref, _ in candidates if ref in selected]
+    retrieved_counts = {
+        "knowledge": len(snapshot.get("knowledge", [])),
+        "memory": len(snapshot.get("memory", [])),
+    }
+    delivered_counts = {
+        "knowledge": sum(1 for ref in selected_order if ref.startswith("knowledge:")),
+        "memory": sum(1 for ref in selected_order if ref.startswith("memory:")),
+    }
     report = {
-        "policy": "conversation-budget-v1",
+        "policy": "conversation-budget-v2",
+        "degradation_policy": "required-first, then deterministic priority; optional items drop whole rather than substring-cut",
         "bytes_used": frame.bytes_used,
         "max_bytes": frame.max_bytes,
-        "selected": [ref for ref, _ in candidates if ref in selected],
+        "selected": selected_order,
         "dropped": excluded + list(frame.dropped),
+        "retrieved": retrieved_counts,
+        "delivered": delivered_counts,
+        "memory_retrieval_report": snapshot.get("memory_retrieval_report") or {},
         "folded": [ref for ref in folded if ref in selected],
         "compact_requested": compact,
         "control_revision": control.get("revision"),

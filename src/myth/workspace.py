@@ -2,6 +2,7 @@
 按状态所有权连接个人、工作区、Control、Memory、Evolution 和执行适配器；应用只得到端口，活动策略仅影响未来 Turn。"""
 
 from .adapters.workspace_store import SqliteWorkspaceRepository
+from .adapters.milvus_retrieval import create_milvus_vector_index
 from .adapters.conversation_execution import LocalConversationExecution
 from .adapters.personal_store import SqlitePersonalState
 from .application.conversation_agent import ConversationAgent
@@ -25,8 +26,15 @@ class Workspace:
         resolution_controller=None,
         resolution_policy_id=None,
     ):
+        # vector_index：可选 Milvus 派生索引；延迟连接/加载，缺失时词面检索保持完整可用。
+        self.vector_index = create_milvus_vector_index(runtime)
         # components：横向能力组合目录；运行状态仍归具体仓储，目录不授予执行权。
-        self.components = MythComponents.default()
+        self.components = MythComponents.default(
+            milvus_ready=bool(
+                self.vector_index
+                and self.vector_index.status().get("healthy")
+            )
+        )
         # 保留旧公开调用方的薄别名；与 components 指向同一对象，不维护另一套状态。
         # kernel：旧公开兼容别名，指向 components；新代码使用 components，避免误认为强制执行层。
         self.kernel = self.components
@@ -49,6 +57,7 @@ class Workspace:
             intent_picker=intent_picker,
             resolution_controller=resolution_controller,
             resolution_policy_id=resolution_policy_id,
+            vector_index=self.vector_index,
         )
         # sota_route：已验收成功路径的效率账本；只给未来 Run 提供冻结提示，不授予能力。
         self.sota_route = SotaRouteLedger(runtime)
@@ -56,7 +65,7 @@ class Workspace:
         # control：控制服务协作对象；只在安全点影响未来规划。
         self.control = SqliteControlService(runtime, self.repository)
         # memory：有来源记忆协作对象；不授予权限。
-        self.memory = SqliteMemoryStore(runtime)
+        self.memory = SqliteMemoryStore(runtime, vector_index=self.vector_index)
         # delivery：回答终态、验收、Work item 与人工关注的持久交付账本。
         self.delivery = DeliveryLedger(runtime, sota_route=self.sota_route)
         # execution：用例执行端口/实现；外部效果须经过 Ticket 和收据协议。
@@ -65,6 +74,7 @@ class Workspace:
             self.repository,
             capability_registry=self.components.capabilities,
             subagent_registry=self.components.subagents,
+            memory_store=self.memory,
         )
         # verification：与 execution 共用同一 profile 状态所有者，避免双写真相。
         self.verification = self.execution.verification
