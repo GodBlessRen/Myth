@@ -3,7 +3,9 @@
 
 from ..acceptance import ContextBudgetError
 from ..domain import BudgetExceeded, RecoveryRequired, PatchContractError
+from ..failures import failure_result, observe_failure
 from ..models import StepDecision, DecisionValidationError, ProviderKnownFailure, ProviderUnavailable
+from ..platform.completion import CompletionGuard
 from ..conversation_ports import (
     ConversationRepository,
     ConversationExecution,
@@ -39,6 +41,8 @@ class ConversationAgent:
         self.personal = personal
         # delivery：交付事实所有者；COMPLETED 不自动等于语义验收通过。
         self.delivery = delivery
+        # completion_guard：Verify-on-Stop 纯策略；不执行测试，只核对现有 durable evidence。
+        self.completion_guard = CompletionGuard()
 
     # 按 Turn 冻结 Goal 身份写长期进度；个人仓储负责拒绝旧 Run 的迟到覆盖。
     def _checkpoint_goal(
@@ -123,6 +127,7 @@ class ConversationAgent:
                         next_action="Review the unfinished work and admit a new turn.",
                     )
                     return
+                capability_id = None
                 try:
                     turn = self.repository.turn(run_id)
                     turn["control"] = self.control.view(run_id)
@@ -138,6 +143,7 @@ class ConversationAgent:
                             run_id, step["step"], decision_id, decision
                         )
                         self.repository.network_restored(run_id)
+                    capability_id = decision.capability_id
                         self.control.consume_compaction(run_id, decision_id=decision_id)
 
                     # 模型在途时到达的 Pause/Stop 在这里被观察；新工具派发前再次检查安全点。
@@ -179,6 +185,20 @@ class ConversationAgent:
                         )
                         return
                     else:
+                        stop_verdict = self.completion_guard.evaluate(
+                            self.repository.turn(run_id), decision
+                        )
+                        if not stop_verdict.allowed:
+                            self.repository.finish_observation(
+                                run_id, step["step"], stop_verdict.result()
+                            )
+                            if self.delivery is not None:
+                                self.delivery.update_root_work_item(
+                                    run_id,
+                                    status="RUNNING",
+                                    progress_note=stop_verdict.observation.message,
+                                )
+                            continue
                         if self.delivery is not None:
                             goal = (turn.get("snapshot") or {}).get("goal") or {}
                             self.delivery.prepare_completion(
@@ -233,7 +253,12 @@ class ConversationAgent:
                     PermissionError,
                     PatchContractError,
                 ) as exc:
-                    self.repository.reject(run_id, step["step"], str(exc))
+                    observation = observe_failure(exc, capability_id=capability_id)
+                    self.repository.finish_observation(
+                        run_id,
+                        step["step"],
+                        failure_result(observation),
+                    )
                 except BudgetExceeded as exc:
                     self.repository.block(run_id, "BUDGET_EXHAUSTED", str(exc))
                     self._checkpoint_goal(
