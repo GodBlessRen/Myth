@@ -265,11 +265,18 @@ class SqliteKnowledgeViews:
             )
             evidence = []
             for memory_id in evidence_ids:
+                try:
+                    self.memory.resolve(
+                        memory_id,
+                        resolution="L0",
+                        project_id=project_id,
+                        session_id=session_id,
+                    )
+                except (KeyError, PermissionError) as exc:
+                    raise ValueError(
+                        f"mental model evidence is not visible: {memory_id}"
+                    ) from exc
                 source = self.memory.get(memory_id)
-                if not source.get("active") or not self.memory._visible(
-                    source, project_id, session_id
-                ):
-                    raise ValueError(f"mental model evidence is not visible: {memory_id}")
                 if str(source.get("source_ref") or "").startswith("mental-model:"):
                     raise ValueError("mental model refresh cannot cite synthesized models")
                 evidence.append(
