@@ -36,14 +36,14 @@ Myth 的开发目标不是“堆更多 Agent 抽象”，而是把一个 **可�
    - UI 重构不能静默删除这些事实。
    - Executor heartbeat、Driver heartbeat、durable progress 是三件事；“进程还活着”不能冒充“任务在推进”。
 
-## 1.1 Harness Efficiency 不变量
+## 1.1 Context 与效率不变量
 
 - State 与 Context 分离：durable State 是真相，Context 只是 provider-visible projection。
-- 优化必须 fail-open；无法验证的 summary/reduction 不得覆盖原始 evidence。
+- Context/摘要/压缩失败必须回到原始 evidence；无法验证的 summary/reduction 不得覆盖原始来源。
 - 能由 Runtime 确定完成的后继不再额外调用 LLM，但只融合不需要新语义判断的动作。
 - Compact / fold / replay / reconnect 只改变表示，不制造新的 Goal progress / Verification。
-- 优化成本必须计算 upfront cost、outstanding debt、remaining horizon；缺测保持 N/A。
-- 每个 adaptive mechanism 都要留下 APPLIED / SKIPPED / DEFERRED / FALLBACK / FAILED / INELIGIBLE 与 reason code。
+- Context/缓存等效率判断只使用已测成本与剩余请求；upfront/debt 缺测保持 N/A。
+- 自适应 Context 选择和 Capability 可达性都要留下稳定结果与 reason code。
 - Eval 先过 capability floor，再比较效率；held-out final cases 不回流搜索。
 - Sub-Agent 优先共享 evidence refs，不继承完整父历史。
 
