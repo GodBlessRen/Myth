@@ -77,6 +77,7 @@ class LocalConversationExecution:
         capability_registry=None,
         subagent_registry=None,
         information_controller=None,
+        memory_store=None,
     ):
         # runtime：共享 Runtime 装配对象；其 SQLite 连接只在所属线程使用。
         # repository：用例仓储端口/实现；持久状态写入归此协作对象所有。
@@ -89,6 +90,8 @@ class LocalConversationExecution:
         self.intent_picker = RuleIntentPicker()
         # information_controller：实时信息准入策略；只控制已有读取/检索工具，不执行 I/O 或持有新状态。
         self.information_controller = information_controller or LiveInformationController()
+        # memory_store：Memory 的权威读取协作者；渐进披露工具只读，不授予执行权限。
+        self.memory_store = memory_store
         # verification：显式受信项目的固定 Python unittest profile；不提供任意 shell。
         self.verification = SqliteVerificationProfiles(runtime, repository)
         # receipts：持久效果日志协作对象；不存在日志不自动证明调用未发出。
@@ -822,6 +825,54 @@ class LocalConversationExecution:
             result.update(self._read_knowledge(turn, args))
         elif capability == "knowledge.resolve":
             result.update(self._resolve_knowledge(turn, args))
+        elif capability == "memory.search":
+            if self.memory_store is None:
+                raise RuntimeError("memory store is unavailable")
+            project_id = (turn["snapshot"].get("project") or {}).get("id")
+            values = self.memory_store.search_views(
+                args.get("query", ""),
+                limit=args.get("limit", 5),
+                project_id=project_id,
+                session_id=turn["session_id"],
+            )
+            result.update(
+                {
+                    "memories": values,
+                    "retrieval": {
+                        "backend": (
+                            self.memory_store.search_report(
+                                args.get("query", ""),
+                                limit=args.get("limit", 5),
+                                project_id=project_id,
+                                session_id=turn["session_id"],
+                            )["retrieval"]
+                        ),
+                        "resolution": "L0",
+                    },
+                }
+            )
+        elif capability == "memory.timeline":
+            if self.memory_store is None:
+                raise RuntimeError("memory store is unavailable")
+            result.update(
+                self.memory_store.timeline(
+                    args.get("memory_id", ""),
+                    radius=args.get("radius", 2),
+                    project_id=(turn["snapshot"].get("project") or {}).get("id"),
+                    session_id=turn["session_id"],
+                )
+            )
+        elif capability == "memory.resolve":
+            if self.memory_store is None:
+                raise RuntimeError("memory store is unavailable")
+            result.update(
+                self.memory_store.resolve(
+                    args.get("memory_id", ""),
+                    resolution=args.get("resolution", "L2"),
+                    project_id=(turn["snapshot"].get("project") or {}).get("id"),
+                    session_id=turn["session_id"],
+                )
+            )
         elif capability == "project.list":
             result.update(self.list_project(turn, args.get("path", ".")))
         elif capability == "project.read":
