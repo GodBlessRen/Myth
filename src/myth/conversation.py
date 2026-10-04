@@ -375,6 +375,13 @@ def calculate(expression):
 # 根据统一工具合同和冻结事实编译有界消息；Ollama 窗口与输出预留对齐，远端保持本地投影上限。
 def conversation_request(settings, snapshot, messages, activities, control=None):
     visible_ids = visible_tool_ids(TOOL_CATALOG, activities)
+    eval_mechanisms = snapshot.get("evaluation_harness_mechanisms")
+    if isinstance(eval_mechanisms, list):
+        enabled = set(str(item) for item in eval_mechanisms)
+        if "observation_recall" not in enabled:
+            visible_ids = tuple(
+                tool_id for tool_id in visible_ids if tool_id != "observation.read"
+            )
     visible_catalog = {tool_id: TOOL_CATALOG[tool_id] for tool_id in visible_ids}
     deferred_ids = [tool_id for tool_id in TOOL_CATALOG if tool_id not in visible_catalog]
     system = (
@@ -465,8 +472,14 @@ def conversation_request(settings, snapshot, messages, activities, control=None)
             max_bytes=max_bytes,
             compact_mode=False,
         )
-        boundary_count = sum(
-            1 for activity in activities if context_boundary(activity) is not None
+        auto_compact_enabled = (
+            not isinstance(eval_mechanisms, list)
+            or "context_compaction" in set(str(item) for item in eval_mechanisms)
+        )
+        boundary_count = (
+            sum(1 for activity in activities if context_boundary(activity) is not None)
+            if auto_compact_enabled
+            else 0
         )
         compact_projected = None
         compact_report = None
