@@ -155,24 +155,20 @@ class SqliteMemoryStore:
 
     # 显式重建 active Memory 的派生向量索引；安装/迁移后可调用，失败不改变任何记忆事实。
     def rebuild_vector_index(self) -> dict:
-        rows = self.list(active_only=True, limit=500)
+        rows = self.store.db.execute(
+            "SELECT * FROM workspace_memories WHERE active=1 ORDER BY rowid"
+        ).fetchall()
         if self.vector_index is None:
             return {"configured": False, "memories": len(rows), "synced": 0}
         synced = 0
         degraded = False
-        # list 有 500 上限；继续按 candidates 扫全库，避免“大库重建”静默截断。
-        cursor = 0
         seen = 0
-        while True:
-            page = self.candidates(cursor=cursor, page_size=500)
-            for item in page["candidates"]:
-                seen += 1
-                result = self._sync_vector_record(item)
-                synced += int(result.get("synced") or 0)
-                degraded = degraded or bool(result.get("degraded"))
-            cursor = page["next_cursor"]
-            if not page["has_more"]:
-                break
+        # 重建是显式维护动作，扫描所有 active scope；实际召回仍在 hydration 时重新检查 scope。
+        for row in rows:
+            seen += 1
+            result = self._sync_vector_record(dict(row))
+            synced += int(result.get("synced") or 0)
+            degraded = degraded or bool(result.get("degraded"))
         return {
             "configured": True,
             "memories": seen,
@@ -474,7 +470,35 @@ class SqliteMemoryStore:
             }
         return {**base, "text": text, "bytes": len(text.encode("utf-8"))}
 
-    # 搜索先只返回 L0 索引视图；调用者再用 timeline/resolve 升级，避免 top-k 直接把整段 Memory 塞进 Context。
+    # 搜索先只返回 L0 索引视图和同一次召回报告；避免为了观测元数据重复执行向量查询。
+    def search_view_report(
+        self,
+        query: str,
+        *,
+        kinds: Iterable[str | MemoryKind] | None = None,
+        limit: int = 6,
+        project_id: str | None = None,
+        session_id: str | None = None,
+    ) -> dict:
+        report = self.search_report(
+            query,
+            kinds=kinds,
+            limit=limit,
+            project_id=project_id,
+            session_id=session_id,
+        )
+        views = [
+            self.resolve(
+                item["memory_id"],
+                resolution="L0",
+                project_id=project_id,
+                session_id=session_id,
+            )
+            for item in report["memories"]
+        ]
+        return {"memories": views, "retrieval": report["retrieval"]}
+
+    # 兼容调用只取 L0 结果；完整观测使用 search_view_report，避免把正文直接塞进初始 Context。
     def search_views(
         self,
         query: str,
@@ -484,22 +508,13 @@ class SqliteMemoryStore:
         project_id: str | None = None,
         session_id: str | None = None,
     ) -> list[dict]:
-        report = self.search_report(
+        return self.search_view_report(
             query,
             kinds=kinds,
             limit=limit,
             project_id=project_id,
             session_id=session_id,
-        )
-        return [
-            self.resolve(
-                item["memory_id"],
-                resolution="L0",
-                project_id=project_id,
-                session_id=session_id,
-            )
-            for item in report["memories"]
-        ]
+        )["memories"]
 
     # 以命中 Memory 为锚点读取邻近同作用域记录，提供 chronology/navigation；不是新事实，也不改变 revision。
     def timeline(
