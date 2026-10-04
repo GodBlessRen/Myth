@@ -753,8 +753,8 @@ class LocalConversationExecution:
                 ],
                 "used_bytes": len(payload.encode("utf-8")),
                 "subagent_role": spec.role_id,
-                "evidence_bus": {
-                    "shared": "source_refs_only",
+                "source_ref_sharing": {
+                    "mode": "source_refs_only",
                     "parent_history_inherited": False,
                     "shared_refs": len(source_refs),
                 },
@@ -788,10 +788,9 @@ class LocalConversationExecution:
             "summary": worker.claim or "",
             "coverage": worker.goal_coverage or "",
             "evidence_refs": list(worker.evidence_refs),
-            "evidence_bus": {
+            "source_ref_sharing": {
                 "shared_refs": list(source_refs),
                 "accepted_refs": list(worker.evidence_refs),
-                "conversation_bus": False,
                 "history_inherited": False,
             },
             "remaining": list(worker.remaining),
