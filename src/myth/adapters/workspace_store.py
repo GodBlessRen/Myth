@@ -1001,7 +1001,7 @@ class SqliteWorkspaceRepository:
         )
 
     # 根据持久未决效果选择 INTERRUPTED 或 UNKNOWN，保存恢复游标；安全中断才可继续规划。
-    def interrupt(self, rid, reason):
+    def interrupt(self, rid, reason, *, record_progress=True):
         # 崩溃可能发生在收据发布与数据库结算之间；先核对已有模型证据，不能把已知零派发永久锁在 UNKNOWN。
         self.decisions.recover(rid)
         # 本地事务边界：下列写入一起提交，异常整体回滚；文件/网络效果须在事务外另行核对。
@@ -1051,6 +1051,7 @@ class SqliteWorkspaceRepository:
                 ),
                 recovery_state=recovery,
                 detail=reason,
+                record_progress=record_progress,
             )
             self.store._event(
                 db,
@@ -1072,7 +1073,10 @@ class SqliteWorkspaceRepository:
         lease = self.driver_lease(rid)
         if lease is None or lease["expired"]:
             return self.interrupt(
-                rid, "Driver heartbeat expired; durable checkpoint preserved."
+                rid,
+                "Driver heartbeat expired; durable checkpoint preserved.",
+                # Lease/恢复扫描只是观察，不得刷新 durable progress 时间。
+                record_progress=False,
             )
         return turn
 
