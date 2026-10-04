@@ -560,7 +560,13 @@ class DurableExecutor:
                 except Exception as exc:
                     errors.append(f"{run_id}: {type(exc).__name__}: {exc}")
 
-            # 先恢复/驱动已准入的 Mental Model refresh；UNKNOWN 不在可派发集合，避免盲重放。
+            # UNKNOWN 只核对迟到 durable Receipt；该步骤不调用 Provider，成功后仍恢复同一 occurrence / Run。
+            with MythRuntime(self.root) as runtime:
+                MentalModelRefreshScheduler(Workspace(runtime)).reconcile_unknown(
+                    limit=self.max_active * 4
+                )
+
+            # 再恢复/驱动已准入的 Mental Model refresh；未被 Receipt 解决的 UNKNOWN 不在可派发集合。
             with MythRuntime(self.root) as runtime:
                 refresh_runs = MentalModelRefreshScheduler(
                     Workspace(runtime)
