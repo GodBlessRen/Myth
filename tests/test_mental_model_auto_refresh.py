@@ -1,0 +1,207 @@
+"""回归边界：Mental Model 自动后台 Refresh 复用 Core Run / DecisionRuntime / DurableExecutor。
+测试固定 opt-in、去重、水位、Lease、UNKNOWN、退避与发布；替身模型通过不等同真实供应商质量。
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+import tempfile
+import time
+import unittest
+
+from myth.models import ModelResult, ProviderStatus
+from myth.runtime import MythRuntime
+from myth.workspace import Workspace
+
+
+# RefreshProvider：只返回固定 synthesis；可注入 Ticket 后异常或在 invoke 中改变 Memory 制造并发水位竞争。
+class RefreshProvider:
+    provider_id = "ollama"
+
+    # 保存调用次数与可选副作用；副作用仅用于测试 prepare->commit 竞争窗口。
+    def __init__(self, *, workspace=None, fail_after_ticket=False, mutate_source=False):
+        # workspace：可选同线程测试装配；生产 Provider 不应直接写 Memory。
+        self.workspace = workspace
+        # fail_after_ticket：模拟请求已获 Ticket 后连接结果不明。
+        self.fail_after_ticket = fail_after_ticket
+        # mutate_source：在模型返回前追加来源变化，验证旧 synthesis 不发布。
+        self.mutate_source = mutate_source
+        # calls：替身真实 invoke 次数；用于证明 UNKNOWN 不被后台重复派发。
+        self.calls = 0
+
+    # check：只证明替身连通；不证明模型质量。
+    def check(self):
+        return ProviderStatus("ollama", True, auth_type="none", details={"models": ["test"]})
+
+    # invoke：从固定请求里取 admitted source_ref，返回合法 request_completion wire。
+    def invoke(self, request):
+        self.calls += 1
+        if self.fail_after_ticket:
+            raise RuntimeError("ambiguous timeout after refresh Ticket")
+        payload = json.loads(request.messages[-1].content)
+        if self.mutate_source and self.workspace is not None:
+            self.workspace.memory.remember(
+                kind="semantic",
+                text="A newer architecture fact arrived during synthesis.",
+                source_ref="note:concurrent-refresh-change",
+            )
+        refs = [item["source_ref"] for item in payload["sources"][:2]]
+        decision = {
+            "decision_type": "request_completion",
+            "reason": "Synthesize only admitted Memory evidence.",
+            "capability_id": "",
+            "arguments_json": "{}",
+            "question": "",
+            "missing_info_category": "",
+            "claim": "Myth keeps durable evidence-backed knowledge current.",
+            "goal_coverage": "mental-model-refresh",
+            "evidence_refs": refs,
+            "remaining": [],
+        }
+        return ModelResult(
+            text=json.dumps(decision),
+            usage={"model_calls": 1, "input_tokens": 120, "output_tokens": 40},
+            raw={
+                "id": f"refresh-{self.calls}",
+                "provider": "ollama",
+                "model": "test",
+                "status": "completed",
+                "usage": {"input_tokens": 120, "output_tokens": 40},
+            },
+            response_id=f"refresh-{self.calls}",
+        )
+
+
+# MentalModelAutoRefreshTests：每个用例使用独立 SQLite；后台语义必须从 durable facts 恢复而不是进程缓存。
+class MentalModelAutoRefreshTests(unittest.TestCase):
+    # 建立固定 Memory、Mental Model 与模型设置；默认未启用自动刷新。
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.runtime = MythRuntime(self.root)
+        self.workspace = Workspace(self.runtime)
+        self.workspace.repository.save_settings(
+            {
+                "provider": "ollama",
+                "model": "test",
+                "max_output_tokens": 1024,
+                "num_ctx": 8192,
+            }
+        )
+        self.source = self.workspace.memory.remember(
+            kind="semantic",
+            text="Myth uses SQLite as authority and durable Evidence.",
+            source_ref="decision:auto-refresh-source",
+        )
+        self.model = self.workspace.mental_models.create_model(
+            name="Architecture",
+            source_query="Myth SQLite Evidence",
+        )
+        self.refresh = self.workspace.mental_model_refresh
+
+    # 关闭 Runtime，避免数据库连接跨测试；临时目录拥有所有模型收据。
+    def tearDown(self):
+        self.runtime.close()
+        self.tmp.cleanup()
+
+    # 自动刷新必须显式 opt-in，并冻结配置时的 Provider/Model；全局设置后改不倒写 policy。
+    def test_policy_is_opt_in_and_freezes_model_settings(self):
+        self.assertEqual(self.refresh.due(), [])
+        policy = self.refresh.configure(
+            self.model["model_id"], enabled=True, min_interval_seconds=60
+        )
+        self.assertTrue(policy["enabled"])
+        self.assertEqual(policy["settings"]["model"], "test")
+        self.assertEqual(len(self.refresh.due()), 1)
+
+        self.workspace.repository.save_settings(
+            {"provider": "ollama", "model": "later-model", "num_ctx": 8192}
+        )
+        frozen = self.refresh.policy(self.model["model_id"])
+        self.assertEqual(frozen["settings"]["model"], "test")
+
+    # 同一个 source watermark 只准入一个 Core Run；pending occurrence 会吸收重复扫描。
+    def test_same_watermark_coalesces_to_one_occurrence(self):
+        self.refresh.configure(self.model["model_id"], enabled=True, min_interval_seconds=60)
+        run_id = self.refresh.admit(self.model["model_id"], now=1000.0)
+        again = self.refresh.admit(self.model["model_id"], now=1000.5)
+
+        self.assertEqual(run_id, again)
+        count = self.runtime.store.db.execute(
+            "SELECT COUNT(*) AS n FROM mental_model_refresh_occurrences"
+        ).fetchone()["n"]
+        self.assertEqual(count, 1)
+
+    # per-occurrence lease 阻止双 worker；过期后新 owner 可接管同一 Run，而不是新建 occurrence。
+    def test_refresh_lease_allows_only_one_live_owner(self):
+        self.refresh.configure(self.model["model_id"], enabled=True, min_interval_seconds=60)
+        run_id = self.refresh.admit(self.model["model_id"], now=1000.0)
+
+        self.assertTrue(self.refresh.claim(run_id, "worker-a", ttl_seconds=8, now=1000.0))
+        self.assertFalse(self.refresh.claim(run_id, "worker-b", ttl_seconds=8, now=1005.0))
+        self.assertTrue(self.refresh.claim(run_id, "worker-b", ttl_seconds=8, now=1009.0))
+        self.assertFalse(self.refresh.heartbeat(run_id, "worker-a", now=1010.0))
+        self.assertTrue(self.refresh.heartbeat(run_id, "worker-b", now=1010.0))
+
+    # 成功刷新走一次模型 Ticket/Receipt，提交 backing Memory 后 occurrence 与 Core Run 同为成功。
+    def test_successful_refresh_commits_materialized_view_and_core_run(self):
+        self.refresh.configure(self.model["model_id"], enabled=True, min_interval_seconds=60)
+        run_id = self.refresh.admit(self.model["model_id"])
+        provider = RefreshProvider()
+
+        result = self.refresh.run(run_id, provider)
+
+        self.assertEqual(result["state"], "SUCCEEDED")
+        self.assertEqual(provider.calls, 1)
+        self.assertEqual(self.runtime.store.get_run(run_id)["state"], "SUCCEEDED")
+        model = self.workspace.mental_models.model(self.model["model_id"], resolution="L2")
+        self.assertEqual(model["freshness"], "fresh")
+        self.assertEqual(
+            model["content"]["text"],
+            "Myth keeps durable evidence-backed knowledge current.",
+        )
+        self.assertGreaterEqual(model["content"]["proof_count"], 1)
+
+    # Ticket 后结果不明必须进入 UNKNOWN/RECOVERING；后续 due/dispatch 都不能绕过原模型机会。
+    def test_unknown_refresh_is_never_auto_redispatched(self):
+        self.refresh.configure(self.model["model_id"], enabled=True, min_interval_seconds=60)
+        run_id = self.refresh.admit(self.model["model_id"])
+        provider = RefreshProvider(fail_after_ticket=True)
+
+        result = self.refresh.run(run_id, provider)
+
+        self.assertEqual(result["state"], "UNKNOWN")
+        self.assertEqual(self.runtime.store.get_run(run_id)["state"], "RECOVERING")
+        self.assertEqual(self.refresh.dispatchable_runs(), [])
+        self.assertEqual(self.refresh.due(), [])
+        self.assertEqual(provider.calls, 1)
+
+    # 模型调用期间来源水位变化时，旧 synthesis 已有收据但不能发布；Run 明确 SUPERSEDED/CANCELLED。
+    def test_source_change_during_synthesis_supersedes_old_refresh(self):
+        self.refresh.configure(self.model["model_id"], enabled=True, min_interval_seconds=60)
+        run_id = self.refresh.admit(self.model["model_id"])
+        provider = RefreshProvider(workspace=self.workspace, mutate_source=True)
+
+        result = self.refresh.run(run_id, provider)
+
+        self.assertEqual(result["state"], "SUPERSEDED")
+        self.assertEqual(self.runtime.store.get_run(run_id)["state"], "CANCELLED")
+        current = self.workspace.mental_models.model(self.model["model_id"], resolution="L2")
+        self.assertEqual(current["freshness"], "unmaterialized")
+        self.assertIsNone(current["content"])
+
+    # policy retry_at 必须约束已准入 occurrence 的重新派发，不能每两秒忽略退避再次探测。
+    def test_dispatchable_respects_policy_backoff(self):
+        self.refresh.configure(self.model["model_id"], enabled=True, min_interval_seconds=60)
+        run_id = self.refresh.admit(self.model["model_id"], now=1000.0)
+        self.refresh.defer(self.model["model_id"], "provider disconnected")
+        policy = self.refresh.policy(self.model["model_id"])
+
+        self.assertGreater(policy["retry_at"], time.time())
+        self.assertNotIn(run_id, self.refresh.dispatchable_runs(now=time.time()))
+        self.assertIn(run_id, self.refresh.dispatchable_runs(now=policy["retry_at"] + 0.1))
+
+
+if __name__ == "__main__":
+    unittest.main()
