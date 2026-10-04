@@ -13,6 +13,7 @@ from myth.platform.efficiency import (
     RecoveryFailure,
     assess_reachability,
     decide_optimization,
+    next_recovery_action,
 )
 from myth.platform.evidence import (
     EvidenceKind,
@@ -89,13 +90,11 @@ class EfficiencyControlTests(unittest.TestCase):
     def test_recovery_ladder_keeps_unknown_and_representation_distinct(self):
         self.assertEqual(
             RecoveryAction.RECONCILE,
-            __import__("myth.platform.efficiency", fromlist=["next_recovery_action"])
-            .next_recovery_action(RecoveryFailure.UNKNOWN, RecoveryBudget()),
+            next_recovery_action(RecoveryFailure.UNKNOWN, RecoveryBudget()),
         )
         self.assertEqual(
             RecoveryAction.REPAIR,
-            __import__("myth.platform.efficiency", fromlist=["next_recovery_action"])
-            .next_recovery_action(RecoveryFailure.REPRESENTATION, RecoveryBudget()),
+            next_recovery_action(RecoveryFailure.REPRESENTATION, RecoveryBudget()),
         )
 
 
