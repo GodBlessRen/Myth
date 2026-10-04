@@ -70,3 +70,5 @@ Workflow、Routing/Parallel、Multi-Agent、MCP/A2A 和更复杂 Evolution 暂�
 术语保持简单：`Champion / Loser / Working / Drift`。完整边界见 [SOTA_ROUTE.md](SOTA_ROUTE.md)。
 
 下一阶段固定任务每题继续重复多次，同时报告 trajectory variance，并联合分析 Reasoning Cost / Reasoning Summary / Action Path，验证 SOTA Route 是否让同模型更稳定地复现 Champion 路线，而不是只提高平均成功率。
+
+Historical Replay World 只作为这批重复真实 Run 的实验性离线利用方式：它复用已发生路径降低策略研究成本，但不能替代新的真实试次、固定 Eval 或发布验证。
