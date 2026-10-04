@@ -87,6 +87,19 @@ Managed Agent: Goal → AgentPort → Remote Managed Agent
 Personal:      Goal ← Trigger → Run ... over time
 ```
 
+### Delegation / Sub-Agent 不变量
+
+Myth 对 Multi-Agent 的稳定定义是 **Context Isolation + Contracted Return**，不是“Agent 越多越聪明”。
+
+- 是否委派属于父 LLM 的 Strategy 选择；Runtime 不增加强制 Multi-Agent 层，也不靠固定分类器替模型决定。
+- Child 只得到父级显式传入的 task、bounded context 与已准入 source refs；完整父对话、Memory 与工具目录不会自动继承。
+- Child 权限不得超过父级。当前 `agent.delegate` 只连接一个 read-only isolated worker：无工具、无写入、无用户交互、无递归委派。
+- Child 返回 summary / coverage / evidence refs / remaining 等合同结果；工作轨迹不回灌父 Context。
+- Child 输出属于 Observation，不是 Verification。最终工具执行、证据核对、验收与交付仍由父 Agent / Runtime 负责。
+- 委派本身消耗父 Run 的模型与工具预算，并使用稳定 request identity；已发出但结果不明时继续遵守 UNKNOWN / RECONCILE。
+
+当前状态：**connected**。Conversation Agent 已把 `agent.delegate` 暴露为可选能力，是否调用由当前主模型自行判断；第一版刻意保持单层、只读、可观测。
+
 ## 4. Intent Pick 与 Information
 
 ### Intent Pick
