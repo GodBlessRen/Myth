@@ -37,6 +37,9 @@ CREATE TABLE IF NOT EXISTS mental_model_refresh_occurrences(
     created_at REAL NOT NULL,
     updated_at REAL NOT NULL,
     error TEXT,
+    owner_id TEXT,
+    lease_until REAL,
+    heartbeat_at REAL,
     UNIQUE(model_id, source_change_seq)
 );
 CREATE INDEX IF NOT EXISTS idx_mm_refresh_occurrences_state
@@ -63,6 +66,26 @@ class MentalModelRefreshScheduler:
         # decisions：模型 Ticket/Receipt/UNKNOWN 协调器；自动刷新不另造模型调用协议。
         self.decisions = workspace.repository.decisions
         self.store.db.executescript(SCHEMA)
+        # additive migration：旧实验库补齐 per-occurrence lease；不存在历史 owner 时视为可接管。
+        columns = {
+            row["name"]
+            for row in self.store.db.execute(
+                "PRAGMA table_info(mental_model_refresh_occurrences)"
+            ).fetchall()
+        }
+        with self.store.tx() as db:
+            if "owner_id" not in columns:
+                db.execute(
+                    "ALTER TABLE mental_model_refresh_occurrences ADD COLUMN owner_id TEXT"
+                )
+            if "lease_until" not in columns:
+                db.execute(
+                    "ALTER TABLE mental_model_refresh_occurrences ADD COLUMN lease_until REAL"
+                )
+            if "heartbeat_at" not in columns:
+                db.execute(
+                    "ALTER TABLE mental_model_refresh_occurrences ADD COLUMN heartbeat_at REAL"
+                )
 
     # configure：显式 opt-in/out，并冻结当前模型设置；自动刷新不会随全局设置悄悄换模型。
     def configure(
@@ -155,6 +178,9 @@ class MentalModelRefreshScheduler:
             return None
         prepared = self.views.prepare_refresh(model_id, limit=12, resolution="L1")
         source_change_seq = int(prepared["observed_change_seq"])
+        if not prepared["sources"]:
+            self.defer(model_id, "no admissible Memory sources for refresh")
+            return None
         existing = self.store.db.execute(
             "SELECT run_id,state FROM mental_model_refresh_occurrences "
             "WHERE model_id=? AND source_change_seq=?",
@@ -230,14 +256,87 @@ class MentalModelRefreshScheduler:
             raise KeyError(run_id)
         return dict(row)
 
-    # dispatchable_runs：只返回可继续的 ADMITTED/RUNNING；UNKNOWN 必须人工/专门 reconcile 后才能继续。
-    def dispatchable_runs(self, *, limit: int = 16) -> list[str]:
+    # dispatchable_runs：只返回策略退避已到且 occurrence lease 空闲/过期的工作；UNKNOWN 永不自动重放。
+    def dispatchable_runs(
+        self, *, now: float | None = None, limit: int = 16
+    ) -> list[str]:
+        now = time.time() if now is None else float(now)
         rows = self.store.db.execute(
-            "SELECT run_id FROM mental_model_refresh_occurrences "
-            "WHERE state IN ('ADMITTED','RUNNING') ORDER BY created_at LIMIT ?",
-            (max(1, min(int(limit), 128)),),
+            "SELECT o.run_id FROM mental_model_refresh_occurrences o "
+            "JOIN mental_model_refresh_policies p USING(model_id) "
+            "WHERE o.state IN ('ADMITTED','RUNNING') AND p.enabled=1 AND p.retry_at<=? "
+            "AND (o.owner_id IS NULL OR o.lease_until IS NULL OR o.lease_until<=?) "
+            "ORDER BY o.created_at LIMIT ?",
+            (now, now, max(1, min(int(limit), 128))),
         ).fetchall()
         return [str(row["run_id"]) for row in rows]
+
+    # claim：同一 refresh occurrence 只允许一个活 owner；过期 lease 可被新 DurableExecutor 接管原 Run。
+    def claim(
+        self,
+        run_id: str,
+        owner_id: str,
+        *,
+        ttl_seconds: float = 8.0,
+        now: float | None = None,
+    ) -> bool:
+        now = time.time() if now is None else float(now)
+        ttl = max(2.0, min(float(ttl_seconds), 60.0))
+        owner = str(owner_id or "").strip()
+        if not owner or len(owner) > 300:
+            raise ValueError("refresh owner_id is required")
+        with self.store.tx() as db:
+            row = db.execute(
+                "SELECT state,owner_id,lease_until FROM mental_model_refresh_occurrences "
+                "WHERE run_id=?",
+                (run_id,),
+            ).fetchone()
+            if row is None:
+                raise KeyError(run_id)
+            if row["state"] not in {"ADMITTED", "RUNNING"}:
+                return False
+            if (
+                row["owner_id"]
+                and row["owner_id"] != owner
+                and row["lease_until"] is not None
+                and float(row["lease_until"]) > now
+            ):
+                return False
+            db.execute(
+                "UPDATE mental_model_refresh_occurrences SET owner_id=?,lease_until=?,"
+                "heartbeat_at=?,updated_at=? WHERE run_id=?",
+                (owner, now + ttl, now, now, run_id),
+            )
+        return True
+
+    # heartbeat：仅当前 owner 可续租；失败表示执行权已被收回，旧线程不得再发起新的模型工作。
+    def heartbeat(
+        self,
+        run_id: str,
+        owner_id: str,
+        *,
+        ttl_seconds: float = 8.0,
+        now: float | None = None,
+    ) -> bool:
+        now = time.time() if now is None else float(now)
+        ttl = max(2.0, min(float(ttl_seconds), 60.0))
+        with self.store.tx() as db:
+            changed = db.execute(
+                "UPDATE mental_model_refresh_occurrences SET lease_until=?,heartbeat_at=?,"
+                "updated_at=? WHERE run_id=? AND owner_id=? "
+                "AND state IN ('ADMITTED','RUNNING')",
+                (now + ttl, now, now, run_id, str(owner_id)),
+            )
+        return bool(changed.rowcount)
+
+    # release：只释放自己的 lease；晚到旧 owner 不能清掉新 owner 的接管事实。
+    def release(self, run_id: str, owner_id: str) -> None:
+        with self.store.tx() as db:
+            db.execute(
+                "UPDATE mental_model_refresh_occurrences SET owner_id=NULL,lease_until=NULL "
+                "WHERE run_id=? AND owner_id=?",
+                (run_id, str(owner_id)),
+            )
 
     # _request：把固定 sources 投影成一次性 synthesis 请求；模型只能返回 completion claim，不得到工具或执行权限。
     def _request(self, run_id: str, prepared: dict[str, Any], settings: dict[str, Any]) -> ModelRequest:
@@ -307,12 +406,13 @@ class MentalModelRefreshScheduler:
                     "error='source changed before dispatch' WHERE run_id=?",
                     (time.time(), run_id),
                 )
-            self.store.transition_run(
-                run_id,
-                RunState.CANCELLED,
-                event_kind="MentalModelRefreshSuperseded",
-                payload={"model_id": occurrence["model_id"]},
-            )
+                self.store.transition_run(
+                    run_id,
+                    RunState.CANCELLED,
+                    event_kind="MentalModelRefreshSuperseded",
+                    payload={"model_id": occurrence["model_id"]},
+                    _db=db,
+                )
             return self.occurrence(run_id)
 
         with self.store.tx() as db:
@@ -345,12 +445,13 @@ class MentalModelRefreshScheduler:
                     "UPDATE mental_model_refresh_occurrences SET state='UNKNOWN',updated_at=?,error=? WHERE run_id=?",
                     (time.time(), str(exc)[:1000], run_id),
                 )
-            self.store.transition_run(
-                run_id,
-                RunState.RECOVERING,
-                event_kind="MentalModelRefreshUnknown",
-                payload={"reason": str(exc)[:500]},
-            )
+                self.store.transition_run(
+                    run_id,
+                    RunState.RECOVERING,
+                    event_kind="MentalModelRefreshUnknown",
+                    payload={"reason": str(exc)[:500]},
+                    _db=db,
+                )
             return self.occurrence(run_id)
         except Exception as exc:
             # Ticket 后的未知异常由 DecisionRuntime 已转 UNKNOWN；已知解析/供应商失败则显式 FAILED。
@@ -364,12 +465,13 @@ class MentalModelRefreshScheduler:
                     "UPDATE mental_model_refresh_occurrences SET state=?,updated_at=?,error=? WHERE run_id=?",
                     (state, time.time(), f"{type(exc).__name__}: {exc}"[:1000], run_id),
                 )
-            self.store.transition_run(
-                run_id,
-                RunState.RECOVERING if state == "UNKNOWN" else RunState.FAILED,
-                event_kind="MentalModelRefreshFailed",
-                payload={"state": state, "reason": f"{type(exc).__name__}: {exc}"[:500]},
-            )
+                self.store.transition_run(
+                    run_id,
+                    RunState.RECOVERING if state == "UNKNOWN" else RunState.FAILED,
+                    event_kind="MentalModelRefreshFailed",
+                    payload={"state": state, "reason": f"{type(exc).__name__}: {exc}"[:500]},
+                    _db=db,
+                )
             if state == "FAILED":
                 self.defer(str(occurrence["model_id"]), str(exc))
             return self.occurrence(run_id)
@@ -406,12 +508,13 @@ class MentalModelRefreshScheduler:
                         "UPDATE mental_model_refresh_occurrences SET state='SUPERSEDED',updated_at=?,error=? WHERE run_id=?",
                         (time.time(), str(exc)[:1000], run_id),
                     )
-                self.store.transition_run(
-                    run_id,
-                    RunState.CANCELLED,
-                    event_kind="MentalModelRefreshSuperseded",
-                    payload={"reason": str(exc)[:500]},
-                )
+                    self.store.transition_run(
+                        run_id,
+                        RunState.CANCELLED,
+                        event_kind="MentalModelRefreshSuperseded",
+                        payload={"reason": str(exc)[:500]},
+                        _db=db,
+                    )
                 return self.occurrence(run_id)
             self.fail(run_id, str(exc))
             return self.occurrence(run_id)
@@ -421,14 +524,21 @@ class MentalModelRefreshScheduler:
                 "UPDATE mental_model_refresh_occurrences SET state='SUCCEEDED',updated_at=?,error=NULL WHERE run_id=?",
                 (time.time(), run_id),
             )
-            db.execute("UPDATE mental_model_refresh_policies SET retry_at=0,retry_failures=0,last_error=NULL,updated_at=CURRENT_TIMESTAMP WHERE model_id=?",
-                       (occurrence["model_id"],))
-        self.store.transition_run(
-            run_id,
-            RunState.SUCCEEDED,
-            event_kind="MentalModelRefreshCommitted",
-            payload={"model_id": occurrence["model_id"], "evidence_count": len(cited_ids)},
-        )
+            db.execute(
+                "UPDATE mental_model_refresh_policies SET retry_at=0,retry_failures=0,"
+                "last_error=NULL,updated_at=CURRENT_TIMESTAMP WHERE model_id=?",
+                (occurrence["model_id"],),
+            )
+            self.store.transition_run(
+                run_id,
+                RunState.SUCCEEDED,
+                event_kind="MentalModelRefreshCommitted",
+                payload={
+                    "model_id": occurrence["model_id"],
+                    "evidence_count": len(cited_ids),
+                },
+                _db=db,
+            )
         return self.occurrence(run_id)
 
     # fail：已知失败终止本 occurrence 并进入有界退避；不会覆盖已有 materialized content。
@@ -439,12 +549,13 @@ class MentalModelRefreshScheduler:
                 "UPDATE mental_model_refresh_occurrences SET state='FAILED',updated_at=?,error=? WHERE run_id=?",
                 (time.time(), str(reason)[:1000], run_id),
             )
-        self.store.transition_run(
-            run_id,
-            RunState.FAILED,
-            event_kind="MentalModelRefreshFailed",
-            payload={"state": "FAILED", "reason": str(reason)[:500]},
-        )
+            self.store.transition_run(
+                run_id,
+                RunState.FAILED,
+                event_kind="MentalModelRefreshFailed",
+                payload={"state": "FAILED", "reason": str(reason)[:500]},
+                _db=db,
+            )
         self.defer(str(occurrence["model_id"]), reason)
 
     # defer：失败只推迟未来新水位机会；UNKNOWN occurrence 不会靠 retry_at 绕过原结果核对。
