@@ -189,6 +189,7 @@ class EvolutionControlPlaneTests(unittest.TestCase):
                 "measured_cost": 0,
                 "unsupported_count": 0,
             }
+            # 构造同一固定题的完整评测结果，只改变明确的 input_tokens 成本维度。
             def result(policy_id, input_tokens):
                 return {
                     "suite_id": suite_id,
