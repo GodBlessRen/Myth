@@ -74,3 +74,26 @@ fixed capability / safety floor
 Discovery/Search case 与 final held-out case 的身份必须不相交。Final 只产生接受/拒绝证据，不能回流指导同一候选继续修改；否则它已经不再是 held-out。
 
 Historical Replay、SOTA Route 和单次漂亮轨迹可以产生 hypothesis，但不能替代新的固定评测。
+
+## Task × Harness × Mechanism attribution
+
+Outcome attribution 不允许从 aggregate score 猜原因。Evaluation 以固定 Task/case 为最小单位，分别保存：
+
+- `policy_id`：策略身份；
+- `harness_id`：本次完整 Harness 变体身份；
+- `harness_mechanisms`：该变体明确启用的机制集合；
+- `mechanism_events`：该 Task 实际观察到的机制触发/回退线索；
+- verdict / metrics / evidence refs。
+
+受控归因固定使用：
+
+```text
+baseline
+full candidate
+one-mechanism
+leave-one-out
+```
+
+只有同一 Task 同时拥有 one-mechanism 与 leave-one-out 证据时，Evaluation 才允许标记 `supported_benefit` / `supported_harm`；否则保持 `insufficient` 或 `mixed_or_interaction`。
+
+内置 disposable runner 当前真正能切换的机制只有 `context_compaction`、`observation_recall`、`action_fusion`。未知机制直接拒绝，避免“只换标签、不换行为”的伪消融。实验 Run 进入 discovery 分区，不能直接作为 final Promote 证据。
