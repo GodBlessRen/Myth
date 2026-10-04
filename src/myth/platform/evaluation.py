@@ -279,6 +279,27 @@ def release_gate(
     return True, "quality gate passed"
 
 
+# 只有这些明确成本 meter 参与默认效率门；检索命中数、附件数等业务指标不能被误当作“越少越好”的成本。
+EFFICIENCY_METERS = frozenset(
+    {
+        "input_tokens",
+        "output_tokens",
+        "total_tokens",
+        "reasoning_tokens",
+        "model_calls",
+        "tool_calls",
+        "steps",
+        "write_bytes",
+        "tool_bytes",
+        "wall_ms",
+        "provider_wall_ms",
+        "changed_lines",
+        "human_attention",
+        "cost",
+    }
+)
+
+
 # 能力下限 + Pareto 效率发布门：候选可以更省，但不能用未测/安全回归/超容差能力损失换取效率。
 def capability_efficiency_gate(
     baseline: EvalReport,
@@ -286,6 +307,7 @@ def capability_efficiency_gate(
     comparisons: Iterable[PairedEvalComparison],
     *,
     max_pass_rate_loss: float = 0.0,
+    cost_meters: frozenset[str] = EFFICIENCY_METERS,
 ) -> tuple[bool, str, dict[str, float]]:
     if baseline.suite_id != candidate.suite_id or baseline.total != candidate.total:
         return False, "baseline/candidate suite identity differs", {}
@@ -309,6 +331,8 @@ def capability_efficiency_gate(
         return False, "paired attribution is incomplete", {}
     for item in values:
         for meter, delta in item.cost_delta.items():
+            if meter not in cost_meters:
+                continue
             aggregate[meter] = aggregate.get(meter, 0.0) + float(delta)
     if not aggregate:
         return False, "no common measured efficiency meters", {}
@@ -322,9 +346,13 @@ def capability_efficiency_gate(
 # 从同题不同 policy 的观测构造 task×policy 与 outcome flip 投影；只做归因导航，不把相关性冒充机制因果。
 def attribution_matrix(
     observations: Iterable[EvalObservation],
+    *,
+    baseline_policy_id: str,
 ) -> dict[str, object]:
     values = tuple(observations)
     policies = sorted({item.policy_id for item in values if item.policy_id})
+    if baseline_policy_id not in policies:
+        raise ValueError("attribution requires an explicit observed baseline_policy_id")
     cases = sorted({item.case_id for item in values})
     matrix = {
         case_id: {
@@ -342,8 +370,8 @@ def attribution_matrix(
     }
     flips = []
     if len(policies) >= 2:
-        baseline = policies[0]
-        for candidate in policies[1:]:
+        baseline = baseline_policy_id
+        for candidate in (policy for policy in policies if policy != baseline):
             for case_id in cases:
                 before = matrix[case_id][baseline]
                 after = matrix[case_id][candidate]
@@ -368,6 +396,7 @@ def attribution_matrix(
                     )
     return {
         "policies": policies,
+        "baseline_policy_id": baseline_policy_id,
         "cases": cases,
         "matrix": matrix,
         "outcome_flips": flips,
