@@ -133,6 +133,34 @@ def _wants_reasoning_summary(model_request: ModelRequest) -> bool:
     return model.startswith(("gpt-5", "gpt-6", "o1", "o3", "o4"))
 
 
+# 递归保留供应商返回的未知元数据，明确剔除凭据/不透明推理状态/私有 reasoning body；未知字段默认保留供后续分析。
+_PROVIDER_EVIDENCE_DENY = {
+    "authorization",
+    "api_key",
+    "access_token",
+    "refresh_token",
+    "id_token",
+    "encrypted_content",
+    "reasoning_text",
+}
+
+
+def _provider_evidence(value):
+    if isinstance(value, dict):
+        result = {}
+        for key, item in value.items():
+            if str(key).lower() in _PROVIDER_EVIDENCE_DENY:
+                continue
+            # reasoning.content 可能承载供应商私有思维正文；保留 reasoning 的状态/摘要等元数据，但不保存该正文。
+            if key == "content" and value.get("type") == "reasoning":
+                continue
+            result[key] = _provider_evidence(item)
+        return result
+    if isinstance(value, list):
+        return [_provider_evidence(item) for item in value]
+    return value
+
+
 # 把 Responses output 限制为可观察结果；加密 reasoning state 不复制进分析对象。
 def _observable_output(value: dict) -> list[dict]:
     output: list[dict] = []
@@ -367,13 +395,13 @@ class OpenAIResponsesProvider:
         usage = _usage(value)
         if first_token_ms is not None:
             usage["time_to_first_token_ms"] = first_token_ms
-        # 只保留可观察结果/用量/公开 Reasoning Summary；encrypted_content 属不透明推理状态，不进入分析账本。
+        # Provider Evidence 默认保留远端未知元数据，便于未来比较；凭据与私有 reasoning body 由 denylist 剔除。
         reasoning_summary = _extract_reasoning_summary(value)
-        safe_value = {
-            **{k: value[k] for k in ("id", "status", "usage", "reasoning") if k in value},
-            "output": _observable_output(value),
-            "reasoning_summary": reasoning_summary,
-        }
+        safe_value = _provider_evidence(value)
+        safe_value["output"] = _observable_output(value)
+        safe_value["reasoning_summary"] = reasoning_summary
+        safe_value["provider"] = self.provider_id
+        safe_value["provider_name"] = self.provider_name
         safe_raw = redact_response(safe_value, token)
         return ModelResult(
             text=redact_response(output_text, token),
