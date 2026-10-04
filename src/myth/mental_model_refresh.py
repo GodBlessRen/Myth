@@ -352,15 +352,18 @@ class MentalModelRefreshScheduler:
                 }
             )
         system = (
-            "You synthesize one durable Mental Model from the supplied Memory evidence. "
+            "You update one durable Mental Model from admitted Memory evidence. "
+            "previous_content is only the prior document baseline, never evidence. "
+            "Preserve still-supported wording where practical to reduce prose drift; change only what the supplied Memory evidence justifies. "
             "Do not invent facts, do not cite information outside the supplied sources, and do not issue tool calls. "
-            "Return request_completion only. Put the complete synthesized document in claim. "
+            "Return request_completion only. Put the complete revised document in claim. "
             "Copy every source_ref you actually relied on into evidence_refs. Keep remaining empty."
         )
         user = canonical_json(
             {
                 "mental_model": prepared["name"],
                 "question": prepared["source_query"],
+                "previous_content": prepared.get("previous_content") or "",
                 "sources": sources,
                 "rules": [
                     "preserve uncertainty and conflicts",
