@@ -73,6 +73,7 @@ class ExperimentCandidate:
     # workspace_ephemeral：研究编排目录必须可丢弃，不进入生产 Runtime 依赖。
     workspace_ephemeral: bool = True
 
+    # 构造时固定实验身份、变更集合和 disposable workspace 不变量。
     def __post_init__(self) -> None:
         if not self.experiment_id.strip() or not self.hypothesis.strip():
             raise ValueError("experiment id/hypothesis are required")
