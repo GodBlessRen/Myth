@@ -445,7 +445,7 @@ def conversation_request(settings, snapshot, messages, activities, control=None)
                 compact_mode=False,
             )
             normal_bytes = int(normal_report["bytes_used"])
-        except Exception:
+        except ContextBudgetError:
             normal_bytes = int(report["bytes_used"])
         context_decision = choose_context_mode(
             normal_bytes=normal_bytes,
