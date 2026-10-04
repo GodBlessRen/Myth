@@ -830,7 +830,10 @@ class DecisionRuntime:
     def status(self, run_id: str) -> dict[str, Any]:
         invocations = []
         for row in self.store.db.execute(
-            "SELECT * FROM model_invocations WHERE run_id=? ORDER BY rowid", (run_id,)
+            "SELECT m.*,k.request_key FROM model_invocations m "
+            "LEFT JOIN model_request_keys k USING(model_attempt_id) "
+            "WHERE m.run_id=? ORDER BY m.rowid",
+            (run_id,),
         ).fetchall():
             item = dict(row)
             try:
