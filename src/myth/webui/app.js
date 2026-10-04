@@ -331,10 +331,13 @@ function renderAdaptiveModelSettings() {
   show("ollamaEndpointField", provider === "ollama");
   show("ollamaContextField", provider === "ollama");
   const profile = modelCapability();
+  const savedModel = state.data?.settings?.model || "";
+  const currentThinking =
+    $("model").value.trim() === savedModel ? state.data?.settings?.thinking : null;
   const reasoningVisible = fillReasoningSelect(
     $("reasoningSetting"),
     profile,
-    state.data?.settings?.thinking,
+    currentThinking,
     $("reasoningMeta"),
   );
   show("reasoningField", reasoningVisible);
