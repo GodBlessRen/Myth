@@ -6,13 +6,12 @@ API key 仅在调用时从环境变量读取，不进入 SQLite、事件、Web J
 from __future__ import annotations
 
 import json
-import os
 from urllib import request
 
 from ..auth.transport import open_credential_request, read_bounded
 from ..models import ModelRequest, ProviderStatus
 from .capabilities import model_capability, reasoning_capability
-from .openai import OpenAIResponsesProvider
+from .openai import OpenAIResponsesProvider, TokenSupplier
 
 
 # DeepSeek 官方 Responses API 根地址；固定 HTTPS 端点避免用户设置把凭据发送到任意主机。
@@ -23,13 +22,21 @@ class DeepSeekApiKeyProvider(OpenAIResponsesProvider):
     provider_id = "deepseek"
 
     # 只保存非秘钥端点/超时配置；key 每次从环境读取，支持进程级轮换且不产生持久副本。
-    def __init__(self, env_var: str = "DEEPSEEK_API_KEY", timeout: float = 180.0) -> None:
-        # token：调用边界即时读取环境变量；缺失属于派发前已知失败，不进入 UNKNOWN。
-        def token() -> str:
+    def __init__(
+        self,
+        env_var: str = "DEEPSEEK_API_KEY",
+        timeout: float = 180.0,
+        token_supplier: TokenSupplier | None = None,
+    ) -> None:
+        # token_supplier 由 Credential Hub 注入；环境变量仅保留兼容旧部署，不再要求用户先开 PowerShell。
+        def env_token() -> str:
+            import os
             value = os.environ.get(env_var, "").strip()
             if not value:
                 raise RuntimeError(f"{env_var} is not set")
             return value
+
+        token = token_supplier or env_token
 
         # status_check：读取 DeepSeek 官方 /models 公开能力目录；失败不回退到写死模型表，避免过期能力误导 UI。
         def status_check() -> ProviderStatus:
@@ -71,6 +78,16 @@ class DeepSeekApiKeyProvider(OpenAIResponsesProvider):
                             off="none",
                             source="remote",
                         )
+                    # known 字段进入跨 Provider capability；其余 DeepSeek 目录元数据原样留在折叠层，避免未来字段被静默丢弃。
+                    known = {
+                        "id", "name", "context_window", "max_output_tokens",
+                        "input_modalities", "output_modalities", "effort",
+                    }
+                    provider_metadata = {
+                        str(key): value
+                        for key, value in item.items()
+                        if key not in known
+                    }
                     profile = model_capability(
                         item["id"],
                         display_name=item.get("name"),
@@ -79,6 +96,7 @@ class DeepSeekApiKeyProvider(OpenAIResponsesProvider):
                         input_modalities=item.get("input_modalities") or (),
                         output_modalities=item.get("output_modalities") or (),
                         reasoning=reasoning,
+                        provider_metadata=provider_metadata,
                         source="remote",
                     )
                     profiles[item["id"]] = profile

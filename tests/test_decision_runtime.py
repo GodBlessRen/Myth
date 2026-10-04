@@ -52,7 +52,21 @@ class FakeProvider:
         return ModelResult(
             text=json.dumps(payload),
             usage={"model_calls": 1, "input_tokens": 20, "output_tokens": 30},
-            raw={"id": "fake-response", "payload": payload},
+            raw={
+                "id": "fake-response",
+                "provider": "fake",
+                "model": "fake-model",
+                "status": "completed",
+                "created_at": 123456,
+                "usage": {
+                    "input_tokens": 20,
+                    "output_tokens": 30,
+                    "input_tokens_details": {"cached_tokens": 5},
+                    "output_tokens_details": {"reasoning_tokens": 7},
+                },
+                "provider_only_metric": {"lane": "fast"},
+                "payload": payload,
+            },
             response_id="fake-response",
         )
 
@@ -94,6 +108,39 @@ class DecisionRuntimeTests(unittest.TestCase):
                 self.assertEqual(accounts["model_calls"]["settled"], 1)
                 self.assertEqual(accounts["input_tokens"]["settled"], 20)
                 self.assertEqual(accounts["output_tokens"]["settled"], 30)
+
+
+    # 回归断言：完整 Provider Evidence 保留在不可变对象中，常用字段则投影成轻量摘要。
+    def test_provider_evidence_is_durable_and_lazily_projected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with MythRuntime(root) as base:
+                decisions = DecisionRuntime(base)
+                run_id = decisions.create_goal_run(
+                    goal="inspect provider evidence",
+                    provider_id="fake",
+                    model_id="fake-model",
+                    max_output_tokens=100,
+                )
+                decisions.request_decision(
+                    run_id=run_id,
+                    provider=FakeProvider(),
+                    model="fake-model",
+                    max_output_tokens=100,
+                )
+                status = decisions.status(run_id)
+                summary = status["model_invocations"][0]["provider_evidence"]
+                self.assertEqual(summary["provider"], "fake")
+                self.assertEqual(summary["model"], "fake-model")
+                self.assertEqual(summary["cached_input_tokens"], 5)
+                self.assertEqual(summary["reasoning_tokens"], 7)
+                self.assertIn("provider_only_metric", summary["extra_keys"])
+
+                evidence = decisions.provider_evidence(run_id)
+                self.assertEqual(
+                    evidence["evidence"]["provider_only_metric"], {"lane": "fast"}
+                )
+                self.assertEqual(evidence["summary"]["response_id"], "fake-response")
 
     # 回归断言：Ticket 后传输异常保持未知，不把超时当作已知未执行。
     def test_provider_exception_after_ticket_becomes_unknown(self) -> None:

@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import json
-import os
 import time
 from pathlib import Path
 from typing import Callable
@@ -132,6 +131,41 @@ def _wants_reasoning_summary(model_request: ModelRequest) -> bool:
         return True
     model = model_request.model.strip().lower()
     return model.startswith(("gpt-5", "gpt-6", "o1", "o3", "o4"))
+
+
+# 递归保留供应商返回的未知元数据，明确剔除凭据/不透明推理状态/私有 reasoning body；未知字段默认保留供后续分析。
+_PROVIDER_EVIDENCE_DENY = {
+    "authorization",
+    "headers",
+    "request_headers",
+    "response_headers",
+    "cookie",
+    "cookies",
+    "set-cookie",
+    "api_key",
+    "access_token",
+    "refresh_token",
+    "id_token",
+    "encrypted_content",
+    "reasoning_text",
+}
+
+
+# 递归清理 Provider 原始响应；保留未知可观察字段，删除凭据与私有推理正文后才允许进入不可变对象库。
+def _provider_evidence(value):
+    if isinstance(value, dict):
+        result = {}
+        for key, item in value.items():
+            if str(key).lower() in _PROVIDER_EVIDENCE_DENY:
+                continue
+            # reasoning.content 可能承载供应商私有思维正文；保留 reasoning 的状态/摘要等元数据，但不保存该正文。
+            if key == "content" and value.get("type") == "reasoning":
+                continue
+            result[key] = _provider_evidence(item)
+        return result
+    if isinstance(value, list):
+        return [_provider_evidence(item) for item in value]
+    return value
 
 
 # 把 Responses output 限制为可观察结果；加密 reasoning state 不复制进分析对象。
@@ -368,13 +402,13 @@ class OpenAIResponsesProvider:
         usage = _usage(value)
         if first_token_ms is not None:
             usage["time_to_first_token_ms"] = first_token_ms
-        # 只保留可观察结果/用量/公开 Reasoning Summary；encrypted_content 属不透明推理状态，不进入分析账本。
+        # Provider Evidence 默认保留远端未知元数据，便于未来比较；凭据与私有 reasoning body 由 denylist 剔除。
         reasoning_summary = _extract_reasoning_summary(value)
-        safe_value = {
-            **{k: value[k] for k in ("id", "status", "usage", "reasoning") if k in value},
-            "output": _observable_output(value),
-            "reasoning_summary": reasoning_summary,
-        }
+        safe_value = _provider_evidence(value)
+        safe_value["output"] = _observable_output(value)
+        safe_value["reasoning_summary"] = reasoning_summary
+        safe_value["provider"] = self.provider_id
+        safe_value["provider_name"] = self.provider_name
         safe_raw = redact_response(safe_value, token)
         return ModelResult(
             text=redact_response(output_text, token),
@@ -492,13 +526,21 @@ class OpenAIApiKeyProvider(OpenAIResponsesProvider):
     provider_id = "openai"
 
     # 保存本实例的协作对象与配置；状态/I/O 边界见类合同，实例字段不能替代持久执行事实。
-    def __init__(self, env_var: str = "OPENAI_API_KEY", timeout: float = 180.0) -> None:
-        # 调用时从指定环境变量读取 API key；缺失显式失败，秘钥不持久化。
-        def token() -> str:
+    def __init__(
+        self,
+        env_var: str = "OPENAI_API_KEY",
+        timeout: float = 180.0,
+        token_supplier: TokenSupplier | None = None,
+    ) -> None:
+        # token_supplier 由 Credential Hub 注入；直接构造时仍保留环境变量兼容旧 CLI/测试。
+        def env_token() -> str:
+            import os
             value = os.environ.get(env_var, "").strip()
             if not value:
                 raise RuntimeError(f"{env_var} is not set")
             return value
+
+        token = token_supplier or env_token
 
         # API key 路径读取官方模型目录；OpenAI /models 不含 effort 元数据，因此能力由本 adapter 的公开模型族规则补充。
         def status_check() -> ProviderStatus:

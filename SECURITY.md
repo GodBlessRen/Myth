@@ -20,13 +20,13 @@ Myth is local-first. Remote model providers are explicit choices; tool authority
 ## Model boundary
 
 - **Ollama:** requests go to the configured local endpoint. Use this for content that must remain local.
-- **OpenAI API key:** `OPENAI_API_KEY` is read at call time and is never persisted by Myth.
+- **OpenAI / DeepSeek API keys:** the normal path is in-app connection. Candidate keys are validated before replacing an existing credential and are stored only in the secure OS credential backend. `OPENAI_API_KEY` / `DEEPSEEK_API_KEY` remain compatibility fallbacks for existing deployments, not a required user setup step.
 - **Sign in with ChatGPT:** Myth owns its OAuth lifecycle directly. It uses authorization-code + PKCE S256, fresh state + OIDC nonce, an exact `127.0.0.1` loopback callback, OpenAI's OSS dynamic client registration, and ID-token signature/issuer/audience/expiry/nonce verification.
 - OAuth access/refresh/ID tokens are stored only in an explicitly selected secure OS credential backend. Myth has **no plaintext credential-file fallback**; if a secure backend is unavailable, OAuth fails closed.
 - `.runtime/oauth/chatgpt.json` stores only non-secret registration/profile metadata (issued client id, subject/email/name, stable host id). It must never contain access tokens, refresh tokens, ID tokens, authorization codes or PKCE verifiers.
 - Refresh-token rotation is serialized. Terminal refresh rejection requires reauthentication; temporary transport failures do not silently destroy otherwise valid credentials.
 - Logout attempts remote refresh-token revocation and always clears local credentials; if remote revocation cannot be confirmed, the UI/CLI reports that uncertainty.
-- Bearer/API tokens are used only for outbound requests and are not inserted into Runtime SQLite, ModelResult/raw persistence, durable receipts, object-store artifacts, events, traces, Web JSON or local request logs.
+- Bearer/API tokens are used only for outbound requests and are not inserted into Runtime SQLite, ModelResult/raw persistence, durable receipts, object-store artifacts, events, traces, Web JSON or local request logs. Provider Evidence may retain sanitized response metadata, but credential-like fields, encrypted reasoning state and private reasoning bodies are explicitly excluded.
 - A remote provider receives the selected model request content by definition.
 
 ## Agent authority boundary

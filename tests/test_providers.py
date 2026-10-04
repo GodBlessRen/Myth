@@ -310,6 +310,8 @@ class DeepSeekProviderTests(unittest.TestCase):
                         "supported_levels": ["low", "high", "max"],
                         "default_level": "high",
                     },
+                    "api_capabilities": ["responses", "vision"],
+                    "provider_revision": "ds-catalog-r1",
                 }
             ],
         }
@@ -329,13 +331,24 @@ class DeepSeekProviderTests(unittest.TestCase):
         self.assertEqual(profile["reasoning"]["off"], "none")
         self.assertEqual(profile["context_window"], 1048576)
         self.assertEqual(profile["max_output_tokens"], 393216)
+        self.assertEqual(
+            profile["provider_metadata"]["api_capabilities"],
+            ["responses", "vision"],
+        )
+        self.assertEqual(
+            profile["provider_metadata"]["provider_revision"], "ds-catalog-r1"
+        )
 
     # DeepSeek 的 developer 会退化为 user，因此 system 必须原样发送；thinking 显式映射到 reasoning.effort。
     def test_request_preserves_system_role_and_maps_thinking(self) -> None:
         captured = {}
         completed = {
             "id": "resp_ds",
+            "model": "deepseek-v4-pro",
+            "created_at": 1791077000,
             "status": "completed",
+            "service_tier": "default",
+            "custom_provider_metric": {"phase": "decode", "value": 17},
             "output": [
                 {
                     "type": "reasoning",
@@ -400,6 +413,12 @@ class DeepSeekProviderTests(unittest.TestCase):
         self.assertEqual(result.usage["reasoning_tokens"], 9)
         self.assertNotIn("private reasoning body", json.dumps(result.raw))
         self.assertNotIn("ds-secret", json.dumps(result.raw))
+        self.assertEqual(result.raw["model"], "deepseek-v4-pro")
+        self.assertEqual(result.raw["created_at"], 1791077000)
+        self.assertEqual(result.raw["service_tier"], "default")
+        self.assertEqual(
+            result.raw["custom_provider_metric"], {"phase": "decode", "value": 17}
+        )
 
     # thinking=False 明确关闭 DeepSeek 默认思考，避免 UI 关闭开关却仍产生 reasoning token。
     def test_false_thinking_maps_to_none_effort(self) -> None:

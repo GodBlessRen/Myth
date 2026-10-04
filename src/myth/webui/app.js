@@ -20,6 +20,8 @@ const state = {
   connection: null,
   // 脱敏账号投影；凭据保存在系统库。
   chatgptAuth: null,
+  // API Key Provider 的脱敏连接状态；浏览器从不保存 secret。
+  providerKeys: null,
   // 会话列表的归档筛选。
   archived: false,
   // 当前编辑的会话元数据副本。
@@ -176,6 +178,25 @@ async function authApi(path, value) {
     clearTimeout(timer);
   }
 }
+// API Key Provider 的应用内凭据接口；浏览器只在 connect 请求中短暂持有用户刚粘贴的 secret。
+async function providerAuthApi(path, value) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 20000);
+  try {
+    const r = await fetch("/api/auth/providers" + path, {
+      method: value === undefined ? "GET" : "POST",
+      headers: { "Content-Type": "application/json" },
+      body: value === undefined ? undefined : JSON.stringify(value),
+      signal: controller.signal,
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+    return data;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // 把数据库 UTC 时间投影为本地中文日期；不改写保存时间。
 function date(value) {
   return new Date(value.replace(" ", "T") + "Z").toLocaleDateString("zh-CN", {
@@ -350,8 +371,24 @@ function renderAdaptiveModelSettings() {
     $("maxTokens").max = "393216";
   }
   if (profile?.input_modalities?.length) facts.push(`Input ${profile.input_modalities.join(" + ")}`);
-  $("modelCapabilityMeta").textContent = facts.join(" · ");
-  show("modelCapabilityMeta", facts.length > 0);
+  const capabilityMeta = $("modelCapabilityMeta");
+  capabilityMeta.replaceChildren();
+  if (facts.length) capabilityMeta.append(document.createTextNode(facts.join(" · ")));
+  const providerMetadata = profile?.provider_metadata;
+  if (providerMetadata && Object.keys(providerMetadata).length) {
+    const details = document.createElement("details");
+    details.className = "model-provider-details";
+    const summary = document.createElement("summary");
+    summary.textContent = "Provider model details";
+    const pre = document.createElement("pre");
+    pre.textContent = JSON.stringify(providerMetadata, null, 2);
+    details.append(summary, pre);
+    capabilityMeta.append(details);
+  }
+  show(
+    "modelCapabilityMeta",
+    facts.length > 0 || !!(providerMetadata && Object.keys(providerMetadata).length),
+  );
 }
 // Control 面板复用同一 capability 目录，但保持当前 Run 已保存的原生值可见。
 function renderTurnReasoning(turn, current) {
@@ -390,6 +427,7 @@ function loadSettings() {
   $("numCtx").value = s.num_ctx ?? 8192;
   $("temperature").value = s.temperature ?? 0;
   renderChatGPTAuth();
+  renderProviderKeyAuth();
   renderAdaptiveModelSettings();
 }
 // 仅展示公开账号/scope 状态；身份已连接与 plan usage 已授权分开。
@@ -425,6 +463,42 @@ function renderChatGPTAuth() {
     show("chatgptLogout", false);
     $("chatgptLogin").textContent = "Continue with ChatGPT";
   }
+}
+// 渲染 OpenAI / DeepSeek 的应用内 API Key 连接；Provider 特有认证不污染通用模型表单。
+function renderProviderKeyAuth() {
+  const provider = $("provider").value;
+  const enabled = ["openai", "deepseek"].includes(provider);
+  show("providerKeyPanel", enabled);
+  if (!enabled) return;
+  const status = (state.providerKeys?.providers || []).find(
+    (item) => item.provider === provider,
+  );
+  const label = status?.label || (provider === "openai" ? "OpenAI" : "DeepSeek");
+  if (status?.configured) {
+    $("providerKeyState").textContent = `${label} 已连接`;
+    $("providerKeyMeta").textContent =
+      status.source === "myth"
+        ? "凭据保存在操作系统安全凭据库 · 不进入 Runtime 数据库"
+        : "检测到旧环境配置 · 可直接使用，也可在 Myth 内重新连接";
+    show("providerKeyDisconnect", status.source === "myth");
+    $("providerKeyConnect").textContent =
+      status.source === "myth" ? "替换 API Key" : "改为 Myth 安全连接";
+  } else {
+    $("providerKeyState").textContent = `连接 ${label}`;
+    $("providerKeyMeta").textContent =
+      "粘贴一次 API Key 即可。Myth 会保存到操作系统安全凭据库。";
+    show("providerKeyDisconnect", false);
+    $("providerKeyConnect").textContent = "连接";
+  }
+}
+// 刷新 API Key Provider 的脱敏状态；失败只影响设置提示，不把未知状态伪装成未连接。
+async function refreshProviderKeys() {
+  try {
+    state.providerKeys = await providerAuthApi("/status");
+  } catch (e) {
+    state.providerKeys = { providers: [], error: e.message };
+  }
+  renderProviderKeyAuth();
 }
 // 读取脱敏认证状态；错误保留为页面提示，不伪造 ready。
 async function refreshChatGPTAuth() {
@@ -503,8 +577,10 @@ function renderConnection() {
         : provider === "chatgpt"
           ? "ChatGPT 尚未完成授权或当前计划不可用。"
           : provider === "deepseek"
-            ? "DeepSeek 尚未就绪，请确认 DEEPSEEK_API_KEY 已设置。"
-            : "模型提供方尚未就绪。";
+            ? "DeepSeek 尚未就绪，请在 Myth 内连接 API Key。"
+            : provider === "openai"
+              ? "OpenAI 尚未就绪，请在 Myth 内连接 API Key。"
+              : "模型提供方尚未就绪。";
     $("connectionResult").textContent = c.ready
       ? `已连接 · ${c.details.models?.length || 0} 个可用模型`
       : c.details.error || c.details.reason || fallback;
@@ -1600,6 +1676,7 @@ async function readWorkspace() {
     await refresh();
     loadSettings();
     await refreshChatGPTAuth();
+    await refreshProviderKeys();
     fillGoals($("chatGoal"), "");
     await route();
     await checkConnection(true);
@@ -1848,10 +1925,42 @@ $("provider").onchange = () => {
   state.connection = null;
   $("model").value = "";
   renderChatGPTAuth();
+  renderProviderKeyAuth();
   renderConnection();
   renderAdaptiveModelSettings();
 };
 $("chatgptLogin").onclick = beginChatGPTLogin;
+$("providerKeyConnect").onclick = async () => {
+  const provider = $("provider").value;
+  const secret = $("providerApiKey").value.trim();
+  if (!secret) return toast("请先粘贴 API Key。");
+  $("providerKeyConnect").disabled = true;
+  try {
+    await providerAuthApi("/connect", { provider, api_key: secret });
+    $("providerApiKey").value = "";
+    await refreshProviderKeys();
+    state.connection = null;
+    await checkConnection(false);
+    toast("API Key 已安全保存并验证，模型现在可直接使用。");
+  } catch (e) {
+    toast(e.message);
+  } finally {
+    $("providerApiKey").value = "";
+    $("providerKeyConnect").disabled = false;
+  }
+};
+$("providerKeyDisconnect").onclick = async () => {
+  const provider = $("provider").value;
+  try {
+    await providerAuthApi("/disconnect", { provider });
+    await refreshProviderKeys();
+    state.connection = null;
+    renderConnection();
+    toast("Myth 内保存的 API Key 已断开。");
+  } catch (e) {
+    toast(e.message);
+  }
+};
 $("chatgptLogout").onclick = async () => {
   try {
     const result = await authApi("/logout", {});

@@ -15,7 +15,7 @@ import webbrowser
 
 from . import __version__
 from .agent_runtime import AgentRuntime
-from .auth import ChatGPTAuthManager
+from .auth import ChatGPTAuthManager, ProviderApiKeyVault
 from .providers import create_provider
 from .runtime import MythRuntime
 from .web_workspace import ConversationWebService
@@ -39,6 +39,8 @@ class AgentWebService:
         self.workspace = ConversationWebService(self.root)
         # chatgpt_auth：Myth 独立账号认证管理器；只用本应用颁发的客户端身份。
         self.chatgpt_auth = ChatGPTAuthManager(self.root)
+        # provider_keys：OpenAI/DeepSeek 等 API Key 的系统安全凭据入口；浏览器永远只取得脱敏状态。
+        self.provider_keys = ProviderApiKeyVault()
 
     # 按明确 API 配置装配供应商；认证不从用户项目文件获取。
     def _provider(self, payload: dict[str, Any]):
@@ -57,6 +59,34 @@ class AgentWebService:
             "auth_type": status.auth_type,
             "details": status.details or {},
         }
+
+    # 返回所有 API Key Provider 的脱敏连接状态；不读取模型、Run 或业务权限。
+    def provider_key_status(self) -> dict[str, Any]:
+        return {"providers": self.provider_keys.statuses()}
+
+    # 用户在 Myth 内显式连接 API Key；先用候选值验证远端，再原子切换系统凭据，坏 key 不覆盖旧连接。
+    def provider_key_save(self, payload: dict[str, Any]) -> dict[str, Any]:
+        provider = str(payload.get("provider") or "").strip().lower()
+        secret = self.provider_keys.prepare(provider, payload.get("api_key"))
+        candidate = create_provider(
+            provider,
+            runtime_root=str(self.root),
+            token_supplier=lambda: secret,
+        )
+        check = candidate.check()
+        if not check.ready:
+            raise ValueError("API Key 验证失败；原有连接保持不变。")
+        status = self.provider_keys.save(provider, secret)
+        return {
+            **status,
+            "ready": True,
+            "details": check.details or {},
+        }
+
+    # 删除 Myth 管理的 API Key；环境变量兼容配置不由网页静默修改。
+    def provider_key_delete(self, payload: dict[str, Any]) -> dict[str, Any]:
+        provider = str(payload.get("provider") or "").strip().lower()
+        return self.provider_keys.delete(provider)
 
     # 返回脱敏账号状态和目录；token 不进入 HTTP JSON。
     def chatgpt_status(self) -> dict[str, Any]:
@@ -356,6 +386,9 @@ def make_handler(service: AgentWebService):
                 if path == "/api/auth/chatgpt/status":
                     self._json(HTTPStatus.OK, service.chatgpt_status())
                     return
+                if path == "/api/auth/providers/status":
+                    self._json(HTTPStatus.OK, service.provider_key_status())
+                    return
                 if path == "/api/workspace" or path.startswith("/api/workspace/"):
                     parts = (
                         path.removeprefix("/api/workspace").strip("/").split("/")
@@ -468,6 +501,12 @@ def make_handler(service: AgentWebService):
                     return
                 if path == "/api/auth/chatgpt/select":
                     self._json(HTTPStatus.OK, service.chatgpt_select(payload))
+                    return
+                if path == "/api/auth/providers/connect":
+                    self._json(HTTPStatus.OK, service.provider_key_save(payload))
+                    return
+                if path == "/api/auth/providers/disconnect":
+                    self._json(HTTPStatus.OK, service.provider_key_delete(payload))
                     return
                 if path.startswith("/api/workspace/"):
                     parts = path.removeprefix("/api/workspace/").strip("/").split("/")

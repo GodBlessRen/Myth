@@ -759,6 +759,73 @@ class DecisionRuntime:
                 )
         return recovered
 
+    # 从不可变 Provider Evidence 对象投影轻量摘要；完整对象按需读取，避免会话刷新搬运大响应。
+    @staticmethod
+    def _provider_evidence_summary(row: dict[str, Any], raw: dict[str, Any]) -> dict[str, Any]:
+        usage = raw.get("usage") if isinstance(raw.get("usage"), dict) else {}
+        input_details = (
+            usage.get("input_tokens_details")
+            if isinstance(usage.get("input_tokens_details"), dict)
+            else {}
+        )
+        output_details = (
+            usage.get("output_tokens_details")
+            if isinstance(usage.get("output_tokens_details"), dict)
+            else {}
+        )
+        output = raw.get("output") if isinstance(raw.get("output"), list) else []
+        common_keys = {
+            "id", "provider", "provider_name", "model", "status", "created_at",
+            "usage", "output", "reasoning", "reasoning_summary", "incomplete_details",
+        }
+        return {
+            "provider": raw.get("provider") or row.get("provider_id"),
+            "provider_name": raw.get("provider_name"),
+            "model": raw.get("model") or row.get("model_id"),
+            "response_id": raw.get("id") or row.get("response_id"),
+            "status": raw.get("status") or row.get("outcome"),
+            "created_at": raw.get("created_at"),
+            "input_tokens": usage.get("input_tokens"),
+            "output_tokens": usage.get("output_tokens"),
+            "cached_input_tokens": input_details.get("cached_tokens"),
+            "reasoning_tokens": output_details.get("reasoning_tokens"),
+            "incomplete_details": raw.get("incomplete_details"),
+            "reasoning_summary": raw.get("reasoning_summary") or [],
+            "output_types": [
+                item.get("type")
+                for item in output
+                if isinstance(item, dict) and isinstance(item.get("type"), str)
+            ],
+            "extra_keys": sorted(
+                str(key) for key in raw.keys() if key not in common_keys
+            ),
+        }
+
+    # 按 model Attempt 读取完整脱敏 Provider Evidence；对象摘要已由 ObjectStore 校验，不执行任何远端调用。
+    def provider_evidence(self, run_id: str, attempt_id: str | None = None) -> dict[str, Any]:
+        params: list[Any] = [run_id]
+        sql = "SELECT * FROM model_invocations WHERE run_id=? AND response_ref IS NOT NULL"
+        if attempt_id is not None:
+            sql += " AND model_attempt_id=?"
+            params.append(attempt_id)
+        sql += " ORDER BY rowid DESC LIMIT 1"
+        row = self.store.db.execute(sql, params).fetchone()
+        if row is None:
+            raise KeyError(attempt_id or run_id)
+        raw = json.loads(self.objects.get(str(row["response_ref"])).decode("utf-8"))
+        if not isinstance(raw, dict):
+            raise ValueError("provider evidence must be a JSON object")
+        return {
+            "model_attempt_id": row["model_attempt_id"],
+            "provider_id": row["provider_id"],
+            "model_id": row["model_id"],
+            "response_ref": row["response_ref"],
+            "response_id": row["response_id"],
+            "outcome": row["outcome"],
+            "evidence": raw,
+            "summary": self._provider_evidence_summary(dict(row), raw),
+        }
+
     # 读取当前持久事实并生成状态投影；不得把模型 claim 当作已执行或已验收。
     def status(self, run_id: str) -> dict[str, Any]:
         invocations = []
@@ -770,6 +837,19 @@ class DecisionRuntime:
                 item["usage"] = json.loads(item.get("usage_json") or "{}")
             except json.JSONDecodeError:
                 item["usage"] = {}
+            item["provider_evidence"] = None
+            if item.get("response_ref"):
+                try:
+                    raw = json.loads(
+                        self.objects.get(str(item["response_ref"])).decode("utf-8")
+                    )
+                    if isinstance(raw, dict):
+                        item["provider_evidence"] = self._provider_evidence_summary(
+                            item, raw
+                        )
+                except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError):
+                    # 观测对象损坏/旧格式不能阻止 Run 状态读取；完整 evidence 端点会显式报错。
+                    item["provider_evidence"] = {"status": "unavailable"}
             invocations.append(item)
         decisions = []
         for row in self.store.db.execute(

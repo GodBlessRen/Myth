@@ -82,6 +82,30 @@ UNKNOWN     -> RECONCILE
 
 必须保留顺序与事件身份；UI 可折叠，事实不能消失。
 
+### Model / Provider Evidence
+
+第三栏的模型观测采用三级渐进披露，而不是让某个 Provider 的字段数量决定整个界面：
+
+1. **共同事实（默认可见）**
+   - Provider；
+   - Model；
+   - Response ID；
+   - Status；
+   - Input / Cached Input / Output Token；
+   - Reasoning Token（Provider 提供时）；
+   - Runtime measured model wall time。
+
+2. **Provider details（折叠）**
+   - 只显示当前 Provider 真正返回的特有字段摘要，例如 `created_at`、`incomplete_details`、output item types、公开 Reasoning Summary；
+   - 未报告就是 N/A，不用别家 Provider 的字段补齐。
+
+3. **Raw Provider Evidence（再次展开、按需读取）**
+   - 读取已经持久化的不可变脱敏响应对象，不重新调用远端模型；
+   - 未知元数据默认保留，便于以后分析新字段；
+   - API key / bearer token / refresh token / ID token、`encrypted_content`、私有 reasoning body 不得进入 Evidence。
+
+因此主界面使用“最大公约数”，但后端不做“最大公约数存储”。DeepSeek 等 Provider 暴露的丰富元数据应保留为分析资产，而不是为了跨模型统一而丢弃。
+
 ### Token Window
 
 至少显示：
@@ -192,6 +216,7 @@ Runtime Observatory 只投影现有事实：
 - Budget accounts；
 - Operations；
 - Model invocation usage；
+- sanitized Provider Evidence object + lightweight summary；
 - Goal work state；
 - Context report；
 - Artifact / Receipt / Verification。

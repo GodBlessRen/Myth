@@ -380,6 +380,16 @@ class ConversationWebService:
                 turn["model_usage"] = self._model_usage_summary(
                     model_state["model_invocations"]
                 )
+                latest_invocation = (
+                    model_state["model_invocations"][-1]
+                    if model_state["model_invocations"]
+                    else None
+                )
+                turn["provider_evidence"] = (
+                    latest_invocation.get("provider_evidence")
+                    if latest_invocation
+                    else None
+                )
                 goal_id = (turn.get("snapshot") or {}).get("goal", {}).get("goal_id")
                 turn["goal_current"] = (
                     workspace.personal.goal_view(goal_id) if goal_id else None
@@ -824,6 +834,15 @@ class ConversationWebService:
             )
             return "myth-conversation.md", text.encode("utf-8")
 
+    # 按需读取某 Turn 最新或指定 Attempt 的完整脱敏 Provider Evidence；不重新调用模型。
+    def provider_evidence(self, rid, attempt_id=None):
+        with MythRuntime(self.root) as runtime:
+            repository = Workspace(runtime).repository
+            turn = repository.turn(rid)
+            if turn["run_id"] != rid:
+                raise KeyError(rid)
+            return repository.decisions.provider_evidence(rid, attempt_id)
+
     # 分派只读产品 API 到对应状态所有者；允许的恢复投影修正仍由仓储维护。
     def get(self, parts, query):
         if not parts:
@@ -855,6 +874,10 @@ class ConversationWebService:
             return self.turn_delivery(parts[1])
         if len(parts) == 3 and parts[0] == "turns" and parts[2] == "sota-route":
             return self.turn_sota_route(parts[1])
+        if len(parts) == 3 and parts[0] == "turns" and parts[2] == "provider-evidence":
+            return self.provider_evidence(
+                parts[1], query.get("attempt_id", [None])[0]
+            )
         if len(parts) == 2 and parts[0] == "goals":
             return self.goal(parts[1])
         if len(parts) == 3 and parts[0] == "goals" and parts[2] == "triggers":
