@@ -18,6 +18,7 @@ from .platform.evaluation import (
     EvalObservation,
     EvalSuite,
     EvalVerdict,
+    controlled_harness_variants,
     load_eval_suite,
     release_gate,
     summarize_observations,
@@ -32,6 +33,11 @@ from .workspace import Workspace
 
 
 # _SETTINGS：安全的产品设置默认值；只影响新准入，不倒写历史模型请求。
+CONTROLLED_HARNESS_MECHANISMS = frozenset(
+    {"context_compaction", "observation_recall", "action_fusion"}
+)
+
+
 _SETTINGS = {
     "provider": "ollama",
     "model": "eval-local",
@@ -622,3 +628,35 @@ def run_eval_suite(
         resolution_policy=resolution_policy,
         policy_config=policy_config,
     ).run(case_ids)
+
+
+
+# 在同一固定 suite 上实际执行 baseline/full/one-mechanism/leave-one-out 变体；工作区均为临时 disposable。
+def run_controlled_harness_experiment(
+    path: str | Path,
+    mechanisms: Iterable[str],
+    *,
+    policy_id: str = "production-default",
+    policy_config: dict | None = None,
+    case_ids: Iterable[str] | None = None,
+    prefix: str = "harness",
+) -> list[dict]:
+    requested = tuple(sorted({str(item).strip() for item in mechanisms if str(item).strip()}))
+    unsupported = set(requested) - CONTROLLED_HARNESS_MECHANISMS
+    if unsupported:
+        raise ValueError(
+            "unsupported controlled harness mechanisms: " + ",".join(sorted(unsupported))
+        )
+    results = []
+    for variant in controlled_harness_variants(requested, prefix=prefix):
+        runner = FoundationEvalRunner.from_path(
+            path,
+            policy_id=policy_id,
+            policy_config=policy_config,
+            harness_id=variant.harness_id,
+            harness_mechanisms=variant.mechanisms,
+        )
+        result = runner.run(case_ids)
+        result["evaluation_partition"] = "discovery"
+        results.append(result)
+    return results
