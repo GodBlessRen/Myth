@@ -383,6 +383,28 @@ class MentalModelRefreshScheduler:
             )
         return bool(changed.rowcount)
 
+    # owned：发布前再次核对 owner 与未过期 lease；模型 Receipt 可晚到，但旧 owner 不能提交派生状态。
+    def owned(
+        self,
+        run_id: str,
+        owner_id: str,
+        *,
+        now: float | None = None,
+    ) -> bool:
+        now = time.time() if now is None else float(now)
+        row = self.store.db.execute(
+            "SELECT owner_id,lease_until,state FROM mental_model_refresh_occurrences "
+            "WHERE run_id=?",
+            (run_id,),
+        ).fetchone()
+        return bool(
+            row
+            and row["state"] in {"ADMITTED", "RUNNING"}
+            and row["owner_id"] == str(owner_id)
+            and row["lease_until"] is not None
+            and float(row["lease_until"]) > now
+        )
+
     # release：只释放自己的 lease；晚到旧 owner 不能清掉新 owner 的接管事实。
     def release(self, run_id: str, owner_id: str) -> None:
         with self.store.tx() as db:
@@ -438,7 +460,9 @@ class MentalModelRefreshScheduler:
         )
 
     # run：驱动一个 refresh occurrence；模型调用由 DecisionRuntime 记 Ticket/Receipt，发布前再次核对水位。
-    def run(self, run_id: str, provider) -> dict[str, Any]:
+    def run(
+        self, run_id: str, provider, *, owner_id: str | None = None
+    ) -> dict[str, Any]:
         occurrence = self.occurrence(run_id)
         if occurrence["state"] == "SUCCEEDED":
             return occurrence
@@ -449,6 +473,8 @@ class MentalModelRefreshScheduler:
         settings = policy["settings"]
         if provider.provider_id != settings["provider"]:
             raise ValueError("provider differs from fixed refresh policy")
+        if owner_id is not None and not self.owned(run_id, owner_id):
+            return self.occurrence(run_id)
 
         prepared = self.views.prepare_refresh(
             str(occurrence["model_id"]), limit=12, resolution="L1"
@@ -533,6 +559,10 @@ class MentalModelRefreshScheduler:
                 self.defer(str(occurrence["model_id"]), str(exc))
             return self.occurrence(run_id)
 
+        # Provider Receipt 已持久化后再次核对 lease；失租只停止当前 driver，Receipt 留给新 owner 恢复。
+        if owner_id is not None and not self.owned(run_id, owner_id):
+            return self.occurrence(run_id)
+
         if decision.decision_type != "request_completion" or decision.remaining:
             self.fail(run_id, "refresh model did not return a final synthesis")
             return self.occurrence(run_id)
@@ -547,6 +577,9 @@ class MentalModelRefreshScheduler:
                 cited_ids.append(memory_id)
         if not cited_ids:
             self.fail(run_id, "refresh synthesis cited no admitted Memory evidence")
+            return self.occurrence(run_id)
+
+        if owner_id is not None and not self.owned(run_id, owner_id):
             return self.occurrence(run_id)
 
         try:
