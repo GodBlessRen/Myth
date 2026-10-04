@@ -12,6 +12,7 @@ import unittest
 
 from myth.models import ModelResult, ProviderStatus
 from myth.runtime import MythRuntime
+from myth.web_workspace import ConversationWebService
 from myth.workspace import Workspace
 
 
@@ -190,6 +191,28 @@ class MentalModelAutoRefreshTests(unittest.TestCase):
         current = self.workspace.mental_models.model(self.model["model_id"], resolution="L2")
         self.assertEqual(current["freshness"], "unmaterialized")
         self.assertIsNone(current["content"])
+
+    # Web 产品门面可直接创建 Mental Model 并打开 auto-refresh；用户不需要 Python/PowerShell 才能使用。
+    def test_web_facade_exposes_mental_model_auto_refresh(self):
+        service = ConversationWebService(self.root)
+        created = service.post(
+            ["mental-models"],
+            {
+                "name": "Web knowledge",
+                "source_query": "Myth SQLite Evidence",
+            },
+        )
+        configured = service.post(
+            ["mental-models", created["model_id"], "auto-refresh"],
+            {"enabled": True, "min_interval_seconds": 60},
+        )
+        listed = service.get(["mental-models"], {})["mental_models"]
+
+        self.assertTrue(configured["enabled"])
+        selected = next(
+            item for item in listed if item["model_id"] == created["model_id"]
+        )
+        self.assertTrue(selected["auto_refresh"]["enabled"])
 
     # policy retry_at 必须约束已准入 occurrence 的重新派发，不能每两秒忽略退避再次探测。
     def test_dispatchable_respects_policy_backoff(self):
