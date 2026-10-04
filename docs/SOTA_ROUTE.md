@@ -179,6 +179,29 @@ Promote / Rollback
 
 一个偶然的漂亮 Run 不会自动改变生产策略。
 
+## Historical Replay World
+
+SOTA Route 的历史路径现在还能作为实验性的 **Replay World** 数据源，但仍不增加新的 Runtime 真相：
+
+```text
+same comparison_key
+  + eligible PASSED routes
+        ↓
+merge shared observable prefixes
+        ↓
+realized historical search tree
+        ↓
+candidate strategy chooses observed edges
+```
+
+Replay 有三个硬边界：
+
+1. 只重放历史真实出现过的 Action Path；策略选择未出现动作时结果是 `UNOBSERVED`。
+2. 终点 metrics 直接引用对应历史 Run 的已测量事实，不重新调用模型、工具或 Verification。
+3. Replay report 没有 `score / eligible / promote` 语义；要发布策略，仍必须回到固定 EvalSuite、paired calibration 与显式 Promote。
+
+因此它是“历史已实现搜索空间的 exact replay”，不是能预测任意反事实分支的 world model。
+
 ## Runtime Observatory
 
 第三栏新增 `SOTA Route` 区：
