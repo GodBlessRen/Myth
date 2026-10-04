@@ -680,6 +680,7 @@ class RuntimeStore:
         *,
         event_kind: str,
         payload: dict[str, Any] | None = None,
+        _db: sqlite3.Connection | None = None,
     ) -> dict[str, Any]:
         target = state if isinstance(state, RunState) else RunState(str(state))
         if target not in {
@@ -691,7 +692,7 @@ class RuntimeStore:
             raise ValueError("transition_run only accepts explicit background outcome states")
         if not isinstance(event_kind, str) or not event_kind.strip():
             raise ValueError("event_kind is required")
-        with self.tx() as db:
+        with self.admission_transaction(_db) as db:
             row = db.execute("SELECT state FROM runs WHERE run_id=?", (run_id,)).fetchone()
             if row is None:
                 raise KeyError(run_id)
