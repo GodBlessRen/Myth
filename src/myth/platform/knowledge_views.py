@@ -50,9 +50,10 @@ CREATE TABLE IF NOT EXISTS workspace_knowledge_pages(
     CHECK(
         (node_type='folder' AND mental_model_id IS NULL)
         OR (node_type='page' AND mental_model_id IS NOT NULL)
-    ),
-    UNIQUE(parent_id, name)
+    )
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_workspace_knowledge_pages_sibling_name
+    ON workspace_knowledge_pages(COALESCE(parent_id,''), name);
 """
 
 
@@ -93,6 +94,7 @@ class SqliteKnowledgeViews:
         scope_type: str = "global",
         scope_id: str | None = None,
         model_id: str | None = None,
+        _db=None,
     ) -> dict[str, Any]:
         title = _clean_name(name)
         query = _clean_name(source_query, field="source_query", max_length=1000)
@@ -100,7 +102,7 @@ class SqliteKnowledgeViews:
         identity = str(model_id or f"mm_{uuid.uuid4().hex}").strip()
         if not re.fullmatch(r"[A-Za-z0-9_.:-]{1,200}", identity):
             raise ValueError("model_id contains unsupported characters")
-        with self.store.tx() as db:
+        with self.store.admission_transaction(_db) as db:
             db.execute(
                 "INSERT INTO workspace_mental_models("
                 "model_id,name,source_query,scope_type,scope_id"
@@ -351,7 +353,7 @@ class SqliteKnowledgeViews:
             sort_order=sort_order,
         )
 
-    # create_page_with_model：常用入口一次登记问题与页面，但不偷偷刷新/调用模型。
+    # create_page_with_model：同事务登记问题与树节点；任一约束失败都不留下孤儿 Mental Model。
     def create_page_with_model(
         self,
         *,
@@ -362,27 +364,26 @@ class SqliteKnowledgeViews:
         scope_id: str | None = None,
         sort_order: int = 0,
     ) -> dict[str, Any]:
-        model = self.create_model(
-            name=name,
-            source_query=source_query,
-            scope_type=scope_type,
-            scope_id=scope_id,
-        )
-        try:
-            page = self.create_page(
-                name,
-                mental_model_id=str(model["model_id"]),
-                parent_id=parent_id,
-                sort_order=sort_order,
+        with self.store.tx() as db:
+            model = self.create_model(
+                name=name,
+                source_query=source_query,
+                scope_type=scope_type,
+                scope_id=scope_id,
+                _db=db,
             )
-        except BaseException:
-            with self.store.tx() as db:
-                db.execute(
-                    "DELETE FROM workspace_mental_models WHERE model_id=?",
-                    (str(model["model_id"]),),
-                )
-            raise
-        return {"page": page, "mental_model": model}
+            page = self._create_node(
+                node_type="page",
+                name=name,
+                parent_id=parent_id,
+                mental_model_id=str(model["model_id"]),
+                sort_order=sort_order,
+                _db=db,
+            )
+        return {
+            "page": self.node(str(page["node_id"])),
+            "mental_model": self.model(str(model["model_id"]), resolution="L0"),
+        }
 
     # _create_node：父节点必须是 folder；同级名称唯一，正文身份由 mental_model_id 显式引用。
     def _create_node(
@@ -393,12 +394,13 @@ class SqliteKnowledgeViews:
         parent_id: str | None,
         mental_model_id: str | None,
         sort_order: int,
+        _db=None,
     ) -> dict[str, Any]:
         title = _clean_name(name)
         if type(sort_order) is not int:
             raise ValueError("sort_order must be an integer")
         identity = f"kp_{uuid.uuid4().hex}"
-        with self.store.tx() as db:
+        with self.store.admission_transaction(_db) as db:
             if parent_id is not None:
                 parent = db.execute(
                     "SELECT node_type FROM workspace_knowledge_pages WHERE node_id=?",
@@ -419,6 +421,15 @@ class SqliteKnowledgeViews:
                     sort_order,
                 ),
             )
+        if _db is not None:
+            return {
+                "node_id": identity,
+                "parent_id": parent_id,
+                "node_type": node_type,
+                "name": title,
+                "mental_model_id": mental_model_id,
+                "sort_order": sort_order,
+            }
         return self.node(identity)
 
     # node：page 默认返回 Mental Model L0，folder 只返回结构；调用方按需再展开。
