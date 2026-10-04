@@ -6,9 +6,17 @@ from __future__ import annotations
 
 import re
 import uuid
-from typing import Iterable
+from typing import Any, Iterable, Mapping
 
 from .memory import MemoryKind
+from .memory_lifecycle import (
+    MemoryDeltaError,
+    apply_text_delta,
+    evaluate_freshness,
+    evidence_json,
+    normalize_delta_operations,
+    normalize_evidence_set,
+)
 from .retrieval import reciprocal_rank_scores
 
 
@@ -27,6 +35,29 @@ CREATE TABLE IF NOT EXISTS workspace_memories(
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(kind, source_ref)
+);
+
+CREATE TABLE IF NOT EXISTS workspace_memory_evidence(
+    memory_id TEXT NOT NULL REFERENCES workspace_memories(memory_id),
+    evidence_ref TEXT NOT NULL,
+    source_memory_id TEXT,
+    source_revision INTEGER,
+    quote TEXT NOT NULL DEFAULT '',
+    relevance TEXT NOT NULL DEFAULT '',
+    occurred_at TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY(memory_id, evidence_ref)
+);
+
+CREATE TABLE IF NOT EXISTS workspace_memory_revisions(
+    memory_id TEXT NOT NULL REFERENCES workspace_memories(memory_id),
+    revision INTEGER NOT NULL,
+    text TEXT NOT NULL,
+    fact_level TEXT NOT NULL,
+    active INTEGER NOT NULL CHECK(active IN (0,1)),
+    evidence_json TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY(memory_id, revision)
 );
 """
 
@@ -69,7 +100,10 @@ class SqliteMemoryStore:
                 "ALTER TABLE workspace_memories ADD COLUMN fact_level TEXT NOT NULL DEFAULT 'context'"
             )
 
-    # 校验 kind/text/source/scope/fact_level 后按来源更新或创建；同事务递增 revision，不凭经历升级 verified。
+        # 历史项目可能先存在 workspace_memories；为当前 revision 补一个可审计快照，不改写业务 revision。
+        self._backfill_revision_snapshots()
+
+    # 校验 kind/text/source/scope/fact_level/evidence 后按来源更新或创建；revision 与证据快照同事务提交。
     def remember(
         self,
         *,
@@ -79,6 +113,7 @@ class SqliteMemoryStore:
         scope_type: str = "global",
         scope_id: str | None = None,
         fact_level: str = "context",
+        evidence: Iterable[Mapping[str, Any]] | None = None,
     ) -> dict:
         memory_kind = kind if isinstance(kind, MemoryKind) else MemoryKind(str(kind))
         value = str(text).strip()
@@ -96,7 +131,8 @@ class SqliteMemoryStore:
         level = str(fact_level or "context").strip().lower()
         if level not in {"context", "user_asserted", "verified"}:
             raise ValueError("memory fact_level must be context/user_asserted/verified")
-        # 本地事务边界：下列写入一起提交，异常整体回滚；文件/网络效果须在事务外另行核对。
+
+        # 本地事务边界：正文、当前 evidence 与 immutable revision snapshot 一起提交。
         with self.store.tx() as db:
             row = db.execute(
                 "SELECT * FROM workspace_memories WHERE kind=? AND source_ref=?",
@@ -104,14 +140,18 @@ class SqliteMemoryStore:
             ).fetchone()
             if row:
                 revision = int(row["revision"]) + 1
+                memory_id = str(row["memory_id"])
                 db.execute(
                     "UPDATE workspace_memories SET text=?,scope_type=?,scope_id=?,fact_level=?,"
                     "revision=?,active=1,updated_at=CURRENT_TIMESTAMP WHERE memory_id=?",
-                    (value, scope, scope_value, level, revision, row["memory_id"]),
+                    (value, scope, scope_value, level, revision, memory_id),
                 )
-                memory_id = str(row["memory_id"])
+                if evidence is not None:
+                    prepared = self._prepare_evidence(db, evidence, default_ref=source)
+                    self._replace_evidence(db, memory_id, prepared)
             else:
                 memory_id = f"mem_{uuid.uuid4().hex}"
+                revision = 1
                 db.execute(
                     "INSERT INTO workspace_memories(memory_id,kind,text,source_ref,scope_type,scope_id,fact_level) "
                     "VALUES (?,?,?,?,?,?,?)",
@@ -125,8 +165,214 @@ class SqliteMemoryStore:
                         level,
                     ),
                 )
+                prepared = self._prepare_evidence(db, evidence, default_ref=source)
+                self._replace_evidence(db, memory_id, prepared)
+
+            self._snapshot_revision(db, memory_id)
+
         record = self.get(memory_id)
         # 外部向量索引不是同一事务；失败只降级未来语义召回，权威记忆仍已提交。
+        self._sync_vector_record(record)
+        return record
+
+    # _backfill_revision_snapshots：旧库第一次升级只为当前 revision 建快照；历史未知 revision 不伪造。
+    def _backfill_revision_snapshots(self) -> None:
+        rows = self.store.db.execute(
+            "SELECT * FROM workspace_memories ORDER BY rowid"
+        ).fetchall()
+        with self.store.tx() as db:
+            for row in rows:
+                memory_id = str(row["memory_id"])
+                exists = db.execute(
+                    "SELECT 1 FROM workspace_memory_revisions WHERE memory_id=? AND revision=?",
+                    (memory_id, int(row["revision"])),
+                ).fetchone()
+                if exists is not None:
+                    continue
+                if not self._evidence_rows(db, memory_id):
+                    prepared = self._prepare_evidence(
+                        db, None, default_ref=str(row["source_ref"])
+                    )
+                    self._replace_evidence(db, memory_id, prepared)
+                self._snapshot_revision(db, memory_id)
+
+    # _prepare_evidence：在写事务内把 source_memory_id 固定到当时 revision，外部 ref 保持显式来源。
+    def _prepare_evidence(
+        self,
+        db,
+        values: Iterable[Mapping[str, Any]] | None,
+        *,
+        default_ref: str | None = None,
+    ) -> list[dict[str, Any]]:
+        prepared = normalize_evidence_set(values, default_ref=default_ref)
+        result: list[dict[str, Any]] = []
+        for item in prepared:
+            value = dict(item)
+            source_memory_id = value.get("source_memory_id")
+            if source_memory_id:
+                row = db.execute(
+                    "SELECT memory_id,revision FROM workspace_memories WHERE memory_id=?",
+                    (source_memory_id,),
+                ).fetchone()
+                if row is None:
+                    raise MemoryDeltaError(
+                        f"source memory does not exist: {source_memory_id}"
+                    )
+                value["source_revision"] = int(row["revision"])
+                if not value.get("evidence_ref"):
+                    value["evidence_ref"] = f"memory:{source_memory_id}"
+            else:
+                value["source_revision"] = None
+            result.append(value)
+        return result
+
+    # _evidence_rows：当前证据只读投影；revision snapshot 另存 JSON，避免历史指向可变当前表。
+    def _evidence_rows(self, db, memory_id: str) -> list[dict[str, Any]]:
+        return [
+            dict(row)
+            for row in db.execute(
+                "SELECT evidence_ref,source_memory_id,source_revision,quote,relevance,occurred_at "
+                "FROM workspace_memory_evidence WHERE memory_id=? ORDER BY evidence_ref",
+                (memory_id,),
+            ).fetchall()
+        ]
+
+    # _replace_evidence：当前 Evidence 是 Memory revision 的一部分；整组替换发生在同一 SQLite 事务。
+    def _replace_evidence(
+        self, db, memory_id: str, values: Iterable[Mapping[str, Any]]
+    ) -> None:
+        db.execute(
+            "DELETE FROM workspace_memory_evidence WHERE memory_id=?", (memory_id,)
+        )
+        for item in values:
+            db.execute(
+                "INSERT INTO workspace_memory_evidence("
+                "memory_id,evidence_ref,source_memory_id,source_revision,quote,relevance,occurred_at"
+                ") VALUES (?,?,?,?,?,?,?)",
+                (
+                    memory_id,
+                    item["evidence_ref"],
+                    item.get("source_memory_id"),
+                    item.get("source_revision"),
+                    item.get("quote") or "",
+                    item.get("relevance") or "",
+                    item.get("occurred_at"),
+                ),
+            )
+
+    # _snapshot_revision：把当前正文/事实等级/active/evidence 固化为不可变 revision 行；同 revision 不覆盖。
+    def _snapshot_revision(self, db, memory_id: str) -> None:
+        row = db.execute(
+            "SELECT memory_id,revision,text,fact_level,active FROM workspace_memories WHERE memory_id=?",
+            (memory_id,),
+        ).fetchone()
+        if row is None:
+            raise KeyError(memory_id)
+        evidence = self._evidence_rows(db, memory_id)
+        db.execute(
+            "INSERT OR IGNORE INTO workspace_memory_revisions("
+            "memory_id,revision,text,fact_level,active,evidence_json"
+            ") VALUES (?,?,?,?,?,?)",
+            (
+                memory_id,
+                int(row["revision"]),
+                str(row["text"]),
+                str(row["fact_level"]),
+                int(row["active"]),
+                evidence_json(evidence),
+            ),
+        )
+
+    # evidence：返回当前 revision 的证据链；Evidence 证明来源，不等同 Verification。
+    def evidence(self, memory_id: str) -> list[dict[str, Any]]:
+        self.get(memory_id)
+        return self._evidence_rows(self.store.db, memory_id)
+
+    # revision_snapshot：读取不可变历史 revision；缺失代表当时未记录，不能用当前内容补造历史。
+    def revision_snapshot(self, memory_id: str, revision: int) -> dict[str, Any]:
+        row = self.store.db.execute(
+            "SELECT * FROM workspace_memory_revisions WHERE memory_id=? AND revision=?",
+            (memory_id, int(revision)),
+        ).fetchone()
+        if row is None:
+            raise KeyError(f"{memory_id}@{revision}")
+        value = dict(row)
+        value["evidence"] = __import__("json").loads(value.pop("evidence_json"))
+        return value
+
+    # freshness：只对 Memory-linked evidence 比较当前 source revision/active；外部 provenance 无水位时保持 untracked。
+    def freshness(self, memory_id: str) -> dict[str, Any]:
+        evidence = self.evidence(memory_id)
+        source_ids = {
+            str(item["source_memory_id"])
+            for item in evidence
+            if item.get("source_memory_id")
+        }
+        current: dict[str, dict[str, Any] | None] = {}
+        for source_id in source_ids:
+            row = self.store.db.execute(
+                "SELECT memory_id,revision,active FROM workspace_memories WHERE memory_id=?",
+                (source_id,),
+            ).fetchone()
+            current[source_id] = None if row is None else dict(row)
+        return evaluate_freshness(evidence, current)
+
+    # apply_delta：LLM/策略只能提出受约束操作；Runtime 在 expected_revision 上原子校验并应用，拒绝整批部分写。
+    def apply_delta(
+        self,
+        memory_id: str,
+        operations: Iterable[Mapping[str, Any]],
+        *,
+        expected_revision: int,
+    ) -> dict[str, Any]:
+        normalized = normalize_delta_operations(operations)
+        if not normalized:
+            return self.get(memory_id)
+
+        with self.store.tx() as db:
+            row = db.execute(
+                "SELECT * FROM workspace_memories WHERE memory_id=?", (memory_id,)
+            ).fetchone()
+            if row is None:
+                raise KeyError(memory_id)
+            if int(row["revision"]) != int(expected_revision):
+                raise MemoryDeltaError(
+                    "memory delta expected_revision does not match current revision"
+                )
+            if not bool(row["active"]):
+                raise MemoryDeltaError("memory delta cannot mutate a revoked memory")
+
+            current_evidence = self._evidence_rows(db, memory_id)
+            by_ref = {str(item["evidence_ref"]): dict(item) for item in current_evidence}
+            new_text = apply_text_delta(str(row["text"]), normalized)
+
+            for operation in normalized:
+                if operation["op"] == "add_evidence":
+                    prepared = self._prepare_evidence(
+                        db, [operation["evidence"]]
+                    )[0]
+                    ref = str(prepared["evidence_ref"])
+                    if ref in by_ref:
+                        raise MemoryDeltaError(f"memory evidence already exists: {ref}")
+                    by_ref[ref] = prepared
+                elif operation["op"] == "remove_evidence":
+                    ref = str(operation["evidence_ref"])
+                    if ref not in by_ref:
+                        raise MemoryDeltaError(f"memory evidence does not exist: {ref}")
+                    del by_ref[ref]
+
+            revision = int(row["revision"]) + 1
+            db.execute(
+                "UPDATE workspace_memories SET text=?,revision=?,updated_at=CURRENT_TIMESTAMP "
+                "WHERE memory_id=?",
+                (new_text, revision, memory_id),
+            )
+            self._replace_evidence(
+                db, memory_id, [by_ref[key] for key in sorted(by_ref)]
+            )
+            self._snapshot_revision(db, memory_id)
+
+        record = self.get(memory_id)
         self._sync_vector_record(record)
         return record
 
@@ -445,6 +691,8 @@ class SqliteMemoryStore:
             raise ValueError("resolution must be L0/L1/L2")
         text = str(item.get("text") or "")
         stable_ref = f"memory:{item['memory_id']}@{item['revision']}"
+        evidence = self.evidence(str(item["memory_id"]))
+        freshness = self.freshness(str(item["memory_id"]))
         base = {
             "memory_id": item["memory_id"],
             "kind": item["kind"],
@@ -455,6 +703,9 @@ class SqliteMemoryStore:
             "fact_level": item.get("fact_level") or "context",
             "revision": item["revision"],
             "resolution": level,
+            "proof_count": len(evidence),
+            "freshness": freshness["status"],
+            "is_stale": freshness["is_stale"],
         }
         if level == "L0":
             return {**base, "text": text[:360], "bytes": len(text.encode("utf-8"))}
@@ -470,7 +721,13 @@ class SqliteMemoryStore:
                 "segment_count": len(segments),
                 "bytes": len(text.encode("utf-8")),
             }
-        return {**base, "text": text, "bytes": len(text.encode("utf-8"))}
+        return {
+            **base,
+            "text": text,
+            "bytes": len(text.encode("utf-8")),
+            "evidence": evidence,
+            "freshness_report": freshness,
+        }
 
     # 搜索先只返回 L0 索引视图和同一次召回报告；避免为了观测元数据重复执行向量查询。
     def search_view_report(
@@ -580,16 +837,16 @@ class SqliteMemoryStore:
             session_id=session_id,
         )["memories"]
 
-    # 撤销条目在未来查询中的可见性；历史快照与已发生效果不被倒写。
+    # 撤销只改变未来可见性并形成新的 immutable revision；依赖它的 Observation 将自动变 stale。
     def revoke(self, memory_id: str) -> dict:
-        current = self.get(memory_id)
-        # 本地事务边界：下列写入一起提交，异常整体回滚；文件/网络效果须在事务外另行核对。
+        self.get(memory_id)
         with self.store.tx() as db:
             db.execute(
                 "UPDATE workspace_memories SET active=0,revision=revision+1,"
                 "updated_at=CURRENT_TIMESTAMP WHERE memory_id=?",
                 (memory_id,),
             )
+            self._snapshot_revision(db, memory_id)
         return self.get(memory_id)
 
     # 以 Run 来源幂等记录结束经历，按冻结项目/会话范围保存；不宣称回答为 verified。
