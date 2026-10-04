@@ -115,6 +115,7 @@ class SqliteMemoryStore:
         scope_id: str | None = None,
         fact_level: str = "context",
         evidence: Iterable[Mapping[str, Any]] | None = None,
+        _db=None,
     ) -> dict:
         memory_kind = kind if isinstance(kind, MemoryKind) else MemoryKind(str(kind))
         value = str(text).strip()
@@ -133,8 +134,8 @@ class SqliteMemoryStore:
         if level not in {"context", "user_asserted", "verified"}:
             raise ValueError("memory fact_level must be context/user_asserted/verified")
 
-        # 本地事务边界：正文、当前 evidence 与 immutable revision snapshot 一起提交。
-        with self.store.tx() as db:
+        # 本地事务边界：正文、当前 evidence 与 immutable revision snapshot 一起提交；Memory Domain 内部可加入同连接活动事务。
+        with self.store.admission_transaction(_db) as db:
             row = db.execute(
                 "SELECT * FROM workspace_memories WHERE kind=? AND source_ref=?",
                 (memory_kind.value, source),
@@ -172,8 +173,9 @@ class SqliteMemoryStore:
             self._snapshot_revision(db, memory_id)
 
         record = self.get(memory_id)
-        # 外部向量索引不是同一事务；失败只降级未来语义召回，权威记忆仍已提交。
-        self._sync_vector_record(record)
+        # 外部向量索引不是同一事务；只有最外层提交后才同步，内部事务协作者负责在提交后调用。
+        if _db is None:
+            self._sync_vector_record(record)
         return record
 
     # _backfill_revision_snapshots：旧库第一次升级只为当前 revision 建快照；历史未知 revision 不伪造。
