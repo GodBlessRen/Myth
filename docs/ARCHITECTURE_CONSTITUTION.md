@@ -71,22 +71,22 @@ Evaluation 的分数只是证据的压缩投影，不是证据本身。
 - 缺测、样本不足和不确定性保持显式；不得把小样本波动直接包装为 Champion、Policy 增益或发布证据。
 - Evaluation 只提供证据与资格。SOTA Route 负责发现，Evolution 负责证明和显式发布；任一单次漂亮 Run 都不能直接改变生产策略。
 - Historical Replay 只能在同一冻结比较条件下重放“历史真实出现过的边”；未观察分支必须保持 `UNOBSERVED`，Replay 结果不能直接产生 `ELIGIBLE`、授权或 Promote。
-## 2.2 Harness Efficiency / Harness 效率不变量
+## 2.2 Context、执行与评测的不变量
 
 效率优化只能减少**无效工作**，不能偷偷降低权限、证据、可恢复性或验收标准。
 
 - **State ≠ Context**：持久事实是 source of truth；模型 Context 只是 State 的有预算投影。投影折叠、Compact、UI 隐藏都不能删除原始事实。
 - **Context = Projection(State)**：成本与节约优先按 provider-visible projection 计量；raw history 很大不代表真实请求仍然很大。无法量测的节约保持 N/A，不得补造。
-- **Fail-open optimization**：Observation fold、Reducer、Compact、Action Fusion 等优化失败时，必须优先保留原始证据/原始可执行路径，而不是让优化故障升级成任务信息丢失。
-- **Evidence-bound transformation**：LLM/小模型生成的摘要、Reduction、Compaction 都只是候选；能确定校验的关键事实必须绑定 source digest / exact quote / Artifact / Receipt / Verification。
+- **失败回原路径**：Observation fold、摘要、Compact、Action Fusion 等效率路径失败时，必须优先保留原始证据/原始可执行路径，而不是让效率改进本身造成信息丢失。
+- **摘要必须绑定来源**：LLM/小模型生成的摘要、Reduction、Compaction 都只是候选；可确定校验的关键事实必须绑定 source digest / exact quote / Artifact / Receipt / Verification。
 - **Deterministic successor**：Runtime 能确定执行、验证、恢复或计价的工作，不再浪费一次 LLM 决策；只有中间无需新语义判断的后继才允许融合。
 - **Partial success is explicit**：mutation 成功而 fused verifier/projection 失败时分别记录，不把部分成功伪装为“什么都没发生”。
-- **Optimization has debt**：cache rewrite、compaction、delegation、index/retrieval 等可以有 upfront cost / outstanding debt；是否执行应看剩余 horizon 能否回本，而不是只看单次 Token。
+- **成本要算未来请求**：cache rewrite、compaction、delegation、index/retrieval 等可以有 upfront cost / outstanding debt；是否执行应看剩余请求能否回本，而不是只看单次 Token。
 - **Hysteresis**：自适应优化需要 cooldown / margin / emergency override，防止 compact/route/delegate 在相邻步骤振荡。
 - **Representation transition ≠ semantic transition**：Compact、Memory consolidation、reconnect、branch reconstruction、UI projection 不得凭空制造 Goal progress、Action completion 或 Verification。
-- **Reachability is observable**：enabled 不等于 reachable。机制的 available / exposed / reachable / applied / skipped / fallback 必须有明确 reason code。
+- **Capability 可达性必须可观测**：enabled 不等于 reachable。Capability 的 available / exposed / reachable，以及未生效原因必须有稳定 reason code。
 - **Capability floor first**：任何效率候选先守住固定能力/安全下限，再比较 Pareto 成本；最终 held-out 结果不得反馈回候选搜索。
-- **Evidence Bus > Conversation Bus**：Sub-Agent / 多 Agent 默认共享显式 evidence refs 与有界 task/context，不复制完整父聊天历史或“所有想法”。
+- **Sub-Agent 只共享必要来源**：默认共享显式 evidence/source refs 与有界 task/context，不复制完整父聊天历史或“所有想法”。
 
 ## 3. Strategy，不升格成 Layer
 
