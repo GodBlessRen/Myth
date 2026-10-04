@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+from typing import Callable
+
 from .base import ModelProvider
 from .deepseek import DeepSeekApiKeyProvider
 from .ollama import OllamaProvider
@@ -13,7 +15,11 @@ from ..auth.provider_keys import ProviderApiKeyVault
 
 # 按明确 provider_id 在装配边界创建具体供应商；配置不携带其他应用认证文件或扩大工具权限。
 def create_provider(
-    name: str, *, ollama_base_url: str | None = None, runtime_root: str | None = None
+    name: str,
+    *,
+    ollama_base_url: str | None = None,
+    runtime_root: str | None = None,
+    token_supplier: Callable[[], str] | None = None,
 ) -> ModelProvider:
     if name == "scripted":
         return ScriptedPatchProvider()
@@ -31,7 +37,7 @@ def create_provider(
         if runtime_root is None:
             raise ValueError(f"{name} provider requires runtime_root")
         vault = ProviderApiKeyVault()
-        token = lambda: vault.resolve(name)[0]
+        token = token_supplier or (lambda: vault.resolve(name)[0])
         return (
             OpenAIApiKeyProvider(token_supplier=token)
             if name == "openai"
