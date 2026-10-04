@@ -101,6 +101,81 @@ class WorkspaceTests(unittest.TestCase):
         )
         self.assertFalse(session["messages"][-1]["metadata"]["execution_verified"])
 
+    # 回归断言：父模型可自行选择隔离 worker，Child 只收到显式委派上下文并以普通工具结果返回。
+    def test_llm_may_delegate_to_isolated_read_only_subagent(self):
+        sid = self.session()
+        rid = self.turn(
+            sid,
+            "主任务含 PARENT-ONLY-SECRET；请判断是否需要独立复核。",
+        )
+        provider = ChatProvider(
+            [
+                decision(
+                    "tool_call",
+                    "agent.delegate",
+                    {
+                        "task": "独立复核 FACT=A 是否足以支持给定结论。",
+                        "context": "FACT=A",
+                        "expected_output": "一句结论和未解决项",
+                        "source_refs": [],
+                    },
+                ),
+                decision(claim="子结论：FACT=A 可以支持当前局部结论。"),
+                decision(claim="最终回答：已结合隔离复核结果。"),
+            ]
+        )
+        self.workspace.run(rid, provider)
+
+        self.assertEqual(self.repo.turn(rid)["status"], "COMPLETED")
+        self.assertEqual(len(provider.calls), 3)
+        child_request = provider.calls[1]
+        child_text = "\n".join(message.content for message in child_request.messages)
+        self.assertIn("FACT=A", child_text)
+        self.assertNotIn("PARENT-ONLY-SECRET", child_text)
+        self.assertEqual(
+            child_request.response_schema["properties"]["decision_type"]["enum"],
+            ["request_completion"],
+        )
+        result = self.repo.turn(rid)["activities"][0]["result"]
+        self.assertTrue(result["subagent"]["context_isolated"])
+        self.assertFalse(result["subagent"]["write_access"])
+        self.assertFalse(result["subagent"]["recursive_delegation"])
+        model_rows = self.repo.decisions.status(rid)["model_invocations"]
+        self.assertTrue(
+            any(
+                str(row.get("request_key") or "").startswith("subagent:")
+                for row in model_rows
+            )
+        )
+
+    # 回归断言：Child 即使忽略输出 Schema 提议再次委派，本地边界也拒绝递归，不把它升级为执行权限。
+    def test_subagent_cannot_recursively_delegate(self):
+        rid = self.turn(self.session())
+        provider = ChatProvider(
+            [
+                decision(
+                    "tool_call",
+                    "agent.delegate",
+                    {"task": "独立检查一个问题。"},
+                ),
+                decision(
+                    "tool_call",
+                    "agent.delegate",
+                    {"task": "尝试创建孙级 Agent。"},
+                ),
+                decision(claim="父 Agent 在子任务被拒绝后继续完成。"),
+            ]
+        )
+        self.workspace.run(rid, provider)
+
+        turn = self.repo.turn(rid)
+        self.assertEqual(turn["status"], "COMPLETED")
+        self.assertEqual(len(provider.calls), 3)
+        self.assertIn(
+            "sub-agent may only return request_completion",
+            turn["activities"][0]["result"]["error"],
+        )
+
     # 回归断言：多轮请求包含保存的旧消息；重启后的历史以仓储为准。
     def test_multi_turn_model_receives_prior_messages(self):
         sid = self.session()

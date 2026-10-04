@@ -64,6 +64,7 @@ class Workspace:
             runtime,
             self.repository,
             capability_registry=self.components.capabilities,
+            subagent_registry=self.components.subagents,
         )
         # verification：与 execution 共用同一 profile 状态所有者，避免双写真相。
         self.verification = self.execution.verification

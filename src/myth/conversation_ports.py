@@ -59,7 +59,9 @@ class ConversationExecution(Protocol):
     def decide(self, turn: dict, step: int, provider: Any) -> tuple: ...
 
     # 执行已校验/准入的工作并留下结果证据；已存在稳定绑定时复用事实而非重复效果。
-    def execute(self, turn: dict, decision_id: str, decision: Any) -> dict: ...
+    def execute(
+        self, turn: dict, decision_id: str, decision: Any, *, provider: Any | None = None
+    ) -> dict: ...
 
 
 class ConversationControl(Protocol):

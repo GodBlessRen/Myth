@@ -145,7 +145,13 @@ class ConversationAgent:
                         return
 
                     if decision.decision_type == "tool_call":
-                        result = self.execution.execute(turn, decision_id, decision)
+                        # Sub-Agent 需要复用本轮固定 Provider；是否委派仍完全来自当前模型决定。
+                        if decision.capability_id == "agent.delegate":
+                            result = self.execution.execute(
+                                turn, decision_id, decision, provider=provider
+                            )
+                        else:
+                            result = self.execution.execute(turn, decision_id, decision)
                         self.repository.finish_tool(run_id, step["step"], result)
                         if self.delivery is not None:
                             self.delivery.record_tool_result(run_id, result)

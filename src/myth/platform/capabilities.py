@@ -126,6 +126,12 @@ def default_capabilities() -> CapabilityRegistry:
         ),
         ("math.calculate", "compute", "Evaluate bounded arithmetic only.", "compute"),
         (
+            "agent.delegate",
+            "agent",
+            "Run one bounded read-only isolated sub-agent and return a contracted result.",
+            "compute",
+        ),
+        (
             "file.read",
             "file",
             "Read fixed managed bytes in exact verification mode.",

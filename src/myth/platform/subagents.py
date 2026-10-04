@@ -1,24 +1,64 @@
-"""子 Agent 描述和预算分配的纯合同。
-父预算给出硬上限，注册不产生远端调用；实际并行或远端执行能力尚需对应执行适配器。"""
+"""子 Agent 的隔离执行合同与预算分配原语。
+父 Agent 负责决定是否委派，Runtime 保留权限与预算边界；第一版只提供无工具、无写入、不可递归的隔离 worker。
+"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
 
-# 显式子角色与预算比例合同；不包含自主启动实现。
+# SUBAGENT_RESULT_SCHEMA：隔离 worker 只能返回完成结果；Schema 限制表示，本地仍会复核决定种类与证据引用。
+SUBAGENT_RESULT_SCHEMA: dict[str, object] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": [
+        "decision_type",
+        "reason",
+        "capability_id",
+        "arguments_json",
+        "question",
+        "missing_info_category",
+        "claim",
+        "goal_coverage",
+        "evidence_refs",
+        "remaining",
+    ],
+    "properties": {
+        "decision_type": {"type": "string", "enum": ["request_completion"]},
+        "reason": {"type": "string"},
+        "capability_id": {"type": "string"},
+        "arguments_json": {"type": "string"},
+        "question": {"type": "string"},
+        "missing_info_category": {"type": "string"},
+        "claim": {"type": "string"},
+        "goal_coverage": {"type": "string"},
+        "evidence_refs": {"type": "array", "items": {"type": "string"}},
+        "remaining": {"type": "array", "items": {"type": "string"}},
+    },
+}
+
+
+# 显式子角色与预算/上下文边界合同；角色登记不代表已经启动子工作。
 @dataclass(frozen=True)
 class SubAgentSpec:
     # role_id：子 Agent 角色身份；不代表已经启动子工作。
     role_id: str
     # instruction：角色的显式工作说明；不能覆盖父授权上限。
     instruction: str
-    # capability_allowlist：角色明确允许能力集合；仍受父 Run 准入约束。
+    # capability_allowlist：角色明确允许能力集合；第一版 isolated worker 固定为空。
     capability_allowlist: tuple[str, ...]
-    # max_steps：用例/角色步骤硬上限；单位为规划步骤。
+    # max_steps：子工作规划步硬上限；第一版 worker 使用单次模型完成。
     max_steps: int = 6
     # budget_fraction：从父额度分配的比例，范围 (0,1]；按 meter 向下取整。
     budget_fraction: float = 0.25
+    # max_task_chars：父 Agent 可委派任务文本的字符上限。
+    max_task_chars: int = 4000
+    # max_context_chars：显式委派上下文字符上限；完整父对话不会自动继承。
+    max_context_chars: int = 12000
+    # max_expected_output_chars：期望输出描述的字符上限。
+    max_expected_output_chars: int = 2000
+    # max_source_refs：允许传入的已结算父级来源引用数量上限。
+    max_source_refs: int = 20
 
     # 在合同构造时校验输入边界；非法值提前拒绝，避免进入后续执行或比较。
     def __post_init__(self) -> None:
@@ -26,6 +66,13 @@ class SubAgentSpec:
             raise ValueError("invalid sub-agent spec")
         if not (0 < self.budget_fraction <= 1):
             raise ValueError("budget_fraction must be in (0, 1]")
+        if min(
+            self.max_task_chars,
+            self.max_context_chars,
+            self.max_expected_output_chars,
+            self.max_source_refs,
+        ) <= 0:
+            raise ValueError("sub-agent text/source limits must be positive")
 
 
 # 子角色目录与预算切片纯函数；子份额来自父额度，注册不启动线程/远端 Agent。
@@ -45,6 +92,10 @@ class SubAgentRegistry:
     def get(self, role_id: str) -> SubAgentSpec:
         return self._roles[role_id]
 
+    # 返回稳定排序的角色合同；目录可观测不等于角色已经运行。
+    def list(self) -> tuple[SubAgentSpec, ...]:
+        return tuple(self._roles[key] for key in sorted(self._roles))
+
     # 按明确角色 budget_fraction 对父各 meter 向下取整；不启动子 Run 或突破父硬上限。
     def child_budget(
         self, role_id: str, parent_budget: dict[str, int]
@@ -54,3 +105,21 @@ class SubAgentRegistry:
             meter: max(0, int(amount * fraction))
             for meter, amount in parent_budget.items()
         }
+
+
+# 登记第一版通用隔离 worker；它只有模型推理能力，没有工具、写入或递归委派权限。
+def default_subagents() -> SubAgentRegistry:
+    registry = SubAgentRegistry()
+    registry.register(
+        SubAgentSpec(
+            role_id="isolated_worker",
+            instruction=(
+                "在隔离上下文中完成一个只读子任务；不得使用工具、写入、"
+                "请求用户或再次委派。"
+            ),
+            capability_allowlist=(),
+            max_steps=1,
+            budget_fraction=0.5,
+        )
+    )
+    return registry

@@ -14,7 +14,7 @@ from .mcp import MCPRegistry
 from .observability import TraceProjection
 from .retrieval import RetrievalBackend, RetrievalMode, RetrievalRouter
 from .skills import SkillRegistry
-from .subagents import SubAgentRegistry
+from .subagents import SubAgentRegistry, default_subagents
 from ..domains.coordination import StrategyRegistry, default_strategies
 
 
@@ -263,7 +263,7 @@ class MythComponents:
     memory: MemoryCatalog
     # retrieval：检索路由协作对象；具体生产召回由仓储实现。
     retrieval: RetrievalRouter
-    # subagents：子角色目录协作对象；没有自主启动后端。
+    # subagents：子角色目录协作对象；执行仍由对话适配器在 Runtime 边界内显式派发。
     subagents: SubAgentRegistry
     # skills：流程目录协作对象；声明能力需求不授权。
     skills: SkillRegistry
@@ -290,7 +290,7 @@ class MythComponents:
                     RetrievalBackend("graph", RetrievalMode.GRAPH, False),
                 )
             ),
-            subagents=SubAgentRegistry(),
+            subagents=default_subagents(),
             skills=SkillRegistry(),
             mcp=MCPRegistry(),
             observability=TraceProjection(),

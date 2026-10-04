@@ -80,6 +80,21 @@ Decision proposal
 
 模型自述“已执行”不能代替 Receipt。
 
+### 4.1 Delegation / Sub-Agent
+
+第一版 Multi-Agent 不增加新 Core，也不把 Supervisor 固定成必经层。父模型在正常 Agent Loop 中自行判断是否调用 `agent.delegate`：
+
+```text
+Parent decision
+  -> optional agent.delegate
+  -> explicit task + bounded context + admitted source refs
+  -> isolated read-only model worker
+  -> contracted result
+  -> Parent continues normal Agent Loop
+```
+
+隔离 worker 不继承完整父历史、Memory 或工具目录，不可写入、调用工具、再次委派或向用户提问。它的结果作为 Observation 回到父步骤；不是 Receipt 的替代物，也不自动通过 Acceptance。委派模型调用继续使用父 Run 的 durable model Ticket / receipt / budget 账本，因此恢复和成本仍可观测。
+
 ## 5. Interruption / recovery
 
 Run 生命周期不绑定 Browser、HTTP request 或 Web Driver 生命周期。

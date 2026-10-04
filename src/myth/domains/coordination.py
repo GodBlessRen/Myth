@@ -140,8 +140,8 @@ def default_strategies() -> StrategyRegistry:
             StrategySpec(
                 "multi_agent",
                 "Multi-Agent",
-                StrategyState.EXISTS,
-                "Delegate bounded child Runs to role-scoped agents.",
+                StrategyState.CONNECTED,
+                "Parent LLM may choose a bounded isolated worker through agent.delegate; the child cannot write, use tools or recursively delegate and returns a contracted result.",
             ),
             StrategySpec(
                 "managed_agent",

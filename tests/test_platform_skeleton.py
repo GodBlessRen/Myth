@@ -115,8 +115,11 @@ class PlatformSkeletonTests(unittest.TestCase):
             components.strategies.get("agent_loop").state, StrategyState.USABLE
         )
         self.assertEqual(
-            components.strategies.get("multi_agent").state, StrategyState.EXISTS
+            components.strategies.get("multi_agent").state, StrategyState.CONNECTED
         )
+        worker = components.subagents.get("isolated_worker")
+        self.assertEqual(worker.max_steps, 1)
+        self.assertEqual(worker.capability_allowlist, ())
         self.assertEqual(RouteTarget.REMOTE_AGENT.value, "remote_agent")
 
     # 回归断言：当前 Stop 与旧 Abort 兼容，只有一套控制语义。
