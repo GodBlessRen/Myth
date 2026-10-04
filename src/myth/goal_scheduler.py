@@ -226,7 +226,7 @@ class GoalScheduler:
                 raise KeyError(schedule_id)
             if not row["enabled"] or row["due_at"] > now or row["retry_at"] > now:
                 return None
-            # 读取/补齐旧 Goal 必须加入当前准入事务；不能在调度事务内再开一个初始化事务。
+            # 在当前准入事务核对 Goal 和完整进度；缺失状态拒绝准入，不做旧库回填。
             goal = self.workspace.personal.admission_snapshot(db, row["goal_id"])
             work = goal["work"]
             if (

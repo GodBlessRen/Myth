@@ -145,6 +145,24 @@ class SqliteKnowledgeRepository:
             "content": self.runtime.objects.get(row["digest"]).decode("utf-8"),
         }
 
+    def chunk_page(self, document_id, *, cursor=0, limit=12):
+        """读取一页分片导航，多取一项判断后续页；游标是分片编号，不是字符偏移。
+
+        文档作用域由执行适配器先核对，SQL 与分片布局仅由知识仓储拥有。
+        文档内容不可原地修改，因此分页持续绑定同一 document/digest。
+        """
+        if type(cursor) is not int or cursor < 0 or type(limit) is not int or not 1 <= limit <= 20:
+            raise ValueError("L1 cursor must be non-negative and limit must be 1-20 chunks")
+        rows = self.store.db.execute(
+            "SELECT chunk_index,content FROM workspace_chunks WHERE document_id=? AND chunk_index>=? "
+            "ORDER BY chunk_index LIMIT ?", (document_id, cursor, limit + 1),
+        ).fetchall()
+        values = [{"chunk_index": int(row["chunk_index"]), "preview": row["content"][:500],
+                   "citation": f"doc:{document_id}:{row['chunk_index']}"} for row in rows[:limit]]
+        has_more = len(rows) > limit
+        return {"chunks": values, "cursor": cursor, "has_more": has_more,
+                "next_cursor": values[-1]["chunk_index"] + 1 if values and has_more else None}
+
     # 把文档从未来检索集合撤下；不删除冻结快照引用的原始对象。
     def archive_document(self, did):
         self.document(did)

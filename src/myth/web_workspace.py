@@ -165,7 +165,7 @@ class ConversationWebService:
     def mental_models(self):
         with MythRuntime(self.root) as runtime:
             workspace = Workspace(runtime)
-            values = workspace.mental_models.list_models()
+            values = workspace.knowledge_views.list_models()
             for item in values:
                 try:
                     item["auto_refresh"] = workspace.mental_model_refresh.policy(
@@ -182,7 +182,7 @@ class ConversationWebService:
     def mental_model(self, model_id):
         with MythRuntime(self.root) as runtime:
             workspace = Workspace(runtime)
-            value = workspace.mental_models.model(str(model_id), resolution="L2")
+            value = workspace.knowledge_views.model(str(model_id), resolution="L2")
             try:
                 value["auto_refresh"] = workspace.mental_model_refresh.policy(
                     str(model_id)
@@ -198,7 +198,7 @@ class ConversationWebService:
     def create_mental_model(self, value):
         with MythRuntime(self.root) as runtime:
             workspace = Workspace(runtime)
-            return workspace.mental_models.create_model(
+            return workspace.knowledge_views.create_model(
                 name=value.get("name", ""),
                 source_query=value.get("source_query", ""),
                 scope_type=value.get("scope_type", "global"),
@@ -218,7 +218,7 @@ class ConversationWebService:
     # knowledge_pages：只返回导航树；正文继续由 backing Mental Model/Memory 持有。
     def knowledge_pages(self):
         with MythRuntime(self.root) as runtime:
-            return Workspace(runtime).knowledge_pages.tree()
+            return Workspace(runtime).knowledge_views.tree()
 
     # 读取独立执行器心跳/租约投影；只反映 worker 生命，不把它冒充业务进度。
     def executor(self):
@@ -601,7 +601,7 @@ class ConversationWebService:
                 goal_id=goal_id,
                 goal_context=goal_context,
             )
-            workspace.control.ensure(turn["run_id"], turn["settings"])
+            workspace.control.ensure(turn["run_id"])
         if turn["status"] == "RUNNING":
             self._spawn(turn["run_id"])
         return {"run_id": turn["run_id"], "session_id": sid}
@@ -624,7 +624,6 @@ class ConversationWebService:
             "pause": ControlCommand.PAUSE,
             "resume": ControlCommand.RESUME,
             "stop": ControlCommand.STOP,
-            "cancel": ControlCommand.STOP,
             "steer": ControlCommand.STEER,
             "switch_model": ControlCommand.SWITCH_MODEL,
             "switch_thinking": ControlCommand.SWITCH_THINKING,
@@ -633,6 +632,7 @@ class ConversationWebService:
         if action not in mapping:
             raise ValueError("unsupported control")
 
+        expected_revision = None
         if action == "steer":
             payload = value.get("text")
         elif action in {"switch_model", "switch_thinking"}:
@@ -642,6 +642,7 @@ class ConversationWebService:
                 workspace = Workspace(runtime)
                 turn = workspace.repository.turn(rid)
                 current = workspace.control.view(rid)
+            expected_revision = current["revision"]
             current_model = current.get("model") or turn["settings"]["model"]
             current_thinking = (
                 current["thinking"]
@@ -662,31 +663,10 @@ class ConversationWebService:
 
         with MythRuntime(self.root) as runtime:
             workspace = Workspace(runtime)
-            projection = workspace.control.command(rid, mapping[action], payload)
+            projection = workspace.control.command(
+                rid, mapping[action], payload, expected_revision=expected_revision
+            )
             turn = workspace.repository.turn(rid)
-
-        goal_id = (turn.get("snapshot") or {}).get("goal", {}).get("goal_id")
-        if goal_id and action in {"pause", "stop", "resume"}:
-            with MythRuntime(self.root) as runtime:
-                personal = Workspace(runtime).personal
-                status = {"pause": "PAUSED", "stop": "CANCELLED", "resume": "RUNNING"}[
-                    action
-                ]
-                personal.checkpoint_run(
-                    goal_id,
-                    rid,
-                    status=status,
-                    summary=f"Control action applied: {action}.",
-                    next_action=(
-                        "Resume this Goal when ready."
-                        if action == "pause"
-                        else (
-                            "Continue the Goal in a new admitted Turn."
-                            if action == "stop"
-                            else "Let the resumed Turn reach a durable checkpoint."
-                        )
-                    ),
-                )
 
         if action == "resume":
             self._spawn(rid)

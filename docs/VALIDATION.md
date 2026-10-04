@@ -1,105 +1,36 @@
-# Validation
+# 验证入口
 
-这份文档只说明**当前怎么验证**以及**当前验证不能证明什么**。本次版本证据见 [REFINEMENT_REVIEW](REFINEMENT_REVIEW.md)。历史记录进入仓库垃圾站，不作为当前版本通过证据。
+当前版本结果见 [REFINEMENT_REVIEW](REFINEMENT_REVIEW.md)；历史证据只用于比较，不能充当当前通过记录。完整命令以根目录 [AGENTS.md](../AGENTS.md#验证与交付) 为准。
 
-## 自动检查
+## 每次提交
 
-PR / 本地至少运行：
+1. Python 编译、中文说明覆盖、已知秘钥模式扫描。
+2. 全量 `unittest discover -s tests -v`；不能只运行新增测试。
+3. 六个前端 JS 语法检查，以及 Observatory / reconnect / statistics / interactions 四组 Node 测试。
+4. wheel、sdist、`git archive` 源码包排除 `.trash`、运行库、秘钥和开发缓存。
+5. wheel 安装至独立目录，运行 `scripts/validate_package.py --package-dir <目录>`，通过真实 HTTP 核对导入、静态资源与基本 API。
 
-```bash
-python -m compileall -q src tests
-python -m unittest discover -s tests -v
-node --check src/myth/webui/app.js
-node --check src/myth/webui/inspector.js
-node --check src/myth/webui/goals.js
-```
+中文检查只证明说明存在，不能证明注释准确。涉及界面的改动再运行真实浏览器交互、桌面/窄屏、双主题、焦点与溢出检查。
 
-发布前另行构建 wheel/sdist，执行 `python scripts/validate_release.py dist` 和安装包 HTTP 验证。
+## 按变更选择故障窗口
 
-根据改动范围增加专项检查：
+| 边界 | 回归入口 / 检查重点 |
+| --- | --- |
+| 创建与状态所有权 | `test_state_boundaries.py`：SQL 故障、并发身份、事务回滚 |
+| 控制 | `test_control_atomicity.py`：Pause/Resume/Stop 跨聚合回滚、终态竞争、CAS、真实进程退出 |
+| 委派 | `test_delegation_boundaries.py`：父额度先于子费用、收据间崩溃、无 Provider 恢复、UNKNOWN 不重发 |
+| 交付 | `test_delivery_workflow.py`：回答提交后收尾、对象摘要验收、受信测试进程 |
+| 调度与长 Run | schedule / goal / long-run 测试：同机会争抢、同 Run 接续、租约和进度分离 |
+| 模型与认证 | provider / context / oauth 测试：请求窗口、用量缺测、轮转、PKCE/OIDC、日志无凭据 |
+| Memory/检索 | revision、撤销、作用域、候选覆盖、来源核对、分页与刷新水位 |
+| Evaluation/Evolution | 完整分母、固定版本、partial 禁止发布、显式 Promote/Rollback |
 
-- Runtime / recovery → crash / UNKNOWN；
-- Intent / routing → adversarial cases；
-- Provider / Context → window / truncation / usage；
-- Auth / OAuth → PKCE/state/nonce、OIDC signature/audience/issuer、secure storage、refresh/revoke、callback log leakage；
-- Goal / Personal → cross-session / restart；
-- Timer / Schedule → atomic admission、跨连接争抢、commit 后进程退出、断连重试、暂停、UNKNOWN no replay；
-- UI → Runtime Observatory surface contract；
-- Evaluation / Evolution → complete-suite release evidence。
+## 真实模型与连续使用
 
-## 自动测试覆盖的核心边界
+`evals/daily-v1.json` 和 `myth task-benchmark` 提供固定任务、两组对照与重复试次。记录 provider/model、任务和上下文、预算、完整分母、产物/收据/验收、失败类别、token/耗时/人工介入。用法见 [TASK_BENCHMARK](TASK_BENCHMARK.md)。
 
-开发前运行 `python scripts/check_annotations.py`；它检查中文职责说明覆盖，不判断内容准确性。准入/状态所有权回归集中在 `tests/test_state_boundaries.py`，当前协作边界见 [CODE_GUIDE.md](CODE_GUIDE.md)。
+替身通过证明指定合同；真实模型质量、账号登录可用性、在途断网与多周运行需分别留证据。受信 unittest profile 不是任意代码沙箱；本机测试不证明多用户权限或分布式 exactly-once。
 
-- durable Run / Attempt / Ticket / Receipt；
-- model / tool UNKNOWN 不盲 replay；
-- crash 后恢复与预算结算；
-- Control revision / Pause / Resume / Stop；
-- scoped Memory；
-- Knowledge / project retrieval coverage；
-- Intent adversarial routing；
-- Ollama context-window semantics；
-- Myth-owned ChatGPT OAuth protocol/security invariants；
-- Goal checkpoint / cross-session continuation；
-- Eval Ledger / paired evidence / policy promote / rollback；
-- Runtime Observatory UI identity。
+## 记录规则
 
-自动测试大量使用 deterministic provider 或 test doubles。
-
-**自动测试通过 ≠ 真实模型任务稳定。**
-
-## 真实模型验证
-
-真实模型验证必须单独记录：
-
-- provider / model；
-- prompt / task；
-- context window；
-- tool set；
-- expected outcome；
-- actual outcome；
-- artifact / receipt；
-- failure taxonomy；
-- token / latency / tool cost。
-
-当前开发主线要求建立真实任务集，而不是继续用单个 happy-path 证明“可用”。
-
-固定日常任务已提供 `evals/daily-v1.json` 和 `myth task-benchmark`。默认包含 Myth 与 simple-loop 两组，每题重复三次；所有试次、失败、产物字节校验和运行数据库都会保存。使用方法见 [TASK_BENCHMARK.md](TASK_BENCHMARK.md)；真实模型验证需另行记录当前版本结果。
-
-## 浏览器验证
-
-至少检查：
-
-- 桌面三栏工作台；
-- 第三栏 Runtime Observatory；
-- 窄屏折叠行为；
-- Goal create / bind / continue；
-- Conversation / Tool / Artifact；
-- Settings；
-- Runtime state transitions；
-- 无水平溢出；
-- keyboard focus / critical state readability。
-
-## 不能据此宣称
-
-当前验证**不能**证明：
-
-- 任意真实模型长期稳定；
-- 多用户权限安全；
-- 分布式 exactly-once；
-- 任意代码 / shell 安全执行；
-- 完整语义验收；
-- 脱离 Web 服务的系统常驻调度、Webhook/Email 触发；
-- 所有浏览器 / 辅助技术兼容；
-- 多周 Personal Agent 可靠性。
-
-这些必须通过真实任务、自用、故障注入和更大评测逐步证明。
-
-## 证据原则
-
-1. 测到什么写什么。
-2. 没测到写 `not measured`，不要写“没有问题”。
-3. model claim 不等于 verification。
-4. UI projection 不等于 durable truth。
-5. UNKNOWN 不等于 FAILED。
-6. 历史测试数字进入 CHANGELOG / 垃圾站，不进入当前架构说明。
+测到什么写什么；缺测标记 `not measured`。Model claim 不等于验收，UI 投影不等于持久事实，UNKNOWN 不等于 FAILED。功能文档不堆积旧测试数字；故障输入和版本化结果集中进入审查/评测证据。

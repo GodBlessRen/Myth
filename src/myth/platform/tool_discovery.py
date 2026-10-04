@@ -10,7 +10,6 @@ from typing import Any
 # 常用能力默认可见；专门 Git/Diff 工具延迟加载，避免整个目录长期占用 Prompt。
 DEFAULT_VISIBLE_TOOL_IDS = (
     "knowledge.search",
-    "knowledge.read",
     "knowledge.resolve",
     "memory.search",
     "memory.timeline",

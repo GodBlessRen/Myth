@@ -86,7 +86,6 @@ class LiveInformationController:
         "project.search": InformationControlAction.SEEK,
         "project.list": InformationControlAction.SEEK,
         "knowledge.resolve": InformationControlAction.EXPAND,
-        "knowledge.read": InformationControlAction.EXPAND,
         "memory.timeline": InformationControlAction.EXPAND,
         "memory.resolve": InformationControlAction.EXPAND,
         "project.read": InformationControlAction.EXPAND,
@@ -133,12 +132,6 @@ class LiveInformationController:
                 "cursor": value.get("cursor", 0),
                 "limit": value.get("limit", 6000 if resolution == "L2" else 12),
             }
-        if capability == "knowledge.read":
-            return {
-                "document_id": str(value.get("document_id") or "").strip(),
-                "offset": value.get("offset", 0),
-                "max_chars": value.get("max_chars", 6000),
-            }
         if capability == "project.read":
             return {
                 "path": str(value.get("path") or "").strip(),
@@ -166,7 +159,7 @@ class LiveInformationController:
             )
         if capability == "project.list":
             return canonical_json({"kind": capability, "path": normalized["path"]})
-        if capability in {"knowledge.resolve", "knowledge.read"}:
+        if capability == "knowledge.resolve":
             return canonical_json(
                 {"kind": "knowledge", "document_id": normalized["document_id"]}
             )
@@ -309,10 +302,6 @@ class LiveInformationController:
                     "document_id": normalized["document_id"],
                     "resolution": normalized["resolution"],
                 }
-            )
-        if capability == "knowledge.read":
-            return canonical_json(
-                {"kind": capability, "document_id": normalized["document_id"]}
             )
         if capability == "project.read":
             return canonical_json(

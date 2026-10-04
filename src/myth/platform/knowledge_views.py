@@ -108,7 +108,7 @@ class SqliteKnowledgeViews:
         identity = str(model_id or f"mm_{uuid.uuid4().hex}").strip()
         if not re.fullmatch(r"[A-Za-z0-9_.:-]{1,200}", identity):
             raise ValueError("model_id contains unsupported characters")
-        with self.store.admission_transaction(_db) as db:
+        with self.store.transaction_scope(_db) as db:
             db.execute(
                 "INSERT INTO workspace_mental_models("
                 "model_id,name,source_query,scope_type,scope_id"
@@ -426,7 +426,7 @@ class SqliteKnowledgeViews:
         if type(sort_order) is not int:
             raise ValueError("sort_order must be an integer")
         identity = f"kp_{uuid.uuid4().hex}"
-        with self.store.admission_transaction(_db) as db:
+        with self.store.transaction_scope(_db) as db:
             if parent_id is not None:
                 parent = db.execute(
                     "SELECT node_type FROM workspace_knowledge_pages WHERE node_id=?",

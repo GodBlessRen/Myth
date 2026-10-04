@@ -1,5 +1,5 @@
 """控制命令的纯状态转换规则。
-修改未来规划与安全点状态，不撤销已发出的外部效果；持久命令序列与对话投影由 control_store 所有。"""
+修改未来规划与安全点状态，不撤销已发出的外部效果；命令由 Control 仓储持久化，Turn/Core/Goal 由各自仓储投影。"""
 
 from __future__ import annotations
 
@@ -31,7 +31,7 @@ class ControlCommand(StrEnum):
 # 某 revision 的不可变控制投影；不包括外部效果是否成功。
 @dataclass(frozen=True)
 class ControlSnapshot:
-    # revision：当前状态/记忆的单调版本；旧结果不能覆盖更新版本。
+    # revision：此 Run 的控制命令序号；与 Core 的执行栅栏独立，不能相互赋值。
     revision: int = 1
     # paused：暂停未来规划的显式状态；已发出效果照常留收据。
     paused: bool = False
@@ -75,8 +75,8 @@ class ControlService:
             update["paused"] = False
         elif command is ControlCommand.SWITCH_MODEL:
             value = str(payload or "").strip()
-            if not value:
-                raise ValueError("model must be non-empty")
+            if not value or len(value) > 200:
+                raise ValueError("model must contain 1-200 characters")
             update["model"] = value
         elif command is ControlCommand.SWITCH_THINKING:
             # Control 只保存用户显式 Provider 原生值；允许未来模型增加档位而无需修改控制状态机。

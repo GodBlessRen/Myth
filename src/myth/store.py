@@ -311,13 +311,31 @@ class RuntimeStore:
             raise IdentityConflict("request_id reused with different request content")
         return str(existing["run_id"])
 
-    # 开始独立短事务或加入本连接的明确准入事务；禁止跨连接/无事务传入，绝不隐式嵌套。
-    def admission_transaction(self, db: sqlite3.Connection | None = None):
+    # 开始独立写事务或加入本连接的明确业务事务；跨聚合协作共用提交点，不允许隐式嵌套。
+    def transaction_scope(self, db: sqlite3.Connection | None = None):
         if db is not None:
             if db is not self.db or not db.in_transaction:
-                raise RuntimeError("admission requires this store's active transaction")
+                raise RuntimeError("operation requires this store's active transaction")
             return nullcontext(db)
         return self.tx()
+
+    def project_control(self, db, run_id: str, *, state: str | None = None,
+                        advance_revision: bool = False) -> None:
+        """在协调事务内更新 Core 的控制投影；Core 栅栏自行递增，不能用命令序号倒写。
+
+        命令 revision 只为命令排序；Core revision 还会因恢复/阻塞递增，两者不是同一计数器。
+        已完成的 Core 不允许被迟到 Pause/Resume 重新打开。
+        """
+        with self.transaction_scope(db):
+            current = self.get_run(run_id)
+            if state is not None:
+                target = RunState(state).value
+                if current["state"] in {"SUCCEEDED", "FAILED", "CANCELLED", "BUDGET_EXHAUSTED"}:
+                    if target != current["state"]:
+                        raise InvalidTransition("terminal Run cannot accept control projection")
+                db.execute("UPDATE runs SET state=? WHERE run_id=?", (target, run_id))
+            if advance_revision:
+                db.execute("UPDATE runs SET control_revision=control_revision+1 WHERE run_id=?", (run_id,))
 
     # 同事务固定 request_id/entry_digest、Run、所有预算和首事件；_db 允许入口把初始 Intent 一起提交。
     def create_run(
@@ -332,7 +350,7 @@ class RuntimeStore:
         _db: sqlite3.Connection | None = None,
     ) -> tuple[str, bool]:
         # 本地事务边界：下列写入一起提交，异常整体回滚；文件/网络效果须在事务外另行核对。
-        with self.admission_transaction(_db) as db:
+        with self.transaction_scope(_db) as db:
             existing = self.request_run(request_id, entry_digest)
             if existing is not None:
                 return existing, False
@@ -374,7 +392,7 @@ class RuntimeStore:
 
         run_id = str(action["run_id"])
         # 本地事务边界：下列写入一起提交，异常整体回滚；文件/网络效果须在事务外另行核对。
-        with self.admission_transaction(_db) as db:
+        with self.transaction_scope(_db) as db:
             run = db.execute(
                 "SELECT state FROM runs WHERE run_id=?", (run_id,)
             ).fetchone()
@@ -783,7 +801,7 @@ class RuntimeStore:
             raise ValueError("transition_run only accepts explicit background outcome states")
         if not isinstance(event_kind, str) or not event_kind.strip():
             raise ValueError("event_kind is required")
-        with self.admission_transaction(_db) as db:
+        with self.transaction_scope(_db) as db:
             row = db.execute("SELECT state FROM runs WHERE run_id=?", (run_id,)).fetchone()
             if row is None:
                 raise KeyError(run_id)

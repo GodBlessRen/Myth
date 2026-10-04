@@ -16,9 +16,9 @@ from myth.workspace import Workspace
 from test_workspace import ChatProvider, decision
 
 
-# 该类型集中拥有当前职责，避免把状态真相分散到多个适配器。
+# 以独立 SQLite 和受信测试项目核对收尾、验收与人工关注；不调用真实模型。
 class DeliveryWorkflowTests(unittest.TestCase):
-    # 该入口按持久合同处理输入与输出，失败保持显式而不伪造完成。
+    # 建立隔离根、真实仓储与 Session，确保用例不共享持久状态。
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
@@ -28,12 +28,12 @@ class DeliveryWorkflowTests(unittest.TestCase):
         self.repo.save_settings({"provider": "ollama", "model": "test"})
         self.sid = self.repo.create_session()["id"]
 
-    # 该入口按持久合同处理输入与输出，失败保持显式而不伪造完成。
+    # 关闭数据库后清理临时目录，避免 Windows 持有文件句柄。
     def tearDown(self):
         self.runtime.close()
         self.tmp.cleanup()
 
-    # 该入口按持久合同处理输入与输出，失败保持显式而不伪造完成。
+    # 回答结束会补齐收尾义务；验收仍未验证，Goal 不再假装持续执行。
     def test_completion_creates_finalization_and_unverified_acceptance(self):
         goal = self.workspace.personal.create_goal("Ship one checked deliverable")
         turn = self.repo.create_turn(
@@ -43,7 +43,7 @@ class DeliveryWorkflowTests(unittest.TestCase):
             goal_id=goal["goal_id"],
             goal_context=goal,
         )
-        self.workspace.control.ensure(turn["run_id"], turn["settings"])
+        self.workspace.control.ensure(turn["run_id"])
         self.workspace.run(turn["run_id"], ChatProvider([decision(claim="Draft ready")]))
         view = self.workspace.delivery.run_view(turn["run_id"])
         self.assertEqual(self.repo.turn(turn["run_id"])["status"], "COMPLETED")
@@ -55,7 +55,7 @@ class DeliveryWorkflowTests(unittest.TestCase):
             "IN_PROGRESS",
         )
 
-    # 该入口按持久合同处理输入与输出，失败保持显式而不伪造完成。
+    # 在回答已提交、Memory 尚未写入时真实退出；重开补偿，不重放模型。
     def test_hard_exit_after_answer_commit_is_reconciled_without_model_replay(self):
         child_root = self.root / "terminal-crash"
         source_root = Path(__file__).resolve().parents[1]
@@ -76,7 +76,7 @@ with MythRuntime(root) as runtime:
         sid, "Finish exactly once", "terminal-crash",
         goal_id=goal["goal_id"], goal_context=goal
     )
-    w.control.ensure(turn["run_id"], turn["settings"])
+    w.control.ensure(turn["run_id"])
     (root/"ids.json").write_text(
         json.dumps({"run_id":turn["run_id"],"goal_id":goal["goal_id"]})
     )
@@ -106,7 +106,7 @@ with MythRuntime(root) as runtime:
                 "IN_PROGRESS",
             )
 
-    # 该入口按持久合同处理输入与输出，失败保持显式而不伪造完成。
+    # 验收绑定当前对象摘要，人工审查耗时独立计量；旧摘要必须拒绝。
     def test_acceptance_binds_subject_and_human_attention(self):
         rid = self.repo.create_turn(self.sid, "Review me", "acceptance")["run_id"]
         self.workspace.run(rid, ChatProvider([decision(claim="Answer")]))
@@ -130,7 +130,7 @@ with MythRuntime(root) as runtime:
                 rid, state="PASSED", checker_id="stale", subject_digest="0" * 64
             )
 
-    # 该入口按持久合同处理输入与输出，失败保持显式而不伪造完成。
+    # 工作计划修订严格前进，依赖引用按持久 ordinal 保存。
     def test_work_plan_revision_is_monotonic(self):
         rid = self.repo.create_turn(self.sid, "Multi-stage work", "plan")["run_id"]
         self.workspace.delivery.ensure_root_work_item(self.repo.turn(rid))
@@ -149,7 +149,7 @@ with MythRuntime(root) as runtime:
                 rid, [{"title": "old plan"}], plan_revision=2
             )
 
-    # 该入口按持久合同处理输入与输出，失败保持显式而不伪造完成。
+    # 显式受信 profile 才启动固定 unittest；测试 PASS 不自动等于交付验收。
     def test_trusted_python_unittest_profile_executes_via_receipt(self):
         project_root = self.root / "fixture-project"
         tests = project_root / "tests"
@@ -191,7 +191,7 @@ with MythRuntime(root) as runtime:
         self.assertTrue(operation["result"]["evidence_ref"].startswith("test:"))
         self.assertEqual(self.workspace.delivery.acceptance(rid)["state"], "UNVERIFIED")
 
-    # 该入口按持久合同处理输入与输出，失败保持显式而不伪造完成。
+    # Web 展示持久 Delivery 事实，普通回答仍显示 UNVERIFIED。
     def test_web_projection_exposes_delivery_metrics(self):
         rid = self.repo.create_turn(self.sid, "Visible delivery", "web-delivery")["run_id"]
         self.workspace.run(rid, ChatProvider([decision(claim="Visible")]))

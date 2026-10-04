@@ -105,6 +105,18 @@ class AskProvider:
 
 # Exact Agent 端口装配与固定文件范围的固定测试集合/替身；临时资源由本用例拥有，生产状态必须从实际仓储核对。
 class AgentRuntimeTests(unittest.TestCase):
+    def test_missing_acceptance_contract_is_not_replaced_by_empty_rules(self):
+        """固定验收合同丢失即损坏，不能用空规则把未验证目标降级成可完成。"""
+        with tempfile.TemporaryDirectory() as tmp, MythRuntime(Path(tmp)) as runtime:
+            source = Path(tmp) / "data.txt"
+            source.write_text("foo", encoding="utf-8")
+            agent = AgentRuntime(runtime)
+            rid = agent.create_run(goal="review foo", provider=LoopProvider(), model="fixture", allowed_files=(source,))
+            runtime.store.db.execute("DELETE FROM agent_contracts WHERE run_id=?", (rid,))
+            with self.assertRaisesRegex(RuntimeError, "acceptance manifest missing"):
+                agent.repository.manifest(rid)
+            self.assertEqual(runtime.store.db.execute("SELECT count(*) FROM agent_contracts").fetchone()[0], 0)
+
     # 回归断言：应用经端口执行真实受管工具，固定验收通过后才能交付。
     def test_agent_executes_tool_then_verifies_completion(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

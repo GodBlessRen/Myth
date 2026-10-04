@@ -162,9 +162,9 @@ class SessionStatisticsTests(unittest.TestCase):
         self.assertEqual(account[0], 1)
 
 
-    # 老收据缺时间或损坏的观测字段不能阻止真实结果核对，不能变成伪造零耗时。
-    def test_legacy_or_invalid_timing_does_not_change_recovery(self):
-        rid = self.repo.create_turn(self.sid, "Legacy receipts", "legacy")["run_id"]
+    # 缺测或损坏的观测字段不能阻止真实结果核对，不能变成伪造零耗时。
+    def test_missing_or_invalid_timing_does_not_change_recovery(self):
+        rid = self.repo.create_turn(self.sid, "Missing timing", "missing-timing")["run_id"]
         for index, timing in enumerate([None, True, -1, "250"]):
             step = self.repo.begin_step(rid)["step"]
             did, proposal = self.workspace.execution.decide(self.repo.turn(rid), step,

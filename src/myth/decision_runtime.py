@@ -632,6 +632,50 @@ class DecisionRuntime:
             )
         return decision_id
 
+    def recorded_decision(self, run_id: str, request_key: str) -> tuple[str, StepDecision] | None:
+        """只核对已有 key、模型收据与决定；绝不准入或调用 Provider。
+
+        None 表示没有绑定机会（未开始或已证明零派发）；有 Ticket 但无收据仍抛出
+        RecoveryRequired。供调用去重与委派工具补收据共用，避免重启后花第二次模型费用。
+        """
+        existing = self.store.db.execute(
+            "SELECT m.* FROM model_request_keys k JOIN model_invocations m USING(model_attempt_id) WHERE request_key=?",
+            (request_key,),
+        ).fetchone()
+        if existing is not None:
+            if existing["run_id"] != run_id:
+                raise ValueError("model request key belongs to another run")
+            self.recover(run_id)
+            saved = self.store.db.execute(
+                "SELECT * FROM step_decisions WHERE model_attempt_id=?",
+                (existing["model_attempt_id"],),
+            ).fetchone()
+            if saved is not None:
+                return saved["decision_id"], StepDecision(
+                    **json.loads(saved["payload_json"])
+                )
+            receipt_path = self._receipt_path(existing["model_attempt_id"])
+            if receipt_path.exists():
+                receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+                if receipt.get("outcome") == "FAILED":
+                    if receipt.get("retryable") is True:
+                        raise ProviderUnavailable()
+                    raise ProviderKnownFailure(receipt["reason"], usage=receipt.get("usage"))
+                decision = parse_step_decision(receipt["text"])
+                return (
+                    self._save_decision(
+                        run_id,
+                        existing["model_attempt_id"],
+                        receipt["response_ref"],
+                        decision,
+                    ),
+                    decision,
+                )
+            raise RecoveryRequired(
+                "this step already owns a model Ticket without a durable response"
+            )
+        return None
+
     def request_decision(
         self,
         *,
@@ -648,42 +692,9 @@ class DecisionRuntime:
         """按 request_key 去重，准备/准入后在事务外调用供应商；再发布收据、结算、校验并绑定决定。"""
 
         if request_key is not None:
-            existing = self.store.db.execute(
-                "SELECT m.* FROM model_request_keys k JOIN model_invocations m USING(model_attempt_id) WHERE request_key=?",
-                (request_key,),
-            ).fetchone()
-            if existing is not None:
-                if existing["run_id"] != run_id:
-                    raise ValueError("model request key belongs to another run")
-                self.recover(run_id)
-                saved = self.store.db.execute(
-                    "SELECT * FROM step_decisions WHERE model_attempt_id=?",
-                    (existing["model_attempt_id"],),
-                ).fetchone()
-                if saved is not None:
-                    return saved["decision_id"], StepDecision(
-                        **json.loads(saved["payload_json"])
-                    )
-                receipt_path = self._receipt_path(existing["model_attempt_id"])
-                if receipt_path.exists():
-                    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
-                    if receipt.get("outcome") == "FAILED":
-                        if receipt.get("retryable") is True:
-                            raise ProviderUnavailable()
-                        raise ProviderKnownFailure(receipt["reason"], usage=receipt.get("usage"))
-                    decision = parse_step_decision(receipt["text"])
-                    return (
-                        self._save_decision(
-                            run_id,
-                            existing["model_attempt_id"],
-                            receipt["response_ref"],
-                            decision,
-                        ),
-                        decision,
-                    )
-                raise RecoveryRequired(
-                    "this step already owns a model Ticket without a durable response"
-                )
+            recorded = self.recorded_decision(run_id, request_key)
+            if recorded is not None:
+                return recorded
         model_request = model_request_override or self._build_request(
             run_id, model, allowed_files, context, max_output_tokens, thinking
         )

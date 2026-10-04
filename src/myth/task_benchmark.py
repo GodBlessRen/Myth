@@ -222,7 +222,7 @@ def _trial(root, case, arm, settings, provider):
                 goal_id=goal["goal_id"] if goal else None,
                 goal_context=context,
             )
-            workspace.control.ensure(turn["run_id"], turn["settings"])
+            workspace.control.ensure(turn["run_id"])
             return turn["run_id"]
 
         run_ids = []

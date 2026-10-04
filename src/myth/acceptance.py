@@ -6,7 +6,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 from hashlib import sha256
-from typing import Any, Iterable
+from typing import Any
 
 from .domain import Verdict, canonical_json, digest_json, exact_patch, sha256_bytes
 
@@ -260,14 +260,3 @@ def validate_source_evidence(
         ):
             return EvidenceCheck(False, "missing_failure_evidence")
     return EvidenceCheck(True, "verified")
-
-
-# 一组候选只有全部绑定同一固定来源时才可继续；任一失败即返回 None，保留原始来源。
-def validated_source_evidence_or_none(
-    source_text: str,
-    candidates: Iterable[SourceEvidence],
-) -> tuple[SourceEvidence, ...] | None:
-    values = tuple(candidates)
-    if any(not validate_source_evidence(source_text, item).accepted for item in values):
-        return None
-    return values

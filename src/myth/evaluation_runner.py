@@ -555,7 +555,7 @@ class FoundationEvalRunner:
                 sid = workspace.repository.create_session("control")["id"]
                 turn = workspace.repository.create_turn(sid, "hello", "eval-control")
                 rid = turn["run_id"]
-                workspace.control.ensure(rid, turn["settings"])
+                workspace.control.ensure(rid)
 
             barrier = threading.Barrier(int(case.input["concurrent_commands"]))
             errors = []

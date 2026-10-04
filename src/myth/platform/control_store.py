@@ -42,7 +42,7 @@ CREATE TABLE IF NOT EXISTS workspace_control_commands(
 
 # 控制命令和投影的持久协调器；写事务中分配 revision，安全点尊重晚到收据。
 class SqliteControlService:
-    # 连接纯控制状态机与对话仓储，建立命令/投影表；revision 同事务分配，跨表投影仍是已知共享数据库耦合。
+    # 连接纯控制状态机与对话仓储，建立命令/投影表；revision 同事务分配，Turn/Core/Goal 通过状态所有者加入同一事务。
     def __init__(self, runtime, repository) -> None:
         # runtime：共享 Runtime 装配对象；其 SQLite 连接只在所属线程使用。
         self.runtime = runtime
@@ -59,228 +59,100 @@ class SqliteControlService:
     def _id() -> str:
         return f"cmd_{uuid.uuid4().hex}"
 
-    # 幂等初始化该 Turn 的控制投影；设置来自已保存 Turn，不以当前全局设置覆盖。
-    def ensure(self, run_id: str, settings: dict[str, Any] | None = None) -> None:
-        if settings is None:
-            settings = self.repository.turn(run_id)["settings"]
-        # 本地事务边界：下列写入一起提交，异常整体回滚；文件/网络效果须在事务外另行核对。
-        with self.store.tx() as db:
-            db.execute(
-                "INSERT OR IGNORE INTO workspace_control_projection"
-                "(run_id,model,thinking_json) VALUES (?,?,?)",
-                (
-                    run_id,
-                    settings.get("model"),
-                    canonical_json(settings.get("thinking")),
-                ),
-            )
+    def _ensure(self, db, run_id: str, settings: dict[str, Any]) -> None:
+        """在当前事务里首次登记控制快照；配置取自 Turn 所有者，之后只由命令改变。"""
+        db.execute(
+            "INSERT OR IGNORE INTO workspace_control_projection"
+            "(run_id,model,thinking_json) VALUES (?,?,?)",
+            (run_id, settings.get("model"), canonical_json(settings.get("thinking"))),
+        )
 
-    # 把控制行映射为不可变快照；stopped 列直接记录停止未来调度的事实。
+    def ensure(self, run_id: str) -> None:
+        """幂等建立控制快照；初始化只读取当前 Turn，不接受调用者携带的旧设置。"""
+        with self.store.tx() as db:
+            target = self.repository.control_target(db, run_id)
+            self._ensure(db, run_id, target["settings"])
+
     @staticmethod
     def _snapshot_from_row(row) -> ControlSnapshot:
+        """把数据库值投影成纯状态机输入；命令 revision 仅为此 Run 的命令排序。"""
         if row is None:
             raise KeyError("control projection missing")
         return ControlSnapshot(
-            revision=int(row["revision"]),
-            paused=bool(row["paused"]),
-            stopped=bool(row["stopped"]),
-            model=row["model"],
-            thinking=json.loads(row["thinking_json"]),
-            steering_note=row["steering_note"],
-            compact_requested=bool(row["compact_requested"]),
+            revision=int(row["revision"]), paused=bool(row["paused"]), stopped=bool(row["stopped"]),
+            model=row["model"], thinking=json.loads(row["thinking_json"]),
+            steering_note=row["steering_note"], compact_requested=bool(row["compact_requested"]),
         )
 
-    # 确保并读取当前持久控制快照；返回投影供安全点判断。
-    def _snapshot(self, run_id: str) -> ControlSnapshot:
-        self.ensure(run_id)
-        row = self.store.db.execute(
+    def _current(self, db, run_id: str) -> ControlSnapshot:
+        """只读取当前连接事务的快照；不能把事务外旧读值带进写入安全点。"""
+        return self._snapshot_from_row(db.execute(
             "SELECT * FROM workspace_control_projection WHERE run_id=?", (run_id,)
-        ).fetchone()
-        if row is None:
-            raise KeyError(run_id)
-        return self._snapshot_from_row(row)
+        ).fetchone())
 
-    # 生成当前控制事实与命令历史的只读投影；不是新的业务执行决定。
-    def view(self, run_id: str) -> dict[str, Any]:
-        snap = self._snapshot(run_id)
-        history = [
-            {
-                **dict(row),
-                "payload": json.loads(row["payload_json"]),
-            }
-            for row in self.store.db.execute(
-                "SELECT * FROM workspace_control_commands WHERE run_id=? ORDER BY revision",
-                (run_id,),
-            ).fetchall()
-        ]
-        for item in history:
-            item.pop("payload_json", None)
+    def _view(self, db, run_id: str) -> dict[str, Any]:
+        """快照与历史来自同一事务；命令返回自己的提交版本，不混入下一条并发命令。"""
+        snap = self._current(db, run_id)
+        history = []
+        for row in db.execute(
+            "SELECT * FROM workspace_control_commands WHERE run_id=? ORDER BY revision", (run_id,)
+        ):
+            item = dict(row)
+            item["payload"] = json.loads(item.pop("payload_json"))
+            history.append(item)
         return {
-            "revision": snap.revision,
-            "paused": snap.paused,
-            "stopped": snap.stopped,
-            "model": snap.model,
-            "thinking": snap.thinking,
-            "steering_note": snap.steering_note,
-            "compact_requested": snap.compact_requested,
-            "commands": history,
+            "revision": snap.revision, "paused": snap.paused, "stopped": snap.stopped,
+            "model": snap.model, "thinking": snap.thinking, "steering_note": snap.steering_note,
+            "compact_requested": snap.compact_requested, "commands": history,
         }
 
-    # 在 BEGIN IMMEDIATE 内读取/校验当前 revision，并原子提交命令和投影；之后在安全点收束状态。
-    def command(
-        self, run_id: str, command: str | ControlCommand, payload: Any = None
-    ) -> dict[str, Any]:
-        kind = (
-            command
-            if isinstance(command, ControlCommand)
-            else ControlCommand(str(command))
-        )
-
-        # BEGIN IMMEDIATE 在不同连接间串行分配 revision；读取当前状态、校验、递增和命令持久化一起提交。
-        # 本地事务边界：下列写入一起提交，异常整体回滚；文件/网络效果须在事务外另行核对。
+    def view(self, run_id: str) -> dict[str, Any]:
+        """读取完整控制投影；仅在首次使用时登记默认快照，不改变 Turn/Goal 状态。"""
         with self.store.tx() as db:
-            turn = db.execute(
-                "SELECT status,settings_json FROM workspace_turns WHERE run_id=?",
-                (run_id,),
-            ).fetchone()
-            if turn is None:
-                raise KeyError(run_id)
-            if turn["status"] in {
-                "COMPLETED",
-                "FAILED",
-                "CANCELLED",
-                "BUDGET_EXHAUSTED",
-            }:
+            target = self.repository.control_target(db, run_id)
+            self._ensure(db, run_id, target["settings"])
+            return self._view(db, run_id)
+
+    def command(self, run_id: str, command: str | ControlCommand, payload: Any = None,
+                *, expected_revision: int | None = None) -> dict[str, Any]:
+        """命令、设置、Turn/Core、Goal 和事件共用一次提交。
+
+        模型目录的网络检查在事务外；expected_revision 把检查所依据的配置版本带回，
+        若期间发生其他控制命令则拒绝旧检查结果，不能提交未经验证的模型/档位组合。
+        """
+        kind = ControlCommand(command)
+        with self.store.tx() as db:
+            target = self.repository.control_target(db, run_id)
+            if target["status"] in {"COMPLETED", "FAILED", "CANCELLED", "BUDGET_EXHAUSTED"}:
                 raise ValueError("terminal turn does not accept control commands")
-
-            settings = json.loads(turn["settings_json"])
-            db.execute(
-                "INSERT OR IGNORE INTO workspace_control_projection"
-                "(run_id,model,thinking_json) VALUES (?,?,?)",
-                (
-                    run_id,
-                    settings.get("model"),
-                    canonical_json(settings.get("thinking")),
-                ),
-            )
-            row = db.execute(
-                "SELECT * FROM workspace_control_projection WHERE run_id=?", (run_id,)
-            ).fetchone()
-            current = self._snapshot_from_row(row)
+            self._ensure(db, run_id, target["settings"])
+            current = self._current(db, run_id)
+            if expected_revision is not None and current.revision != expected_revision:
+                raise ValueError("control changed during validation; retry with current settings")
             updated = self.machine.apply(current, kind, payload)
-
-            if kind is ControlCommand.SWITCH_MODEL:
-                model = str(updated.model or "").strip()
-                if not model or len(model) > 200:
-                    raise ValueError("model must contain 1-200 characters")
-                settings["model"] = model
-            elif kind is ControlCommand.SWITCH_THINKING:
-                settings["thinking"] = updated.thinking
-
             db.execute(
                 "UPDATE workspace_control_projection SET revision=?,paused=?,stopped=?,model=?,"
-                "thinking_json=?,steering_note=?,compact_requested=?,updated_at=CURRENT_TIMESTAMP "
-                "WHERE run_id=?",
-                (
-                    updated.revision,
-                    int(updated.paused),
-                    int(updated.stopped),
-                    updated.model,
-                    canonical_json(updated.thinking),
-                    updated.steering_note,
-                    int(updated.compact_requested),
-                    run_id,
-                ),
+                "thinking_json=?,steering_note=?,compact_requested=?,updated_at=CURRENT_TIMESTAMP WHERE run_id=?",
+                (updated.revision, int(updated.paused), int(updated.stopped), updated.model,
+                 canonical_json(updated.thinking), updated.steering_note, int(updated.compact_requested), run_id),
             )
             db.execute(
                 "INSERT INTO workspace_control_commands(command_id,run_id,revision,command,payload_json) "
-                "VALUES (?,?,?,?,?)",
-                (
-                    self._id(),
-                    run_id,
-                    updated.revision,
-                    kind.value,
-                    canonical_json(payload),
-                ),
+                "VALUES (?,?,?,?,?)", (self._id(), run_id, updated.revision, kind.value, canonical_json(payload)),
             )
-            if kind in {ControlCommand.SWITCH_MODEL, ControlCommand.SWITCH_THINKING}:
-                db.execute(
-                    "UPDATE workspace_turns SET settings_json=? WHERE run_id=?",
-                    (canonical_json(settings), run_id),
-                )
-            db.execute(
-                "UPDATE runs SET control_revision=? WHERE run_id=?",
-                (updated.revision, run_id),
-            )
-            self.store._event(
-                db,
-                run_id,
-                "ControlCommandCommitted",
-                {"command": kind.value, "revision": updated.revision},
-            )
-
-        # Run 状态是持久命令的安全点投影；Pause/Stop 后仍允许晚到模型/工具收据结算。
-        if kind is ControlCommand.PAUSE:
-            self.gate(run_id)
-        elif kind is ControlCommand.RESUME:
-            # 本地事务边界：下列写入一起提交，异常整体回滚；文件/网络效果须在事务外另行核对。
-            with self.store.tx() as db:
-                row = db.execute(
-                    "SELECT status FROM workspace_turns WHERE run_id=?", (run_id,)
-                ).fetchone()
-                if row and row["status"] == "PAUSED":
-                    db.execute(
-                        "UPDATE workspace_turns SET status='RUNNING',error=NULL WHERE run_id=?",
-                        (run_id,),
-                    )
-                    db.execute(
-                        "UPDATE runs SET state='RUNNING' WHERE run_id=?", (run_id,)
-                    )
-                    self.store._event(
-                        db, run_id, "RunResumed", {"revision": updated.revision}
-                    )
-        elif kind is ControlCommand.STOP:
-            self.gate(run_id)
-
-        return self.view(run_id)
+            self.store.project_control(db, run_id, advance_revision=True)
+            self.store._event(db, run_id, "ControlCommandCommitted",
+                              {"command": kind.value, "revision": updated.revision})
+            # 状态写入回到所有者；仓储只加入本事务，任何后半段故障会撤销上面的命令。
+            self.repository.apply_control(db, run_id, updated, command=kind)
+            return self._view(db, run_id)
 
     def gate(self, run_id: str) -> str | None:
-        """在安全点应用明确控制意图；停止/暂停未来工作，已发出效果不会被物理撤销。"""
-
-        snap = self._snapshot(run_id)
-        turn = self.repository.turn(run_id)
-        if snap.stopped:
-            if turn["status"] not in {
-                "COMPLETED",
-                "FAILED",
-                "CANCELLED",
-                "BUDGET_EXHAUSTED",
-            }:
-                self.repository.block(
-                    run_id,
-                    "CANCELLED",
-                    "用户已终止本轮。已获 Ticket 的调用仍会保留真实晚到结果。",
-                )
-            return "CANCELLED"
-        if snap.paused:
-            if turn["status"] in {"RUNNING", "INTERRUPTED", "UNKNOWN"}:
-                # 本地事务边界：下列写入一起提交，异常整体回滚；文件/网络效果须在事务外另行核对。
-                with self.store.tx() as db:
-                    db.execute(
-                        "UPDATE workspace_turns SET status='PAUSED',error=NULL WHERE run_id=?",
-                        (run_id,),
-                    )
-                    db.execute(
-                        "UPDATE runs SET state='PAUSED' WHERE run_id=?", (run_id,)
-                    )
-                    self.store._event(
-                        db,
-                        run_id,
-                        "RunPaused",
-                        {"revision": snap.revision, "safe_point": True},
-                    )
-            return "PAUSED"
-        return None
+        """在同一个写事务内读取控制并投影安全点；迟到 Pause 不能覆盖新回答或 Resume。"""
+        with self.store.tx() as db:
+            target = self.repository.control_target(db, run_id)
+            self._ensure(db, run_id, target["settings"])
+            return self.repository.apply_control(db, run_id, self._current(db, run_id))
 
     # 只消费生成该决定时使用的 Compact revision；旧决定不能清除更新的压缩请求。
     def consume_compaction(

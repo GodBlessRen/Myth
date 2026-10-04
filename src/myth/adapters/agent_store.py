@@ -46,7 +46,7 @@ CREATE TABLE IF NOT EXISTS agent_reads (
 
 # 拥有 Exact Agent 状态的适配器；共享 Core 执行事实但不拥有外部 I/O。
 class SqliteAgentRepository:
-    # 复用 Runtime 连接建立 Exact 步骤/笔记/验收表；旧 Run 可检查，缺合同不能推断完成。
+    # 复用 Runtime 连接建立 Exact 步骤/笔记/验收表；当前格式的 Run 必须拥有冻结合同。
     def __init__(self, runtime) -> None:
         # runtime：共享 Runtime 装配对象；其 SQLite 连接只在所属线程使用。
         self.runtime = runtime
@@ -159,8 +159,9 @@ class SqliteAgentRepository:
         row = self.store.db.execute(
             "SELECT manifest_json FROM agent_contracts WHERE run_id=?", (run_id,)
         ).fetchone()
-        # 缺少固定验收合同的旧 Run 仍可检查；不能从模型声明或旧状态推断 PASS。
-        return json.loads(row[0]) if row else {"rules": [], "files": []}
+        if row is None:
+            raise RuntimeError(f"agent acceptance manifest missing: {run_id}")
+        return json.loads(row[0])
 
     # 按持久顺序读取用例经历；用于上下文恢复而不是权限推断。
     def notes(self, run_id):

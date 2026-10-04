@@ -1,0 +1,2 @@
+        elif capability == "knowledge.read":
+            result.update(self._read_knowledge(turn, args))

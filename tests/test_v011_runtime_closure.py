@@ -40,7 +40,7 @@ class RuntimeClosureTests(unittest.TestCase):
                     sid, "hello", "req-control-race"
                 )
                 rid = turn["run_id"]
-                workspace.control.ensure(rid, turn["settings"])
+                workspace.control.ensure(rid)
 
             barrier = threading.Barrier(2)
             revisions: list[int] = []
@@ -68,11 +68,8 @@ class RuntimeClosureTests(unittest.TestCase):
             b.join(5)
 
             self.assertEqual(errors, [])
-            # command() returns the latest projection view; after both commits,
-            # either caller may therefore observe revision 3. The durable
-            # invariant is unique, monotonic committed command revisions.
-            self.assertEqual(len(revisions), 2)
-            self.assertTrue(all(revision in {2, 3} for revision in revisions))
+            # 每条命令在自己的事务内生成响应，调用者必须拿到自己提交的版本。
+            self.assertEqual(sorted(revisions), [2, 3])
             with MythRuntime(root) as runtime:
                 view = Workspace(runtime).control.view(rid)
                 history = view["commands"]
@@ -176,7 +173,7 @@ class RuntimeClosureTests(unittest.TestCase):
                 self.assertEqual(memory_a["fact_level"], "context")
 
     # 回归断言：展开知识核对作用域和摘要；不能以 document id 绕开范围。
-    def test_knowledge_read_expands_scoped_source_to_l2_with_digest(self):
+    def test_knowledge_resolve_expands_scoped_source_to_l2_with_digest(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             with MythRuntime(root) as runtime:
@@ -206,18 +203,40 @@ class RuntimeClosureTests(unittest.TestCase):
                 )["run_id"]
                 turn = workspace.repository.turn(rid)
 
-                result = workspace.execution._read_knowledge(
+                result = workspace.execution._resolve_knowledge(
                     turn,
-                    {"document_id": doc["id"], "offset": 7, "max_chars": 120},
+                    {"document_id": doc["id"], "resolution": "L2", "cursor": 7, "limit": 120},
                 )
                 self.assertEqual(result["resolution"], "L2")
                 self.assertEqual(result["digest"], doc["digest"])
                 self.assertTrue(result["source_ref"].startswith(f"doc:{doc['id']}@"))
                 self.assertTrue(result["has_more"])
-                self.assertGreater(result["next_offset"], 7)
+                self.assertGreater(result["next_cursor"], 7)
+
+                # L1 必须按分片游标前进，分页期间 digest 不变，最终页明确结束。
+                chunks, cursor = [], 0
+                while True:
+                    page = workspace.execution._resolve_knowledge(
+                        turn, {"document_id": doc["id"], "resolution": "L1", "cursor": cursor, "limit": 1}
+                    )
+                    self.assertEqual(page["digest"], doc["digest"])
+                    chunks.extend(item["chunk_index"] for item in page["chunks"])
+                    if not page["has_more"]:
+                        self.assertIsNone(page["next_cursor"])
+                        break
+                    self.assertGreater(page["next_cursor"], cursor)
+                    cursor = page["next_cursor"]
+                self.assertGreater(len(chunks), 1)
+                self.assertEqual(chunks, list(range(len(chunks))))
+                for resolution in ("L0", "L1"):
+                    for args in ({"cursor": True}, {"cursor": -1}, {"limit": 0}, {"limit": 21}, {"limit": "2"}):
+                        with self.subTest(resolution=resolution, args=args), self.assertRaises(ValueError):
+                            workspace.execution._resolve_knowledge(
+                                turn, {"document_id": doc["id"], "resolution": resolution, **args}
+                            )
 
                 with self.assertRaises(PermissionError):
-                    workspace.execution._read_knowledge(
+                    workspace.execution._resolve_knowledge(
                         turn,
                         {"document_id": foreign["id"]},
                     )

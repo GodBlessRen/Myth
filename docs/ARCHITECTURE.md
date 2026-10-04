@@ -1,529 +1,74 @@
-# Myth Architecture
+# Myth 当前架构
 
-> 稳定边界：[ARCHITECTURE_CONSTITUTION.md](ARCHITECTURE_CONSTITUTION.md)  
-> 组件地图：[PLATFORM_MAP.md](PLATFORM_MAP.md)  
-> 运行观测：[OBSERVABILITY.md](OBSERVABILITY.md)
+Myth 是面向个人工作的本地 Agent Runtime：长期 Goal 保存工作意图，一次 Run 保存可恢复执行身份；策略可以替换，权限、预算、Ticket、Receipt 与验收事实不能绕过。
 
-## 1. 一句话
+规范见 [架构宪法](ARCHITECTURE_CONSTITUTION.md)，具体源码入口见 [CODE_GUIDE](CODE_GUIDE.md)。本页负责全局关系，功能细节由下方专题维护。
 
-Myth 是一个单机 modular monolith：用 durable Runtime 保存执行事实，用 Goal-first work loop 推进长期工作，用 Ports / Adapters 隔离模型、工具和基础设施。
-
-## 2. Runtime shape
-
-稳定 Core：
+## 从入口到效果
 
 ```text
-Goal -> Run -> Action -> Attempt -> Ticket -> Receipt -> Artifact -> Verification
+Web / CLI / 到期计划
+  → Workspace / AgentRuntime 装配与准入
+  → application 中的 ConversationAgent / AgentDriver
+  → Repository / Execution / Control 等端口
+  → SQLite 仓储、模型供应商、受管文件和测试进程适配器
 ```
 
-Core 固定：
-
-- durable identity；
-- authority；
-- effect fact；
-- immutable evidence；
-- verification boundary。
-
-Coordination / Control / Execution / Capability / State / Context / Memory / Personal State / Observability / Evaluation / Evolution 是正交 Domain。
-
-Intent Pick、Information Resolution、Direct、Agent Loop 和只读委派属于 Strategy，不是固定执行层。
-
-## 3. Golden path — Conversation / Goal
-
-```text
-User message
-  -> Session / optional Goal admission
-  -> frozen Turn Snapshot
-     - settings
-     - project scope
-     - Goal checkpoint
-     - retrieval evidence
-     - Intent Pick
-     - Information Resolution policy
-  -> bounded Context compilation
-  -> Model Ticket
-  -> model decision
-  -> local validation
-  -> optional Tool Ticket
-  -> tool effect / Receipt
-  -> next Step
-  -> reply / ask_user / failure
-  -> Goal checkpoint
-```
-
-Goal work state包含：
-
-- current_state；
-- progress_note；
-- next_action；
-- waiting_for；
-- last_run_id；
-- revision。
-
-下一 Session 继续同一 Goal 时，新的 Turn 读取当前 Goal work state 并**冻结副本**。后续 Goal 更新不会倒写历史 Turn。
-
-## 3.1 Context、执行与 Evaluation 深化
-
-这些能力直接落在已有 Context / Execution / Acceptance / Capability / Evaluation / Evolution 边界，不新增平行 Runtime：
-
-```text
-Durable State
-  -> Context Projection
-     -> old Observation fold + observation.read 精确回读
-     -> settled boundary 下按真实 provider-visible 投影选择 normal / compact
-  -> Model
-  -> Action / Attempt
-     -> 无需新语义判断时执行 deterministic successor
-  -> Receipt / Artifact / Verification
-     -> 摘要/压缩候选绑定 source digest + exact quote
-  -> Evaluation
-     -> capability floor + paired cost + outcome attribution
-  -> Evolution
-     -> 上述 gate 直接决定 Candidate 是否能进入 ELIGIBLE
-```
+内圈保存领域合同与纯策略；外圈负责 HTTP、认证、SQL、文件和供应商协议。`runtime.py`、`workspace.py` 是装配/协调入口，不以目录名假装全项目已经完全解耦。
 
-当前连接点：
+## 状态由谁拥有
 
-- `platform/context.py` + `conversation_context.py`：State 与 Context 分离；按真实 normal/compact 投影字节、窗口压力和滞回选择 Context mode；Compact seed 只来自 durable Goal / Artifact / Verification / Evidence facts。
-- `observation.read`：按 decision id + field 精确分页回读已结算 Tool Observation，不重跑 Tool。
-- `platform/capabilities.py`：直接在现有 Capability Registry 上解释 enabled / available / exposed / reachable，不维护第二份“机制目录”。
-- `project.patch_exact`：生成候选 Artifact 后融合 deterministic diff；mutation 与 successor 分开结算，source digest 改变时 successor 显式 SKIPPED。
-- `acceptance.py`：摘要/压缩候选以 source digest + exact quote 绑定来源；失败继续使用原始来源。
-- `failures.py`：有界 recovery ladder；UNKNOWN 继续优先 RECONCILE。
-- `platform/evaluation.py` + `platform/evolution_store.py`：capability floor 和 Pareto 成本已直接进入 Candidate 的 ELIGIBLE/Promote 资格；逐题 mechanism events 进入 Eval Ledger 供 outcome attribution。
-- Sub-Agent：只共享显式 source/evidence refs 与 bounded context，不继承完整父聊天历史。
-
-## 4. Authority boundary
-
-模型、Memory、Goal、Context 都是数据。
-
-只有本地 Runtime 能授予执行权：
-
-```text
-Decision proposal
-  -> capability admission
-  -> budget reservation
-  -> Ticket
-  -> effect
-  -> Receipt
-  -> settlement / verification
-```
-
-模型自述“已执行”不能代替 Receipt。
-
-### 4.1 Delegation / Sub-Agent
-
-第一版 Multi-Agent 不增加新 Core，也不把 Supervisor 固定成必经层。父模型在正常 Agent Loop 中自行判断是否调用 `agent.delegate`：
-
-```text
-Parent decision
-  -> optional agent.delegate
-  -> explicit task + bounded context + admitted source refs
-  -> isolated read-only model worker
-  -> contracted result
-  -> Parent continues normal Agent Loop
-```
+| 事实 | 写入所有者 | 主要约束 |
+| --- | --- | --- |
+| Core Run、账号、事件与执行栅栏 | `RuntimeStore` | 同事务身份/预算核对；栅栏只递增 |
+| 模型机会、请求键、决定 | `DecisionRuntime` | 固定请求对象 → 模型 Ticket → 收据 → 结算 |
+| Session、Turn、工具机会、执行游标 | `SqliteWorkspaceRepository` | 当前步骤只消费一次；晚到收据不能重开终态 |
+| 控制命令与快照 | `SqliteControlService` | 命令排序由自身 revision 拥有；状态投影交给对应仓储 |
+| Goal、个人状态、工作进度 | `SqlitePersonalState` | 创建即含初始进度；`last_run_id` 拒绝迟到旧轮次覆盖 |
+| 文档、分片与知识检索 | `SqliteKnowledgeRepository` | 原文按 digest 固定；共享/项目范围由权威记录核对 |
+| Memory、Evidence、revision | Memory 仓储 | 上下文事实等级与来源显式；不授予工具权限 |
+| 派生知识视图、页面树 | `SqliteKnowledgeViews` | 来源版本/水位校验；自身输出不循环作为来源 |
+| 收尾义务、交付验收、工作项 | Delivery 仓储 | 义务持久化；验收绑定 subject digest |
 
-隔离 worker 不继承完整父历史、Memory 或工具目录，不可写入、调用工具、再次委派或向用户提问。它的结果作为 Observation 回到父步骤；不是 Receipt 的替代物，也不自动通过 Acceptance。委派模型调用继续使用父 Run 的 durable model Ticket / receipt / budget 账本，因此恢复和成本仍可观测。
+共享 SQLite 连接不等于共享写权限。跨聚合业务入口让各所有者加入同连接的 `transaction_scope`；外部连接或非活动事务明确拒绝。
 
-## 5. Interruption / recovery
+## 一次工作怎样推进
 
-Run 生命周期不绑定 Browser、HTTP request 或 Web Driver 生命周期。
+1. 准入事务核对入口身份、Session/Goal 占用，保存 Run、预算、Turn、用户消息、冻结快照和游标。相同身份重试复用事实，冲突内容拒绝。
+2. Driver 取得本机 Run 锁并维护租约；恢复旧机会后，才复用决定或创建新模型请求。心跳表示存活，持久游标表示进度。
+3. 模型输出是提案。工具范围、参数、Capability 和预算通过后生成 Ticket，外部效果在短事务之外执行。
+4. 先发布收据，再在数据库结算。效果与用量分别核对；无收据且无法证明未派发时保持 UNKNOWN。
+5. 回答提交前保存 finalization 义务；Memory 与 Goal 收尾按义务幂等补偿。回答结束、长期 Goal 完成、验收通过分别显示。
 
-Conversation / Goal 的已准入工作由独立 **Durable Executor** 驱动。Web 启动时只确保本机执行器存在；之后关闭页面、刷新页面或 Web 进程退出都不会主动停止该执行器。执行器竞争自己的全局短租约，再对每个 Run 继续竞争既有 Driver Lease，因此多个进程不能把同一个 Run 当成两项工作执行。机器重启后再次启动 Myth 时，过期租约允许新执行器从原 Run 的 durable cursor 接管，而不是创建替代 Run。
+`agent.delegate` 先准入父工具，再准入子模型。子模型已完成而父工具尚未留收据时，恢复从固定子决定补收据；恢复入口不持有 Provider，不再次联网。无子模型 Ticket 可闭合为未启动；未决模型机会继续 UNKNOWN。
 
-Conversation Run 额外保存：
+## 控制的原子边界
 
-- durable Execution Cursor；
-- current phase；
-- last durable checkpoint；
-- recovery state；
-- Driver Lease / generation / heartbeat。
+命令和安全点均在同一写事务读取当前状态。Control 只写自己的表，Turn/Core/Goal 由对应所有者加入；后半段 SQL 失败，命令、设置、投影与事件一起回滚。每条命令返回自己提交的 revision。
 
-Driver heartbeat 丢失时：
+- Pause 阻止后续驱动；Resume 重新允许驱动，但执行前仍核对旧机会。
+- WAITING_USER 保留问题身份，Resume 不代替回答。终态 Turn 不接受新控制，也不被迟到 gate 覆盖。
+- Stop 不声称撤销已派发请求；真实晚到结果照常记录。
+- 模型/推理档位在事务外查询能力，提交时 CAS 核对控制 revision，拒绝过时检查结果。
+- Compact 按实际模型请求使用的控制 revision 消费；命令序号不能覆盖 Core 的独立执行栅栏。
 
-```text
-no uncertain external effect
-  -> INTERRUPTED
-  -> RESUME from durable checkpoint
+## State 与 Context
 
-Ticket / provider call outcome uncertain
-  -> UNKNOWN
-  -> RECONCILE before replay
-```
+State 是持久事实，Context 是有预算的投影。Observation 可折叠并精确回读；Compact seed 绑定持久证据。知识使用 `knowledge.search → knowledge.resolve` 的 L0/L1/L2；L1 分片、L2 字符游标各自有明确单位和限额。分页不改变来源 digest。
 
-Lease 只是“谁当前负责驱动”的事实，不是执行成功证明。新的 Driver 只能在租约失效后接管，并仍要经过 normal recovery gate。
+Memory 与派生知识视图的版本/撤销/刷新协议见 [MEMORY_LIFECYCLE](MEMORY_LIFECYCLE.md)。可选 Milvus 只提供候选，必须回 SQLite 核对 scope、digest/revision 和 archive/revoke；失效时报告降级，见 [MILVUS_RETRIEVAL](MILVUS_RETRIEVAL.md)。工具发现只改变后续可见目录，不直接授权执行。
 
-## 6. UNKNOWN semantics
+## 专题与验证
 
-SQLite 事务只能保证数据库自身原子性，不能把 provider / filesystem 等外部效果宣称为 exactly-once。
+| 主题 | 当前合同 |
+| --- | --- |
+| 跨会话工作与到期调度 | [GOAL_WAKEUP](GOAL_WAKEUP.md)、[LONG_RUN_VALIDATION](LONG_RUN_VALIDATION.md) |
+| 网络中断与零派发重试 | [NETWORK_RECOVERY](NETWORK_RECOVERY.md) |
+| 收尾、验收、受信测试 | [DELIVERY](DELIVERY.md)、[SECURITY](../SECURITY.md) |
+| 执行过程、预算与成本展示 | [OBSERVABILITY](OBSERVABILITY.md)、[SESSION_STATISTICS](SESSION_STATISTICS.md) |
+| 固定任务、完整分母与策略证据 | [TASK_BENCHMARK](TASK_BENCHMARK.md)、[SOTA_ROUTE](SOTA_ROUTE.md) |
+| 当前检查与本轮证据 | [VALIDATION](VALIDATION.md)、[REFINEMENT_REVIEW](REFINEMENT_REVIEW.md) |
 
-Ticket 后结果不明：
+Evaluation 的 partial 运行没有发布资格；候选只在完整固定集合与能力下限通过后参与比较，仍需显式 Promote。Historical Replay 只覆盖已观察分支，不产生执行授权。
 
-```text
-known success   -> settle
-known failure   -> FAILED
-unknown outcome -> UNKNOWN / unknown-held
-```
-
-UNKNOWN 先 reconcile，不盲目重发。
-
-Provider 明确返回 context truncation 属于已知失败，不冒充 UNKNOWN。
-
-## 7. Context
-
-Conversation context 是从 durable facts 生成的 bounded projection，不是执行记录本身。
-
-### 7.1 Live Information Control
-
-Agent Loop 中现有读取/检索工具同时构成一个 bounded information loop：
-
-```text
-LLM identifies an information need
-        ↓
-SEEK / EXPAND proposal
-        ↓
-Information Control admission
-   - novelty
-   - pagination progress
-   - total/action/source budget
-        ↓
-normal Runtime Tool Ticket / Receipt
-        ↓
-Observation returns to Context
-        ↓
-next model decision
-        ↓
-KEEP when no more information action is needed
-```
-
-Controller 是纯策略：不执行 I/O、不调用模型、不拥有新的持久表。它只从当前 Turn 已持久的 activities 重建消费状态，因此进程退出/恢复不会重置信息预算。拒绝发生在 Tool Ticket 前，属于已知准入失败，不制造 UNKNOWN，也不消耗一次真实 tool call。
-
-第一版故意不把 offline Information Gain 数字接入 live admission；先用可验证的 novelty / progress / boundedness 建立稳定控制面，再由固定 Eval 证明后决定是否让 Gain 影响排序或升级。Memory 同样遵循该控制面：search 属于 SEEK，timeline/resolve 属于 EXPAND。
-
-Conversation context 是从 durable facts 生成的 bounded projection，不是执行记录本身。
-
-优先级包括：
-
-- 当前任务；
-- Goal checkpoint；
-- project/control instructions；
-- pinned attachments；
-- latest tool result；
-- retrieved Knowledge；
-- recalled Memory；
-- older history / previews。
-
-Ollama projection budget 与 `num_ctx` 对齐；远端 provider 使用本地 projection cap。Context report 记录：
-
-- selected；
-- folded；
-- dropped；
-- byte usage；
-- `num_ctx`；
-- control revision。
-
-完整 durable history 不因 Compact / folding 被删除。
-
-### 7.2 Context Anchor / 增量压缩
-
-长会话不会把所有旧消息持续塞回模型窗口。Turn 准入时，旧消息按稳定序号增量合并为 **Context Anchor**，最近尾部继续保留原文：
-
-```text
-durable workspace_messages
-        ↓
-previous Context Anchor + newly aged messages
-        ↓ deterministic extractive merge
-bounded Context Anchor + recent verbatim tail
-        ↓
-ContextCompiler
-```
-
-Context Anchor 是有损派生投影，不是 Memory、权限或验证事实；它保存 covered message count、lineage digest 与自身 digest。极小窗口可以丢弃 Anchor，不能为了保留摘要挤掉当前任务、项目指令或固定来源。完整原始消息始终保存在 durable store。
-
-## 8. Retrieval / Memory
-
-Knowledge：
-
-- local UTF-8 documents；
-- chunked lexical baseline；
-- shared / project scope；
-- stable candidate pagination；
-- source + digest provenance；
-- L0 / L1 / L2 fixed-source projection。
-
-Memory：
-
-- Working / Episodic / Semantic / Procedural；
-- revision / provenance / revoke；
-- global / project / session scope；
-- `fact_level=context` 不自动升级为 verified fact；
-- 每个当前 revision 可绑定显式 Evidence；Memory-linked Evidence 固定 source revision，外部 provenance 没有版本水位时保持 `untracked`，不伪造 fresh；
-- 每次更新/撤销都保存 immutable revision snapshot；历史证据不会指向可变当前表；
-- L0/L1 只投影 `proof_count / freshness / is_stale`，L2 才展开完整 Evidence，避免“证据化”反而撑爆 Context；
-- `apply_delta(expected_revision, ops)` 只接受受约束 Delta，Runtime 原子校验后应用；空 Delta 是机械 no-op，非法操作整批失败；
-- `memory.search → memory.timeline → memory.resolve` progressive disclosure，初始召回只进入 L0 compact view。
-
-Mental Model / Knowledge Page 是 Memory Domain 的派生高阶视图，不增加新的 Runtime Layer：
-
-```text
-Memory + Evidence + revision
-        ↓
-Mental Model (materialized memory view)
-        ↓
-Knowledge Page (tree/navigation only)
-```
-
-- Mental Model 保存“持续回答的问题”、作用域、backing Memory、水位与刷新历史；正文仍由现有 Semantic Memory 承载；
-- refresh 使用 `prepare → external synthesis → commit`，模型调用发生在 Store 外；提交时重新核对 model revision 与 scope change watermark；
-- backing Memory 不参与自己的下一轮 source set，避免 synthetic self-feedback；
-- Knowledge Page 只保存 folder/page 树和 `mental_model_id`，不复制正文；
-- source scope 有新 Memory revision / revoke 后，Mental Model 只变 stale，不自动偷偷调用模型。
-
-当显式启用 Auto Refresh 后，stale 状态通过已有 Durable Executor 转成后台工作，而不是在 Memory 模块内启动线程：
-
-```text
-stale
-→ Refresh Policy
-→ Refresh Occurrence + Lease
-→ Core Run / model budget
-→ DecisionRuntime Ticket / Receipt
-→ commit or UNKNOWN / SUPERSEDED
-```
-
-自动刷新与 Goal Scheduler 共用同一个常驻 Durable Executor 和全局并发上限，但保持独立工作身份；它不是 Conversation Turn，也不占用用户会话。
-
-Milvus 是**可重建的派生 Vector Adapter**，不是新的事实数据库：
-
-```text
-SQLite documents / Memory revisions
-        ↓ authoritative source + scope + active/version
-optional embedding
-        ↓
-Milvus derived vector candidates
-        ↓
-SQLite hydration / freshness / permission check
-        ↓
-lexical + vector RRF
-        ↓
-L0 → L1 → L2 Context projection
-```
-
-- lexical baseline 始终保留；Milvus 不可用时明确 degraded 到 lexical；
-- 不直接比较 lexical score 与 cosine distance，Hybrid 使用 rank fusion；
-- 每个 vector hit 必须回 SQLite 核对 document digest / memory revision / archive / revoke / scope；
-- 旧数据可重建索引；Milvus collection 丢失不丢业务事实；
-- Context report 同时记录 retrieved 与**实际 delivered** Knowledge / Memory 数量。
-
-Retrieval / Memory 都不能授予执行权限。
-
-### 8.1 Progressive Tool Disclosure
-
-Conversation Tool Catalog 超过阈值后不再把所有工具 schema 永久塞进 Prompt。默认只暴露常用能力和 `tool.search / tool.describe`：
-
-```text
-small visible catalog
-   ↓
-tool.search / tool.describe
-   ↓ durable Observation
-   ↓
-next model step sees discovered tool
-   ↓
-normal Capability admission -> Ticket -> Receipt
-```
-
-Discovery 只改变**下一模型步骤的可见目录**，不授予执行权限。远端模型即使猜中隐藏 capability，也会在 Ticket 前被本地 Runtime 拒绝；一次被拒绝的“偷调”不会自动解锁该工具。
-
-## 9. Control
-
-产品术语：
-
-```text
-Steer / Pause / Resume / Stop / Model Switch / Thinking Switch / Compact
-```
-
-Stop 表示“不再调度新的工作”。
-
-它不宣称已经发出的 provider/tool effect 被撤销。晚到结果仍按真实事实记录。
-
-### 9.1 Structured Failure Observation + Verify-on-Stop
-
-已知参数、权限、合同、Information Control 等失败统一投影为结构化 Observation：
-
-```text
-category / code / capability / retryable / expected / hint
-```
-
-同时保留便于阅读的人类 `error` 文本。这个 Observation 发生在已知拒绝路径，不制造 Tool Receipt，也不把已知失败升级成 UNKNOWN。
-
-Conversation 的 `request_completion` 先经过 **Completion Guard**。模型仍列出 `remaining`、引用不存在的 evidence，或最近一次已执行 verifier 未通过时，停止请求会被退回为结构化 Observation，父 Loop 必须继续。Guard 不自己执行测试、不修改 Acceptance；没有已执行 verifier 时也不会伪造验证事实。
-
-## 10. Exact verification path
-
-Exact-mode 是独立 use case，不把普通聊天的 COMPLETED 冒充语义验收。
-
-固定 acceptance manifest 后：
-
-```text
-baseline
- -> exact candidate effect
- -> durable receipt
- -> independent verifier
- -> immutable accepted Artifact
- -> delivery
-```
-
-模型的 completion request 只是 claim。
-
-## 11. Evaluation / Evolution
-
-Evaluation 使用固定 versioned suite：
-
-```text
-EvalSuite
- -> Runner
- -> Observation
- -> Report
- -> Release Gate
-```
-
-Policy release：
-
-```text
-full baseline suite
- + full candidate suite
- -> paired evidence
- -> calibration gate
- -> ELIGIBLE
- -> explicit Promote
- -> Active Policy for future Turns
-```
-
-历史成功 Run 还可形成实验性 **Replay World**：同一 SOTA Route `comparison_key` 下的可观察 Action Path 合并为前缀树，候选策略只允许沿历史真实出现过的边离线重放；未出现分支保持 `UNOBSERVED`，不调用模型/工具，也不预测 counterfactual outcome。
-
-```text
-PASSED Run / SOTA Route
-        ↓
-same frozen comparison_key
-        ↓
-Replay World (realized history only)
-        ↓
-candidate policy replay
-        ↓
-research evidence
-        ↓
-fixed EvalSuite / paired calibration
-        ↓
-explicit Promote
-```
-
-Replay 只是研究证据，不产生 `ELIGIBLE` 或发布资格；partial-suite eval 同样只能研究，不能发布。
-
-Evolution 不自动 Promote，也不能修改正在运行或历史 Turn。
-
-## 12. Ports / Adapters
-
-依赖方向：
-
-```text
-CLI / Web
-   ↓
-Workspace / AgentRuntime
-   ↓
-Application use cases
-   ↓
-Ports / domain contracts
-   ↑
-SQLite / local execution / providers
-```
-
-协议与厂商只能进入 Adapter 外圈。
-
-认证同样属于 Adapter 边界：
-
-- OpenAI API Key 只从环境变量读取；
-- Sign in with ChatGPT 由 Myth 自己实现 OAuth authorization-code + PKCE/OIDC；
-- OAuth secret 只进入系统安全凭据库，不进入 Runtime SQLite / Event / Artifact / Web JSON；
-- OAuth registration/profile metadata 与 Runtime execution state 分离；
-- Myth 不读取 Pi/Codex auth files，也不复用其他应用的 OAuth client identity。
-
-登录挑战只在内存中存活十分钟，退出会更新非秘钥 login epoch 取消旧挑战。认证聚合的登录、刷新、选择与退出共用线程/进程锁；刷新派发前保存 `refresh_pending`，崩溃或结果不明时必须重新授权，不能重发旧 refresh token。系统凭据库的分块清单先登记新代次、最后切换 active，旧代次及未完成代次可清理；SQLite 不承担凭据事务。
-
-传输拒绝 credential redirect，OIDC 使用固定 issuer/JWKS、RS256、至少 2048-bit RSA、规范 compact JWT、audience/azp/nonce/subject 校验。授权 URL 不包含可选 ID Token。公开模型目录可短时缓存，每次仍复核实际系统凭据和授予 scope；缓存不授予权限。
-
-Responses 只在 `response.completed` 后发布完整结果。`time_to_first_token_ms` 是供应商调用开始到首个非空输出 delta 的本机计时，可能包含认证刷新，JSON 决策 delta 不等于页面首字；没有 delta 时显示 N/A。已知拒绝进入 FAILED，传输中断仍保持 UNKNOWN / RECONCILE。细节与验证范围见 [沉淀期审查](REFINEMENT_REVIEW.md)。
-
-Core 不依赖：
-
-- OpenAI；
-- Ollama；
-- MCP；
-- A2A；
-- Browser；
-- Shell；
-- SQLite。
-
-## 13. Persistence
-
-主要 durable categories：
-
-- Run / Action / Attempt；
-- Ticket / Receipt / budgets / events；
-- Conversation Session / Turn / Step / messages；
-- Execution Cursor / Driver Lease / heartbeat；
-- projects / documents / chunks；
-- Memory；
-- Goal / Goal work state / Trigger / Personal State；
-- Goal schedule / due occurrence / immutable model settings；
-- Evaluation runs / observations；
-- Cost Model / Policy Candidate / Active Policy / history；
-- content-addressed objects / Artifact evidence。
-
-Schema 只接受 `store.SCHEMA_VERSION` 指定的当前格式；仓储通过 `ensure_schema` 在短事务内原子初始化。旧实验库拒绝启动但保留原件，使用新 `--root`，不保留迁移链。
-
-## 14. Web boundary
-
-本地 Web 是 loopback-only single-user workspace，不是多用户安全边界。
-
-页面只投影 Runtime facts：
-
-```text
-History / Context | Conversation / Task | Runtime Observatory
-```
-
-第三栏必须保持 Goal / Flow / Recovery / Trajectory / Tokens / Cache Hit / Context / Tools / Control / Budget 可观察。执行器心跳与业务进度分开：`executor heartbeat` 只证明 worker 活着，`Execution Cursor.updated_at` 才作为最近 durable progress 的观察信号；长时间无 checkpoint 只能标记为 **suspected no progress**，不能据此盲目重试未知外部效果。
-
-## 15. 本地 Goal Wake-up
-
-`GoalScheduler` 是现有 Workspace 的本地适配器，不增加 Core 层次。用户显式创建一次性或固定间隔计划；独立 Durable Executor 默认每两秒检查 due schedule，provider readiness 在事务外检查。Web 只负责确保执行器已启动和展示其心跳，不再拥有计划任务的生命周期。
-
-同一 SQLite 事务提交 occurrence、Turn/Run、Goal link 和 admission checkpoint。`request_id` 固定计划入口身份；`(schedule_id, sequence)` 唯一约束固定每次工作机会。未来 due time 仅在 admission 成功时推进，停机期间的过期重复时段合并为一次。
-
-提交后 Driver 消失时，原 Run 从 Execution Cursor 进入正常恢复流程；不创建替代 Run。UNKNOWN、PAUSED、WAITING_USER 不由定时器自动重放。会话与 Goal 的未完成轮次阻止新 admission；旧 Run 的迟到 Goal checkpoint 不能覆盖新 Run。
-
-详见 [GOAL_WAKEUP.md](GOAL_WAKEUP.md)。
-
-断连等待归 Workspace/Goal 仓储，使用持久失败次数及 UTC 截止时间，间隔为 1/2/4/8/16/32/60 秒。供应商只报告派发前错误证据，DecisionRuntime 结算零用量失败后才释放当前请求键；未知效果不自动重发。后台线程按原 Run/step 接续，浏览器读取独立重连。详见 [NETWORK_RECOVERY.md](NETWORK_RECOVERY.md)。
-
-## 16. 当前明确不做
-
-当前没有：
-
-- 任意 shell / arbitrary code executor；
-- 操作系统级开机自启动/服务管理器与通用事件触发；当前 Durable Executor 是本机独立进程，由 Myth 启动并用 SQLite lease 自恢复；
-- 分布式 lease / worker；
-- 多用户 auth；
-- 通用 MCP/A2A production integration；
-- 语义上“万能”的 completion verifier。
-
-这些由真实任务需求决定是否进入下一阶段。
-
-## 17. 状态所有权与原子准入
-
-个人状态仓储拥有 Goal/进度/关联写入；对话仓储协调 Turn admission，通过个人仓储加入同连接活动事务，不能复制对方写表逻辑。计划机会加入同一事务，初始进度缺失也在这个事务内补齐。
-
-独立精确文件入口先在事务外准备摘要对象及私有基线，再把 Run/账号/Action/Attempt/预留/事件一起提交；失败不留下只有 Run 的新入口。未引用私有准备不具有 Ticket，也不代表已修改原项目。
-
-应用对 Control、Memory 和 Goal checkpoint 依赖明确端口；Exact/Conversation 共用独立本机 Run 锁，不互相实例化业务执行器。包入口按需导出，纯领域冷导入不加载数据库/认证/供应商依赖。
-
-当前仍保留 Control 对 Core/对话表的跨聚合写入，以及回答、记忆、长期进度和 Driver 清理的分别提交。目录和端口分离不等于全面状态隔离；文件、凭据库与数据库也不是一个事务。详细协作表与剩余耦合见 [CODE_GUIDE.md](CODE_GUIDE.md)。
+当前保留单进程/本机服务边界与单数据库格式，不保留无人使用的迁移链。Workspace 仓储、Web 服务仍是较大的协调聚合；后续拆分以真实改动压力为依据，并保住原子准入与恢复入口。下一阶段见 [ROADMAP](ROADMAP.md)。

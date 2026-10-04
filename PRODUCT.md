@@ -37,7 +37,7 @@ Runtime Observatory 是产品主界面的一部分，保留 Goal、Execution Flo
 2. UNKNOWN 与已知失败分开表达；UNKNOWN 先 RECONCILE，INTERRUPTED 按事实提供 RESUME。
 3. Executor heartbeat、Driver heartbeat 与 durable progress 分开显示。
 4. 缺失计量显示“未报告”或 `N/A`，不补造 Token、缓存命中、进度或交付证据。
-5. 视觉简化不删减既有能力；本次重构不改变后端状态、授权、恢复、计费口径或数据库 schema。
+5. 视觉简化不删减既有能力；界面重构保留后端事实口径，后端合同修改必须单独验证状态、授权、恢复与计量。
 
 ## 证据与开放事项
 

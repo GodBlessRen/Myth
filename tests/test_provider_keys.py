@@ -1,4 +1,4 @@
-"""回归边界：应用内 Provider API Key 安全存储与兼容回退。
+"""回归边界：应用内 Provider API Key 安全存储与显式进程环境配置。
 固定内存凭据替身只验证 Myth 的状态/优先级/删除语义，不代表真实 OS keyring 或远端 Provider 可用。
 """
 

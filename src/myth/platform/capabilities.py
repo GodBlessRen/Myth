@@ -71,19 +71,13 @@ class CapabilityRegistry:
         return tuple(item.capability_id for item in self.list(executable_only=True))
 
 
-# 登记当前工具和明确 planned 能力；此目录不实现任意 shell 或受限 test executor。
+# 登记已接入工具及其效果合同；执行由适配器承担，test.run 仍需显式受信 profile。
 def default_capabilities() -> CapabilityRegistry:
     executable = [
         (
             "knowledge.search",
             "knowledge",
             "Search local indexed text with source references.",
-            "read",
-        ),
-        (
-            "knowledge.read",
-            "knowledge",
-            "Expand one admitted knowledge document to paginated L2 evidence.",
             "read",
         ),
         (
