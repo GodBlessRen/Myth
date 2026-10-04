@@ -147,6 +147,17 @@ class LocalConversationExecution:
                     )
 
         snapshot = dict(turn["snapshot"])
+        # 复用上一真实模型请求的 Context mode 作为滞回事实；只影响本次投影选择，不倒写 Turn Snapshot。
+        previous_context = next(
+            (
+                event.get("payload") or {}
+                for event in reversed(self.repository.events(turn["run_id"]))
+                if event.get("kind") == "ConversationContextCompiled"
+            ),
+            None,
+        )
+        if isinstance(previous_context, dict) and previous_context.get("context_mode"):
+            snapshot["previous_context_mode"] = previous_context["context_mode"]
         if getattr(self.repository, "sota_route", None) is not None:
             # 实时偏离只影响下一步提示，不改变冻结比较身份、权限或预算。
             view = self.repository.sota_route.view(turn["run_id"])
@@ -742,8 +753,8 @@ class LocalConversationExecution:
                 ],
                 "used_bytes": len(payload.encode("utf-8")),
                 "subagent_role": spec.role_id,
-                "evidence_bus": {
-                    "shared": "source_refs_only",
+                "source_ref_sharing": {
+                    "mode": "source_refs_only",
                     "parent_history_inherited": False,
                     "shared_refs": len(source_refs),
                 },
@@ -777,10 +788,9 @@ class LocalConversationExecution:
             "summary": worker.claim or "",
             "coverage": worker.goal_coverage or "",
             "evidence_refs": list(worker.evidence_refs),
-            "evidence_bus": {
+            "source_ref_sharing": {
                 "shared_refs": list(source_refs),
                 "accepted_refs": list(worker.evidence_refs),
-                "conversation_bus": False,
                 "history_inherited": False,
             },
             "remaining": list(worker.remaining),

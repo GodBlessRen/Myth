@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import Any
 
 
@@ -136,3 +137,86 @@ def failure_result(
         "failure": observation.serializable(),
         "observation_kind": observation_kind,
     }
+
+
+# 恢复判断的失败类别；UNKNOWN 与已知执行失败分开，避免盲重放。
+class RecoveryFailure(StrEnum):
+    # REPRESENTATION：来源可能正确，但格式/编码/引用表达错误。
+    REPRESENTATION = "representation"
+    # TRANSFORMATION：摘要/压缩等变换未通过固定验证。
+    TRANSFORMATION = "transformation"
+    # EVIDENCE：支撑结论的来源缺失或失效。
+    EVIDENCE = "evidence"
+    # EXECUTION：底层执行已知失败。
+    EXECUTION = "execution"
+    # UNKNOWN：外部效果是否发生不明确，必须先 reconcile。
+    UNKNOWN = "unknown"
+
+
+# 有界恢复的下一步动作；动作本身不新增 Capability 或授权。
+class RecoveryAction(StrEnum):
+    # REPAIR：只修正表达，不重新执行底层效果。
+    REPAIR = "repair"
+    # RETRY_TRANSFORMATION：在同一固定来源上重做变换。
+    RETRY_TRANSFORMATION = "retry_transformation"
+    # REACQUIRE_EVIDENCE：重新读取/取得来源证据。
+    REACQUIRE_EVIDENCE = "reacquire_evidence"
+    # FALLBACK_ORIGINAL：放弃优化路径，继续使用原始来源/路径。
+    FALLBACK_ORIGINAL = "fallback_original"
+    # RECONCILE：先核对未知外部效果，再决定是否有新机会。
+    RECONCILE = "reconcile"
+
+
+# 有界恢复预算；每级都有硬上限，防止优化失败形成无限自修复循环。
+@dataclass(frozen=True)
+class RecoveryBudget:
+    # repair_attempts：已消费的表达修复次数。
+    repair_attempts: int = 0
+    # transformation_attempts：已消费的变换重试次数。
+    transformation_attempts: int = 0
+    # max_repairs：表达修复上限。
+    max_repairs: int = 1
+    # max_transformations：变换重试上限。
+    max_transformations: int = 1
+    # can_reacquire：当前权限/来源是否允许重新取证。
+    can_reacquire: bool = True
+
+    # 构造时拒绝负次数，保证恢复预算单调。
+    def __post_init__(self) -> None:
+        for value in (
+            self.repair_attempts,
+            self.transformation_attempts,
+            self.max_repairs,
+            self.max_transformations,
+        ):
+            if value < 0:
+                raise ValueError("recovery counters must be non-negative")
+
+
+# UNKNOWN 固定先 reconcile；表达/变换/证据错误按最便宜可验证路径逐级升级。
+def next_recovery_action(
+    failure: RecoveryFailure, budget: RecoveryBudget
+) -> RecoveryAction:
+    if failure is RecoveryFailure.UNKNOWN:
+        return RecoveryAction.RECONCILE
+    if failure is RecoveryFailure.REPRESENTATION:
+        if budget.repair_attempts < budget.max_repairs:
+            return RecoveryAction.REPAIR
+        if budget.transformation_attempts < budget.max_transformations:
+            return RecoveryAction.RETRY_TRANSFORMATION
+        return RecoveryAction.FALLBACK_ORIGINAL
+    if failure is RecoveryFailure.TRANSFORMATION:
+        if budget.transformation_attempts < budget.max_transformations:
+            return RecoveryAction.RETRY_TRANSFORMATION
+        return (
+            RecoveryAction.REACQUIRE_EVIDENCE
+            if budget.can_reacquire
+            else RecoveryAction.FALLBACK_ORIGINAL
+        )
+    if failure is RecoveryFailure.EVIDENCE:
+        return (
+            RecoveryAction.REACQUIRE_EVIDENCE
+            if budget.can_reacquire
+            else RecoveryAction.FALLBACK_ORIGINAL
+        )
+    return RecoveryAction.FALLBACK_ORIGINAL

@@ -11,6 +11,7 @@ from ..domain import canonical_json
 from ..strategies.information_resolution import resolution_controller_from_config
 from .calibration import build_calibration_matrix
 from .cost_model import SqliteCostModelRegistry
+from .evaluation import capability_efficiency_gate, eval_report_from_dict
 from .evaluation_store import SqliteEvaluationLedger
 
 
@@ -41,6 +42,7 @@ CREATE TABLE IF NOT EXISTS policy_candidates(
     candidate_eval_run_id TEXT,
     cost_model_id TEXT,
     calibration_json TEXT,
+    efficiency_gate_json TEXT,
     decision_reason TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -70,6 +72,14 @@ class SqliteEvolutionControl:
         # store：持久事实仓储；短事务维护本地一致性；外部效果不能并入数据库事务。
         self.store = runtime.store
         self.store.db.executescript(SCHEMA)
+        columns = {
+            row["name"]
+            for row in self.store.db.execute("PRAGMA table_info(policy_candidates)")
+        }
+        if "efficiency_gate_json" not in columns:
+            self.store.db.execute(
+                "ALTER TABLE policy_candidates ADD COLUMN efficiency_gate_json TEXT"
+            )
         self._ensure_builtin()
 
     # 生成带类型前缀的新身份；重试去重使用已固定的 request/decision 身份，不靠新 UUID 判断已执行。
@@ -174,6 +184,11 @@ class SqliteEvolutionControl:
             if value.get("calibration_json")
             else None
         )
+        value["efficiency_gate"] = (
+            json.loads(value["efficiency_gate_json"])
+            if value.get("efficiency_gate_json")
+            else None
+        )
         return value
 
     # 列出候选研究状态；列表不触发发布。
@@ -220,6 +235,9 @@ class SqliteEvolutionControl:
         ):
             raise ValueError("baseline/candidate suite case counts differ")
 
+        ledger.require_held_out_final(candidate_eval_run_id)
+        if baseline.get("evaluation_partition") != "final":
+            raise ValueError("baseline promotion evidence must use final evaluation partition")
         pairs = ledger.paired_comparisons(baseline_eval_run_id, candidate_eval_run_id)
         cost_model = (
             SqliteCostModelRegistry(self.runtime).model(cost_model_id)
@@ -230,9 +248,20 @@ class SqliteEvolutionControl:
         calibration_ok, calibration_reason = matrix.promotion_gate(min_pairs=min_pairs)
         release_gate = tested["release_gate"]
         release_ok = bool(release_gate.get("passed"))
-        eligible = release_ok and calibration_ok
+        efficiency_ok, efficiency_reason, cost_delta = capability_efficiency_gate(
+            eval_report_from_dict(baseline["report"]),
+            eval_report_from_dict(tested["report"]),
+            pairs,
+            require_improvement=False,
+        )
+        efficiency_gate = {
+            "passed": efficiency_ok,
+            "reason": efficiency_reason,
+            "cost_delta": cost_delta,
+        }
+        eligible = release_ok and calibration_ok and efficiency_ok
         reason = (
-            "candidate passed release and paired calibration gates"
+            "candidate passed release, capability/efficiency, and paired calibration gates"
             if eligible
             else "; ".join(
                 part
@@ -241,6 +270,11 @@ class SqliteEvolutionControl:
                         None
                         if release_ok
                         else f"release gate: {release_gate.get('reason')}"
+                    ),
+                    (
+                        None
+                        if efficiency_ok
+                        else f"capability/efficiency gate: {efficiency_reason}"
                     ),
                     (
                         None
@@ -258,13 +292,14 @@ class SqliteEvolutionControl:
                 raise ValueError("promoted candidate evidence is immutable")
             db.execute(
                 "UPDATE policy_candidates SET status=?,baseline_eval_run_id=?,candidate_eval_run_id=?,"
-                "cost_model_id=?,calibration_json=?,decision_reason=?,updated_at=CURRENT_TIMESTAMP WHERE candidate_id=?",
+                "cost_model_id=?,calibration_json=?,efficiency_gate_json=?,decision_reason=?,updated_at=CURRENT_TIMESTAMP WHERE candidate_id=?",
                 (
                     "ELIGIBLE" if eligible else "HOLD",
                     baseline_eval_run_id,
                     candidate_eval_run_id,
                     cost_model_id,
                     canonical_json(matrix.serializable()),
+                    canonical_json(efficiency_gate),
                     reason,
                     candidate_id,
                 ),
@@ -286,6 +321,7 @@ class SqliteEvolutionControl:
                 "candidate_eval_run_id": candidate["candidate_eval_run_id"],
                 "cost_model_id": candidate["cost_model_id"],
                 "calibration": candidate["calibration"],
+                "efficiency_gate": candidate["efficiency_gate"],
             }
             db.execute(
                 "INSERT OR IGNORE INTO policy_versions(policy_id,domain,config_json,source_candidate_id) VALUES (?,?,?,?)",
@@ -303,7 +339,10 @@ class SqliteEvolutionControl:
             )
             db.execute(
                 "UPDATE policy_candidates SET status='PROMOTED',decision_reason=?,updated_at=CURRENT_TIMESTAMP WHERE candidate_id=?",
-                ("explicitly promoted after release + calibration gates", candidate_id),
+                (
+                    "explicitly promoted after release + capability/efficiency + calibration gates",
+                    candidate_id,
+                ),
             )
             db.execute(
                 "INSERT INTO policy_history(domain,action,from_policy_id,to_policy_id,candidate_id,evidence_json) "

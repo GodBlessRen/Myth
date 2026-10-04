@@ -62,36 +62,36 @@ Goal work state包含：
 
 下一 Session 继续同一 Goal 时，新的 Turn 读取当前 Goal work state 并**冻结副本**。后续 Goal 更新不会倒写历史 Turn。
 
-## 3.1 Harness efficiency inside the existing Runtime
+## 3.1 Context、执行与 Evaluation 深化
 
-Efficiency 不新增一条平行 Runtime。它落在已有 Context / Execution / Evidence / Evaluation / Evolution seam：
+这些能力直接落在已有 Context / Execution / Acceptance / Capability / Evaluation / Evolution 边界，不新增平行 Runtime：
 
 ```text
 Durable State
   -> Context Projection
-     -> fold old Observation + exact observation.read recall
-     -> optional grounded Compact seed
+     -> old Observation fold + observation.read 精确回读
+     -> settled boundary 下按真实 provider-visible 投影选择 normal / compact
   -> Model
   -> Action / Attempt
-     -> deterministic successor fusion when no new semantic decision is needed
+     -> 无需新语义判断时执行 deterministic successor
   -> Receipt / Artifact / Verification
-     -> evidence-bound transformation verifier
+     -> 摘要/压缩候选绑定 source digest + exact quote
   -> Evaluation
-     -> capability floor + paired efficiency + attribution matrix
+     -> capability floor + paired cost + outcome attribution
   -> Evolution
-     -> disposable Discover / Harden experiments
+     -> 上述 gate 直接决定 Candidate 是否能进入 ELIGIBLE
 ```
 
 当前连接点：
 
-- conversation_context.py：State 与 provider-visible Context 分离；fold 产生 stable recall handle；Compact seed 只来自 durable Goal / Artifact / Verification / Evidence facts。
-- observation.read：按 decision id + field 精确分页回读已结算 Tool Observation，不重跑 Tool。
-- project.patch_exact：生成候选 Artifact 后融合 deterministic diff；mutation 与 fused successor 分开结算，source digest 改变时 successor 显式 SKIPPED。
-- platform/evidence.py：source digest + exact quote 的 Evidence Receipt verifier；失败时调用方保留原始来源。
-- platform/efficiency.py：provider-visible saving、upfront cost、outstanding debt、remaining horizon、cooldown、reachability、bounded recovery 的纯策略合同。
-- platform/evaluation.py：capability floor 先于效率比较；提供 task×policy flip 投影和 held-out identity boundary。
-- platform/evolution.py：Discover 用广度找候选，Harden 只深化已有 lineage；研究 workspace 明确 disposable。
-- Sub-Agent：只共享显式 evidence refs / bounded context，不继承完整父聊天历史。
+- `platform/context.py` + `conversation_context.py`：State 与 Context 分离；按真实 normal/compact 投影字节、窗口压力和滞回选择 Context mode；Compact seed 只来自 durable Goal / Artifact / Verification / Evidence facts。
+- `observation.read`：按 decision id + field 精确分页回读已结算 Tool Observation，不重跑 Tool。
+- `platform/capabilities.py`：直接在现有 Capability Registry 上解释 enabled / available / exposed / reachable，不维护第二份“机制目录”。
+- `project.patch_exact`：生成候选 Artifact 后融合 deterministic diff；mutation 与 successor 分开结算，source digest 改变时 successor 显式 SKIPPED。
+- `acceptance.py`：摘要/压缩候选以 source digest + exact quote 绑定来源；失败继续使用原始来源。
+- `failures.py`：有界 recovery ladder；UNKNOWN 继续优先 RECONCILE。
+- `platform/evaluation.py` + `platform/evolution_store.py`：capability floor 和 Pareto 成本已直接进入 Candidate 的 ELIGIBLE/Promote 资格；逐题 mechanism events 进入 Eval Ledger 供 outcome attribution。
+- Sub-Agent：只共享显式 source/evidence refs 与 bounded context，不继承完整父聊天历史。
 
 ## 4. Authority boundary
 

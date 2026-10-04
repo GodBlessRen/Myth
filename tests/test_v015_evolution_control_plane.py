@@ -169,6 +169,184 @@ class EvolutionControlPlaneTests(unittest.TestCase):
                     candidate_eval_run_id=after["eval_run_id"],
                 )
 
+    # 回归断言：即使候选完整通过质量 gate，只要同题已测成本出现 Pareto 回归，就不能进入 ELIGIBLE。
+    def test_cost_regression_blocks_candidate_before_promote(self):
+        with MythRuntime(self.root) as runtime:
+            evolution = SqliteEvolutionControl(runtime)
+            candidate = evolution.create_candidate(
+                candidate_id="policy-cost-regression",
+                config={"mode": "rule"},
+                changes=["exercise capability and efficiency release gate"],
+            )
+            ledger = SqliteEvaluationLedger(runtime)
+            suite_id = "cost-gate-v1"
+            report = {
+                "suite_id": suite_id,
+                "pass_count": 1,
+                "fail_count": 0,
+                "inconclusive_count": 0,
+                "safety_regressions": 0,
+                "measured_cost": 0,
+                "unsupported_count": 0,
+            }
+            # 构造同一固定题的完整评测结果，只改变明确的 input_tokens 成本维度。
+            def result(policy_id, input_tokens):
+                return {
+                    "suite_id": suite_id,
+                    "version": 1,
+                    "policy_id": policy_id,
+                    "suite_case_count": 1,
+                    "selected_case_count": 1,
+                    "complete_suite": True,
+                    "report": report,
+                    "release_gate": {"passed": True, "reason": "quality gate passed"},
+                    "observations": [
+                        {
+                            "case_id": "case-1",
+                            "verdict": "PASS",
+                            "reason": "fixed pass",
+                            "metrics": {"input_tokens": input_tokens, "tool_calls": 1},
+                            "evidence_refs": ["eval:case-1"],
+                            "comparison_key": "case-1",
+                        }
+                    ],
+                }
+            before = ledger.record(
+                result(candidate["baseline_policy_id"], 100),
+                policy_id=candidate["baseline_policy_id"],
+            )
+            after = ledger.record(
+                result(candidate["candidate_id"], 130),
+                policy_id=candidate["candidate_id"],
+            )
+            evaluated = evolution.attach_evaluation(
+                candidate["candidate_id"],
+                baseline_eval_run_id=before["eval_run_id"],
+                candidate_eval_run_id=after["eval_run_id"],
+            )
+            self.assertEqual(evaluated["status"], "HOLD")
+            self.assertFalse(evaluated["efficiency_gate"]["passed"])
+            self.assertIn("Pareto", evaluated["efficiency_gate"]["reason"])
+            with self.assertRaises(ValueError):
+                evolution.promote(candidate["candidate_id"])
+
+    # 回归断言：同一候选已经用于 discovery 的 case 不能再次冒充 held-out final promotion evidence。
+    def test_discovery_cases_cannot_reappear_in_final_promotion_evidence(self):
+        with MythRuntime(self.root) as runtime:
+            evolution = SqliteEvolutionControl(runtime)
+            candidate = evolution.create_candidate(
+                candidate_id="policy-heldout-leak",
+                config={"mode": "rule"},
+                changes=["exercise held-out isolation"],
+            )
+            ledger = SqliteEvaluationLedger(runtime)
+
+            # 构造最小固定单题评测，避免用完整 Foundation suite 测试纯账本隔离规则。
+            def result(policy_id, partition):
+                return {
+                    "suite_id": "heldout-v1",
+                    "version": 1,
+                    "policy_id": policy_id,
+                    "evaluation_partition": partition,
+                    "suite_case_count": 1,
+                    "selected_case_count": 1,
+                    "complete_suite": True,
+                    "report": {
+                        "suite_id": "heldout-v1",
+                        "pass_count": 1,
+                        "fail_count": 0,
+                        "inconclusive_count": 0,
+                        "safety_regressions": 0,
+                        "measured_cost": 0,
+                        "unsupported_count": 0,
+                    },
+                    "release_gate": {
+                        "passed": True,
+                        "reason": "quality gate passed",
+                    },
+                    "observations": [
+                        {
+                            "case_id": "case-1",
+                            "verdict": "PASS",
+                            "reason": "fixed pass",
+                            "metrics": {"input_tokens": 10},
+                            "evidence_refs": ["eval:case-1"],
+                            "comparison_key": "case-1",
+                        }
+                    ],
+                }
+
+            before = ledger.record(
+                result(candidate["baseline_policy_id"], "final"),
+                policy_id=candidate["baseline_policy_id"],
+            )
+            ledger.record(
+                result(candidate["candidate_id"], "discovery"),
+                policy_id=candidate["candidate_id"],
+            )
+            after = ledger.record(
+                result(candidate["candidate_id"], "final"),
+                policy_id=candidate["candidate_id"],
+            )
+            with self.assertRaisesRegex(ValueError, "held-out final"):
+                evolution.attach_evaluation(
+                    candidate["candidate_id"],
+                    baseline_eval_run_id=before["eval_run_id"],
+                    candidate_eval_run_id=after["eval_run_id"],
+                )
+
+    # 回归断言：逐题实际机制事件持久进入 Eval Ledger；重开后 attribution 仍能看到候选触发线索。
+    def test_mechanism_attribution_survives_eval_ledger_round_trip(self):
+        with MythRuntime(self.root) as runtime:
+            ledger = SqliteEvaluationLedger(runtime)
+            # 构造同题不同策略的持久观测，只让 verdict 与 mechanism_events 发生明确变化。
+            def result(policy_id, verdict, events):
+                passed = 1 if verdict == "PASS" else 0
+                failed = 1 - passed
+                return {
+                    "suite_id": "attribution-v1",
+                    "version": 1,
+                    "policy_id": policy_id,
+                    "suite_case_count": 1,
+                    "selected_case_count": 1,
+                    "complete_suite": True,
+                    "report": {
+                        "suite_id": "attribution-v1",
+                        "pass_count": passed,
+                        "fail_count": failed,
+                        "inconclusive_count": 0,
+                        "safety_regressions": 0,
+                        "measured_cost": 0,
+                        "unsupported_count": 0,
+                    },
+                    "release_gate": {
+                        "passed": verdict == "PASS",
+                        "reason": "fixture",
+                    },
+                    "observations": [
+                        {
+                            "case_id": "case-1",
+                            "verdict": verdict,
+                            "reason": "fixture",
+                            "metrics": {"input_tokens": 10},
+                            "evidence_refs": ["eval:case-1"],
+                            "comparison_key": "case-1",
+                            "mechanism_events": events,
+                        }
+                    ],
+                }
+            before = ledger.record(result("base", "PASS", []), policy_id="base")
+            after = ledger.record(
+                result("candidate", "FAIL", ["context_compaction:APPLIED"]),
+                policy_id="candidate",
+            )
+            value = ledger.attribution(before["eval_run_id"], after["eval_run_id"])
+            self.assertEqual(
+                value["outcome_flips"][0]["candidate_mechanisms"],
+                ["context_compaction:APPLIED"],
+            )
+            self.assertFalse(value["causal_attribution"])
+
     # 回归断言：显式发布只改变未来 Turn，旧快照固定策略，回退也保留历史。
     def test_candidate_promote_freezes_future_turn_policy_and_rollback(self):
         with MythRuntime(self.root) as runtime:
@@ -206,6 +384,7 @@ class EvolutionControlPlaneTests(unittest.TestCase):
             )
             self.assertEqual(evaluated["status"], "ELIGIBLE")
             self.assertEqual(evaluated["calibration"]["negative_pairs"], 0)
+            self.assertTrue(evaluated["efficiency_gate"]["passed"])
             promoted = evolution.promote(candidate["candidate_id"])
             self.assertEqual(promoted["active"]["policy_id"], candidate["candidate_id"])
             self.assertEqual(promoted["active"]["revision"], 2)

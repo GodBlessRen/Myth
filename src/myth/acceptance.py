@@ -3,7 +3,10 @@
 
 from __future__ import annotations
 
-from typing import Any
+from dataclasses import dataclass
+from enum import StrEnum
+from hashlib import sha256
+from typing import Any, Iterable
 
 from .domain import Verdict, canonical_json, digest_json, exact_patch, sha256_bytes
 
@@ -154,3 +157,117 @@ def compile_context(
             f"required context exceeds the {max_bytes}-byte budget; split the task"
         )
     return encoded
+
+
+# 来源证据片段的用途分类；分类只帮助验证/展示，不改变来源事实。
+class EvidenceKind(StrEnum):
+    # FAILURE：直接描述失败事实的来源片段。
+    FAILURE = "failure"
+    # SUCCESS：直接描述成功事实的来源片段。
+    SUCCESS = "success"
+    # TARGET：定位关键对象或位置的来源片段。
+    TARGET = "target"
+    # WARNING：需要保留但不自动判失败的来源片段。
+    WARNING = "warning"
+    # SUMMARY：来源中原本就存在的摘要片段，不是模型新写的总结。
+    SUMMARY = "summary"
+
+
+# 一条必须逐字存在于固定来源中的证据片段。
+@dataclass(frozen=True)
+class EvidenceQuote:
+    # kind：证据用途分类，不授予额外可信度。
+    kind: EvidenceKind
+    # quote：必须能在 source text 中逐字定位的原文。
+    quote: str
+
+    # 构造时限制空引用和异常长引用；真正绑定来源仍由 validate_source_evidence 完成。
+    def __post_init__(self) -> None:
+        if not self.quote:
+            raise ValueError("evidence quote must not be empty")
+        if len(self.quote) > 2000:
+            raise ValueError("evidence quote exceeds 2000 characters")
+
+
+# 摘要/压缩候选携带的来源证据；通过验证前不能替代原始 Artifact/Observation。
+@dataclass(frozen=True)
+class SourceEvidence:
+    # source_ref：原始来源稳定引用。
+    source_ref: str
+    # source_digest：原始 UTF-8 文本 SHA-256。
+    source_digest: str
+    # status：候选结构化状态；最终仍受 source digest 和 quote 约束。
+    status: str
+    # evidence：逐字来源片段集合。
+    evidence: tuple[EvidenceQuote, ...]
+    # summary：便于阅读的候选摘要；本身不产生可信度。
+    summary: str = ""
+
+    # 构造时只校验身份形状；内容真实性由 validate_source_evidence 决定。
+    def __post_init__(self) -> None:
+        if not self.source_ref.strip():
+            raise ValueError("source_ref is required")
+        if len(self.source_digest) != 64:
+            raise ValueError("source_digest must be a SHA-256 hex digest")
+
+
+# 来源证据验证结果；失败保持原因码供恢复，不放松原始验证条件。
+@dataclass(frozen=True)
+class EvidenceCheck:
+    # accepted：摘要候选是否完整绑定到固定来源。
+    accepted: bool
+    # reason_code：稳定机器原因码。
+    reason_code: str
+    # rejected_quotes：无法逐字在来源中定位的候选片段。
+    rejected_quotes: tuple[str, ...] = ()
+
+    # 转为只读投影；不修改来源或候选内容。
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "accepted": self.accepted,
+            "reason_code": self.reason_code,
+            "rejected_quotes": list(self.rejected_quotes),
+        }
+
+
+# 对原始 UTF-8 文本计算固定来源身份。
+def source_digest(source_text: str) -> str:
+    return sha256(source_text.encode("utf-8")).hexdigest()
+
+
+# 验证摘要/压缩候选的 source digest 与逐字引用；失败时调用方继续使用原始来源。
+def validate_source_evidence(
+    source_text: str,
+    candidate: SourceEvidence,
+    *,
+    require_failure_evidence: bool = False,
+) -> EvidenceCheck:
+    if source_digest(source_text) != candidate.source_digest:
+        return EvidenceCheck(False, "source_digest_mismatch")
+    rejected = tuple(
+        item.quote for item in candidate.evidence if item.quote not in source_text
+    )
+    if rejected:
+        return EvidenceCheck(False, "unverifiable_quote", rejected)
+    if require_failure_evidence and candidate.status.upper() in {
+        "FAILED",
+        "FAILURE",
+        "ERROR",
+    }:
+        if not any(
+            item.kind in {EvidenceKind.FAILURE, EvidenceKind.TARGET}
+            for item in candidate.evidence
+        ):
+            return EvidenceCheck(False, "missing_failure_evidence")
+    return EvidenceCheck(True, "verified")
+
+
+# 一组候选只有全部绑定同一固定来源时才可继续；任一失败即返回 None，保留原始来源。
+def validated_source_evidence_or_none(
+    source_text: str,
+    candidates: Iterable[SourceEvidence],
+) -> tuple[SourceEvidence, ...] | None:
+    values = tuple(candidates)
+    if any(not validate_source_evidence(source_text, item).accepted for item in values):
+        return None
+    return values

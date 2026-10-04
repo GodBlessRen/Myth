@@ -234,3 +234,63 @@ def default_capabilities() -> CapabilityRegistry:
         for cid, family, desc, risk in planned
     ]
     return CapabilityRegistry(specs)
+
+
+# 当前模型工具面中的能力可达性投影；注册、启用、暴露分开解释，任何一项都不等于已经执行。
+@dataclass(frozen=True)
+class CapabilityReachability:
+    # capability_id：现有 Capability Registry 中的能力身份。
+    capability_id: str
+    # enabled：当前策略是否允许该能力出现在工具面。
+    enabled: bool
+    # available：Runtime 是否有 executable 实现。
+    available: bool
+    # exposed：本次模型请求是否实际看到了该能力。
+    exposed: bool
+    # reachable：前三项同时成立后的派生事实。
+    reachable: bool
+    # reason_code：供 Runtime Observatory 稳定解释不可达原因。
+    reason_code: str
+
+    # 转为只读观测投影；不改变 Capability/Ticket/权限事实。
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "capability_id": self.capability_id,
+            "enabled": self.enabled,
+            "available": self.available,
+            "exposed": self.exposed,
+            "reachable": self.reachable,
+            "reason_code": self.reason_code,
+        }
+
+
+# 由现有 Capability Registry 和本次工具披露事实计算可达性；不另建“机制注册表”。
+def capability_reachability(
+    registry: CapabilityRegistry,
+    capability_id: str,
+    *,
+    enabled: bool,
+    exposed: bool,
+) -> CapabilityReachability:
+    try:
+        spec = registry.get(capability_id)
+    except KeyError:
+        available = False
+    else:
+        available = spec.state is CapabilityState.EXECUTABLE
+    if not enabled:
+        reason = "disabled"
+    elif not available:
+        reason = "implementation_unavailable"
+    elif not exposed:
+        reason = "surface_not_exposed"
+    else:
+        reason = "reachable"
+    return CapabilityReachability(
+        capability_id=capability_id,
+        enabled=enabled,
+        available=available,
+        exposed=exposed,
+        reachable=enabled and available and exposed,
+        reason_code=reason,
+    )

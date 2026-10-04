@@ -1,21 +1,25 @@
-"""SoL-Pi 黄金机制落入 Myth 现有骨架后的纯合同回归。
-这里只验证 Efficiency/Evidence 接口；真实 Provider/长轨迹收益仍必须由固定 Eval 与实际运行证明。"""
+"""Context、Capability、Recovery、Evaluation 与 Acceptance 的固定回归。
+这些测试验证吸收到现有模块后的合同；真实 Provider/长轨迹收益仍必须由固定 Eval 与实际运行证明。"""
 
 from __future__ import annotations
 
 import unittest
 
-from myth.platform.efficiency import (
-    OptimizationEconomics,
-    OptimizationOutcome,
+from myth.acceptance import (
+    EvidenceKind,
+    EvidenceQuote,
+    SourceEvidence,
+    source_digest,
+    validate_source_evidence,
+)
+from myth.failures import (
     RecoveryAction,
     RecoveryBudget,
     RecoveryFailure,
-    assess_reachability,
-    decide_optimization,
     next_recovery_action,
-    semantic_boundary,
 )
+from myth.platform.capabilities import capability_reachability, default_capabilities
+from myth.platform.context import choose_context_mode, context_boundary
 from myth.platform.evaluation import (
     EvalObservation,
     EvalReport,
@@ -30,82 +34,64 @@ from myth.platform.evolution import (
     ExperimentPhase,
     experiment_frontier,
 )
-from myth.platform.evidence import (
-    EvidenceKind,
-    EvidenceQuote,
-    EvidenceReceipt,
-    evidence_digest,
-    validate_evidence_receipt,
-)
 
 
-# Harness 效率经济、可达性、恢复与语义边界的固定纯合同回归集合。
-class EfficiencyControlTests(unittest.TestCase):
-    # 回归断言：只有 provider-visible 的已测节约能进入回本计算，raw history 估算缺失时保持 DEFERRED。
-    def test_economics_refuses_unmeasured_savings(self):
-        decision = decide_optimization(
-            OptimizationEconomics(
-                "context_compaction",
-                provider_visible_saving_per_request=None,
-                upfront_cost=1000,
-                remaining_requests=8,
-            )
+# Context/Capability/Recovery 的 provider-visible 计价、滞回、可达性与恢复回归集合。
+class ContextCapabilityRecoveryTests(unittest.TestCase):
+    # 回归断言：只有实际 normal/compact provider-visible 投影差额进入节约量；没有稳定边界时不自动 Compact。
+    def test_context_mode_requires_measured_compact_projection(self):
+        decision = choose_context_mode(
+            normal_bytes=32000,
+            compact_bytes=None,
+            max_bytes=42000,
+            remaining_requests=4,
         )
-        self.assertEqual(decision.outcome, OptimizationOutcome.DEFERRED)
-        self.assertEqual(decision.reason_code, "measurement_unavailable")
+        self.assertEqual(decision["mode"], "normal")
+        self.assertEqual(decision["outcome"], "INELIGIBLE")
+        self.assertEqual(decision["reason_code"], "no_settled_context_boundary")
+        self.assertIsNone(decision["provider_visible_saving_bytes"])
 
-    # 回归断言：upfront + outstanding debt 必须在剩余 horizon 内回本，不能因为“上下文很长”直接压缩。
-    def test_economics_prices_debt_and_horizon(self):
-        decision = decide_optimization(
-            OptimizationEconomics(
-                "context_compaction",
-                provider_visible_saving_per_request=500,
-                upfront_cost=1000,
-                outstanding_debt=500,
-                remaining_requests=4,
-                requests_since_last_apply=3,
-            )
+    # 回归断言：高窗口压力下按真实投影节约进入 Compact，并显式保留未知 optimization debt。
+    def test_context_mode_uses_provider_visible_saving(self):
+        decision = choose_context_mode(
+            normal_bytes=36000,
+            compact_bytes=22000,
+            max_bytes=42000,
+            remaining_requests=3,
         )
-        self.assertEqual(decision.outcome, OptimizationOutcome.APPLIED)
-        self.assertEqual(decision.breakeven_requests, 3)
-        self.assertEqual(decision.projected_net_saving, 500)
+        self.assertEqual(decision["mode"], "compact")
+        self.assertEqual(decision["reason_code"], "context_pressure")
+        self.assertEqual(decision["provider_visible_saving_bytes"], 14000)
+        self.assertEqual(decision["projected_saving_bytes"], 42000)
+        self.assertIsNone(decision["optimization_debt_bytes"])
 
-    # 回归断言：自适应策略有 cooldown/hysteresis；安全保护可以显式越过普通经济门槛。
-    def test_cooldown_and_emergency_override_are_distinct(self):
-        cooled = decide_optimization(
-            OptimizationEconomics(
-                "context_compaction",
-                1000,
-                remaining_requests=10,
-                requests_since_last_apply=1,
-                cooldown_requests=2,
-            )
+    # 回归断言：进入 Compact 后使用较低退出阈值保持模式，避免在相邻步骤 normal/compact 来回振荡。
+    def test_context_mode_hysteresis_holds_compact(self):
+        decision = choose_context_mode(
+            normal_bytes=28000,
+            compact_bytes=18000,
+            max_bytes=42000,
+            remaining_requests=2,
+            previous_mode="compact",
         )
-        self.assertEqual(cooled.reason_code, "cooldown_active")
-        emergency = decide_optimization(
-            OptimizationEconomics(
-                "context_compaction",
-                None,
-                remaining_requests=None,
-                requests_since_last_apply=0,
-                emergency_required=True,
-            )
-        )
-        self.assertEqual(emergency.outcome, OptimizationOutcome.APPLIED)
-        self.assertEqual(emergency.reason_code, "emergency_override")
+        self.assertEqual(decision["mode"], "compact")
+        self.assertEqual(decision["reason_code"], "hysteresis_hold")
 
-    # 回归断言：enabled 不等于 reachable；工具面没暴露时必须可解释地保持不可达。
-    def test_reachability_separates_enabled_from_exposed(self):
-        value = assess_reachability(
-            "action_fusion", enabled=True, available=True, exposed=False
+    # 回归断言：enabled 不等于 reachable；直接复用现有 Capability Registry，不建立第二套机制目录。
+    def test_capability_reachability_uses_existing_registry(self):
+        value = capability_reachability(
+            default_capabilities(),
+            "observation.read",
+            enabled=True,
+            exposed=False,
         )
         self.assertFalse(value.reachable)
         self.assertEqual(value.reason_code, "surface_not_exposed")
 
     # 回归断言：Compact 的语义边界只来自已结算 Artifact/Verification/Delegation，不从普通聊天文本猜进度。
-    def test_semantic_boundaries_require_durable_settlement(self):
+    def test_context_boundaries_require_durable_settlement(self):
         self.assertEqual(
-            semantic_boundary(
+            context_boundary(
                 {
                     "capability": "test.run",
                     "result": {"status": "PASSED", "evidence_ref": "test:x"},
@@ -114,7 +100,7 @@ class EfficiencyControlTests(unittest.TestCase):
             "verification_settled",
         )
         self.assertEqual(
-            semantic_boundary(
+            context_boundary(
                 {
                     "capability": "artifact.write",
                     "result": {
@@ -126,7 +112,7 @@ class EfficiencyControlTests(unittest.TestCase):
             "artifact_settled",
         )
         self.assertIsNone(
-            semantic_boundary({"result": {"summary": "I think the task is done"}})
+            context_boundary({"result": {"summary": "I think the task is done"}})
         )
 
     # 回归断言：UNKNOWN 外部效果永远先 reconcile；表达层错误可在有界预算内走廉价修复。
@@ -142,8 +128,8 @@ class EfficiencyControlTests(unittest.TestCase):
 
 
 # Evaluation/Evolution 的能力下限、归因、held-out 与实验 lineage 固定回归集合。
-class EvaluationEvolutionEfficiencyTests(unittest.TestCase):
-    # 回归断言：候选只有在 capability floor 不退化且共同测量成本 Pareto 改善时才获得效率资格。
+class EvaluationEvolutionTests(unittest.TestCase):
+    # 回归断言：候选先守 capability floor，再比较共同测量成本。
     def test_capability_floor_precedes_efficiency_gain(self):
         baseline_obs = EvalObservation(
             "case-1",
@@ -165,12 +151,12 @@ class EvaluationEvolutionEfficiencyTests(unittest.TestCase):
         comparison = compare_observations(baseline_obs, candidate_obs)
         report = EvalReport("suite", 1, 0, 0, 0)
         ok, reason, aggregate = capability_efficiency_gate(
-            report, report, (comparison,)
+            report, report, (comparison,), require_improvement=True
         )
         self.assertTrue(ok, reason)
         self.assertEqual(aggregate["input_tokens"], -30.0)
 
-    # 回归断言：逐题矩阵只提供 flip/机制线索，不把相关性直接写成因果归因。
+    # 回归断言：逐题矩阵只提供 outcome flip/实际触发线索，不把相关性直接写成因果归因。
     def test_attribution_matrix_keeps_causality_explicitly_false(self):
         value = attribution_matrix(
             (
@@ -234,14 +220,14 @@ class EvaluationEvolutionEfficiencyTests(unittest.TestCase):
         )
 
 
-# Evidence-bound transformation 的固定来源摘要与逐字引用验证回归集合。
-class EvidenceBoundTransformationTests(unittest.TestCase):
+# 摘要/压缩候选绑定固定来源的验收回归集合。
+class SourceEvidenceTests(unittest.TestCase):
     # 回归断言：逐字 quote 与 source digest 同时成立才能接受；流畅 summary 本身不产生可信度。
-    def test_exact_quotes_bind_receipt_to_source(self):
+    def test_exact_quotes_bind_candidate_to_source(self):
         source = "FAILED tests/test_demo.py::test_x\nAssertionError: expected 2 got 3\n"
-        receipt = EvidenceReceipt(
+        candidate = SourceEvidence(
             source_ref="artifact:test-log",
-            source_digest=evidence_digest(source),
+            source_digest=source_digest(source),
             status="FAILED",
             evidence=(
                 EvidenceQuote(
@@ -251,21 +237,21 @@ class EvidenceBoundTransformationTests(unittest.TestCase):
             ),
             summary="The test failed.",
         )
-        verdict = validate_evidence_receipt(
-            source, receipt, require_failure_evidence=True
+        verdict = validate_source_evidence(
+            source, candidate, require_failure_evidence=True
         )
         self.assertTrue(verdict.accepted)
 
-    # 回归断言：模型“顺手修正”一个字符也必须拒绝候选，调用方随后 fail-open 使用原始来源。
+    # 回归断言：模型“顺手修正”一个字符也必须拒绝候选，调用方随后继续使用原始来源。
     def test_quote_drift_is_rejected(self):
         source = "Error Trace:\tthread 4830 panicked\n"
-        receipt = EvidenceReceipt(
+        candidate = SourceEvidence(
             source_ref="artifact:test-log",
-            source_digest=evidence_digest(source),
+            source_digest=source_digest(source),
             status="FAILED",
             evidence=(EvidenceQuote(EvidenceKind.FAILURE, "Error Trace: thread 4830 panicked"),),
         )
-        verdict = validate_evidence_receipt(source, receipt)
+        verdict = validate_source_evidence(source, candidate)
         self.assertFalse(verdict.accepted)
         self.assertEqual(verdict.reason_code, "unverifiable_quote")
 

@@ -899,24 +899,27 @@ function renderInspectorContext(session, turn) {
     ].forEach(([k, v]) => {
       inspectorFact(box, k, v);
     });
-    const optimizations = compiled.optimizations || [];
-    if (optimizations.length) {
+    const contextDecision = compiled.context_decision;
+    if (contextDecision) {
       inspectorFact(
         box,
-        "Optimization",
-        optimizations
-          .map(item => (item.mechanism_id || "mechanism") + " · " +
-            (item.outcome || "UNKNOWN") + " · " + (item.reason_code || "unspecified"))
-          .join(" / "),
+        "Context mode",
+        (contextDecision.mode || "normal") + " · " +
+          (contextDecision.outcome || "UNKNOWN") + " · " +
+          (contextDecision.reason_code || "unspecified") +
+          (contextDecision.provider_visible_saving_bytes == null
+            ? ""
+            : " · save " +
+              inspectorNumber(contextDecision.provider_visible_saving_bytes, " bytes/request")),
       );
     }
-    const reachability = compiled.mechanism_reachability || [];
+    const reachability = compiled.capability_reachability || [];
     if (reachability.length) {
       inspectorFact(
         box,
-        "Mechanism reachability",
+        "Capability reachability",
         reachability
-          .map(item => (item.mechanism_id || "mechanism") + "=" +
+          .map(item => (item.capability_id || "capability") + "=" +
             (item.reachable ? "reachable" : (item.reason_code || "unreachable")))
           .join(" / "),
       );
