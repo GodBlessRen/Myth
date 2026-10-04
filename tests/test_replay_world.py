@@ -71,6 +71,7 @@ class ReplayWorldTests(unittest.TestCase):
     def test_policy_can_select_an_observed_terminal_route(self):
         world = ReplayWorld.from_sota_group(_group())
 
+        # 固定测试策略：第一步走 search，分叉后优先选择真实历史中的 reply 短路线。
         def decide(observation):
             preferred = "project.search" if observation.depth == 0 else "reply"
             return next(
