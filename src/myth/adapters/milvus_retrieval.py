@@ -37,6 +37,7 @@ class MilvusVectorIndex:
     # backend_id：稳定适配器身份；用于观测/路由，不代表连接健康。
     backend_id = "milvus"
 
+    # 保存延迟连接配置与可注入测试替身；构造本身不访问网络、不下载模型、不创建 collection。
     def __init__(
         self,
         *,
@@ -184,9 +185,11 @@ class MilvusVectorIndex:
                 raise RuntimeError("Milvus vector upsert failed") from exc
         return {"received": len(rows), "upserted": upserted, "skipped": len(rows) - upserted}
 
+    # 将知识 chunk 当前 source version 投影到派生 collection；写失败由调用方降级处理。
     def sync_knowledge(self, rows: list[dict[str, Any]]) -> dict[str, int]:
         return self._sync(self.knowledge_collection, rows)
 
+    # 将 active Memory 当前 revision 投影到派生 collection；不拥有 revoke/scope 状态。
     def sync_memories(self, rows: list[dict[str, Any]]) -> dict[str, int]:
         return self._sync(self.memory_collection, rows)
 
@@ -225,9 +228,11 @@ class MilvusVectorIndex:
             self._healthy = False
             raise RuntimeError("Milvus vector search failed") from exc
 
+    # 返回知识向量候选身份；正文、digest 与可见范围必须由 SQLite 仓储重新核对。
     def search_knowledge(self, query: str, *, limit: int = 64) -> list[dict[str, Any]]:
         return self._search(self.knowledge_collection, query, limit=limit)
 
+    # 返回 Memory 向量候选身份；revision、active 与 scope 仍由 MemoryStore 最终判定。
     def search_memories(self, query: str, *, limit: int = 64) -> list[dict[str, Any]]:
         return self._search(self.memory_collection, query, limit=limit)
 
