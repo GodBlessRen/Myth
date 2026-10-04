@@ -198,7 +198,7 @@ class LiveInformationController:
         )
         target_limit = 3 if action is InformationControlAction.SEEK else 4
 
-        def decision(admitted: bool, reason: str) -> InformationControlDecision:
+        # 把当前计数与限额冻结进同一返回合同；调用方只消费结果，不重复拼装控制元数据。\n        def decision(admitted: bool, reason: str) -> InformationControlDecision:
             return InformationControlDecision(
                 action=action,
                 admitted=admitted,
