@@ -9,6 +9,11 @@ from .information_resolution import (
     resolution_controller_from_config,
 )
 from .information_gain import GainEstimate, PairedEvalGainEstimator
+from .information_control import (
+    InformationControlAction,
+    InformationControlDecision,
+    LiveInformationController,
+)
 
 # __all__：公开导出名单；兼容别名只有在确认外部迁移完成后才删除。
 __all__ = [
@@ -19,4 +24,7 @@ __all__ = [
     "resolution_controller_from_config",
     "GainEstimate",
     "PairedEvalGainEstimator",
+    "InformationControlAction",
+    "InformationControlDecision",
+    "LiveInformationController",
 ]

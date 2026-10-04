@@ -143,6 +143,35 @@ Provider 明确返回 context truncation 属于已知失败，不冒充 UNKNOWN�
 
 Conversation context 是从 durable facts 生成的 bounded projection，不是执行记录本身。
 
+### 7.1 Live Information Control
+
+Agent Loop 中现有读取/检索工具同时构成一个 bounded information loop：
+
+```text
+LLM identifies an information need
+        ↓
+SEEK / EXPAND proposal
+        ↓
+Information Control admission
+   - novelty
+   - pagination progress
+   - total/action/source budget
+        ↓
+normal Runtime Tool Ticket / Receipt
+        ↓
+Observation returns to Context
+        ↓
+next model decision
+        ↓
+KEEP when no more information action is needed
+```
+
+Controller 是纯策略：不执行 I/O、不调用模型、不拥有新的持久表。它只从当前 Turn 已持久的 activities 重建消费状态，因此进程退出/恢复不会重置信息预算。拒绝发生在 Tool Ticket 前，属于已知准入失败，不制造 UNKNOWN，也不消耗一次真实 tool call。
+
+第一版故意不把 offline Information Gain 数字接入 live admission；先用可验证的 novelty / progress / boundedness 建立稳定控制面，再由固定 Eval 证明后决定是否让 Gain 影响排序或升级。
+
+Conversation context 是从 durable facts 生成的 bounded projection，不是执行记录本身。
+
 优先级包括：
 
 - 当前任务；

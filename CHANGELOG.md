@@ -1,5 +1,14 @@
 # Changelog
 
+## 未发布 — Live Information Control v1
+
+- 把现有信息工具接成 bounded live loop，不新增 Tool 或强制 Layer：`knowledge.search / project.search / project.list` 作为 SEEK，`knowledge.resolve / knowledge.read / project.read` 作为 EXPAND，模型停止取信息并继续任务即 KEEP。
+- 新增 `LiveInformationController`，在 Tool Ticket 前执行 Novelty、分页 Progress、总量/动作/单来源 Budget 准入；精确重复、停滞分页、耗尽视图和过度信息获取均作为已知拒绝，不进入 UNKNOWN。
+- Controller 不建新数据库表；从 durable activities 重建本轮状态，崩溃恢复后预算和重复检测继续成立。
+- 已准入信息结果附带小型 `information_control` 投影；Web session 和 Runtime Context 区展示 SEEK/EXPAND 数量、拒绝数与返回字节，不伪造 Information Gain 分数。
+- Offline Information Gain 暂不参与 live admission；先保留为固定 Eval 的策略证据，避免未校准数值控制线上执行。
+- 新增纯策略、集成与 Observatory 回归，验证重复 SEEK 不产生第二个 Tool Ticket / tool_calls 消耗，以及分页必须沿 continuation 前进。
+
 ## 未发布 — Adaptive Sub-Agent v1
 
 - 新增 `agent.delegate`：主 LLM 在正常 Agent Loop 中自行判断是否需要委派，不引入强制 Supervisor 或固定 Multi-Agent 层。

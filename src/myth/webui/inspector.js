@@ -888,6 +888,24 @@ function renderInspectorContext(session, turn) {
       inspectorFact(box, k, v);
     });
   }
+  // 实时信息控制只展示 durable activity 派生事实；KEEP 表示当前没有继续取信息，不伪造“增益分数”。
+  const info = turn?.information_control;
+  if (info) {
+    inspectorFact(
+      box,
+      "Information Control",
+      (info.last_action || "KEEP") + " · " +
+        inspectorNumber(info.actions) + " / " + inspectorNumber(info.total_limit),
+    );
+    inspectorFact(
+      box,
+      "SEEK / EXPAND",
+      inspectorNumber(info.seek) + " / " + inspectorNumber(info.seek_limit) +
+        " · " + inspectorNumber(info.expand) + " / " + inspectorNumber(info.expand_limit),
+    );
+    inspectorFact(box, "信息拒绝", inspectorNumber(info.denied));
+    inspectorFact(box, "信息返回量", inspectorNumber(info.result_bytes, " bytes"));
+  }
 }
 
 // 投影当前组合能力及固定策略；成熟度与可执行路径分开。

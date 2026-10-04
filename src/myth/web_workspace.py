@@ -384,6 +384,10 @@ class ConversationWebService:
                     model_state=model_state,
                     operations=turn["operations"],
                 )
+                # Live Information Control 从已持久 activity 重建只读摘要；页面读取不新增策略状态。
+                turn["information_control"] = (
+                    workspace.execution.information_controller.summary(turn)
+                )
                 turn["model_usage"] = self._model_usage_summary(
                     model_state["model_invocations"]
                 )

@@ -123,6 +123,38 @@ test("token observatory keeps missing, zero and unreported cache distinct", () =
   assert.match(box.textContent, /模型用时0毫秒 · 实测/);
 });
 
+// Context 区同时展示实时信息控制事实；只读投影不能凭空造 Information Gain 分数。
+test("context observatory shows bounded live information control without fake gain", () => {
+  const {context, nodes} = controller(["inspectorContext"]);
+  context.renderInspectorContext(
+    {id: "session-1", project_name: "Myth", messages: []},
+    {
+      snapshot: {messages: [], knowledge: [], memory: []},
+      events: [],
+      current_step: 4,
+      max_steps: 12,
+      information_control: {
+        policy: "bounded-live-v1",
+        actions: 3,
+        total_limit: 8,
+        seek: 1,
+        seek_limit: 4,
+        expand: 2,
+        expand_limit: 6,
+        denied: 1,
+        last_action: "EXPAND",
+        result_bytes: 4096,
+      },
+    },
+  );
+  const text = nodes.get("inspectorContext").textContent;
+  assert.match(text, /Information ControlEXPAND · 3 \/ 8/);
+  assert.match(text, /SEEK \/ EXPAND1 \/ 4 · 2 \/ 6/);
+  assert.match(text, /信息拒绝1/);
+  assert.match(text, /信息返回量4,096 bytes|信息返回量4096 bytes/);
+  assert.doesNotMatch(text, /Information Gain/);
+});
+
 // 比例分段只消费已记录的三个账户桶；UNKNOWN 既不消失也不计为可用余额。
 test("budget segments retain reserved and UNKNOWN without inventing missing limits", () => {
   const {context, nodes} = controller(["inspectorBudgets"]);
