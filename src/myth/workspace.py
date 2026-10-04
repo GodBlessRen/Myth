@@ -38,9 +38,6 @@ class Workspace:
                 and self.vector_index.status().get("healthy")
             )
         )
-        # 保留旧公开调用方的薄别名；与 components 指向同一对象，不维护另一套状态。
-        # kernel：旧公开兼容别名，指向 components；新代码使用 components，避免误认为强制执行层。
-        self.kernel = self.components
 
         # evolution：显式候选/评测/发布状态仓储；不能由模型文字自行 Promote。
         self.evolution = SqliteEvolutionControl(runtime)
@@ -103,8 +100,6 @@ class Workspace:
         self.delivery.reconcile_pending(
             self.repository, self.memory, self.personal, limit=32
         )
-        # 启动只补登记历史 PASSED 路径；不重跑旧模型/工具，也不倒写旧 Turn。
-        self.sota_route.backfill_once(limit=200)
 
     # 驱动当前用例并依据持久事实推进；恢复、权限、预算与结束条件见本模块具体协作边界。
     def run(self, rid, provider):

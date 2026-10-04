@@ -36,7 +36,7 @@ class RetrievalEvalTests(unittest.TestCase):
 
     # 回归断言：后部资料仍参与完整扫描再排序，避免原 LIMIT 丢掉唯一命中。
     def test_knowledge_search_can_find_candidate_after_former_10000_cutoff(self):
-        doc = self.repo.import_document({"title": "bulk", "content": "seed"})
+        doc = self.repo.knowledge.import_document({"title": "bulk", "content": "seed"})
         rows = [(doc["id"], i, "noise") for i in range(1, 10002)]
         rows.append((doc["id"], 10002, "needle AFTER-CUTOFF-77"))
         with self.runtime.store.tx() as db:
@@ -44,7 +44,7 @@ class RetrievalEvalTests(unittest.TestCase):
                 "INSERT INTO workspace_chunks(document_id,chunk_index,content) VALUES (?,?,?)",
                 rows,
             )
-        report = self.repo.search_report("AFTER-CUTOFF-77", limit=3)
+        report = self.repo.knowledge.search_report("AFTER-CUTOFF-77", limit=3)
         self.assertGreater(report["retrieval"]["scanned"], 10000)
         self.assertTrue(report["retrieval"]["exhausted"])
         self.assertFalse(report["retrieval"]["truncated_before_ranking"])
@@ -123,7 +123,7 @@ class RetrievalEvalTests(unittest.TestCase):
 
     # 回归断言：L0/L1/L2 改粒度仍固定同文档摘要，不能悄悄换来源。
     def test_resolution_levels_keep_one_source_digest(self):
-        doc = self.repo.import_document(
+        doc = self.repo.knowledge.import_document(
             {
                 "title": "guide",
                 "content": "alpha\n" + "beta " * 700,
@@ -150,12 +150,11 @@ class RetrievalEvalTests(unittest.TestCase):
         path = (
             Path(__file__).resolve().parents[1]
             / "evals"
-            / "archive"
-            / "foundation-v1.json"
+            / "foundation-v4.json"
         )
         cases = load_eval_cases(path)
-        self.assertEqual(len(cases), 8)
-        self.assertEqual(len({case.case_id for case in cases}), 8)
+        self.assertEqual(len(cases), 48)
+        self.assertEqual(len({case.case_id for case in cases}), 48)
         self.assertTrue(any(case.safety_critical for case in cases))
         self.assertTrue(
             {

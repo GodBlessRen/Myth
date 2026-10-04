@@ -184,14 +184,14 @@ class RuntimeClosureTests(unittest.TestCase):
                 workspace.repository.save_settings(SETTINGS)
                 project = workspace.repository.create_project({"name": "A"})
                 other = workspace.repository.create_project({"name": "B"})
-                doc = workspace.repository.import_document(
+                doc = workspace.repository.knowledge.import_document(
                     {
                         "title": "Guide",
                         "content": "prefix " + ("evidence " * 1200) + "suffix",
                         "project_id": project["id"],
                     }
                 )
-                foreign = workspace.repository.import_document(
+                foreign = workspace.repository.knowledge.import_document(
                     {
                         "title": "Foreign",
                         "content": "secret",

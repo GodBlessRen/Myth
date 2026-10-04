@@ -25,6 +25,7 @@ __pycache__/
 venv/
 dist/
 build/
+output/
 *.egg-info/
 
 # Editors / OS

@@ -45,7 +45,7 @@ SAFE_ENV_KEYS = {
 }
 
 
-# 该入口按持久合同处理输入与输出，失败保持显式而不伪造完成。
+# 解析受信项目内的相对路径，拒绝越界和不存在的目标；返回解析后的路径供固定 argv 使用。
 def _inside(root: Path, value: str, *, must_exist: bool = False) -> Path:
     raw = str(value or "").strip()
     if not raw:
@@ -61,26 +61,25 @@ def _inside(root: Path, value: str, *, must_exist: bool = False) -> Path:
     return resolved
 
 
-# 该类型集中拥有当前职责，避免把状态真相分散到多个适配器。
 class SqliteVerificationProfiles:
     """测试 profile 状态所有者与本机固定 argv 执行器。"""
 
-    # 该入口按持久合同处理输入与输出，失败保持显式而不伪造完成。
+    # 连接 profile 状态所有者与项目只读仓储；构造只建表，真正执行发生在 Tool Ticket 之后。
     def __init__(self, runtime, repository) -> None:
-        # 持有当前协作对象；生命周期与所属 Runtime/仓储一致。
+        # runtime：所属线程的装配根；凭据由独立认证适配器持有。
         self.runtime = runtime
-        # 持有当前协作对象；生命周期与所属 Runtime/仓储一致。
+        # store：本线程共享连接；当前聚合的写入统一经过短事务。
         self.store = runtime.store
-        # 持有当前协作对象；生命周期与所属 Runtime/仓储一致。
+        # repository：只读获取已准入项目身份；测试配置不拥有项目写入权。
         self.repository = repository
-        self.store.db.executescript(SCHEMA)
+        self.store.ensure_schema(SCHEMA)
 
-    # 下列辅助入口保持边界显式，调用不隐式扩大权限或真实性。
+    # 为新测试 profile 生成稳定身份；执行收据另外绑定 profile revision 和结果摘要。
     @staticmethod
     def _id() -> str:
         return f"verify_{uuid.uuid4().hex}"
 
-    # 该入口按持久合同处理输入与输出，失败保持显式而不伪造完成。
+    # 只为用户明确可信项目保存 Python unittest 配置；路径、超时秒数和输出字节上限先校验。
     def create(self, project_id: str, value: dict[str, Any]) -> dict[str, Any]:
         self.repository.project(project_id)
         if value.get("trusted_project") is not True:
@@ -128,7 +127,7 @@ class SqliteVerificationProfiles:
             )
         return self.profile(profile_id)
 
-    # 该入口按持久合同处理输入与输出，失败保持显式而不伪造完成。
+    # 按身份读取测试配置并解码路径列表；不存在即报错，不能回退执行任意默认命令。
     def profile(self, profile_id: str) -> dict[str, Any]:
         row = self.store.db.execute(
             "SELECT * FROM workspace_verification_profiles WHERE profile_id=?",
@@ -141,7 +140,7 @@ class SqliteVerificationProfiles:
         value["trusted_project"] = bool(value["trusted_project"])
         return value
 
-    # 该入口按持久合同处理输入与输出，失败保持显式而不伪造完成。
+    # 按可选项目身份列出持久 profile；展示配置不代表已获得 test.run 执行资格。
     def list(self, project_id: str | None = None) -> list[dict[str, Any]]:
         if project_id:
             self.repository.project(project_id)
@@ -155,7 +154,7 @@ class SqliteVerificationProfiles:
             ).fetchall()
         return [self.profile(row["profile_id"]) for row in rows]
 
-    # 该入口按持久合同处理输入与输出，失败保持显式而不伪造完成。
+    # 匹配 Turn 冻结项目后组装固定 argv 与环境白名单；所有路径再核对，不继承 API Key 等凭据。
     def _contract(
         self, turn: dict[str, Any], profile_id: str
     ) -> tuple[dict[str, Any], Path, list[str], dict[str, str]]:
@@ -190,7 +189,7 @@ class SqliteVerificationProfiles:
             env["PYTHONPATH"] = os.pathsep.join(pythonpath)
         return profile, root, command, env
 
-    # 该入口按持久合同处理输入与输出，失败保持显式而不伪造完成。
+    # 在 Tool Ticket 前冻结 profile/revision、命令和资源上限；此时不启动测试进程。
     def intent(self, turn: dict[str, Any], args: dict[str, Any]) -> dict[str, Any]:
         profile, root, command, _ = self._contract(turn, args.get("profile_id"))
         return {
@@ -212,7 +211,7 @@ class SqliteVerificationProfiles:
             },
         }
 
-    # 下列辅助入口保持边界显式，调用不隐式扩大权限或真实性。
+    # 超时后终止本次进程树，Windows 使用固定 taskkill argv，POSIX 使用独立进程组。
     @staticmethod
     def _kill_tree(proc: subprocess.Popen) -> None:
         if proc.poll() is not None:
@@ -237,7 +236,7 @@ class SqliteVerificationProfiles:
             except Exception:
                 pass
 
-    # 该入口按持久合同处理输入与输出，失败保持显式而不伪造完成。
+    # 在已准入项目执行固定 unittest profile，按超时停止并保存有界输出；退出码与证据摘要决定结果。
     def run(self, turn: dict[str, Any], profile_id: str) -> dict[str, Any]:
         profile, root, command, env = self._contract(turn, profile_id)
         start = time.monotonic()

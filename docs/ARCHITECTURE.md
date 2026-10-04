@@ -26,7 +26,7 @@ Core 固定：
 
 Coordination / Control / Execution / Capability / State / Context / Memory / Personal State / Observability / Evaluation / Evolution 是正交 Domain。
 
-Intent Pick、Information Resolution、Direct、Agent Loop、Workflow、Routing、Parallel、Multi-Agent 等属于 Strategy，不是固定执行层。
+Intent Pick、Information Resolution、Direct、Agent Loop 和只读委派属于 Strategy，不是固定执行层。
 
 ## 3. Golden path — Conversation / Goal
 
@@ -354,7 +354,7 @@ Stop 表示“不再调度新的工作”。
 category / code / capability / retryable / expected / hint
 ```
 
-同时保留兼容的人类 `error` 文本。这个 Observation 发生在已知拒绝路径，不制造 Tool Receipt，也不把已知失败升级成 UNKNOWN。
+同时保留便于阅读的人类 `error` 文本。这个 Observation 发生在已知拒绝路径，不制造 Tool Receipt，也不把已知失败升级成 UNKNOWN。
 
 Conversation 的 `request_completion` 先经过 **Completion Guard**。模型仍列出 `remaining`、引用不存在的 evidence，或最近一次已执行 verifier 未通过时，停止请求会被退回为结构化 Observation，父 Loop 必须继续。Guard 不自己执行测试、不修改 Acceptance；没有已执行 verifier 时也不会伪造验证事实。
 
@@ -451,7 +451,7 @@ SQLite / local execution / providers
 
 传输拒绝 credential redirect，OIDC 使用固定 issuer/JWKS、RS256、至少 2048-bit RSA、规范 compact JWT、audience/azp/nonce/subject 校验。授权 URL 不包含可选 ID Token。公开模型目录可短时缓存，每次仍复核实际系统凭据和授予 scope；缓存不授予权限。
 
-Responses 只在 `response.completed` 后发布完整结果。`time_to_first_token_ms` 是供应商调用开始到首个非空输出 delta 的本机计时，可能包含认证刷新，JSON 决策 delta 不等于页面首字；没有 delta 时显示 N/A。已知拒绝进入 FAILED，传输中断仍保持 UNKNOWN / RECONCILE。细节与验证范围见 [安全与性能审查](SECURITY_PERFORMANCE_AUDIT.md)。
+Responses 只在 `response.completed` 后发布完整结果。`time_to_first_token_ms` 是供应商调用开始到首个非空输出 delta 的本机计时，可能包含认证刷新，JSON 决策 delta 不等于页面首字；没有 delta 时显示 N/A。已知拒绝进入 FAILED，传输中断仍保持 UNKNOWN / RECONCILE。细节与验证范围见 [沉淀期审查](REFINEMENT_REVIEW.md)。
 
 Core 不依赖：
 
@@ -479,7 +479,7 @@ Core 不依赖：
 - Cost Model / Policy Candidate / Active Policy / history；
 - content-addressed objects / Artifact evidence。
 
-Schema 以 additive migration 为主；旧 active-run upgrade 需要单独验证，不能靠 `CREATE TABLE IF NOT EXISTS` 自动宣称兼容。
+Schema 只接受 `store.SCHEMA_VERSION` 指定的当前格式；仓储通过 `ensure_schema` 在短事务内原子初始化。旧实验库拒绝启动但保留原件，使用新 `--root`，不保留迁移链。
 
 ## 14. Web boundary
 

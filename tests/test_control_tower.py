@@ -11,6 +11,7 @@ import unittest
 from myth.runtime import MythRuntime
 from myth.workspace import Workspace
 from myth.platform.control import ControlCommand
+from test_workspace import ChatProvider, decision
 
 
 # 持久控制、记忆与受限项目工具的固定测试集合/替身；临时资源由本用例拥有，生产状态必须从实际仓储核对。
@@ -78,7 +79,16 @@ class ControlTowerTests(unittest.TestCase):
 
                 compact = workspace.control.command(rid, ControlCommand.COMPACT)
                 self.assertTrue(compact["compact_requested"])
-                workspace.control.consume_compaction(rid)
+                # 必须真的把当前 Compact 投影交给一次模型决定，才能消费对应修订。
+                current = workspace.repository.turn(rid)
+                current["control"] = workspace.control.view(rid)
+                step = workspace.repository.begin_step(rid)["step"]
+                did, proposal = workspace.execution.decide(
+                    current, step,
+                    ChatProvider([decision("tool_call", "math.calculate", {"expression": "2+3"})]),
+                )
+                workspace.repository.bind(rid, step, did, proposal)
+                workspace.control.consume_compaction(rid, decision_id=did)
                 self.assertFalse(workspace.control.view(rid)["compact_requested"])
 
                 stopped = workspace.control.command(rid, ControlCommand.STOP)
@@ -175,7 +185,7 @@ class ControlTowerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             runtime, workspace = self._workspace(Path(tmp))
             try:
-                executable = set(workspace.kernel.capabilities.executable_ids())
+                executable = set(workspace.components.capabilities.executable_ids())
                 self.assertTrue(
                     {
                         "project.search",

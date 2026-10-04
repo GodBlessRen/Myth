@@ -68,7 +68,7 @@ class ProviderApiKeyVault:
             "source": "myth",
         }
 
-    # 删除 Myth 自己保存的 key；环境变量兼容值属于进程外配置，不能由页面删除。
+    # 删除 Myth 自己保存的 key；环境变量属于进程外配置，不能由页面删除。
     def delete(self, provider: str) -> dict[str, Any]:
         provider_id = str(provider).strip().lower()
         spec = self._spec(provider_id)
@@ -81,7 +81,7 @@ class ProviderApiKeyVault:
             "source": "environment" if env_ready else None,
         }
 
-    # 从 Myth 安全库优先读取，旧环境变量仅作为兼容回退；返回 source 供 UI/观测解释，不泄露 key。
+    # 从 Myth 安全库优先读取，环境变量作为显式 CLI 配置回退；返回 source 供 UI/观测解释，不泄露 key。
     def resolve(self, provider: str) -> tuple[str, str]:
         provider_id = str(provider).strip().lower()
         spec = self._spec(provider_id)

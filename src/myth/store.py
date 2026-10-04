@@ -4,9 +4,12 @@
 from __future__ import annotations
 
 from contextlib import contextmanager, nullcontext
+from functools import lru_cache
 import json
 from pathlib import Path
+import re
 import sqlite3
+import time
 from typing import Any, Iterator
 import uuid
 
@@ -23,7 +26,38 @@ from .domain import (
 )
 
 
-# SCHEMA：本仓储拥有的表、索引与约束；升级补齐旧字段，删除列须有迁移证据。
+# SCHEMA_VERSION：当前开发期只支持这一格式；旧实验库保留原件，使用新工作区开始运行。
+SCHEMA_VERSION = 1
+
+
+class SchemaMismatch(RuntimeError):
+    """数据库格式与当前代码不匹配；拒绝启动，不迁移、清空或覆盖用户原件。"""
+
+
+@lru_cache(maxsize=32)
+def _schema_parts(schema: str) -> tuple[tuple[str, ...], frozenset[str]]:
+    """拆分仓储内置 DDL，并提取表/索引身份；不解析或执行用户输入。
+
+    complete_statement 能区分字符串中的分号。逐句 execute 保持调用方事务，
+    避免 executescript 在开始前隐式提交事务，让后半段失败留下半套表。
+    """
+    statements = []
+    pending = []
+    for char in schema:
+        pending.append(char)
+        if char == ";" and sqlite3.complete_statement("".join(pending)):
+            statements.append("".join(pending))
+            pending.clear()
+    if "".join(pending).strip():
+        raise ValueError("schema contains an incomplete SQL statement")
+    names = frozenset(re.findall(
+        r"CREATE\s+(?:UNIQUE\s+)?(?:TABLE|INDEX)\s+IF\s+NOT\s+EXISTS\s+(\w+)",
+        schema, re.IGNORECASE,
+    ))
+    return tuple(statements), names
+
+
+# SCHEMA：本仓储拥有的当前表、索引与约束；格式改变时显式更新版本，不叠加旧库补丁。
 # runs 固定入口摘要、验收版本与控制修订；next_sequence 为本 Run 事件序号，不是全库顺序。
 # accounts 的 limit_units/reserved/settled/unknown_held 均沿用 meter 单位：调用次数、字节或 Token。
 # reservations 绑定 Attempt 的各资源；效果已知、用量未知时只转移占用，不能按零释放。
@@ -163,11 +197,68 @@ class RuntimeStore:
         # db：本实例 SQLite 连接；事务身份必须一致，不能跨线程或跨连接冒充原子提交。
         self.db = sqlite3.connect(self.path, isolation_level=None)
         self.db.row_factory = sqlite3.Row
-        self.db.execute("PRAGMA foreign_keys = ON")
-        self.db.execute("PRAGMA busy_timeout = 5000")
-        self.db.execute("PRAGMA journal_mode = WAL")
-        self.db.execute("PRAGMA synchronous = FULL")
-        self.db.executescript(SCHEMA)
+        try:
+            self.db.execute("PRAGMA foreign_keys = ON")
+            self.db.execute("PRAGMA busy_timeout = 5000")
+            self._check_schema_version()
+            self._enable_wal()
+            self.db.execute("PRAGMA synchronous = FULL")
+            if self.db.execute("PRAGMA user_version").fetchone()[0] == 0:
+                # 空库首次创建时，格式身份和 Core 表一起提交；另一个连接等待后重新检查。
+                with self.tx() as db:
+                    self._check_schema_version()
+                    for statement in _schema_parts(SCHEMA)[0]:
+                        db.execute(statement)
+                    db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+            else:
+                self.ensure_schema(SCHEMA)
+        except BaseException:
+            self.db.close()
+            raise
+
+    def _check_schema_version(self) -> None:
+        """只接受当前格式或尚无业务表的空库；检查发生在任何 DDL 和状态写入之前。"""
+        # 两项判断必须来自同一个读快照；分别查询会把另一连接刚提交的新库误认成旧库。
+        version, empty = self.db.execute(
+            "SELECT user_version, NOT EXISTS(SELECT 1 FROM sqlite_master "
+            "WHERE type='table' AND name NOT LIKE 'sqlite_%') FROM pragma_user_version"
+        ).fetchone()
+        if version == SCHEMA_VERSION or (version == 0 and empty):
+            return
+        raise SchemaMismatch(
+            f"Myth database format {version} is unsupported; expected {SCHEMA_VERSION}. "
+            "Keep this database and choose a new --root directory."
+        )
+
+    def _enable_wal(self) -> None:
+        """首次并发打开时等待另一连接完成日志切换；只重试锁竞争，其他错误立即暴露。"""
+        deadline = time.monotonic() + 5
+        while True:
+            try:
+                self.db.execute("PRAGMA journal_mode = WAL")
+                return
+            except sqlite3.OperationalError as exc:
+                # journal_mode 切换有时不会遵守 busy_timeout，因此在同一五秒上限内显式等待。
+                code = getattr(exc, "sqlite_errorcode", 0) & 0xFF
+                if code not in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED) or time.monotonic() >= deadline:
+                    raise
+                time.sleep(0.01)
+
+    def ensure_schema(self, schema: str) -> None:
+        """为一个仓储原子建立表/索引；已完整建立时只读检查，不争抢写锁。
+
+        每个仓储仍拥有自己的 DDL，Store 只协调提交。禁止在业务事务中装配仓储，
+        以免构造对象悄悄改变正在提交的业务决定。失败后整套新 DDL 回滚。
+        """
+        if self.db.in_transaction:
+            raise RuntimeError("schema initialization cannot join a business transaction")
+        statements, required = _schema_parts(schema)
+        existing = {row[0] for row in self.db.execute("SELECT name FROM sqlite_master")}
+        if required and required <= existing:
+            return
+        with self.tx() as db:
+            for statement in statements:
+                db.execute(statement)
 
     # 关闭本实例持有的连接/资源；持久 Run 和收据生命周期继续保留。
     def close(self) -> None:

@@ -126,7 +126,7 @@ def observe_failure(
     )
 
 
-# 把结构化失败包装成现有步骤 result；保留 error 字符串兼容旧 UI/测试，同时新增机器可读 failure。
+# 把结构化失败包装成现有步骤 result；error 供当前界面展示，failure 供模型与观测读取稳定原因码。
 def failure_result(
     observation: FailureObservation,
     *,

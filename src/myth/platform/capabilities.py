@@ -12,8 +12,6 @@ from typing import Iterable
 class CapabilityState(StrEnum):
     # EXECUTABLE：能力已有实际执行路径；每次仍需 Ticket/范围校验。
     EXECUTABLE = "executable"
-    # WIRED：旧公开兼容值，与 CONNECTED 相同；新代码不再使用。
-    WIRED = "wired"
     # PLANNED：规划中的能力/后端；不会因登记而自动执行。
     PLANNED = "planned"
 
@@ -204,34 +202,9 @@ def default_capabilities() -> CapabilityRegistry:
             "read",
         ),
     ]
-    planned = [
-        (
-            "shell.exec",
-            "execution",
-            "Execute an admitted command profile, never arbitrary by default.",
-            "execute",
-        ),
-        (
-            "python.run",
-            "execution",
-            "Execute bounded Python in a controlled environment.",
-            "execute",
-        ),
-        ("web.fetch", "web", "Fetch an admitted URL with provenance.", "network"),
-        (
-            "browser.navigate",
-            "web",
-            "Drive an authenticated browser adapter.",
-            "network",
-        ),
-    ]
     specs = [
         CapabilitySpec(cid, "v1", desc, risk, CapabilityState.EXECUTABLE, family)
         for cid, family, desc, risk in executable
-    ]
-    specs += [
-        CapabilitySpec(cid, "v0", desc, risk, CapabilityState.PLANNED, family)
-        for cid, family, desc, risk in planned
     ]
     return CapabilityRegistry(specs)
 

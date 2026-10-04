@@ -126,40 +126,16 @@ def default_strategies() -> StrategyRegistry:
                 "Model chooses the next StepDecision and may repeat tool/model steps.",
             ),
             StrategySpec(
-                "workflow",
-                "Workflow",
-                StrategyState.CONNECTED,
-                "Validated dependency graph exists; durable workflow execution is not complete.",
-            ),
-            StrategySpec(
-                "routing",
-                "Routing",
-                StrategyState.EXISTS,
-                "Choose a model/tool/workflow/agent/human target without becoming a mandatory layer.",
-            ),
-            StrategySpec(
-                "parallel",
-                "Parallel",
-                StrategyState.EXISTS,
-                "Coordinate independent work in parallel under shared budgets.",
-            ),
-            StrategySpec(
                 "multi_agent",
                 "Multi-Agent",
                 StrategyState.CONNECTED,
                 "Parent LLM may choose a bounded isolated worker through agent.delegate; the child cannot write, use tools or recursively delegate and returns a contracted result.",
             ),
             StrategySpec(
-                "managed_agent",
-                "Managed Agent",
-                StrategyState.EXISTS,
-                "Delegate coordination to a remote managed Agent behind an AgentPort.",
-            ),
-            StrategySpec(
                 "personal_agent",
                 "Personal Agent",
-                StrategyState.EXISTS,
-                "Use long-lived Goals and Triggers to start Runs beyond a chat turn.",
+                StrategyState.CONNECTED,
+                "Explicit Goal schedules admit durable Runs across sessions; the background executor drives the same admitted work.",
             ),
         )
     )

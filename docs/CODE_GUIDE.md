@@ -28,7 +28,7 @@ Myth 是共享 SQLite 的单机模块化应用。纯合同、策略和应用用�
 4. 先核对旧机会，再复用已有决定或构造固定模型请求。有界上下文保留当前意图、澄清、附件及最新证据；Compact 按实际使用的控制版本消费。
 5. 模型调用有独立 Intent/Ticket/Receipt。工具决定仍是提案，参数/范围通过本地校验才能获得工具 Ticket；供应商/文件效果发生在数据库事务外。
 6. 先发布收据再结算并消费步骤。未知效果不重发；已知参数拒绝在 Ticket 前反馈给下一规划步骤。效果已确认也不意味着用量已测得。
-7. 回答结束、经历记忆、长期 Goal checkpoint 是分别提交的协作。当前回答 `COMPLETED` 只表示本轮结束；长期目标是否完成及语义验收需要额外证据。
+7. 回答提交前保存 finalization 义务；回答结束后补齐经历 Memory 和 Goal checkpoint。各仓储分别提交，启动恢复根据义务和回答事实幂等补偿。Turn `COMPLETED`、长期 Goal 完成和语义验收通过分别判定。
 
 ## 原子性具体指什么
 
@@ -48,8 +48,8 @@ Myth 是共享 SQLite 的单机模块化应用。纯合同、策略和应用用�
 ## 当前需要继续约束的耦合
 
 - `SqliteControlService.command` 仍直接更新 `workspace_turns.settings_json` 和 `runs.control_revision`，Resume 的状态投影还有独立事务。控制聚合到工作区/Core 的写入未全面归回对应所有者。
-- 回答、Memory、Goal checkpoint 和 Driver 释放分别提交。`last_run_id` 防止旧进度覆盖新工作，但没有把全部终结协作变成单一事务；进程退出窗口仍应通过持久事实重建派生进度。
-- `SqliteWorkspaceRepository` 同时负责项目、会话、知识、工具机会和恢复游标；`ConversationWebService` 同时负责 API 门面、Driver 和计划线程。下一次按真实改动压力拆职责，拆分时保留现有原子准入协调入口。
+- 回答、Memory、Goal checkpoint 与 Driver 释放仍分别提交；持久 finalization 义务负责补偿，`last_run_id` 防止旧进度覆盖新工作。补偿不是跨系统事务。
+- `SqliteWorkspaceRepository` 负责项目、会话、工具机会和恢复游标；知识已交给 `SqliteKnowledgeRepository`，通过共享连接保留文档/分片事务；`ConversationWebService` 同时负责 API 门面、Driver 和计划线程。下一次按真实改动压力拆职责，拆分时保留现有原子准入协调入口。
 - 跨聚合 join、DDL 装配和外键共享同一个数据库。当前的直接 import 守卫与纯领域冷导入测试不证明所有传递依赖都可独立部署。
 - 本机对象、收据和数据库不能一起提交；断电、外部服务幂等、跨进程认证退出/刷新与多周运行需要各自验证。未引用准备对象暂时保留，未来 GC 需要可靠的存活引用/在途机会判断。
 
@@ -67,4 +67,4 @@ node --check src/myth/webui/goals.js
 
 涉及预算、准入或恢复时，先固定故障窗口和完整期望，再运行 `test_state_boundaries.py`、对应竞争/真实子进程回归。不要把字符覆盖、静态 DOM、替身 PASS 或历史真实模型报告外推到未测场景。
 
-当前固定集在 `evals/`；旧集在 `evals/archive/` 继续服务回归。历史工具/诊断在 `docs/archive/`，当前源码旁的注释才是修改入口。此次逐项审阅及清理证据见 [ANNOTATION_AUDIT_V0211.md](archive/ANNOTATION_AUDIT_V0211.md)。
+当前固定集在 `evals/`，旧集、诊断和一次性画面在 `.trash/` 留档，不进入发布包。数据库只接受当前 `SCHEMA_VERSION`，DDL 逐句在事务内原子初始化，完整 schema 重开只读检查。此次处置与故障证据见 [REFINEMENT_REVIEW](REFINEMENT_REVIEW.md)。

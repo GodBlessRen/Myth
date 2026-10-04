@@ -20,7 +20,7 @@ Myth 会保存原任务并等待连接恢复。Conversation 和 Goal 的后台�
 ## 持久等待与控制
 
 - `workspace_network_retries` 保存每个 Run 的连续失败次数、离线开始时间、最近检查、UTC 下次检查时间及固定公开原因；不保存 token、请求头、异常正文。
-- Goal 计划保存 `retry_failures/retry_at`，兼容旧表的增量迁移。未到期的重复扫描不重复累加；准入成功重置计数。
+- Goal 计划保存 `retry_failures/retry_at`，由当前 schema 明确创建。未到期的重复扫描不重复累加；准入成功重置计数。
 - Run Driver Lease 避免并发接管，本机执行锁阻止重复驱动；到期时间先在 SQL 候选中筛除，等待队列不会挤占就绪工作的 LIMIT。
 - 探测线程、worker/Driver 心跳、业务进度分别记录。重新探测不会刷新原 checkpoint 的进度时间；进程退出后由下一 worker 读取持久截止时间，不从一秒重新开始。
 - Pause/Stop 是本地控制，不依赖远端恢复。Pause 保留等待现场；Resume 后继续尊重原截止时间；Stop 终止未来重连。
@@ -30,7 +30,7 @@ Myth 会保存原任务并等待连接恢复。Conversation 和 Goal 的后台�
 
 ## 验证
 
-`tests/test_network_recovery.py` 覆盖两小时虚拟时钟离线（超过一百次检查）、worker 重启、完整退避、工具结果复用、暂停/停止、队列公平、旧表迁移、收据落盘后 `os._exit` 和真实 loopback HTTP 已接收后超时。`tests/test_reconnect_ui.cjs` 用同一前端控制器验证首次失败、所有间隔、恢复重置、单个在途读取和停止后的晚到响应。
+`tests/test_network_recovery.py` 覆盖两小时虚拟时钟离线（超过一百次检查）、worker 重启、完整退避、工具结果复用、暂停/停止、队列公平、收据落盘后 `os._exit` 和真实 loopback HTTP 已接收后超时。`tests/test_reconnect_ui.cjs` 用同一前端控制器验证首次失败、所有间隔、恢复重置、单个在途读取和停止后的晚到响应。
 
 ```powershell
 $env:PYTHONPATH='src'

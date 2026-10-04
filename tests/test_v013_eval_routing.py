@@ -42,7 +42,7 @@ class EvalRoutingTests(unittest.TestCase):
 
     # 回归断言：明确知识请求固定召回路由及 L1，未来策略变化不倒写快照。
     def test_explicit_local_knowledge_request_freezes_local_retrieval_and_l1(self):
-        doc = self.repo.import_document(
+        doc = self.repo.knowledge.import_document(
             {
                 "title": "交付资料",
                 "content": "Myth 的交付代号是 SILVER-92，发布时间是周五。",
@@ -85,7 +85,7 @@ class EvalRoutingTests(unittest.TestCase):
     # 回归断言：显式附件优先进入 L2 表示，词面策略不能静默丢弃。
     def test_explicit_attachment_is_never_dropped_and_uses_l2(self):
         docs = [
-            self.repo.import_document(
+            self.repo.knowledge.import_document(
                 {
                     "title": f"附件 {i}",
                     "content": f"附件 {i} 的唯一值是 ATTACH-{i}。" + (" detail" * 400),
@@ -131,8 +131,7 @@ class EvalRoutingTests(unittest.TestCase):
         suite = (
             Path(__file__).resolve().parents[1]
             / "evals"
-            / "archive"
-            / "foundation-v2.json"
+            / "foundation-v4.json"
         )
         result = FoundationEvalRunner.from_path(suite).run(
             [
@@ -142,7 +141,7 @@ class EvalRoutingTests(unittest.TestCase):
         )
         self.assertEqual(result["report"]["pass_count"], 2)
         self.assertEqual(result["report"]["fail_count"], 0)
-        self.assertTrue(result["release_gate"]["passed"])
+        self.assertFalse(result["release_gate"]["passed"])
         self.assertTrue(
             all(item["verdict"] == "PASS" for item in result["observations"])
         )
@@ -152,17 +151,15 @@ class EvalRoutingTests(unittest.TestCase):
         suite = (
             Path(__file__).resolve().parents[1]
             / "evals"
-            / "archive"
-            / "foundation-v2.json"
+            / "foundation-v4.json"
         )
         runner = FoundationEvalRunner.from_path(suite)
-        self.assertEqual(runner.suite.version, 2)
-        self.assertEqual(len(runner.suite.cases), 11)
-        for case in runner.suite.cases:
-            self.assertTrue(
-                hasattr(runner, f"_case_{case.case_id.replace('-','_')}"),
-                case.case_id,
-            )
+        self.assertEqual(runner.suite.version, 4)
+        self.assertEqual(len(runner.suite.cases), 48)
+        result = runner.run()
+        self.assertTrue(result["complete_suite"])
+        self.assertEqual(result["selected_case_count"], 48)
+        self.assertFalse(any(item["verdict"] == "UNSUPPORTED" for item in result["observations"]))
 
     # 回归断言：已装配评测与尚未校准增益的成熟度分别报告。
     def test_evaluation_domain_is_usable_but_gain_remains_unpromoted(self):

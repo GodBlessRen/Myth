@@ -66,32 +66,7 @@ class MentalModelRefreshScheduler:
         self.views = workspace.knowledge_views
         # decisions：模型 Ticket/Receipt/UNKNOWN 协调器；自动刷新不另造模型调用协议。
         self.decisions = workspace.repository.decisions
-        self.store.db.executescript(SCHEMA)
-        # additive migration：旧实验库补齐 per-occurrence lease；不存在历史 owner 时视为可接管。
-        columns = {
-            row["name"]
-            for row in self.store.db.execute(
-                "PRAGMA table_info(mental_model_refresh_occurrences)"
-            ).fetchall()
-        }
-        with self.store.tx() as db:
-            if "owner_id" not in columns:
-                db.execute(
-                    "ALTER TABLE mental_model_refresh_occurrences ADD COLUMN owner_id TEXT"
-                )
-            if "lease_until" not in columns:
-                db.execute(
-                    "ALTER TABLE mental_model_refresh_occurrences ADD COLUMN lease_until REAL"
-                )
-            if "heartbeat_at" not in columns:
-                db.execute(
-                    "ALTER TABLE mental_model_refresh_occurrences ADD COLUMN heartbeat_at REAL"
-                )
-            if "attempt_no" not in columns:
-                db.execute(
-                    "ALTER TABLE mental_model_refresh_occurrences ADD COLUMN attempt_no INTEGER NOT NULL DEFAULT 1"
-                )
-
+        self.store.ensure_schema(SCHEMA)
     # configure：显式 opt-in/out，并冻结当前模型设置；自动刷新不会随全局设置悄悄换模型。
     def configure(
         self,

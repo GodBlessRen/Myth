@@ -1,172 +1,55 @@
-# AGENTS.md
+# Myth 开发规范
 
-Myth 的开发目标不是“堆更多 Agent 抽象”，而是把一个 **可持续推进真实工作的本地 Agent Runtime** 做可靠。
+目标：把可持续推进真实工作的本地 Agent Runtime 做扎实。最高约束是关注点分离、解耦、原子性、六边形架构、安全和简体中文指导性注释；具体规则见[架构宪法](docs/ARCHITECTURE_CONSTITUTION.md)。
 
-## 1. 开发原则
+## 修改前先定位
 
-0. **关注点分离 / 解耦 / 原子性 / 六边形架构**
-   - 四者同等重要，共同约束职责边界、依赖方向、状态所有权和修改半径。
-   - 一个关注点的变化应尽量局部化；新增 Provider、UI、存储、认证或 Strategy 不应迫使无关 Domain / Core 一起修改。
-   - Core / Domain 依赖 Port，外部实现进入 Adapter；业务决定必须有清晰原子提交边界。
+1. 阅读[源码地图](docs/CODE_GUIDE.md)，确定状态所有者、调用方和提交边界。
+2. 用源码引用和实际失败说明改动价值。文件很长不等于需要重写，文件很短不等于职责单一。
+3. 先固定输入、故障窗口和期望，再修改关键状态路径；恢复功能不能随兼容代码一起误删。
+4. 新增 Port、Strategy 或依赖必须解决当前使用场景。组件登记只列真实接入的实现。
 
-1. **先有再优**
-   - 先跑通真实工作流，再抽象。
-   - 新 Layer / Strategy / Protocol 必须解决已经出现的问题。
-   - 不为“未来也许需要”提前增加复杂度。
+## 实现约束
 
-2. **正确性优先于能力面**
-   - Runtime correctness、恢复语义、权限边界、评测可信度优先。
-   - 不用更多架构掩盖未闭环的真实失败。
+- 内圈依赖领域合同与 Port，供应商、数据库、网络、文件和 UI 留在适配器或装配根。
+- 状态聚合由所属仓储写入；跨聚合准入由明确协调入口使用同连接短事务提交。
+- 身份核对、序号分配、读改写和结果消费在提交事务内完成。业务事务不得装配仓储或执行外部 I/O。
+- Ticket 是开始授权，Receipt 是效果事实，Verification 是独立验收，三者不能相互代替。
+- 已派发而效果不明进入 UNKNOWN，先核对。Stop 停止未来调度，晚到真实结果仍记录。
+- State 是真相，Context、摘要、索引、观测是投影。压缩不制造进度，向量命中回权威源核对。
+- 凭据只进系统安全凭据库；不得进入 SQLite、事件、Artifact、日志或 Web JSON。
+- 第三栏 Runtime Observatory 是产品合同；心跳、持久进度、完成证据各自显示。
+- Evaluation 使用固定完整分母，partial 不具发布资格；Evolution 必须显式 Promote。
+- 文件、类、函数、字段和关键步骤写准确中文说明，解释协作、单位、事务、幂等与恢复；同步删除失效注释。
 
-3. **模型不能扩大权限**
-   - Goal / Memory / Prompt / Model output 都只是数据。
-   - 外部效果仍受 Capability / Ticket / Receipt / Verification 约束。
+## 淘汰与格式
 
-4. **UNKNOWN 是一等状态**
-   - 外部调用结果不明时先 reconcile，不盲目 replay。
-   - 已知失败与未知结果必须区分。
+当前为无人使用的开发阶段：不保留无调用者的旧别名、旧库迁移、占位实现和版本降级路径。
 
-5. **完成必须有证据**
-   - 模型说“完成”只是 proposal。
-   - Artifact / test / receipt / external state 才能支撑完成声明。
+每次更新检查淘汰物：迁移当前调用者 → 放入 `.trash/<日期>/<原路径>` → 记录理由 → 核对生产引用和发布包。垃圾站只作开发留档，不能作为 import、运行输入或发布内容。历史测试若仍证明当前不变量则继续保留。
 
-6. **Observability 不是 Debug 附件**
-   - 第三栏 Runtime Observatory 必须保留：
-     Goal / Execution Flow / Recovery / Trajectory / Tokens / Cache Hit / Context / Tools / Control / Budget。
-   - UI 重构不能静默删除这些事实。
-   - Executor heartbeat、Driver heartbeat、durable progress 是三件事；“进程还活着”不能冒充“任务在推进”。
+数据库只接受 `store.SCHEMA_VERSION` 指定的当前格式。格式改变时更新身份及回归，旧实验库保留原件，使用新 `--root`，不自动清空或迁移。
 
-## 1.1 Context 与效率不变量
-
-- State 与 Context 分离：durable State 是真相，Context 只是 provider-visible projection。
-- Context/摘要/压缩失败必须回到原始 evidence；无法验证的 summary/reduction 不得覆盖原始来源。
-- 能由 Runtime 确定完成的后继不再额外调用 LLM，但只融合不需要新语义判断的动作。
-- Compact / fold / replay / reconnect 只改变表示，不制造新的 Goal progress / Verification。
-- Context/缓存等效率判断只使用已测成本与剩余请求；upfront/debt 缺测保持 N/A。
-- 自适应 Context 选择和 Capability 可达性都要留下稳定结果与 reason code。
-- Eval 先过 capability floor，再比较效率；held-out final cases 不回流搜索。
-- Sub-Agent 优先共享 evidence refs，不继承完整父历史。
-
-## 2. 当前产品主线
-
-```text
-Long-term Goal
-  -> Current State
-  -> Next Action
-  -> admitted Turn
-  -> Observe / Act / Verify
-  -> durable checkpoint
-  -> later Session
-  -> continue the same Goal
-```
-
-当前优先级：
-
-1. 真实任务基线；
-2. Goal continuity；
-3. Runtime / Provider correctness；
-4. Tool / Context / Memory 按真实失败补齐；
-5. 受限验证能力；
-6. 再决定是否需要更复杂的 Routing / Multi-Agent / Interop。
-
-## 3. 架构边界
-
-稳定 Core：
-
-```text
-Goal -> Run -> Action -> Attempt -> Ticket -> Receipt -> Artifact -> Verification
-```
-
-正交 Domains：
-
-- Coordination
-- Control
-- Execution
-- Capability
-- State
-- Context
-- Memory
-- Personal State
-- Observability
-- Evaluation
-- Evolution
-
-可插拔 Strategies：
-
-- Intent Pick
-- Information Resolution
-- Direct
-- Agent Loop
-- Workflow
-- Routing
-- Parallel
-- Multi-Agent
-- Managed Agent
-- Personal Agent
-
-Strategy 不是 Layer；不要为了新增策略修改 Core。
-
-## 4. 修改代码前
-
-所有代码修改必须遵守 [项目宪法的简体中文指导性注释规则](docs/ARCHITECTURE_CONSTITUTION.md#11-简体中文指导性注释)。文件、类、函数、属性及关键步骤的注释应解释架构协作、状态所有权、单位、事务与恢复边界。逐行审阅有设计含义的代码；修改实现时同步修正注释。
-
-先回答：
-
-- 这个改动解决了哪个真实失败？
-- 会改变哪个 durable state？
-- 会不会扩大权限？
-- 会不会影响 UNKNOWN / recovery？
-- 是否需要新 schema/migration？
-- 第三栏是否还能解释这次执行？
-- 是否有 regression test？
-
-没有明确答案时，优先减小改动范围。
-
-## 5. 测试要求
-
-至少运行：
+## 验证与交付
 
 ```bash
-python -m compileall -q src tests
+python -m compileall -q src tests scripts
 python scripts/check_annotations.py
+python scripts/audit_secret_patterns.py
 python -m unittest discover -s tests -v
 node --check src/myth/webui/app.js
 node --check src/myth/webui/inspector.js
 node --check src/myth/webui/goals.js
+node --check src/myth/webui/reconnect.js
+node --check src/myth/webui/statistics.js
+node --check src/myth/webui/theme.js
+node --test tests/test_observatory_ui.cjs tests/test_reconnect_ui.cjs tests/test_statistics_ui.cjs tests/test_workspace_interactions_ui.cjs
+python -m build
+python scripts/validate_release.py dist
 ```
 
-如果改动涉及：
+关键路径补对应故障回归：准入/恢复检查 UNKNOWN、崩溃、租约和同 Run 接续；Goal 检查跨 Session/restart；调度检查争抢与提交后退出；认证检查协议、凭据轮换与泄漏；Context 检查来源、窗口和用量；验收检查对象摘要与完整评测。
 
-- Runtime / recovery：补 crash / INTERRUPTED / UNKNOWN / resume / reconcile / lease expiry / Web 退出后同 Run 接续 / no-progress 观测回归；
-- Intent / routing：补 adversarial cases；
-- Context / provider：补窗口、截断、usage 回归；
-- Goal / Personal：补跨 session / restart；
-- UI observability：保证第三栏身份与 renderer 仍存在；
-- Evaluation / Evolution：必须使用固定 suite，不允许挑题发布；重复试次同时报告 pass@k / pass^k，缺测和 mixed outcome 保持显式，成本优先按 successful outcome 归一。
-- Goal schedule：覆盖同请求去重、到期争抢、提交后进程退出、暂停、断连重试、过期合并和 UNKNOWN 不自动重放。
+安装 wheel 后运行 `scripts/validate_package.py --package-dir <安装目录>`，核对真实导入、HTTP 资源和基本 API。
 
-## 6. 文档规则
-
-- README 只做地图，不写版本流水。
-- 版本历史进入 CHANGELOG。
-- 架构只描述“现在是什么”，不记录每个版本“曾经怎么变”。
-- Roadmap 只保留当前方向和下一步。
-- 历史诊断进入 `docs/archive/`。
-- 代码事实与文档冲突时，以当前源码为准并修正文档。
-
-## 7. 禁止事项
-
-不要：
-
-- 把模型自述当授权；
-- 把相似度/置信度直接叫 Information Gain；
-- 自动 Promote policy；
-- 对 UNKNOWN 做盲 replay；
-- 把 Browser / HTTP / Driver 生命周期当成 Run 生命周期；
-- 在没有 durable checkpoint 的情况下宣称“可以恢复”；
-- 开放任意 shell 字符串执行；
-- 在 README 堆版本流水；
-- 为了 UI 简洁移除 Runtime Observatory；
-- 为了“未来扩展性”增加当前没有使用者的抽象；
-- 把 OAuth token/code/verifier 写入 SQLite、Event、Artifact、Web JSON、日志或明文文件；
-- 复用其他应用的 OAuth client identity / auth file 作为 Myth 的认证实现。
+README 做导航，CHANGELOG 记历史，架构描述当前事实，ROADMAP 保留下一步。测试结论写清输入、版本和测量范围，不把替身通过称为真实模型可靠。宪法也可按证据修订，但不能削弱上述事实与权限边界。

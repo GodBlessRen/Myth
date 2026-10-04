@@ -127,6 +127,9 @@ class FoundationEvalRunner:
     # 执行选中或完整题集并保存覆盖标记；partial 只作研究，不能获得完整发布资格。
     def run(self, case_ids: Iterable[str] | None = None) -> dict:
         selected = set(case_ids or ())
+        unknown = selected - {case.case_id for case in self.suite.cases}
+        if unknown:
+            raise ValueError(f"unknown evaluation cases: {', '.join(sorted(unknown))}")
         observations = []
         started = time.perf_counter()
         for case in self.suite.cases:
@@ -135,6 +138,9 @@ class FoundationEvalRunner:
             observations.append(self._run_case(case))
         report = summarize_observations(self.suite.suite_id, observations)
         gate_ok, gate_reason = release_gate(report, min_pass_rate=1.0)
+        complete_suite = len(observations) == len(self.suite.cases)
+        if not complete_suite:
+            gate_ok, gate_reason = False, "partial suite cannot qualify for release"
         return {
             "suite_id": self.suite.suite_id,
             "version": self.suite.version,
@@ -144,7 +150,7 @@ class FoundationEvalRunner:
             "harness_mechanisms": list(self.harness_mechanisms),
             "suite_case_count": len(self.suite.cases),
             "selected_case_count": len(observations),
-            "complete_suite": len(observations) == len(self.suite.cases),
+            "complete_suite": complete_suite,
             "observations": [self._observation_dict(item) for item in observations],
             "report": asdict(report),
             "release_gate": {"passed": gate_ok, "reason": gate_reason},
@@ -251,7 +257,7 @@ class FoundationEvalRunner:
         with tempfile.TemporaryDirectory() as tmp, MythRuntime(tmp) as runtime:
             workspace = self._workspace(runtime)
             workspace.repository.save_settings(_SETTINGS)
-            workspace.repository.import_document(
+            workspace.repository.knowledge.import_document(
                 {
                     "title": "eval knowledge",
                     "content": case.input["document"],
@@ -284,7 +290,7 @@ class FoundationEvalRunner:
             workspace.repository.save_settings(_SETTINGS)
             count = int(case.input["attachments"])
             docs = [
-                workspace.repository.import_document(
+                workspace.repository.knowledge.import_document(
                     {
                         "title": f"attachment {index}",
                         "content": f"ATTACH-{index} " + ("detail " * 400),
@@ -348,7 +354,7 @@ class FoundationEvalRunner:
             workspace.repository.save_settings(_SETTINGS)
             marker = case.input["marker"]
             document = case.input["prefix"] + marker + case.input["suffix"]
-            doc = workspace.repository.import_document(
+            doc = workspace.repository.knowledge.import_document(
                 {
                     "title": "resolution calibration source",
                     "content": document,
@@ -385,7 +391,7 @@ class FoundationEvalRunner:
         with tempfile.TemporaryDirectory() as tmp, MythRuntime(tmp) as runtime:
             workspace = self._workspace(runtime)
             workspace.repository.save_settings(_SETTINGS)
-            doc = workspace.repository.import_document(
+            doc = workspace.repository.knowledge.import_document(
                 {"title": "bulk", "content": "seed"}
             )
             position = int(case.input["candidate_position"])
@@ -397,7 +403,7 @@ class FoundationEvalRunner:
                     "INSERT INTO workspace_chunks(document_id,chunk_index,content) VALUES (?,?,?)",
                     rows,
                 )
-            result = workspace.repository.search_report(case.input["query"], limit=3)
+            result = workspace.repository.knowledge.search_report(case.input["query"], limit=3)
             found = (
                 bool(result["sources"])
                 and result["sources"][0]["chunk_index"] == position
@@ -464,7 +470,7 @@ class FoundationEvalRunner:
         with tempfile.TemporaryDirectory() as tmp, MythRuntime(tmp) as runtime:
             workspace = self._workspace(runtime)
             workspace.repository.save_settings(_SETTINGS)
-            doc = workspace.repository.import_document(
+            doc = workspace.repository.knowledge.import_document(
                 {
                     "title": "guide",
                     "content": "alpha\n" + ("beta " * 700),

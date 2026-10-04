@@ -312,10 +312,8 @@ class CredentialChunkTests(unittest.TestCase):
         self.store.delete("profile")
         self.assertEqual(self.vault.values, {})
 
-    # 保存新代次后旧分块及旧单条记录都清理，读写始终返回同一完整代次。
-    def test_rotation_migrates_legacy_and_removes_old_chunks(self):
-        self.vault.set_password(self.store.service, "profile", '{"access_token":"legacy"}')
-        self.assertEqual(self.store.load("profile")["access_token"], "legacy")
+    # 保存新代次后旧分块清理，读写始终返回同一完整代次。
+    def test_rotation_removes_previous_generation_chunks(self):
         self.store.save("profile", {"access_token": "first" * 1000})
         self.store.save("profile", {"access_token": "second" * 1000})
         self.assertNotIn((self.store.service, "profile"), self.vault.values)

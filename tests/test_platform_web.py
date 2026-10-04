@@ -30,7 +30,9 @@ class PlatformWebTests(unittest.TestCase):
             self.assertEqual(domains["control"], "usable")
             self.assertEqual(domains["personal"], "connected")
             adapters = {item["id"]: item["maturity"] for item in web["adapters"]}
-            self.assertEqual(adapters["a2a"], "planned")
+            self.assertNotIn("a2a", adapters)
+            self.assertNotIn("mcp", adapters)
+            self.assertNotIn("browser", adapters)
             self.assertNotIn("shell.exec", web["executable_capabilities"])
 
 

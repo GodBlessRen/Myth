@@ -11,16 +11,16 @@ from .control import ControlCommand, ControlService, ControlSnapshot
 from ..domain import canonical_json
 
 
-# SCHEMA：本仓储拥有的表、索引与约束；升级补齐旧字段，删除列须有迁移证据。
+# SCHEMA：本仓储拥有的当前表、索引与约束；由 Store 原子初始化，不叠加旧格式迁移。
 # revision 是每 Run 的控制版本；(run_id,revision) 唯一，命令和投影在同一写事务分配。
-# paused/aborted/compact_requested 是 0/1；aborted 保留旧列合同，当前产品表达为 stopped。
+# paused/stopped/compact_requested 是 0/1；stopped 表示停止未来调度。
 # thinking_json 保存明确未来推理选项；payload_json 记录用户命令数据，不包含凭据/隐式授权。
 SCHEMA = r"""
 CREATE TABLE IF NOT EXISTS workspace_control_projection(
     run_id TEXT PRIMARY KEY NOT NULL REFERENCES workspace_turns(run_id),
     revision INTEGER NOT NULL DEFAULT 1,
     paused INTEGER NOT NULL DEFAULT 0 CHECK(paused IN (0,1)),
-    aborted INTEGER NOT NULL DEFAULT 0 CHECK(aborted IN (0,1)),
+    stopped INTEGER NOT NULL DEFAULT 0 CHECK(stopped IN (0,1)),
     model TEXT,
     thinking_json TEXT NOT NULL DEFAULT 'null',
     steering_note TEXT,
@@ -52,7 +52,7 @@ class SqliteControlService:
         self.repository = repository
         # machine：纯控制状态机；只计算修订，持久化和 Run 投影由仓储负责。
         self.machine = ControlService()
-        self.store.db.executescript(SCHEMA)
+        self.store.ensure_schema(SCHEMA)
 
     # 生成带类型前缀的新身份；重试去重使用已固定的 request/decision 身份，不靠新 UUID 判断已执行。
     @staticmethod
@@ -75,7 +75,7 @@ class SqliteControlService:
                 ),
             )
 
-    # 把控制行映射为不可变快照；旧 aborted 列只表示当前 stopped 语义。
+    # 把控制行映射为不可变快照；stopped 列直接记录停止未来调度的事实。
     @staticmethod
     def _snapshot_from_row(row) -> ControlSnapshot:
         if row is None:
@@ -83,7 +83,7 @@ class SqliteControlService:
         return ControlSnapshot(
             revision=int(row["revision"]),
             paused=bool(row["paused"]),
-            stopped=bool(row["aborted"]),
+            stopped=bool(row["stopped"]),
             model=row["model"],
             thinking=json.loads(row["thinking_json"]),
             steering_note=row["steering_note"],
@@ -119,7 +119,6 @@ class SqliteControlService:
             "revision": snap.revision,
             "paused": snap.paused,
             "stopped": snap.stopped,
-            "aborted": snap.stopped,
             "model": snap.model,
             "thinking": snap.thinking,
             "steering_note": snap.steering_note,
@@ -179,13 +178,13 @@ class SqliteControlService:
                 settings["thinking"] = updated.thinking
 
             db.execute(
-                "UPDATE workspace_control_projection SET revision=?,paused=?,aborted=?,model=?,"
+                "UPDATE workspace_control_projection SET revision=?,paused=?,stopped=?,model=?,"
                 "thinking_json=?,steering_note=?,compact_requested=?,updated_at=CURRENT_TIMESTAMP "
                 "WHERE run_id=?",
                 (
                     updated.revision,
                     int(updated.paused),
-                    int(updated.aborted),
+                    int(updated.stopped),
                     updated.model,
                     canonical_json(updated.thinking),
                     updated.steering_note,
@@ -200,7 +199,7 @@ class SqliteControlService:
                     self._id(),
                     run_id,
                     updated.revision,
-                    "stop" if kind is ControlCommand.ABORT else kind.value,
+                    kind.value,
                     canonical_json(payload),
                 ),
             )
@@ -240,7 +239,7 @@ class SqliteControlService:
                     self.store._event(
                         db, run_id, "RunResumed", {"revision": updated.revision}
                     )
-        elif kind in {ControlCommand.STOP, ControlCommand.ABORT}:
+        elif kind is ControlCommand.STOP:
             self.gate(run_id)
 
         return self.view(run_id)
@@ -285,24 +284,20 @@ class SqliteControlService:
 
     # 只消费生成该决定时使用的 Compact revision；旧决定不能清除更新的压缩请求。
     def consume_compaction(
-        self, run_id: str, *, decision_id: str | None = None
+        self, run_id: str, *, decision_id: str
     ) -> None:
-        if decision_id is not None:
-            row = self.store.db.execute(
-                "SELECT m.request_ref FROM step_decisions d JOIN model_invocations m "
-                "ON m.model_attempt_id=d.model_attempt_id WHERE d.decision_id=? AND m.run_id=?",
-                (decision_id, run_id),
-            ).fetchone()
-            if row is None:
-                return
-            request = json.loads(self.runtime.objects.get(row["request_ref"]))
-            report = request.get("context_report") or {}
-            if not report.get("compact_requested"):
-                return
-            revision = report.get("control_revision")
-        else:
-            # 保留明确手动确认的兼容路径；正常 Agent 总传 decision_id，旧决定不能消费较新的 Compact。
-            revision = self._snapshot(run_id).revision
+        row = self.store.db.execute(
+            "SELECT m.request_ref FROM step_decisions d JOIN model_invocations m "
+            "ON m.model_attempt_id=d.model_attempt_id WHERE d.decision_id=? AND m.run_id=?",
+            (decision_id, run_id),
+        ).fetchone()
+        if row is None:
+            return
+        request = json.loads(self.runtime.objects.get(row["request_ref"]))
+        report = request.get("context_report") or {}
+        if not report.get("compact_requested"):
+            return
+        revision = report.get("control_revision")
         # 本地事务边界：下列写入一起提交，异常整体回滚；文件/网络效果须在事务外另行核对。
         with self.store.tx() as db:
             changed = db.execute(
@@ -320,8 +315,3 @@ class SqliteControlService:
                         "decision_id": decision_id,
                     },
                 )
-
-
-# 保留旧公开仓储名的薄别名，不复制实现或数据库状态。
-# SqliteControlPlane：旧仓储兼容名；新代码使用 SqliteControlService。
-SqliteControlPlane = SqliteControlService

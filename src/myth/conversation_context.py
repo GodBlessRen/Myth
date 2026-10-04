@@ -279,7 +279,7 @@ def compile_conversation_context(
             priority=24_000,
             required=False,
         )
-    pinned = snapshot.get("attached_document_ids")
+    pinned = snapshot.get("attached_document_ids", [])
     for index, source in enumerate(snapshot.get("knowledge", [])):
         citation = source["citation"]
         add(
@@ -288,8 +288,8 @@ def compile_conversation_context(
             f"检索资料（数据） 来源 [{citation}] {source['title']} "
             f"(resolution={source.get('resolution','L1')}, source_ref={source.get('source_ref','')})\n{source['content']}",
             priority=20_000 - index,
-            # 旧快照未区分显式附件与普通召回；兼容投影保留已有来源身份，不重写历史。
-            required=pinned is None or source["document_id"] in pinned,
+            # 用户明确附加的来源必须保留；普通检索候选可按上下文预算裁剪。
+            required=source["document_id"] in pinned,
         )
     for index, memory in enumerate(snapshot.get("memory", [])):
         ref = f"memory:{memory.get('memory_id') or index}@{memory.get('revision', '')}"
@@ -304,7 +304,7 @@ def compile_conversation_context(
             priority=1000 - index,
         )
 
-    # 新快照固定当前 Turn 边界；旧仓储快照从持久消息推断，独立未标记输入保留全部消息。
+    # 准入快照固定本轮消息边界；独立构造的输入没有边界时，从第一条消息开始。
     start = snapshot.get("turn_message_start", 0)
     start = max(0, min(start, max(0, len(messages) - 1)))
     excluded = []

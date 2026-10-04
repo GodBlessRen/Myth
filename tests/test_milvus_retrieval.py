@@ -74,7 +74,7 @@ class MilvusRetrievalTests(unittest.TestCase):
         self.workspace = Workspace(self.runtime)
         self.fake = FakeVectorIndex()
         self.workspace.vector_index = self.fake
-        self.workspace.repository.vector_index = self.fake
+        self.workspace.repository.knowledge.vector_index = self.fake
         self.workspace.memory.vector_index = self.fake
         self.repo = self.workspace.repository
 
@@ -91,10 +91,10 @@ class MilvusRetrievalTests(unittest.TestCase):
 
     # 证明纯向量命中最终正文仍来自当前 SQLite chunk，而非 Milvus metadata。
     def test_vector_only_knowledge_hit_is_hydrated_from_current_sqlite_source(self):
-        doc = self.repo.import_document(
+        doc = self.repo.knowledge.import_document(
             {"title": "architecture", "content": "alpha beta gamma"}
         )
-        report = self.repo.search_report("meaning-never-in-source", limit=3)
+        report = self.repo.knowledge.search_report("meaning-never-in-source", limit=3)
         self.assertEqual(report["retrieval"]["backend"], "lexical+milvus")
         self.assertEqual(report["sources"][0]["document_id"], doc["id"])
         self.assertEqual(report["sources"][0]["content"], "alpha beta gamma")
@@ -102,19 +102,19 @@ class MilvusRetrievalTests(unittest.TestCase):
 
     # 证明陈旧 digest 的远端向量候选不能重新进入当前知识结果。
     def test_stale_vector_knowledge_version_is_rejected(self):
-        doc = self.repo.import_document({"title": "v1", "content": "first"})
+        doc = self.repo.knowledge.import_document({"title": "v1", "content": "first"})
         key = next(iter(self.fake.knowledge))
         self.fake.knowledge[key]["source_version"] = "stale-digest"
         # 防止 rebuild 覆盖故意注入的陈旧版本，模拟远端索引残留。
-        self.workspace.repository.vector_index.sync_knowledge = lambda rows: {
+        self.workspace.repository.knowledge.vector_index.sync_knowledge = lambda rows: {
             "received": len(rows),
             "upserted": 0,
             "skipped": len(rows),
         }
-        report = self.repo.search_report("semantic-only", limit=3)
+        report = self.repo.knowledge.search_report("semantic-only", limit=3)
         self.assertEqual(report["sources"], [])
         self.assertGreaterEqual(report["retrieval"]["vector_stale_rejected"], 1)
-        self.assertEqual(self.repo.document(doc["id"])["content"], "first")
+        self.assertEqual(self.repo.knowledge.document(doc["id"])["content"], "first")
 
     # 证明 Memory 初始召回保持 L0，显式升级到 L2 时仍绑定同一 memory revision。
     def test_memory_search_returns_l0_then_resolves_same_revision_to_l2(self):

@@ -1277,22 +1277,22 @@ function renderChat(session) {
     "pauseTurn",
     !!turn &&
       !control.paused &&
-      !(control.stopped ?? control.aborted) &&
+      !control.stopped &&
       ["RUNNING", "INTERRUPTED"].includes(status),
   );
   show("resumeTurn", !!turn && control.paused && status === "PAUSED");
   $("steerTurn").disabled =
     !turn ||
-    (control.stopped ?? control.aborted) ||
+    control.stopped ||
     ["COMPLETED", "FAILED", "CANCELLED", "BUDGET_EXHAUSTED"].includes(status);
   $("compactTurn").disabled =
-    !turn || (control.stopped ?? control.aborted) || status !== "RUNNING";
+    !turn || control.stopped || status !== "RUNNING";
   $("stopRun").disabled =
     !turn ||
-    (control.stopped ?? control.aborted) ||
+    control.stopped ||
     ["COMPLETED", "FAILED", "CANCELLED", "BUDGET_EXHAUSTED"].includes(status);
 
-  show("stopTurn", !!active && !(control.stopped ?? control.aborted));
+  show("stopTurn", !!active && !control.stopped);
   show("send", !active || status === "WAITING_USER");
   updateComposer();
   $("prompt").placeholder =

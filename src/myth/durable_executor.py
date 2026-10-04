@@ -47,7 +47,7 @@ NO_PROGRESS_SECONDS = 600.0
 
 # 确保执行器状态表存在；该表不拥有 Goal/Run/Receipt 等业务事实。
 def ensure_executor_schema(runtime) -> None:
-    runtime.store.db.executescript(EXECUTOR_SCHEMA)
+    runtime.store.ensure_schema(EXECUTOR_SCHEMA)
 
 
 # 把 SQLite CURRENT_TIMESTAMP 解析成 UTC epoch；解析失败返回 None，不能伪造进度时间。

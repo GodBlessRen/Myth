@@ -10,7 +10,7 @@ from urllib import request
 
 from ..auth.transport import open_credential_request, read_bounded
 from ..models import ModelRequest, ProviderStatus
-from .capabilities import model_capability, reasoning_capability
+from ..model_capabilities import model_capability, reasoning_capability
 from .openai import OpenAIResponsesProvider, TokenSupplier
 
 
@@ -28,7 +28,7 @@ class DeepSeekApiKeyProvider(OpenAIResponsesProvider):
         timeout: float = 180.0,
         token_supplier: TokenSupplier | None = None,
     ) -> None:
-        # token_supplier 由 Credential Hub 注入；环境变量仅保留兼容旧部署，不再要求用户先开 PowerShell。
+        # token_supplier 由 Credential Hub 注入；环境变量供显式 CLI 配置，桌面端通过安全库连接。
         def env_token() -> str:
             import os
             value = os.environ.get(env_var, "").strip()

@@ -13,7 +13,7 @@
 | 理解不可破坏的边界 | [ARCHITECTURE_CONSTITUTION.md](ARCHITECTURE_CONSTITUTION.md) |
 | 看 Runtime / 第三栏观测合同 | [OBSERVABILITY.md](OBSERVABILITY.md) |
 | 看产品视觉与交互原则 | [DESIGN.md](DESIGN.md) |
-| 看前端重构取舍与实际浏览器证据 | [UI_REDESIGN.md](UI_REDESIGN.md) |
+| 看逐文件处置、故障修复与性能证据 | [REFINEMENT_REVIEW.md](REFINEMENT_REVIEW.md)、[FILE_REVIEW.md](FILE_REVIEW.md) |
 | 看当前下一步 | [ROADMAP.md](ROADMAP.md) |
 | 看验证边界 | [VALIDATION.md](VALIDATION.md) |
 | 安排 Goal 后续工作 | [GOAL_WAKEUP.md](GOAL_WAKEUP.md) |
@@ -73,4 +73,4 @@
 
 ## 历史资料
 
-历史诊断和一次性 review 放在 `archive/`，不参与当前架构导航。
+历史诊断、旧评测和一次性画面在仓库 `.trash/<日期>/` 留档，不参与生产代码、检索或发布包。每次更新按 AGENTS 中的垃圾站规则 淘汰无用内容。

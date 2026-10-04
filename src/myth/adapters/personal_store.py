@@ -12,7 +12,7 @@ from ..domain import canonical_json
 from ..domains.personal import TriggerKind
 
 
-# SCHEMA：本仓储拥有的表、索引与约束；升级补齐旧字段，删除列须有迁移证据。
+# SCHEMA：本仓储拥有的当前表、索引与约束；由 Store 原子初始化，不叠加旧格式迁移。
 # goals 是长期意图，不是 Memory；state 控制未来准入，不能撤销已发出效果。
 # goal_work_state 的 revision 单调递增，last_run_id 决定谁能更新当前进度，waiting_for 保留人工/外部等待。
 # goal_runs 是意图到 Core Run 的关联，不复制会话；triggers 只描述事件，实际机会归 GoalScheduler。
@@ -70,7 +70,7 @@ class SqlitePersonalState:
     def __init__(self, runtime) -> None:
         # store：持久事实仓储；短事务维护本地一致性；外部效果不能并入数据库事务。
         self.store = runtime.store
-        self.store.db.executescript(SCHEMA)
+        self.store.ensure_schema(SCHEMA)
 
     # 生成带类型前缀的新身份；重试去重使用已固定的 request/decision 身份，不靠新 UUID 判断已执行。
     @staticmethod

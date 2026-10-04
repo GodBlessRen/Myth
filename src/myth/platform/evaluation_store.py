@@ -18,7 +18,7 @@ from .evaluation import (
 )
 
 
-# SCHEMA：本仓储拥有的表、索引与约束；升级补齐旧字段，删除列须有迁移证据。
+# SCHEMA：本仓储拥有的当前表、索引与约束；由 Store 原子初始化，不叠加旧格式迁移。
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS evaluation_runs(
     eval_run_id TEXT PRIMARY KEY,
@@ -59,32 +59,7 @@ class SqliteEvaluationLedger:
         self.runtime = runtime
         # store：持久事实仓储；短事务维护本地一致性；外部效果不能并入数据库事务。
         self.store = runtime.store
-        self.store.db.executescript(SCHEMA)
-        columns = {
-            row["name"]
-            for row in self.store.db.execute("PRAGMA table_info(evaluation_runs)")
-        }
-        for name, ddl in (
-            ("suite_case_count", "INTEGER"),
-            ("selected_case_count", "INTEGER"),
-            ("complete_suite", "INTEGER NOT NULL DEFAULT 0"),
-            ("evaluation_partition", "TEXT NOT NULL DEFAULT 'final'"),
-            ("harness_id", "TEXT"),
-            ("harness_mechanisms_json", "TEXT NOT NULL DEFAULT '[]'"),
-        ):
-            if name not in columns:
-                self.store.db.execute(
-                    f"ALTER TABLE evaluation_runs ADD COLUMN {name} {ddl}"
-                )
-        observation_columns = {
-            row["name"]
-            for row in self.store.db.execute("PRAGMA table_info(evaluation_observations)")
-        }
-        if "mechanism_events_json" not in observation_columns:
-            self.store.db.execute(
-                "ALTER TABLE evaluation_observations ADD COLUMN mechanism_events_json TEXT NOT NULL DEFAULT '[]'"
-            )
-
+        self.store.ensure_schema(SCHEMA)
     # 生成带类型前缀的新身份；重试去重使用已固定的 request/decision 身份，不靠新 UUID 判断已执行。
     @staticmethod
     def _id() -> str:

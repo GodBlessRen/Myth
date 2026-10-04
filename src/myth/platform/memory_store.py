@@ -21,7 +21,7 @@ from .memory_lifecycle import (
 from .retrieval import reciprocal_rank_scores
 
 
-# SCHEMA：本仓储拥有的表、索引与约束；升级补齐旧字段，删除列须有迁移证据。
+# SCHEMA：本仓储拥有的当前表、索引与约束；由 Store 原子初始化，不叠加旧格式迁移。
 SCHEMA = r"""
 CREATE TABLE IF NOT EXISTS workspace_memories(
     memory_id TEXT PRIMARY KEY NOT NULL,
@@ -95,27 +95,7 @@ class SqliteMemoryStore:
         self.store = runtime.store
         # vector_index：可选派生索引；Memory 行、scope、revision、active 才是权威事实。
         self.vector_index = vector_index
-        self.store.db.executescript(SCHEMA)
-        columns = {
-            row["name"]
-            for row in self.store.db.execute("PRAGMA table_info(workspace_memories)")
-        }
-        if "scope_type" not in columns:
-            self.store.db.execute(
-                "ALTER TABLE workspace_memories ADD COLUMN scope_type TEXT NOT NULL DEFAULT 'global'"
-            )
-        if "scope_id" not in columns:
-            self.store.db.execute(
-                "ALTER TABLE workspace_memories ADD COLUMN scope_id TEXT"
-            )
-        if "fact_level" not in columns:
-            self.store.db.execute(
-                "ALTER TABLE workspace_memories ADD COLUMN fact_level TEXT NOT NULL DEFAULT 'context'"
-            )
-
-        # 历史项目可能先存在 workspace_memories；为当前 revision 补一个可审计快照，不改写业务 revision。
-        self._backfill_revision_snapshots()
-
+        self.store.ensure_schema(SCHEMA)
     # 校验 kind/text/source/scope/fact_level/evidence 后按来源更新或创建；revision 与证据快照同事务提交。
     def remember(
         self,
@@ -191,26 +171,6 @@ class SqliteMemoryStore:
             self._sync_vector_record(record)
         return record
 
-    # _backfill_revision_snapshots：旧库第一次升级只为当前 revision 建快照；历史未知 revision 不伪造。
-    def _backfill_revision_snapshots(self) -> None:
-        rows = self.store.db.execute(
-            "SELECT * FROM workspace_memories ORDER BY rowid"
-        ).fetchall()
-        with self.store.tx() as db:
-            for row in rows:
-                memory_id = str(row["memory_id"])
-                exists = db.execute(
-                    "SELECT 1 FROM workspace_memory_revisions WHERE memory_id=? AND revision=?",
-                    (memory_id, int(row["revision"])),
-                ).fetchone()
-                if exists is not None:
-                    continue
-                if not self._evidence_rows(db, memory_id):
-                    prepared = self._prepare_evidence(
-                        db, None, default_ref=str(row["source_ref"])
-                    )
-                    self._replace_evidence(db, memory_id, prepared)
-                self._snapshot_revision(db, memory_id)
 
     # _prepare_evidence：在写事务内把 source_memory_id 固定到当时 revision，外部 ref 保持显式来源。
     def _prepare_evidence(
