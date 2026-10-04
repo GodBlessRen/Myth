@@ -88,7 +88,7 @@ Windows：
 http://127.0.0.1:8765/
 ```
 
-一般对话默认使用本机 Ollama；也可选择 OpenAI API Key、DeepSeek API Key 或 Myth 自己实现的 **Sign in with ChatGPT**。OpenAI / DeepSeek API Key 只从进程环境变量读取；ChatGPT OAuth 不依赖 Pi/Codex 的认证文件或 CLI，Token 只进入系统安全凭据库，不进入项目 Runtime 数据库。
+一般对话默认使用本机 Ollama；也可选择 OpenAI、DeepSeek 或 Myth 自己实现的 **Sign in with ChatGPT**。远端模型连接都在 Myth 设置页完成：OpenAI / DeepSeek 直接粘贴 API Key，验证成功后只保存到操作系统安全凭据库；ChatGPT 直接走 OAuth。正常用户不需要预先打开 PowerShell 设置环境变量。旧的 `OPENAI_API_KEY` / `DEEPSEEK_API_KEY` 仅作为兼容回退。
 
 页面可配置：
 
@@ -100,7 +100,7 @@ http://127.0.0.1:8765/
 - max output tokens；
 - thinking。
 
-Myth 不自动下载模型。OpenAI API Key 从 `OPENAI_API_KEY` 读取，DeepSeek API Key 从 `DEEPSEEK_API_KEY` 读取；两者都不写入 Runtime 数据库。ChatGPT OAuth 凭据使用系统安全凭据库，并支持刷新、撤销和显式退出。
+Myth 不自动下载本地模型。OpenAI / DeepSeek API Key 与 ChatGPT OAuth 凭据都通过 Myth 应用内连接，并保存在系统安全凭据库，不写入 Runtime 数据库、事件、Artifact 或日志。API Key 候选值先验证成功再替换旧凭据，粘贴错误不会破坏原有可用连接。
 
 ## 工作台
 
