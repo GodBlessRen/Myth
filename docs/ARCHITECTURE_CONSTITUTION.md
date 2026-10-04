@@ -60,6 +60,16 @@ Domains 是围绕 Core 的同级职责，不构成必须顺序经过的层：
 | Evaluation / 评测 | 固定测试集上的质量、安全、成本比较 |
 | Evolution / 演进 | 只产生候选策略；不能直接改正在运行的 Run |
 
+## 2.1 Evidence Before Score / 证据先于分数
+
+Evaluation 的分数只是证据的压缩投影，不是证据本身。
+
+- 任何质量结论都必须能回溯到固定 Case、Run/Execution、Verification/Final State 与 Grader/Oracle 身份。
+- 能由代码和最终状态确定的判定优先使用 deterministic oracle；未校准的模型 Judge 不得作为发布事实。
+- 重复试次必须区分 **pass@k（至少一次成功，Capability）** 与 **pass^k（k 次全部成功，Reliability）**；平均成功率不能替代可靠性。
+- 成本比较优先报告 **cost per successful outcome**；失败试次的成本不能从分母中消失。
+- 缺测、样本不足和不确定性保持显式；不得把小样本波动直接包装为 Champion、Policy 增益或发布证据。
+- Evaluation 只提供证据与资格。SOTA Route 负责发现，Evolution 负责证明和显式发布；任一单次漂亮 Run 都不能直接改变生产策略。
 ## 3. Strategy，不升格成 Layer
 
 下面这些是可插拔策略，不是所有请求都必须经过的“层”：

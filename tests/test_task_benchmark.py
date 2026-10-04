@@ -47,6 +47,35 @@ class TaskBenchmarkTests(unittest.TestCase):
             self.assertEqual(report["trials"][0]["model_calls"], 0)
             self.assertEqual(report["trials"][1]["model_calls"], 1)
 
+    # 回归断言：重复试次区分“至少成功一次”的 capability 与“每次都成功”的 reliability，并报告 95% 区间。
+    def test_summary_reports_pass_at_k_and_pass_pow_k(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            report = run_task_benchmark(SUITE, Path(tmp) / "evidence", repeats=3)
+            summary = report["summary"]["myth"]
+            self.assertEqual(summary["k"], 3)
+            self.assertEqual(summary["complete_case_count"], 10)
+            self.assertEqual(summary["pass_at_k"], 1.0)
+            self.assertEqual(summary["pass_pow_k"], 1.0)
+            self.assertEqual(summary["mixed_outcome_cases"], [])
+            self.assertEqual(summary["all_failed_cases"], [])
+            self.assertEqual(len(summary["pass_at_k_ci95"]), 2)
+            self.assertEqual(len(summary["pass_pow_k_ci95"]), 2)
+            self.assertIsNotNone(summary["model_calls_per_success"])
+            self.assertGreater(summary["model_calls_per_success"], 0)
+
+    # 回归断言：筛题仍按固定重复次数计算可靠性；只有跑满 k 次的 case 才进入 pass@k/pass^k 分母。
+    def test_filtered_repeats_keep_reliability_denominator_explicit(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            report = run_task_benchmark(
+                SUITE, Path(tmp) / "filtered-reliability", repeats=3,
+                case_ids=["arithmetic"], arms=("myth",)
+            )
+            summary = report["summary"]["myth"]
+            self.assertEqual(summary["complete_case_count"], 1)
+            self.assertEqual(summary["incomplete_cases"], [])
+            self.assertEqual(summary["pass_at_k"], 1.0)
+            self.assertEqual(summary["pass_pow_k"], 1.0)
+
     # 回归断言：错误模型 claim 以真实对象字节判失败，而非按回答措辞算成功。
     def test_wrong_completion_is_counted_by_artifact_bytes_not_claim(self):
         with tempfile.TemporaryDirectory() as tmp:
