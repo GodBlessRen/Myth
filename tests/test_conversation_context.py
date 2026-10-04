@@ -113,7 +113,7 @@ class ConversationContextTests(unittest.TestCase):
         self.assertNotIn("a" * 24000, text)
         self.assertEqual(request.context_report["projection"]["recall_capability"], "observation.read")
         self.assertEqual(
-            request.context_report["optimizations"][0]["reason_code"],
+            request.context_report["fold_reason"]["reason_code"],
             "older_observation_preview",
         )
         self.assertEqual(activities, original)
@@ -145,9 +145,53 @@ class ConversationContextTests(unittest.TestCase):
         self.assertTrue(request.context_report["compact_requested"])
         self.assertEqual(request.context_report["compaction_seed"]["source"], "durable-facts")
         self.assertTrue(request.context_report["compaction_seed"]["selected"])
+        self.assertEqual(request.context_report["context_mode"], "compact")
+        self.assertTrue(request.context_report["compact_applied"])
         self.assertEqual(
-            request.context_report["optimizations"][-1]["reason_code"],
+            request.context_report["context_decision"]["reason_code"],
             "explicit_user_control",
+        )
+
+    # 回归断言：高窗口压力且已有持久语义边界时，Context 自动选择紧凑投影；这不是用户 Compact 命令。
+    def test_context_auto_compacts_only_after_settled_boundary_under_pressure(self):
+        snapshot = {
+            "turn_message_start": 18,
+            "messages": [
+                {"role": "user", "content": f"OLD-{i}-" + ("历史" * 650)}
+                for i in range(18)
+            ]
+            + [{"role": "user", "content": "CURRENT-GOAL"}],
+        }
+        activities = [
+            {
+                "step": 1,
+                "capability": "test.run",
+                "decision_id": "verify-1",
+                "result": {
+                    "status": "PASSED",
+                    "evidence_ref": "test:profile@digest",
+                },
+            }
+        ]
+        request = self.compile(
+            snapshot,
+            activities,
+            settings={**SETTINGS, "num_ctx": 8192},
+        )
+        self.assertEqual(request.context_report["context_mode"], "compact")
+        self.assertTrue(request.context_report["compact_applied"])
+        self.assertFalse(request.context_report["compact_requested"])
+        self.assertEqual(
+            request.context_report["context_decision"]["reason_code"],
+            "context_pressure",
+        )
+        self.assertGreater(
+            request.context_report["context_decision"]["provider_visible_saving_bytes"],
+            0,
+        )
+        self.assertGreater(
+            request.context_report["compaction_seed"]["semantic_boundaries"],
+            0,
         )
 
     # 回归断言：大量召回不能挤掉显式固定附件。
