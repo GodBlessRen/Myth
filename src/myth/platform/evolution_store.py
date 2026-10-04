@@ -235,6 +235,9 @@ class SqliteEvolutionControl:
         ):
             raise ValueError("baseline/candidate suite case counts differ")
 
+        ledger.require_held_out_final(candidate_eval_run_id)
+        if baseline.get("evaluation_partition") != "final":
+            raise ValueError("baseline promotion evidence must use final evaluation partition")
         pairs = ledger.paired_comparisons(baseline_eval_run_id, candidate_eval_run_id)
         cost_model = (
             SqliteCostModelRegistry(self.runtime).model(cost_model_id)
