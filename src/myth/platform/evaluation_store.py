@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS evaluation_runs(
     suite_case_count INTEGER,
     selected_case_count INTEGER,
     complete_suite INTEGER NOT NULL DEFAULT 0,
+    evaluation_partition TEXT NOT NULL DEFAULT 'final',
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE IF NOT EXISTS evaluation_observations(
@@ -58,6 +59,7 @@ class SqliteEvaluationLedger:
             ("suite_case_count", "INTEGER"),
             ("selected_case_count", "INTEGER"),
             ("complete_suite", "INTEGER NOT NULL DEFAULT 0"),
+            ("evaluation_partition", "TEXT NOT NULL DEFAULT 'final'"),
         ):
             if name not in columns:
                 self.store.db.execute(
@@ -90,6 +92,9 @@ class SqliteEvaluationLedger:
         if not suite_id or suite_version < 1:
             raise ValueError("evaluation result requires suite id/version")
         observations = result.get("observations") or []
+        partition = str(result.get("evaluation_partition") or "final").strip().lower()
+        if partition not in {"discovery", "final"}:
+            raise ValueError("evaluation_partition must be discovery or final")
         if not isinstance(observations, list):
             raise ValueError("evaluation observations must be a list")
         eval_run_id = self._id()
@@ -97,7 +102,7 @@ class SqliteEvaluationLedger:
         with self.store.tx() as db:
             db.execute(
                 "INSERT INTO evaluation_runs(eval_run_id,suite_id,suite_version,policy_id,report_json,release_gate_json,elapsed_ms,"
-                "suite_case_count,selected_case_count,complete_suite) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                "suite_case_count,selected_case_count,complete_suite,evaluation_partition) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     eval_run_id,
                     suite_id,
@@ -109,6 +114,7 @@ class SqliteEvaluationLedger:
                     int(result.get("suite_case_count") or len(observations)),
                     int(result.get("selected_case_count") or len(observations)),
                     int(bool(result.get("complete_suite", False))),
+                    partition,
                 ),
             )
             for item in observations:
@@ -209,6 +215,28 @@ class SqliteEvaluationLedger:
                 )
             )
         return pairs
+
+    # 最终评测题不得与同一候选策略已经用于 discovery 的题重叠；否则 final 已经泄漏给搜索过程。
+    def require_held_out_final(self, eval_run_id: str) -> None:
+        final = self.run(eval_run_id)
+        if final.get("evaluation_partition") != "final":
+            raise ValueError("promotion evidence must use final evaluation partition")
+        final_cases = {item["case_id"] for item in final["observations"]}
+        discovery_cases = {
+            row["case_id"]
+            for row in self.store.db.execute(
+                "SELECT o.case_id FROM evaluation_observations o "
+                "JOIN evaluation_runs r USING(eval_run_id) "
+                "WHERE r.policy_id=? AND r.evaluation_partition='discovery'",
+                (final["policy_id"],),
+            ).fetchall()
+        }
+        overlap = final_cases & discovery_cases
+        if overlap:
+            raise ValueError(
+                "held-out final cases were already used in discovery: "
+                + ",".join(sorted(overlap))
+            )
 
     # 基于完整配对结果汇总质量/成本与发布判断；保留逐题回归和缺证据。
     def compare(
