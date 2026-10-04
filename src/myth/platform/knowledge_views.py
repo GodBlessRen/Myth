@@ -27,6 +27,9 @@ CREATE TABLE IF NOT EXISTS workspace_mental_models(
     UNIQUE(scope_type, scope_id, name)
 );
 
+CREATE UNIQUE INDEX IF NOT EXISTS idx_workspace_mental_models_scope_name
+    ON workspace_mental_models(scope_type, COALESCE(scope_id,''), name);
+
 CREATE TABLE IF NOT EXISTS workspace_mental_model_revisions(
     model_id TEXT NOT NULL REFERENCES workspace_mental_models(model_id),
     revision INTEGER NOT NULL,
