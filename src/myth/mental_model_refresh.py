@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS mental_model_refresh_occurrences(
     model_id TEXT NOT NULL REFERENCES workspace_mental_models(model_id),
     source_change_seq INTEGER NOT NULL,
     model_revision INTEGER NOT NULL,
+    attempt_no INTEGER NOT NULL DEFAULT 1,
     run_id TEXT NOT NULL UNIQUE REFERENCES runs(run_id),
     state TEXT NOT NULL CHECK(state IN ('ADMITTED','RUNNING','SUCCEEDED','FAILED','UNKNOWN','SUPERSEDED')),
     created_at REAL NOT NULL,
@@ -40,7 +41,7 @@ CREATE TABLE IF NOT EXISTS mental_model_refresh_occurrences(
     owner_id TEXT,
     lease_until REAL,
     heartbeat_at REAL,
-    UNIQUE(model_id, source_change_seq)
+    UNIQUE(model_id, source_change_seq, attempt_no)
 );
 CREATE INDEX IF NOT EXISTS idx_mm_refresh_occurrences_state
     ON mental_model_refresh_occurrences(state, updated_at);
@@ -85,6 +86,10 @@ class MentalModelRefreshScheduler:
             if "heartbeat_at" not in columns:
                 db.execute(
                     "ALTER TABLE mental_model_refresh_occurrences ADD COLUMN heartbeat_at REAL"
+                )
+            if "attempt_no" not in columns:
+                db.execute(
+                    "ALTER TABLE mental_model_refresh_occurrences ADD COLUMN attempt_no INTEGER NOT NULL DEFAULT 1"
                 )
 
     # configure：显式 opt-in/out，并冻结当前模型设置；自动刷新不会随全局设置悄悄换模型。
@@ -188,12 +193,24 @@ class MentalModelRefreshScheduler:
             return None
         existing = self.store.db.execute(
             "SELECT run_id,state FROM mental_model_refresh_occurrences "
-            "WHERE model_id=? AND source_change_seq=?",
+            "WHERE model_id=? AND source_change_seq=? "
+            "AND state IN ('ADMITTED','RUNNING','UNKNOWN') "
+            "ORDER BY attempt_no DESC LIMIT 1",
             (model_id, source_change_seq),
         ).fetchone()
         if existing:
-            return str(existing["run_id"]) if existing["state"] in {"ADMITTED","RUNNING"} else None
+            return (
+                str(existing["run_id"])
+                if existing["state"] in {"ADMITTED", "RUNNING"}
+                else None
+            )
 
+        last = self.store.db.execute(
+            "SELECT COALESCE(MAX(attempt_no),0) AS n "
+            "FROM mental_model_refresh_occurrences WHERE model_id=? AND source_change_seq=?",
+            (model_id, source_change_seq),
+        ).fetchone()
+        attempt_no = int(last["n"] if last else 0) + 1
         settings = policy["settings"]
         run_id = f"run_{uuid.uuid4().hex}"
         occurrence_id = f"mmr_{uuid.uuid4().hex}"
@@ -202,6 +219,7 @@ class MentalModelRefreshScheduler:
             "model_id": model_id,
             "model_revision": int(prepared["model_revision"]),
             "source_change_seq": source_change_seq,
+            "attempt_no": attempt_no,
             "provider": settings["provider"],
             "model": settings["model"],
         }
@@ -210,7 +228,9 @@ class MentalModelRefreshScheduler:
             "input_tokens": 2_000_000,
             "output_tokens": int(settings["max_output_tokens"]),
         }
-        request_id = f"mental-model-refresh:{model_id}:{source_change_seq}"
+        request_id = (
+            f"mental-model-refresh:{model_id}:{source_change_seq}:{attempt_no}"
+        )
         with self.store.tx() as db:
             existing_run = self.store.request_run(request_id, digest_json(entry))
             if existing_run is not None:
@@ -228,13 +248,15 @@ class MentalModelRefreshScheduler:
                 return admitted
             db.execute(
                 "INSERT INTO mental_model_refresh_occurrences("
-                "occurrence_id,model_id,source_change_seq,model_revision,run_id,state,created_at,updated_at"
-                ") VALUES (?,?,?,?,?,'ADMITTED',?,?)",
+                "occurrence_id,model_id,source_change_seq,model_revision,attempt_no,"
+                "run_id,state,created_at,updated_at"
+                ") VALUES (?,?,?,?,?,?,'ADMITTED',?,?)",
                 (
                     occurrence_id,
                     model_id,
                     source_change_seq,
                     int(prepared["model_revision"]),
+                    attempt_no,
                     run_id,
                     now,
                     now,
@@ -248,6 +270,7 @@ class MentalModelRefreshScheduler:
                     "model_id": model_id,
                     "source_change_seq": source_change_seq,
                     "model_revision": int(prepared["model_revision"]),
+                    "attempt_no": attempt_no,
                 },
             )
         return run_id
