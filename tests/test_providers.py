@@ -310,6 +310,8 @@ class DeepSeekProviderTests(unittest.TestCase):
                         "supported_levels": ["low", "high", "max"],
                         "default_level": "high",
                     },
+                    "api_capabilities": ["responses", "vision"],
+                    "provider_revision": "ds-catalog-r1",
                 }
             ],
         }
@@ -329,6 +331,13 @@ class DeepSeekProviderTests(unittest.TestCase):
         self.assertEqual(profile["reasoning"]["off"], "none")
         self.assertEqual(profile["context_window"], 1048576)
         self.assertEqual(profile["max_output_tokens"], 393216)
+        self.assertEqual(
+            profile["provider_metadata"]["api_capabilities"],
+            ["responses", "vision"],
+        )
+        self.assertEqual(
+            profile["provider_metadata"]["provider_revision"], "ds-catalog-r1"
+        )
 
     # DeepSeek 的 developer 会退化为 user，因此 system 必须原样发送；thinking 显式映射到 reasoning.effort。
     def test_request_preserves_system_role_and_maps_thinking(self) -> None:
