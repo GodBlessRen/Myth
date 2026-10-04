@@ -12,6 +12,7 @@ from .platform.memory_store import SqliteMemoryStore
 from .platform.knowledge_views import SqliteKnowledgeViews
 from .platform.evolution_store import SqliteEvolutionControl
 from .delivery import DeliveryLedger
+from .mental_model_refresh import MentalModelRefreshScheduler
 from .sota_route import SotaRouteLedger
 from .strategies import resolution_controller_from_config
 
@@ -75,6 +76,8 @@ class Workspace:
         self.mental_models = self.knowledge_views
         # knowledge_pages：同一深模块的树导航入口；不创建第二套正文或仓储。
         self.knowledge_pages = self.knowledge_views
+        # mental_model_refresh：只拥有自动刷新 policy/occurrence；模型效果仍走 Core Run + DecisionRuntime。
+        self.mental_model_refresh = MentalModelRefreshScheduler(self)
         # delivery：回答终态、验收、Work item 与人工关注的持久交付账本。
         self.delivery = DeliveryLedger(runtime, sota_route=self.sota_route)
         # execution：用例执行端口/实现；外部效果须经过 Ticket 和收据协议。
