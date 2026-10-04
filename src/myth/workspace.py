@@ -69,8 +69,9 @@ class Workspace:
         self.memory = SqliteMemoryStore(runtime, vector_index=self.vector_index)
         # knowledge_views：Memory Domain 的派生高阶视图；Mental Model 持有内容视图，Knowledge Page 只持有树结构。
         self.knowledge_views = SqliteKnowledgeViews(runtime, self.memory)
-        # mental_models / knowledge_pages：发现性别名，指向同一深模块，不复制状态或实现。
+        # mental_models：发现性别名，指向同一 Knowledge Views 深模块，不复制状态或实现。
         self.mental_models = self.knowledge_views
+        # knowledge_pages：同一深模块的树导航入口；不创建第二套正文或仓储。
         self.knowledge_pages = self.knowledge_views
         # delivery：回答终态、验收、Work item 与人工关注的持久交付账本。
         self.delivery = DeliveryLedger(runtime, sota_route=self.sota_route)
