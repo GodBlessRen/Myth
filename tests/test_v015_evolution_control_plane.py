@@ -276,6 +276,7 @@ class EvolutionControlPlaneTests(unittest.TestCase):
     def test_mechanism_attribution_survives_eval_ledger_round_trip(self):
         with MythRuntime(self.root) as runtime:
             ledger = SqliteEvaluationLedger(runtime)
+            # 构造同题不同策略的持久观测，只让 verdict 与 mechanism_events 发生明确变化。
             def result(policy_id, verdict, events):
                 passed = 1 if verdict == "PASS" else 0
                 failed = 1 - passed
