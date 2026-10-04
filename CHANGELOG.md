@@ -7,6 +7,7 @@
 - Child 使用同一父 Run 的 durable model Ticket / receipt / budget 账本和稳定 request key；返回 contracted result 作为 Observation，最终验收与交付仍归父 Agent / Runtime。
 - Runtime 模型调用投影新增 request key，便于区分普通决策与 `subagent:` 调用；Multi-Agent Strategy 成熟度提升为 connected。
 - 增加上下文隔离与递归委派拒绝回归测试；架构宪法记录 “Context Isolation + Contracted Return” 不变量。
+- Runtime Observatory 新增实验性 `Execution Graph`：只从既有 model/decision/operation 持久事实投影 Parent → Tool → Sub-Agent 关系；不新增 Core、状态机或授权语义，无法映射的模型调用保持 `unmapped`。
 
 ## 未发布 — 前端工作台重构
 
