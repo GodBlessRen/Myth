@@ -70,6 +70,17 @@ class ConversationContextTests(unittest.TestCase):
             },
             {
                 "step": 2,
+                "capability": "test.run",
+                "decision_id": "test-old",
+                "result": {
+                    "status": "FAILED",
+                    "stdout": "TEST-STDOUT-" + "z" * 12000,
+                    "stderr": "TEST-STDERR-" + "y" * 12000,
+                    "evidence_ref": "test:profile@digest",
+                },
+            },
+            {
+                "step": 3,
                 "capability": "knowledge.search",
                 "decision_id": "d2",
                 "result": {
@@ -77,7 +88,7 @@ class ConversationContextTests(unittest.TestCase):
                 },
             },
             {
-                "step": 3,
+                "step": 4,
                 "capability": "project.read",
                 "decision_id": "d3",
                 "result": {
@@ -94,7 +105,17 @@ class ConversationContextTests(unittest.TestCase):
         self.assertIn("fixed-hash", text)
         self.assertIn("doc:d:0", text)
         self.assertIn("d1", text)
+        self.assertIn("observation.read", text)
+        self.assertIn('"decision_id":"d1"', text)
+        self.assertIn('"decision_id":"test-old"', text)
+        self.assertNotIn("z" * 12000, text)
+        self.assertNotIn("y" * 12000, text)
         self.assertNotIn("a" * 24000, text)
+        self.assertEqual(request.context_report["projection"]["recall_capability"], "observation.read")
+        self.assertEqual(
+            request.context_report["optimizations"][0]["reason_code"],
+            "older_observation_preview",
+        )
         self.assertEqual(activities, original)
 
     # 回归断言：Compact 仍保留当前任务全部澄清，不能以压缩改意图。
@@ -122,6 +143,12 @@ class ConversationContextTests(unittest.TestCase):
         for i in range(10):
             self.assertIn(f"CLARIFICATION-{i}", text)
         self.assertTrue(request.context_report["compact_requested"])
+        self.assertEqual(request.context_report["compaction_seed"]["source"], "durable-facts")
+        self.assertTrue(request.context_report["compaction_seed"]["selected"])
+        self.assertEqual(
+            request.context_report["optimizations"][-1]["reason_code"],
+            "explicit_user_control",
+        )
 
     # 回归断言：大量召回不能挤掉显式固定附件。
     def test_pinned_attachment_survives_recall_pressure(self):

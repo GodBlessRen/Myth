@@ -17,6 +17,7 @@ DEFAULT_VISIBLE_TOOL_IDS = (
     "memory.resolve",
     "project.list",
     "project.read",
+    "observation.read",
     "project.search",
     "git.status",
     "git.diff",

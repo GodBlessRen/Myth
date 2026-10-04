@@ -899,6 +899,39 @@ function renderInspectorContext(session, turn) {
     ].forEach(([k, v]) => {
       inspectorFact(box, k, v);
     });
+    const optimizations = compiled.optimizations || [];
+    if (optimizations.length) {
+      inspectorFact(
+        box,
+        "Optimization",
+        optimizations
+          .map(item => (item.mechanism_id || "mechanism") + " · " +
+            (item.outcome || "UNKNOWN") + " · " + (item.reason_code || "unspecified"))
+          .join(" / "),
+      );
+    }
+    const reachability = compiled.mechanism_reachability || [];
+    if (reachability.length) {
+      inspectorFact(
+        box,
+        "Mechanism reachability",
+        reachability
+          .map(item => (item.mechanism_id || "mechanism") + "=" +
+            (item.reachable ? "reachable" : (item.reason_code || "unreachable")))
+          .join(" / "),
+      );
+    }
+    if (compiled.compaction_seed) {
+      inspectorFact(
+        box,
+        "Compact seed",
+        (compiled.compaction_seed.selected ? "selected" : "not selected") +
+          " · " + inspectorNumber(compiled.compaction_seed.observations) +
+          " evidence items · " +
+          inspectorNumber(compiled.compaction_seed.semantic_boundaries) +
+          " semantic boundaries",
+      );
+    }
   }
   // 实时信息控制只展示 durable activity 派生事实；KEEP 表示当前没有继续取信息，不伪造“增益分数”。
   const info = turn?.information_control;

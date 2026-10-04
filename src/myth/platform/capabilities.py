@@ -125,6 +125,12 @@ def default_capabilities() -> CapabilityRegistry:
             "read",
         ),
         (
+            "observation.read",
+            "evidence",
+            "Recall an exact paginated field from a prior durable tool observation.",
+            "read",
+        ),
+        (
             "artifact.write",
             "file",
             "Write a managed output artifact without overwriting source files.",

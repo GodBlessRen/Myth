@@ -359,6 +359,61 @@ class WorkspaceTests(unittest.TestCase):
             self.runtime.objects.get(self.repo.artifacts(sid)[0]["digest"]),
             b"\xef\xbb\xbfbar\r\n",
         )
+        operation = self.repo.operations(rid)[0]
+        fused = operation["result"]["fused_successor"]
+        self.assertEqual(fused["kind"], "deterministic_diff")
+        self.assertEqual(fused["status"], "SUCCEEDED")
+        self.assertFalse(fused["semantic_verification"])
+        self.assertIn("-\ufefffoo", fused["diff"])
+        self.assertIn("+\ufeffbar", fused["diff"])
+
+    # 回归断言：Observation Recall 只读取当前 Run 的已结算原结果，并返回精确分页和固定 source digest。
+    def test_observation_read_recalls_settled_tool_text_without_reexecution(self):
+        (self.root / "a.txt").write_text("base", encoding="utf-8")
+        p = self.repo.create_project({"name": "work", "root": str(self.root)})
+        rid = self.turn(self.session(p["id"]))
+        provider = ChatProvider()
+
+        # 第二次模型决定从已持久化第一条 Operation 取得稳定 decision id；不靠测试伪造 Tool owner。
+        def invoke(request):
+            provider.calls.append(request)
+            if len(provider.calls) == 1:
+                text = decision("tool_call", "git.diff", {})
+            elif len(provider.calls) == 2:
+                source_id = self.repo.operations(rid)[0]["decision_id"]
+                text = decision(
+                    "tool_call",
+                    "observation.read",
+                    {
+                        "decision_id": source_id,
+                        "field": "output",
+                        "offset": 3,
+                        "max_chars": 4,
+                    },
+                )
+            else:
+                text = decision()
+            return ModelResult(
+                text,
+                {"model_calls": 1, "input_tokens": 20, "output_tokens": 30},
+                {"text": "fixture"},
+            )
+
+        provider.invoke = invoke
+        with patch.object(
+            self.workspace.execution,
+            "_git",
+            return_value={"output": "0123456789", "truncated": False},
+        ) as git_call:
+            self.workspace.run(rid, provider)
+        operations = self.repo.operations(rid)
+        self.assertEqual(len(operations), 2)
+        value = operations[1]["result"]
+        self.assertEqual(value["content"], "3456")
+        self.assertTrue(value["has_more"])
+        self.assertEqual(value["projection"], "exact-recall")
+        self.assertTrue(value["source_ref"].startswith("observation:"))
+        git_call.assert_called_once()
 
     # 回归断言：模型结果不明时继续操作先核对，不能新增供应商调用。
     def test_model_unknown_continue_never_calls_again(self):

@@ -29,6 +29,7 @@ Long-term Goal
 - Ollama，本地上下文窗口与 `num_ctx` 对齐；
 - Knowledge / Memory 检索与 provenance；
 - 增量 Context Anchor + recent verbatim tail；长会话压缩不删除 durable history；
+- State / Context 分离：旧 Tool Observation 可折叠但通过 `observation.read` 精确回读；Compact 使用 durable evidence seed，不把表示变化冒充任务进度；
 - Progressive Tool Disclosure：常用工具默认可见，专门能力通过 tool.search / tool.describe 渐进披露；
 - Structured Failure Observation + Verify-on-Stop；已知失败可机器恢复，模型 completion 不能覆盖 remaining/失败 verifier；
 - project.read / search、diff.preview、git.status / diff；
@@ -37,7 +38,7 @@ Long-term Goal
 - durable Execution Cursor + Driver Lease / Heartbeat，页面或 Driver 中断后可从 checkpoint 恢复；
 - [断网恢复](docs/NETWORK_RECOVERY.md)：保存同一 Run，按 1、2、4、8、16、32、60 秒重连，之后每分钟一次；已派发而结果不明的调用先核对；
 - [会话统计](docs/SESSION_STATISTICS.md)：模型/工具累计用时、平均 TTFT 和端到端 TPS，刷新/重启复用实测计量；
-- 固定 EvalSuite、Eval Ledger、Policy Candidate / Promote / Rollback；
+- 固定 EvalSuite、Eval Ledger、Policy Candidate / Promote / Rollback；效率候选先守 capability floor，再做 paired/Pareto 成本比较与 held-out 验证；
 - 三栏工作台，第三栏常驻 Runtime Observatory。
 
 当前**没有**任意 shell、通用代码执行、操作系统常驻服务、多用户权限或分布式 worker。

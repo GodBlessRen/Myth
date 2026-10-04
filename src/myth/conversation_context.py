@@ -6,8 +6,9 @@ from __future__ import annotations
 import json
 
 from .acceptance import ContextBudgetError
-from .domain import canonical_json
+from .domain import canonical_json, sha256_bytes
 from .models import ModelMessage
+from .platform.efficiency import OptimizationOutcome, optimization_event, semantic_boundary
 from .platform.context import ContextCompiler, ContextItem
 from .platform.context_anchor import render_context_anchor
 
@@ -35,7 +36,7 @@ def _fold_activity(activity):
     """折叠旧工具展示内容并保留身份/摘要/错误；完整结果仍在持久对象里。"""
     result = dict(activity.get("result") or {})
     folded = []
-    for key in ("content", "output", "diff"):
+    for key in ("content", "output", "diff", "stdout", "stderr", "summary"):
         if isinstance(result.get(key), str) and len(result[key]) > 200:
             result[key] = result[key][:200] + "\n[older preview folded]"
             folded.append(key)
@@ -52,7 +53,75 @@ def _fold_activity(activity):
             folded.append(key)
     if folded:
         result["context_folded_fields"] = folded
+        decision_id = activity.get("decision_id")
+        if decision_id:
+            result["observation_recall"] = {
+                "decision_id": decision_id,
+                "fields": [key for key in folded if key in {"content", "output", "diff", "stdout", "stderr", "summary"}],
+                "capability": "observation.read",
+            }
     return {**activity, "result": result}, bool(folded)
+
+
+# 从 durable Goal/Tool/Artifact/Verification 事实构造 Compact 导航种子；只保留身份与状态，不让摘要制造新领域事件。
+def _grounded_compaction_seed(snapshot, activities):
+    goal = snapshot.get("goal") or {}
+    work = goal.get("work") or {}
+    observations = []
+    boundaries = []
+    for activity in activities:
+        result = activity.get("result") if isinstance(activity.get("result"), dict) else {}
+        decision = activity.get("decision") if isinstance(activity.get("decision"), dict) else {}
+        capability = activity.get("capability") or decision.get("capability_id")
+        item = {
+            "step": activity.get("step"),
+            "decision_id": activity.get("decision_id"),
+            "capability": capability,
+        }
+        if result.get("evidence_ref"):
+            item["evidence_ref"] = result["evidence_ref"]
+        if isinstance(result.get("artifact"), dict):
+            artifact = result["artifact"]
+            item["artifact"] = {
+                "name": artifact.get("name"),
+                "digest": artifact.get("digest"),
+                "bytes": artifact.get("bytes"),
+            }
+        if capability == "test.run" or result.get("status") in {"PASSED", "FAILED"}:
+            item["verification"] = {
+                "status": result.get("status"),
+                "profile_id": result.get("profile_id"),
+                "evidence_ref": result.get("evidence_ref"),
+            }
+        fused = result.get("fused_successor")
+        if isinstance(fused, dict):
+            item["fused_successor"] = {
+                "kind": fused.get("kind"),
+                "status": fused.get("status"),
+                "candidate_digest": fused.get("candidate_digest"),
+                "semantic_verification": bool(fused.get("semantic_verification")),
+            }
+        boundary = semantic_boundary(activity)
+        if boundary:
+            item["semantic_boundary"] = boundary
+            boundaries.append({"step": activity.get("step"), "kind": boundary})
+        if len(item) > 3:
+            observations.append(item)
+    return {
+        "source": "durable-facts",
+        "goal": {
+            "goal_id": goal.get("goal_id"),
+            "title": goal.get("title"),
+            "current_state": work.get("current_state"),
+            "progress_note": work.get("progress_note"),
+            "next_action": work.get("next_action"),
+            "waiting_for": work.get("waiting_for"),
+            "revision": work.get("revision"),
+        },
+        "observations": observations[-12:],
+        "semantic_boundaries": boundaries[-12:],
+        "invariant": "representation transition does not imply task progress or verification",
+    }
 
 
 # 按优先级投影 Goal/任务/指令/工具/知识/记忆/历史，保留 selected/folded/dropped 报告；必需内容过大提前失败。
@@ -191,6 +260,18 @@ def compile_conversation_context(
             # Anchor 是派生导航；极小窗口可丢弃它，不能挤掉本轮任务/固定约束。
             required=False,
         )
+    compaction_seed = None
+    compaction_seed_text = None
+    if compact:
+        compaction_seed = _grounded_compaction_seed(snapshot, activities)
+        compaction_seed_text = canonical_json(compaction_seed)
+        add(
+            "compaction-seed",
+            "user",
+            "Compact grounded seed（仅来自持久事实；不是新的完成声明）：\n" + compaction_seed_text,
+            priority=24_000,
+            required=False,
+        )
     pinned = snapshot.get("attached_document_ids")
     for index, source in enumerate(snapshot.get("knowledge", [])):
         citation = source["citation"]
@@ -274,7 +355,7 @@ def compile_conversation_context(
         "memory": sum(1 for ref in selected_order if ref.startswith("memory:")),
     }
     report = {
-        "policy": "conversation-budget-v2",
+        "policy": "conversation-budget-v3",
         "degradation_policy": "required-first, then deterministic priority; optional items drop whole rather than substring-cut",
         "bytes_used": frame.bytes_used,
         "max_bytes": frame.max_bytes,
@@ -284,6 +365,26 @@ def compile_conversation_context(
         "delivered": delivered_counts,
         "memory_retrieval_report": snapshot.get("memory_retrieval_report") or {},
         "folded": [ref for ref in folded if ref in selected],
+        "projection": {
+            "source_of_truth": "durable-state",
+            "provider_visible_only": True,
+            "recall_capability": "observation.read",
+            "fold_reason_code": "older_observation_preview" if folded else None,
+        },
+        "optimizations": (
+            ([optimization_event(
+                mechanism_id="observation_projection",
+                outcome=OptimizationOutcome.APPLIED,
+                reason_code="older_observation_preview",
+                metrics={"folded_items": len([ref for ref in folded if ref in selected])},
+            )] if folded else [])
+            + ([optimization_event(
+                mechanism_id="context_compaction",
+                outcome=OptimizationOutcome.APPLIED,
+                reason_code="explicit_user_control",
+                metrics={"grounded_seed_selected": int("compaction-seed" in selected)},
+            )] if compact else [])
+        ),
         "compact_requested": compact,
         "control_revision": control.get("revision"),
         "intent_route": intent_pick.get("route"),
@@ -291,6 +392,17 @@ def compile_conversation_context(
         "retrieval_report": snapshot.get("retrieval_report") or {},
         "goal_id": goal.get("goal_id"),
         "goal_revision": (goal.get("work") or {}).get("revision"),
+        "compaction_seed": (
+            {
+                "digest": sha256_bytes(compaction_seed_text.encode("utf-8")),
+                "observations": len(compaction_seed.get("observations") or []),
+                "semantic_boundaries": len(compaction_seed.get("semantic_boundaries") or []),
+                "selected": "compaction-seed" in selected,
+                "source": "durable-facts",
+            }
+            if compaction_seed_text is not None
+            else None
+        ),
         "context_anchor": (
             {
                 "version": anchor.get("version"),

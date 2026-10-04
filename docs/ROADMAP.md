@@ -33,6 +33,19 @@ Long-term Goal
 
 候选包括更好的原文分页、Artifact verification、Memory conflict/supersede、项目观察与检索对照。只有固定任务或连续自用证明需要时才增加能力；先解决已经发生的问题，不先造更多 Layer。
 
+## Next 3.5 — Harness efficiency 实测
+
+现有骨架已接入 Observation exact recall、grounded Compact seed、deterministic successor fusion、Evidence Receipt verifier、optimization economics/reachability 与 capability-floor eval 合同。下一步不是继续堆机制，而是用真实长轨迹回答：
+
+- provider-visible projection 实际减少多少 input token；
+- exact recall 增加了多少额外 Tool round-trip；
+- Compact 的 upfront/cache debt 在多少请求后回本；
+- fused successor 是否真实减少 model calls，而不降低 Verification；
+- 哪些任务出现 outcome flip，具体机制是否真的触发；
+- 同一候选在 held-out final suite 是否仍保持 capability floor。
+
+只有这些证据成立，才把实验参数从 policy candidate 提升为默认策略。
+
 ## Next 4 — 连续自用与计划故障注入
 
 连续自用 2–4 周，验证跨日 Goal 延续、模型断连、服务重启、长时间暂停、重复计划到期、核对后的继续。当前自动测试与小任务基线不能证明多周可靠性。
@@ -52,6 +65,21 @@ Workflow、Routing/Parallel、Multi-Agent、MCP/A2A 和更复杂 Evolution 暂�
 - 桌面第三栏常驻；窄屏仍有完整 Runtime 观测入口。
 - 旧 Turn/Receipt/Artifact 不被未来策略倒写。
 - Core 不感知模型厂商、MCP/A2A 等协议名。
+
+## 长期研究 — Harness pretraining / recursive efficiency
+
+当真实长轨迹、Disposable Experiment、固定 capability floor 与 held-out final eval 都形成稳定证据后，可以研究 Harness 自身的数据飞轮：
+
+```text
+durable observable trajectories
+  -> repeated waste / failure hypotheses
+  -> broad disposable experiments
+  -> fixed capability + efficiency validation
+  -> explicitly released harness improvement
+  -> lower experiment cost / more evidence
+```
+
+这里的“数据”是 Ticket / Receipt / Artifact / Verification / provider-visible Context / Action Path 等可观察事实，不是隐藏 Chain-of-Thought。任何递归效率提升都仍经过人工可审计的候选、固定评测和显式发布；在真实长期实验成立前，不宣称 Myth 已具备自动 RSI 或稳定 scaling law。
 
 ## 长期方向
 

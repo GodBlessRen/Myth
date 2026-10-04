@@ -62,6 +62,37 @@ Goal work state包含：
 
 下一 Session 继续同一 Goal 时，新的 Turn 读取当前 Goal work state 并**冻结副本**。后续 Goal 更新不会倒写历史 Turn。
 
+## 3.1 Harness efficiency inside the existing Runtime
+
+Efficiency 不新增一条平行 Runtime。它落在已有 Context / Execution / Evidence / Evaluation / Evolution seam：
+
+```text
+Durable State
+  -> Context Projection
+     -> fold old Observation + exact observation.read recall
+     -> optional grounded Compact seed
+  -> Model
+  -> Action / Attempt
+     -> deterministic successor fusion when no new semantic decision is needed
+  -> Receipt / Artifact / Verification
+     -> evidence-bound transformation verifier
+  -> Evaluation
+     -> capability floor + paired efficiency + attribution matrix
+  -> Evolution
+     -> disposable Discover / Harden experiments
+```
+
+当前连接点：
+
+- conversation_context.py：State 与 provider-visible Context 分离；fold 产生 stable recall handle；Compact seed 只来自 durable Goal / Artifact / Verification / Evidence facts。
+- observation.read：按 decision id + field 精确分页回读已结算 Tool Observation，不重跑 Tool。
+- project.patch_exact：生成候选 Artifact 后融合 deterministic diff；mutation 与 fused successor 分开结算，source digest 改变时 successor 显式 SKIPPED。
+- platform/evidence.py：source digest + exact quote 的 Evidence Receipt verifier；失败时调用方保留原始来源。
+- platform/efficiency.py：provider-visible saving、upfront cost、outstanding debt、remaining horizon、cooldown、reachability、bounded recovery 的纯策略合同。
+- platform/evaluation.py：capability floor 先于效率比较；提供 task×policy flip 投影和 held-out identity boundary。
+- platform/evolution.py：Discover 用广度找候选，Harden 只深化已有 lineage；研究 workspace 明确 disposable。
+- Sub-Agent：只共享显式 evidence refs / bounded context，不继承完整父聊天历史。
+
 ## 4. Authority boundary
 
 模型、Memory、Goal、Context 都是数据。

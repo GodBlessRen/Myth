@@ -7,6 +7,7 @@ from dataclasses import asdict
 import json
 import os
 import re
+import stat
 from pathlib import Path
 import tempfile
 import time
@@ -60,6 +61,17 @@ def _read_bytes_stable(path: Path, attempts: int = 8) -> bytes:
     raise last_error  # type: ignore[misc]
 
 
+
+# 内容寻址对象必须是真正的普通文件；摘要一致也不能接受 symlink / 非普通文件替身。
+def _read_object_bytes(path: Path) -> bytes:
+    try:
+        mode = path.lstat().st_mode
+    except FileNotFoundError:
+        raise
+    if stat.S_ISLNK(mode) or not stat.S_ISREG(mode):
+        raise IOError(f"object path is not a regular file: {path}")
+    return _read_bytes_stable(path)
+
 # 内容寻址的不可变字节库；读取和发布均核验 SHA-256，损坏必须显式失败。
 class ObjectStore:
     # 建立按摘要寻址的对象根；写入/读取时都核对字节身份，目录不等于数据库事务。
@@ -78,8 +90,8 @@ class ObjectStore:
     def put(self, data: bytes) -> str:
         digest = sha256_bytes(data)
         path = self._path(digest)
-        if path.exists():
-            if sha256_bytes(_read_bytes_stable(path)) != digest:
+        if path.exists() or path.is_symlink():
+            if sha256_bytes(_read_object_bytes(path)) != digest:
                 raise IOError(f"object corruption at {path}")
             return digest
         try:
@@ -87,16 +99,20 @@ class ObjectStore:
         except (FileExistsError, PermissionError):
             # Windows 可能因另一个发布者正在读取同摘要对象而拒绝 replace。
             # 仅当目标已有完全相同字节才复用确定事实；路径不存在或内容冲突仍是失败，不盲重试。
-            if not path.is_file() or _read_bytes_stable(path) != data:
+            try:
+                existing = _read_object_bytes(path)
+            except (FileNotFoundError, IOError):
                 raise
-        if sha256_bytes(_read_bytes_stable(path)) != digest:
+            if existing != data:
+                raise
+        if sha256_bytes(_read_object_bytes(path)) != digest:
             raise IOError(f"object failed post-publish digest check: {digest}")
         return digest
 
     # 读取对象并重新核对摘要，避免把损坏字节当作验收或恢复证据。
     def get(self, digest: str) -> bytes:
         path = self._path(digest)
-        data = _read_bytes_stable(path)
+        data = _read_object_bytes(path)
         if sha256_bytes(data) != digest:
             raise IOError(f"object digest mismatch: {digest}")
         return data

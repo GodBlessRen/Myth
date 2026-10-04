@@ -13,6 +13,7 @@ from .conversation_context import (
     conversation_budget_bytes,
 )
 from .platform.tool_discovery import visible_tool_ids
+from .platform.efficiency import assess_reachability
 
 
 # 构造统一工具参数 schema；目录描述参数形状，不替代实际参数/范围校验。
@@ -79,6 +80,15 @@ _TOOL_ARGUMENTS = {
             "max_chars": {"type": "integer", "minimum": 1, "maximum": 12000},
         },
         ["path"],
+    ),
+    "observation.read": object_schema(
+        {
+            "decision_id": {"type": "string", "minLength": 1, "maxLength": 200},
+            "field": {"type": "string", "enum": ["content", "output", "diff", "stdout", "stderr", "summary"]},
+            "offset": {"type": "integer", "minimum": 0},
+            "max_chars": {"type": "integer", "minimum": 1, "maximum": 12000},
+        },
+        ["decision_id", "field"],
     ),
     "project.search": object_schema(
         {
@@ -227,6 +237,12 @@ TOOL_CATALOG = {
         "path": "relative file",
         "offset": "character offset",
         "max_chars": "100-12000 characters; default 6000",
+    },
+    "observation.read": {
+        "decision_id": "decision id from a prior durable tool observation",
+        "field": "content/output/diff/stdout/stderr/summary",
+        "offset": "character offset",
+        "max_chars": "1-12000 characters; default 6000",
     },
     "project.search": {
         "query": "text to find",
@@ -411,6 +427,26 @@ def conversation_request(settings, snapshot, messages, activities, control=None)
     )
     report["visible_tools"] = list(visible_ids)
     report["deferred_tools"] = deferred_ids
+    report["mechanism_reachability"] = [
+        assess_reachability(
+            "action_fusion",
+            enabled=True,
+            available="project.patch_exact" in TOOL_CATALOG,
+            exposed="project.patch_exact" in visible_catalog,
+        ).as_dict(),
+        assess_reachability(
+            "observation_recall",
+            enabled=True,
+            available="observation.read" in TOOL_CATALOG,
+            exposed="observation.read" in visible_catalog,
+        ).as_dict(),
+        assess_reachability(
+            "context_compaction",
+            enabled=True,
+            available=True,
+            exposed=True,
+        ).as_dict(),
+    ]
     return ModelRequest(
         settings["model"],
         projected,
