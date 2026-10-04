@@ -462,8 +462,9 @@ def controlled_attribution(
     full_harness_id: str,
 ) -> dict[str, object]:
     values = tuple(observations)
-    variant_map = {item.harness_id: item for item in variants}
-    if len(variant_map) != len(tuple(variants)):
+    variant_values = tuple(variants)
+    variant_map = {item.harness_id: item for item in variant_values}
+    if len(variant_map) != len(variant_values):
         raise ValueError("controlled attribution requires unique harness ids")
     if baseline_harness_id not in variant_map or full_harness_id not in variant_map:
         raise ValueError("baseline/full harness variants are required")
