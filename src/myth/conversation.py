@@ -13,6 +13,7 @@ from .conversation_context import (
     conversation_budget_bytes,
 )
 from .platform.tool_discovery import visible_tool_ids
+from .platform.efficiency import assess_reachability
 
 
 # 构造统一工具参数 schema；目录描述参数形状，不替代实际参数/范围校验。
@@ -426,6 +427,26 @@ def conversation_request(settings, snapshot, messages, activities, control=None)
     )
     report["visible_tools"] = list(visible_ids)
     report["deferred_tools"] = deferred_ids
+    report["mechanism_reachability"] = [
+        assess_reachability(
+            "action_fusion",
+            enabled=True,
+            available="project.patch_exact" in TOOL_CATALOG,
+            exposed="project.patch_exact" in visible_catalog,
+        ).as_dict(),
+        assess_reachability(
+            "observation_recall",
+            enabled=True,
+            available="observation.read" in TOOL_CATALOG,
+            exposed="observation.read" in visible_catalog,
+        ).as_dict(),
+        assess_reachability(
+            "context_compaction",
+            enabled=True,
+            available=True,
+            exposed=True,
+        ).as_dict(),
+    ]
     return ModelRequest(
         settings["model"],
         projected,
