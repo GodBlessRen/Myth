@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from .base import ModelProvider
+from .deepseek import DeepSeekApiKeyProvider
 from .ollama import OllamaProvider
 from .openai import ChatGPTPlanProvider, OpenAIApiKeyProvider
 from .scripted import ScriptedPatchProvider
@@ -27,6 +28,8 @@ def create_provider(
         )
     if name == "openai":
         return OpenAIApiKeyProvider()
+    if name == "deepseek":
+        return DeepSeekApiKeyProvider()
     raise ValueError(f"unknown provider: {name}")
 
 
@@ -34,6 +37,7 @@ def create_provider(
 __all__ = [
     "ModelProvider",
     "OllamaProvider",
+    "DeepSeekApiKeyProvider",
     "OpenAIApiKeyProvider",
     "ChatGPTPlanProvider",
     "create_provider",

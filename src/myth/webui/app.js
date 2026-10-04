@@ -88,6 +88,7 @@ document
 // 奶油白 / 星空黑仅改变浏览器投影；主题选择保存在本机，不进入 Runtime 或会话事实。
 const THEME_STORAGE_KEY = "myth-theme";
 const themeMedia = window.matchMedia("(prefers-color-scheme: dark)");
+// 读取本机已保存的显式主题；读取失败返回空值并由系统偏好决定，不影响任何 Runtime 状态。
 function storedTheme() {
   try {
     const value = localStorage.getItem(THEME_STORAGE_KEY);
@@ -96,6 +97,7 @@ function storedTheme() {
     return null;
   }
 }
+// 应用纯展示主题并可选持久到 localStorage；不把 UI 外观写入会话、Run 或业务设置。
 function applyTheme(theme, persist = false) {
   const next = theme === "dark" ? "dark" : "light";
   document.documentElement.dataset.theme = next;
@@ -390,7 +392,9 @@ function renderConnection() {
       ? "连接 Ollama"
       : provider === "chatgpt"
         ? "连接 ChatGPT"
-        : "连接模型");
+        : provider === "deepseek"
+          ? "连接 DeepSeek"
+          : "连接模型");
   show("welcomeConnection", !state.data.settings.model || (c && !c.ready));
   if (c) {
     const fallback =
@@ -398,7 +402,9 @@ function renderConnection() {
         ? "未连接，请确认 Ollama 正在运行。"
         : provider === "chatgpt"
           ? "ChatGPT 尚未完成授权或当前计划不可用。"
-          : "模型提供方尚未就绪。";
+          : provider === "deepseek"
+            ? "DeepSeek 尚未就绪，请确认 DEEPSEEK_API_KEY 已设置。"
+            : "模型提供方尚未就绪。";
     $("connectionResult").textContent = c.ready
       ? `已连接 · ${c.details.models?.length || 0} 个可用模型`
       : c.details.error || c.details.reason || fallback;

@@ -32,7 +32,7 @@ def _sse_events(response, *, deadline=None):
     while True:
         raw_line = response.readline(2 * 1024 * 1024 + 1)
         if deadline is not None and time.monotonic() > deadline:
-            raise RuntimeError("OpenAI Responses stream exceeded its deadline")
+            raise RuntimeError("Responses stream exceeded its deadline")
         if not raw_line:
             if fields:
                 yield "\n".join(fields), frame_size
@@ -40,7 +40,7 @@ def _sse_events(response, *, deadline=None):
         frame_size += len(raw_line)
         total_size += len(raw_line)
         if frame_size > 2 * 1024 * 1024 or total_size > MAX_RESPONSE_BYTES:
-            raise RuntimeError("OpenAI Responses stream exceeds the byte limit")
+            raise RuntimeError("Responses stream exceeds the byte limit")
         line = raw_line.decode("utf-8").rstrip("\r\n")
         if not line:
             if fields:
@@ -159,6 +159,7 @@ class OpenAIResponsesProvider:
         chatgpt_plan: bool = False,
         auth_type: str = "api_key",
         status_check: Callable[[], ProviderStatus] | None = None,
+        provider_name: str = "OpenAI",
     ) -> None:
         # provider_id：供应商合同身份；必须匹配 Run/Turn 的固定设置。
         self.provider_id = provider_id
@@ -180,6 +181,22 @@ class OpenAIResponsesProvider:
         self.auth_type = auth_type
         # _status_check：供应商可公开连接状态函数；不执行业务模型请求。
         self._status_check = status_check
+        # provider_name：仅用于公开错误文本；不能承载模型身份、权限或凭据。
+        self.provider_name = provider_name
+
+    # 将统一消息角色投影到供应商 wire；OpenAI 用 developer 承载系统约束，子类可保持 system。
+    def _message_role(self, role: str) -> str:
+        return "developer" if role == "system" else role
+
+    # 生成供应商推理参数；公开 summary 是可观察摘要，不是隐藏 Chain-of-Thought。
+    def _reasoning_options(self, model_request: ModelRequest) -> dict | None:
+        if _wants_reasoning_summary(model_request):
+            return {"summary": "auto"}
+        return None
+
+    # 注入供应商专属但非秘钥的请求参数；默认保持现有 OpenAI Responses 合同。
+    def _extra_payload(self, model_request: ModelRequest) -> dict:
+        return {}
 
     # 观察供应商认证/服务是否可用；返回状态而不签发模型 Ticket。
     def check(self) -> ProviderStatus:
@@ -192,7 +209,7 @@ class OpenAIResponsesProvider:
                 self.provider_id,
                 False,
                 auth_type=self.auth_type,
-                details={"error": "OpenAI credential is unavailable"},
+                details={"error": f"{self.provider_name} credential is unavailable"},
             )
         return ProviderStatus(
             self.provider_id, bool(token), auth_type=self.auth_type, details={}
@@ -207,14 +224,14 @@ class OpenAIResponsesProvider:
                 raise RuntimeError("missing credential")
         except Exception:
             # 本地认证拒绝发生在推理请求派发前；无需 UNKNOWN，也不能泄露底层异常。
-            raise ProviderKnownFailure("OpenAI credential is unavailable", usage={
+            raise ProviderKnownFailure(f"{self.provider_name} credential is unavailable", usage={
                 "model_calls": 0, "input_tokens": 0, "output_tokens": 0,
             }, raw={"status": "credential_unavailable"}) from None
         payload: dict = {
             "model": model_request.model,
             "input": [
                 {
-                    "role": "developer" if message.role == "system" else message.role,
+                    "role": self._message_role(message.role),
                     "content": message.content,
                 }
                 for message in model_request.messages
@@ -231,11 +248,14 @@ class OpenAIResponsesProvider:
         }
         # 两条路径都按流消费；决定只有 terminal completion 后才能交 Runtime。
         payload["stream"] = True
-        # Reasoning Summary 是供应商公开摘要；不是原始思维链。支持时主动请求 auto 级摘要供 SOTA Route 分析。
-        if _wants_reasoning_summary(model_request):
-            payload["reasoning"] = {"summary": "auto"}
+        # 推理参数由具体供应商映射；不得把某厂商默认值误当成统一 thinking 语义。
+        reasoning = self._reasoning_options(model_request)
+        if reasoning is not None:
+            payload["reasoning"] = reasoning
         if not self.chatgpt_plan:
             payload["max_output_tokens"] = max(model_request.max_output_tokens, 16)
+        # 额外参数必须来自非秘钥固定配置；认证材料仍只存在于请求头。
+        payload.update(self._extra_payload(model_request))
 
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         req = request.Request(
@@ -258,7 +278,9 @@ class OpenAIResponsesProvider:
                 # 明确 JSON 响应兼容固定测试/网关；OAuth 仍强制流式完成合同。
                 content_type = getattr(response, "headers", {}).get("Content-Type", "")
                 if self.chatgpt_plan or "text/event-stream" in content_type:
-                    value, streamed_text, first_token_ms = self._read_stream(response, started, self.timeout)
+                    value, streamed_text, first_token_ms = self._read_stream(
+                        response, started, self.timeout, self.provider_name
+                    )
                 else:
                     raw = read_bounded(response)
                     value = json.loads(raw.decode("utf-8"))
@@ -276,7 +298,7 @@ class OpenAIResponsesProvider:
                         detail = public_error_code(error_value.get("code"), detail)
             except Exception:
                 pass
-            message = f"OpenAI Responses request failed ({exc.code}): {detail}"
+            message = f"{self.provider_name} Responses request failed ({exc.code}): {detail}"
             if exc.code in {400, 401, 403, 404, 422, 429}:
                 raise ProviderKnownFailure(message, usage={"model_calls": 1}, raw={
                     "http_status": exc.code, "error": {"code": detail},
@@ -287,16 +309,16 @@ class OpenAIResponsesProvider:
             if not response_started and is_pre_dispatch_disconnect(exc.reason):
                 raise ProviderUnavailable() from None
             raise RuntimeError(
-                "OpenAI Responses request failed before completion"
+                f"{self.provider_name} Responses request failed before completion"
             ) from None
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise RuntimeError("OpenAI Responses returned malformed data") from None
+            raise RuntimeError(f"{self.provider_name} Responses returned malformed data") from None
 
         if not isinstance(value, dict):
-            raise RuntimeError("OpenAI response must be a JSON object")
+            raise RuntimeError(f"{self.provider_name} response must be a JSON object")
         if value.get("status") not in {None, "completed"}:
             raise RuntimeError(
-                "OpenAI response ended without successful completion"
+                f"{self.provider_name} response ended without successful completion"
             )
         try:
             output_text = _extract_output_text(value)
@@ -324,7 +346,7 @@ class OpenAIResponsesProvider:
 
     # 逐 SSE data 消费文本增量，只有 response.completed 才返回；失败/中断不能伪造完整响应。
     @staticmethod
-    def _read_stream(response, started=None, timeout=180.0):
+    def _read_stream(response, started=None, timeout=180.0, provider_name="OpenAI"):
         completed = None
         text_chunks = []
         first_token_ms = None
@@ -333,10 +355,10 @@ class OpenAIResponsesProvider:
         # 每事件/整次流都有字节上限；只保留数据字段，不信任服务端自定义错误描述。
         for data, size in _sse_events(response, deadline=started + timeout):
             if time.monotonic() - started > timeout:
-                raise RuntimeError("OpenAI Responses stream exceeded its deadline")
+                raise RuntimeError(f"{provider_name} Responses stream exceeded its deadline")
             total_bytes += size
             if total_bytes > MAX_RESPONSE_BYTES:
-                raise RuntimeError("OpenAI Responses stream exceeds the byte limit")
+                raise RuntimeError(f"{provider_name} Responses stream exceeds the byte limit")
             if not data or data == "[DONE]":
                 continue
             event_value = json.loads(data)
@@ -366,13 +388,13 @@ class OpenAIResponsesProvider:
                     else {}
                 )
                 code = public_error_code(error_value.get("code"), event_type)
-                raise ProviderKnownFailure(f"OpenAI Responses stream failed: {code}",
+                raise ProviderKnownFailure(f"{provider_name} Responses stream failed: {code}",
                     usage=_usage(response_value), raw={"status": event_type, "error": {"code": code}})
             elif event_type == "error":
-                raise RuntimeError("OpenAI Responses stream reported an error")
+                raise RuntimeError(f"{provider_name} Responses stream reported an error")
         if completed is None:
             raise RuntimeError(
-                "OpenAI Responses stream ended without response.completed"
+                f"{provider_name} Responses stream ended without response.completed"
             )
         return completed, "".join(text_chunks), first_token_ms
 

@@ -14,6 +14,7 @@ from myth.models import (
     ModelRequest,
     STEP_DECISION_SCHEMA,
 )
+from myth.providers.deepseek import DeepSeekApiKeyProvider
 from myth.providers.ollama import OllamaProvider
 from myth.providers.openai import OpenAIResponsesProvider
 
@@ -41,6 +42,8 @@ class FakeResponse:
 class FakeStreamResponse:
     # 保存可控测试条件；这些字段属于替身，不模拟远端真实保证。
     def __init__(self, events):
+        # headers：声明与真实 Responses 流一致的媒体类型，确保传输实现走 SSE 解析分支。
+        self.headers = {"Content-Type": "text/event-stream"}
         self.lines = [
             ("data: " + json.dumps(event) + "\n\n").encode() for event in events
         ]
@@ -279,3 +282,104 @@ class OpenAIProviderTests(unittest.TestCase):
         with patch("myth.providers.openai.open_credential_request", side_effect=fake_urlopen):
             provider.invoke(request_obj())
         self.assertEqual(captured["body"]["max_output_tokens"], 128)
+
+
+
+# DeepSeek Responses 适配器回归；固定 wire 夹具证明角色/thinking/usage/脱敏边界，不等同真实远端可用性。
+class DeepSeekProviderTests(unittest.TestCase):
+    # 缺失 key 属派发前已知未就绪；公开模型目录仍可供 UI 选择，不泄露任何凭据。
+    def test_check_reports_env_key_and_public_models(self) -> None:
+        with patch.dict("os.environ", {}, clear=True):
+            status = DeepSeekApiKeyProvider().check()
+        self.assertFalse(status.ready)
+        self.assertEqual(status.provider_id, "deepseek")
+        self.assertEqual(status.auth_type, "api_key")
+        self.assertEqual(status.details["models"], ["deepseek-flash", "deepseek-v4-pro"])
+        self.assertIn("DEEPSEEK_API_KEY", status.details["error"])
+
+        with patch.dict("os.environ", {"DEEPSEEK_API_KEY": "ds-secret"}, clear=True):
+            ready = DeepSeekApiKeyProvider().check()
+        self.assertTrue(ready.ready)
+        self.assertEqual(ready.details["endpoint"], "https://api.deepseek.com")
+
+    # DeepSeek 的 developer 会退化为 user，因此 system 必须原样发送；thinking 显式映射到 reasoning.effort。
+    def test_request_preserves_system_role_and_maps_thinking(self) -> None:
+        captured = {}
+        completed = {
+            "id": "resp_ds",
+            "status": "completed",
+            "output": [
+                {
+                    "type": "reasoning",
+                    "id": "rs_ds",
+                    "status": "completed",
+                    "content": [
+                        {"type": "reasoning_text", "text": "private reasoning body"}
+                    ],
+                    "summary": [],
+                },
+                {
+                    "type": "message",
+                    "content": [{"type": "output_text", "text": "{}"}],
+                },
+            ],
+            "usage": {
+                "input_tokens": 21,
+                "input_tokens_details": {"cached_tokens": 8},
+                "output_tokens": 13,
+                "output_tokens_details": {"reasoning_tokens": 9},
+            },
+        }
+
+        # 固定 DeepSeek HTTP/SSE 替身只捕获 wire 请求并返回终结事件；不代表真实远端连通或模型质量。
+        def fake_urlopen(req, timeout):
+            captured["url"] = req.full_url
+            captured["auth"] = req.headers.get("Authorization") or req.headers.get(
+                "authorization"
+            )
+            captured["body"] = json.loads(req.data)
+            return FakeStreamResponse(
+                [{"type": "response.completed", "response": completed}]
+            )
+
+        request = ModelRequest(
+            model="deepseek-v4-pro",
+            messages=(
+                ModelMessage("system", "system"),
+                ModelMessage("user", "goal"),
+            ),
+            response_schema=STEP_DECISION_SCHEMA,
+            max_output_tokens=256,
+            thinking=True,
+            temperature=0.3,
+        )
+        with (
+            patch.dict("os.environ", {"DEEPSEEK_API_KEY": "ds-secret"}, clear=True),
+            patch(
+                "myth.providers.openai.open_credential_request",
+                side_effect=fake_urlopen,
+            ),
+        ):
+            result = DeepSeekApiKeyProvider().invoke(request)
+
+        self.assertEqual(captured["url"], "https://api.deepseek.com/responses")
+        self.assertEqual(captured["auth"], "Bearer ds-secret")
+        self.assertEqual(captured["body"]["input"][0]["role"], "system")
+        self.assertEqual(captured["body"]["reasoning"], {"effort": "high"})
+        self.assertEqual(captured["body"]["temperature"], 0.3)
+        self.assertEqual(captured["body"]["max_output_tokens"], 256)
+        self.assertEqual(result.usage["cached_input_tokens"], 8)
+        self.assertEqual(result.usage["reasoning_tokens"], 9)
+        self.assertNotIn("private reasoning body", json.dumps(result.raw))
+        self.assertNotIn("ds-secret", json.dumps(result.raw))
+
+    # thinking=False 明确关闭 DeepSeek 默认思考，避免 UI 关闭开关却仍产生 reasoning token。
+    def test_false_thinking_maps_to_none_effort(self) -> None:
+        provider = DeepSeekApiKeyProvider()
+        request = ModelRequest(
+            model="deepseek-flash",
+            messages=(ModelMessage("user", "goal"),),
+            response_schema=STEP_DECISION_SCHEMA,
+            thinking=False,
+        )
+        self.assertEqual(provider._reasoning_options(request), {"effort": "none"})
