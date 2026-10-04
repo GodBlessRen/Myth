@@ -358,6 +358,8 @@ class SqliteMemoryStore:
                 for item in kinds
             }
         try:
+            # 首次启用 Milvus 时补齐已有 active Memory；source revision 让更新项重新 upsert。
+            self.rebuild_vector_index()
             hits = self.vector_index.search_memories(
                 str(query), limit=max(32, int(limit) * 8)
             )
