@@ -14,6 +14,7 @@ from myth.domains.information import (
     IntentPick,
     IntentRoute,
 )
+from myth.strategies import LiveInformationController
 
 
 # 信息粒度、变化、增益和授权语义的固定测试集合/替身；临时资源由本用例拥有，生产状态必须从实际仓储核对。
@@ -85,6 +86,64 @@ class InformationSemanticsTests(unittest.TestCase):
         self.assertEqual(
             registry.get("information_gain").state, StrategyState.CONNECTED
         )
+        self.assertEqual(
+            registry.get("information_control").state, StrategyState.CONNECTED
+        )
+
+    # 回归断言：相同信息请求第二次被拒绝，且没有进程内状态也能从 activity 重建。
+    def test_live_information_control_rejects_exact_repeat_from_durable_activity(self):
+        controller = LiveInformationController()
+        turn = {"max_steps": 6, "activities": []}
+        first = controller.admit(
+            turn, "knowledge.search", {"query": "Myth runtime", "limit": 5}
+        )
+        self.assertTrue(first.admitted)
+        result = {"sources": [], "retrieval": {"exhausted": True}}
+        turn["activities"].append(
+            {
+                "result": {
+                    **result,
+                    "information_control": controller.record_result(first, result),
+                }
+            }
+        )
+        second = controller.admit(
+            turn, "knowledge.search", {"query": "Myth runtime", "limit": 5}
+        )
+        self.assertFalse(second.admitted)
+        self.assertIn("already settled", second.reason)
+
+    # 回归断言：分页必须使用返回 continuation 前进；换一个真实下一页位置才允许 EXPAND。
+    def test_live_information_control_requires_pagination_progress(self):
+        controller = LiveInformationController()
+        turn = {"max_steps": 8, "activities": []}
+        first = controller.admit(
+            turn,
+            "project.read",
+            {"path": "large.py", "offset": 0, "max_chars": 100},
+        )
+        result = {"has_more": True, "next_offset": 100, "content": "x" * 100}
+        turn["activities"].append(
+            {
+                "result": {
+                    **result,
+                    "information_control": controller.record_result(first, result),
+                }
+            }
+        )
+        stalled = controller.admit(
+            turn,
+            "project.read",
+            {"path": "large.py", "offset": 50, "max_chars": 100},
+        )
+        advanced = controller.admit(
+            turn,
+            "project.read",
+            {"path": "large.py", "offset": 100, "max_chars": 100},
+        )
+        self.assertFalse(stalled.admitted)
+        self.assertIn("progress", stalled.reason)
+        self.assertTrue(advanced.admitted)
 
 
 if __name__ == "__main__":
