@@ -176,6 +176,44 @@ class WorkspaceTests(unittest.TestCase):
             turn["activities"][0]["result"]["error"],
         )
 
+    # 回归断言：重复 SEEK 在 Tool Ticket 前被拒绝，不消耗第二次 tool_calls，模型仍可基于已有观察继续回答。
+    def test_live_information_control_rejects_duplicate_seek_before_tool_ticket(self):
+        rid = self.turn(self.session(), "查找资料后回答")
+        provider = ChatProvider(
+            [
+                decision(
+                    "tool_call",
+                    "knowledge.search",
+                    {"query": "SILVER-92", "limit": 5},
+                ),
+                decision(
+                    "tool_call",
+                    "knowledge.search",
+                    {"query": "SILVER-92", "limit": 5},
+                ),
+                decision(claim="已使用现有检索结果继续回答。"),
+            ]
+        )
+        self.workspace.run(rid, provider)
+
+        turn = self.repo.turn(rid)
+        self.assertEqual(turn["status"], "COMPLETED")
+        self.assertEqual(len(provider.calls), 3)
+        self.assertEqual(
+            turn["activities"][0]["result"]["information_control"]["action"],
+            "SEEK",
+        )
+        self.assertIn(
+            "information control denied:",
+            turn["activities"][1]["result"]["error"],
+        )
+        accounts = {row["meter"]: row for row in turn["budgets"]}
+        self.assertEqual(accounts["tool_calls"]["settled"], 1)
+        self.assertEqual(len(self.repo.operations(rid)), 1)
+        summary = self.workspace.execution.information_controller.summary(turn)
+        self.assertEqual(summary["actions"], 1)
+        self.assertEqual(summary["denied"], 1)
+
     # 回归断言：多轮请求包含保存的旧消息；重启后的历史以仓储为准。
     def test_multi_turn_model_receives_prior_messages(self):
         sid = self.session()
