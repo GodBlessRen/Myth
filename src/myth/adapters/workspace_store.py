@@ -652,6 +652,7 @@ class SqliteWorkspaceRepository:
         request_id,
         document_ids=None,
         memory_records=None,
+        memory_retrieval_report=None,
         goal_id=None,
         goal_context=None,
         *,
@@ -863,13 +864,16 @@ class SqliteWorkspaceRepository:
                         "kind": m.get("kind"),
                         "text": m.get("text", ""),
                         "source_ref": m.get("source_ref"),
+                        "provenance_ref": m.get("provenance_ref"),
                         "scope_type": m.get("scope_type", "global"),
                         "scope_id": m.get("scope_id"),
                         "fact_level": m.get("fact_level", "context"),
                         "revision": m.get("revision"),
+                        "resolution": m.get("resolution", "L0"),
                     }
                     for m in memory_records[:8]
                 ],
+                "memory_retrieval_report": dict(memory_retrieval_report or {}),
                 "messages": recent_history
                 + [{"role": "user", "content": text}],
                 "goal": dict(goal_context or {}),
