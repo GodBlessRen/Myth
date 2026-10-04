@@ -132,6 +132,20 @@ UNKNOWN     -> RECONCILE
 
 不要把 byte budget 冒充 token usage，也不要把 keep-alive、KV cache、相似上下文或推测值冒充 Prompt Cache hit。Provider 不提供缓存计量时必须显示 N/A。
 
+### Optimization
+
+Runtime Observatory 必须能解释自适应效率机制，而不是只显示“开/关”：
+
+- mechanism id；
+- enabled / available / exposed / reachable；
+- APPLIED / SKIPPED / DEFERRED / FALLBACK / FAILED / INELIGIBLE；
+- reason code；
+- 已测量 saving / debt / horizon / breakeven（存在时）；
+- Compact grounded seed 是否选入 provider-visible Context；
+- Folded Observation 的 exact recall 入口。
+
+缺测收益、cache debt 或剩余 horizon 显示 N/A，不能按零处理。
+
 ### Context Window
 
 至少显示：
