@@ -62,3 +62,21 @@ class RetrievalRouter:
                 if backend.mode is mode:
                     return backend
         raise LookupError("no retrieval backend is ready")
+
+
+def reciprocal_rank_scores(
+    rankings: tuple[tuple[str, ...], ...], *, constant: int = 60
+) -> dict[str, float]:
+    """用 RRF 融合不可直接比较的 lexical/vector 排名；只融合顺序，不把距离冒充共同概率。"""
+    if type(constant) is not int or constant < 1:
+        raise ValueError("RRF constant must be a positive integer")
+    scores: dict[str, float] = {}
+    for ranking in rankings:
+        seen: set[str] = set()
+        for rank, key in enumerate(ranking, 1):
+            identity = str(key)
+            if not identity or identity in seen:
+                continue
+            seen.add(identity)
+            scores[identity] = scores.get(identity, 0.0) + 1.0 / (constant + rank)
+    return scores
