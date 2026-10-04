@@ -355,7 +355,25 @@ full baseline suite
  -> Active Policy for future Turns
 ```
 
-partial-suite eval 只能研究，不能发布。
+历史成功 Run 还可形成实验性 **Replay World**：同一 SOTA Route `comparison_key` 下的可观察 Action Path 合并为前缀树，候选策略只允许沿历史真实出现过的边离线重放；未出现分支保持 `UNOBSERVED`，不调用模型/工具，也不预测 counterfactual outcome。
+
+```text
+PASSED Run / SOTA Route
+        ↓
+same frozen comparison_key
+        ↓
+Replay World (realized history only)
+        ↓
+candidate policy replay
+        ↓
+research evidence
+        ↓
+fixed EvalSuite / paired calibration
+        ↓
+explicit Promote
+```
+
+Replay 只是研究证据，不产生 `ELIGIBLE` 或发布资格；partial-suite eval 同样只能研究，不能发布。
 
 Evolution 不自动 Promote，也不能修改正在运行或历史 Turn。
 
