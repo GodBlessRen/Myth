@@ -407,6 +407,93 @@ function renderInspectorRecovery(turn) {
   }
 }
 
+// 展示跨 Provider 的共同模型事实；特有元数据只在用户展开时按需读取完整 Evidence。
+function renderInspectorModel(turn) {
+  const box = $("inspectorModel");
+  const details = $("providerEvidenceDetails");
+  const body = $("providerEvidenceBody");
+  if (!box || !details || !body) return;
+  box.replaceChildren();
+  details.classList.add("hidden");
+  details.open = false;
+  details.dataset.runId = "";
+  body.replaceChildren(el("div", "inspector-empty", "展开后读取完整脱敏元数据"));
+  if (!turn) {
+    box.append(el("div", "inspector-empty", "暂无模型证据"));
+    return;
+  }
+  const evidence = turn.provider_evidence || {};
+  inspectorFact(box, "Provider", evidence.provider_name || evidence.provider || turn.settings?.provider || "N/A");
+  inspectorFact(box, "Model", evidence.model || turn.settings?.model || "N/A");
+  inspectorFact(box, "Response", evidence.response_id || "N/A · provider not reported");
+  inspectorFact(box, "Status", evidence.status || "N/A");
+  inspectorFact(
+    box,
+    "Reasoning",
+    evidence.reasoning_tokens == null
+      ? "N/A · provider not reported"
+      : Number(evidence.reasoning_tokens).toLocaleString() + " tokens",
+  );
+  const hasProviderDetail =
+    evidence.created_at != null ||
+    evidence.incomplete_details != null ||
+    (evidence.output_types || []).length ||
+    (evidence.extra_keys || []).length ||
+    evidence.reasoning_summary?.length;
+  if (!hasProviderDetail) return;
+  details.classList.remove("hidden");
+  details.dataset.runId = turn.run_id;
+  const preview = el("div", "provider-evidence-preview");
+  if (evidence.created_at != null)
+    inspectorFact(preview, "Created", String(evidence.created_at));
+  if (evidence.output_types?.length)
+    inspectorFact(preview, "Output types", evidence.output_types.join(", "));
+  if (evidence.incomplete_details != null)
+    inspectorFact(
+      preview,
+      "Incomplete",
+      typeof evidence.incomplete_details === "string"
+        ? evidence.incomplete_details
+        : JSON.stringify(evidence.incomplete_details),
+    );
+  if (evidence.reasoning_summary?.length)
+    inspectorFact(
+      preview,
+      "Reasoning summary",
+      String(evidence.reasoning_summary.at(-1)).slice(0, 280),
+    );
+  if (evidence.extra_keys?.length)
+    inspectorFact(preview, "Provider-only fields", evidence.extra_keys.join(", "));
+  body.replaceChildren(preview);
+}
+
+// Provider details 第一次展开才读取完整不可变对象；页面刷新不会触发额外远端模型请求。
+$("providerEvidenceDetails")?.addEventListener("toggle", async (event) => {
+  const details = event.currentTarget;
+  if (!details.open || details.dataset.loadedFor === details.dataset.runId) return;
+  const runId = details.dataset.runId;
+  if (!runId) return;
+  const body = $("providerEvidenceBody");
+  const preview = body.firstElementChild;
+  body.append(el("div", "inspector-empty", "读取完整 Provider Evidence…"));
+  try {
+    const value = await api(`/turns/${runId}/provider-evidence`);
+    body.querySelector(".inspector-empty")?.remove();
+    const raw = document.createElement("details");
+    raw.className = "provider-evidence-raw";
+    const summary = document.createElement("summary");
+    summary.textContent = "Raw provider evidence";
+    const pre = document.createElement("pre");
+    pre.textContent = JSON.stringify(value.evidence || {}, null, 2);
+    raw.append(summary, pre);
+    body.append(raw);
+    details.dataset.loadedFor = runId;
+  } catch (e) {
+    body.querySelector(".inspector-empty")?.remove();
+    body.append(el("div", "inspector-empty", e.message));
+  }
+});
+
 // 展示供应商实际报告的输入/输出/缓存计量；未报告缓存保留 N/A。
 function renderInspectorTokens(turn) {
   const box = $("inspectorTokens");
@@ -724,6 +811,7 @@ function renderRuntimeInspector(session = state.session) {
   renderInspectorRecovery(turn);
   renderInspectorTrajectory(turn);
   renderInspectorTokens(turn);
+  renderInspectorModel(turn);
   renderInspectorContext(session, turn);
   renderInspectorTools(turn);
   renderInspectorControl(turn);
