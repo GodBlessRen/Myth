@@ -108,6 +108,12 @@ def default_strategies() -> StrategyRegistry:
                 "Paired fixed-case eval plus cross-case calibration can estimate observed quality delta and explicit-cost gain-per-cost; evidence gates policy release but never auto-promotes.",
             ),
             StrategySpec(
+                "information_control",
+                "Information Control",
+                StrategyState.CONNECTED,
+                "Bounded live SEEK/EXPAND admission rejects exact repeats, stalled pagination and runaway information acquisition before Tool Ticket; KEEP is implicit when the model continues without another information tool.",
+            ),
+            StrategySpec(
                 "direct",
                 "Direct",
                 StrategyState.USABLE,
