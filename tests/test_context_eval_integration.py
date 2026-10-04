@@ -235,10 +235,38 @@ class EvaluationEvolutionTests(unittest.TestCase):
             HarnessVariant("only-recall", ("recall",)),
         )
         observations = (
-            EvalObservation("case-1", EvalVerdict.PASS, "base", policy_id="p", harness_id="base"),
-            EvalObservation("case-1", EvalVerdict.FAIL, "full", policy_id="p", harness_id="full"),
-            EvalObservation("case-1", EvalVerdict.FAIL, "compact only", policy_id="p", harness_id="only-compact"),
-            EvalObservation("case-1", EvalVerdict.PASS, "recall only", policy_id="p", harness_id="only-recall"),
+            EvalObservation(
+                "case-1",
+                EvalVerdict.PASS,
+                "base",
+                {"input_tokens": 100, "cache_write_input_tokens": 0},
+                policy_id="p",
+                harness_id="base",
+            ),
+            EvalObservation(
+                "case-1",
+                EvalVerdict.FAIL,
+                "full",
+                {"input_tokens": 70, "cache_write_input_tokens": 20},
+                policy_id="p",
+                harness_id="full",
+            ),
+            EvalObservation(
+                "case-1",
+                EvalVerdict.FAIL,
+                "compact only",
+                {"input_tokens": 80, "cache_write_input_tokens": 20},
+                policy_id="p",
+                harness_id="only-compact",
+            ),
+            EvalObservation(
+                "case-1",
+                EvalVerdict.PASS,
+                "recall only",
+                {"input_tokens": 100, "cache_write_input_tokens": 0},
+                policy_id="p",
+                harness_id="only-recall",
+            ),
         )
         value = controlled_attribution(
             observations,
@@ -254,6 +282,9 @@ class EvaluationEvolutionTests(unittest.TestCase):
         )
         self.assertTrue(compact["controlled"])
         self.assertEqual(compact["classification"], "supported_harm")
+        self.assertEqual(compact["input_token_saving_per_request"], 30.0)
+        self.assertEqual(compact["cache_write_debt_tokens"], 20.0)
+        self.assertEqual(compact["breakeven_requests"], 1)
         self.assertTrue(recall["controlled"])
         self.assertEqual(recall["classification"], "mixed_or_interaction")
 
