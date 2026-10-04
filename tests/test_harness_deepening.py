@@ -156,27 +156,27 @@ class HarnessDeepeningTests(unittest.TestCase):
     # 延迟工具必须经 search/describe 的 durable Observation 才能进入后续可见集合；失败偷调不会解锁。
     def test_deferred_tool_visibility_cannot_be_bypassed_by_rejected_call(self):
         initial = visible_tool_ids(TOOL_CATALOG, [])
-        self.assertNotIn("git.diff", initial)
+        self.assertNotIn("diff.preview", initial)
         failed = [
             {
-                "decision": {"capability_id": "git.diff"},
+                "decision": {"capability_id": "diff.preview"},
                 "result": {"error": "tool is deferred", "failure": {"code": "tool_deferred"}},
             }
         ]
-        self.assertNotIn("git.diff", visible_tool_ids(TOOL_CATALOG, failed))
+        self.assertNotIn("diff.preview", visible_tool_ids(TOOL_CATALOG, failed))
         matches = search_tools(
             TOOL_CATALOG,
             {tool_id: tool_id for tool_id in TOOL_CATALOG},
-            "git diff",
+            "diff preview",
         )
-        self.assertTrue(any(item["capability_id"] == "git.diff" for item in matches))
+        self.assertTrue(any(item["capability_id"] == "diff.preview" for item in matches))
         discovered = [
             {
                 "decision": {"capability_id": "tool.search"},
                 "result": {"matches": matches},
             }
         ]
-        self.assertIn("git.diff", visible_tool_ids(TOOL_CATALOG, discovered))
+        self.assertIn("diff.preview", visible_tool_ids(TOOL_CATALOG, discovered))
 
     # Ollama schema 与 Prompt 只暴露当前工具集合；search 结果会让下一步 schema 出现专门工具。
     def test_conversation_request_progressively_expands_ollama_schema(self):
@@ -206,7 +206,7 @@ class HarnessDeepeningTests(unittest.TestCase):
             for item in request.response_schema["oneOf"]
         }
         self.assertIn("tool.search", actions)
-        self.assertNotIn("git.diff", actions)
+        self.assertNotIn("diff.preview", actions)
         activities = [
             {
                 "step": 1,
@@ -214,8 +214,8 @@ class HarnessDeepeningTests(unittest.TestCase):
                 "result": {
                     "matches": [
                         {
-                            "capability_id": "git.diff",
-                            "description": "Inspect diff",
+                            "capability_id": "diff.preview",
+                            "description": "Preview diff",
                             "arguments": {},
                         }
                     ]
@@ -232,7 +232,7 @@ class HarnessDeepeningTests(unittest.TestCase):
             item["properties"]["action"]["enum"][0]
             for item in expanded.response_schema["oneOf"]
         }
-        self.assertIn("git.diff", expanded_actions)
+        self.assertIn("diff.preview", expanded_actions)
 
     # Conversation 集成把未知能力拒绝写成结构化 Observation；它不产生 Tool Ticket。
     def test_workspace_persists_structured_known_failure(self):
