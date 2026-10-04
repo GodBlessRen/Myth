@@ -136,6 +136,12 @@ def _wants_reasoning_summary(model_request: ModelRequest) -> bool:
 # 递归保留供应商返回的未知元数据，明确剔除凭据/不透明推理状态/私有 reasoning body；未知字段默认保留供后续分析。
 _PROVIDER_EVIDENCE_DENY = {
     "authorization",
+    "headers",
+    "request_headers",
+    "response_headers",
+    "cookie",
+    "cookies",
+    "set-cookie",
     "api_key",
     "access_token",
     "refresh_token",
