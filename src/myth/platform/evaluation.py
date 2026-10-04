@@ -408,7 +408,9 @@ def attribution_matrix(
 # Search/Evolution 与最终发布评测必须物理上保持 case identity 不相交；final 结果不能反馈回候选搜索。
 @dataclass(frozen=True)
 class HeldOutEvalBoundary:
+    # discovery_case_ids：允许反馈候选搜索/调参的固定 Case 身份。
     discovery_case_ids: tuple[str, ...]
+    # final_case_ids：只用于最终接受/拒绝、禁止回流搜索的 Case 身份。
     final_case_ids: tuple[str, ...]
 
     def __post_init__(self) -> None:
