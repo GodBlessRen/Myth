@@ -947,6 +947,7 @@ class LocalConversationExecution:
                 if not source.is_file() or source.stat().st_size > 1_000_000:
                     raise ValueError("source must exist and be <=1MB")
                 before = source.read_bytes()
+                before_digest = sha256_bytes(before)
                 data = exact_patch(
                     before,
                     args.get("old_text"),
@@ -974,6 +975,29 @@ class LocalConversationExecution:
                     "note": "output copy; original project files unchanged",
                 }
             )
+            if capability == "project.patch_exact":
+                # Action Fusion：精确 patch 的确定性后继是 diff 生成，不需要再花一次 LLM 决策。
+                # 这里只读取同一次已冻结 before/data；不执行 shell、不改项目源文件，也不把 diff 当语义验收。
+                root, source = self.project_path(turn, args.get("path"))
+                before_text = before.decode("utf-8")
+                after_text = data.decode("utf-8")
+                diff = "".join(
+                    difflib.unified_diff(
+                        before_text.splitlines(keepends=True),
+                        after_text.splitlines(keepends=True),
+                        fromfile=f"a/{source.relative_to(root).as_posix()}",
+                        tofile=f"b/{source.relative_to(root).as_posix()}",
+                    )
+                )
+                result["fused_successor"] = {
+                    "kind": "deterministic_diff",
+                    "status": "SUCCEEDED",
+                    "precondition_digest": before_digest,
+                    "candidate_digest": digest,
+                    "diff": diff[:24000],
+                    "truncated": len(diff) > 24000,
+                    "semantic_verification": False,
+                }
             intent.update(
                 {"write_bytes": len(data), "target": str(target), "digest": digest}
             )
