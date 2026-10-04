@@ -829,7 +829,7 @@ class LocalConversationExecution:
             if self.memory_store is None:
                 raise RuntimeError("memory store is unavailable")
             project_id = (turn["snapshot"].get("project") or {}).get("id")
-            values = self.memory_store.search_views(
+            report = self.memory_store.search_view_report(
                 args.get("query", ""),
                 limit=args.get("limit", 5),
                 project_id=project_id,
@@ -837,18 +837,8 @@ class LocalConversationExecution:
             )
             result.update(
                 {
-                    "memories": values,
-                    "retrieval": {
-                        "backend": (
-                            self.memory_store.search_report(
-                                args.get("query", ""),
-                                limit=args.get("limit", 5),
-                                project_id=project_id,
-                                session_id=turn["session_id"],
-                            )["retrieval"]
-                        ),
-                        "resolution": "L0",
-                    },
+                    "memories": report["memories"],
+                    "retrieval": {**report["retrieval"], "resolution": "L0"},
                 }
             )
         elif capability == "memory.timeline":
