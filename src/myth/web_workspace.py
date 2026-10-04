@@ -12,6 +12,7 @@ from .runtime import MythRuntime
 from .workspace import Workspace
 from .providers import create_provider
 from .providers.ollama import OllamaProvider
+from .providers.capabilities import validate_model_selection
 from .platform.control import ControlCommand
 from .strategies import RuleIntentPicker
 from .goal_scheduler import GoalScheduler
@@ -480,10 +481,7 @@ class ConversationWebService:
             check = self.connection(settings)
             if not check["ready"]:
                 raise ValueError("模型服务未连接，请在设置中检查模型连接。")
-            if settings["provider"] == "ollama" and settings["model"] not in check[
-                "details"
-            ].get("models", []):
-                raise ValueError("所选模型未安装，请选择已有 Ollama 模型。")
+            validate_model_selection(settings, check.get("details"))
 
         with MythRuntime(self.root) as runtime:
             workspace = Workspace(runtime)
@@ -545,7 +543,12 @@ class ConversationWebService:
         elif action == "switch_model":
             payload = value.get("model")
         elif action == "switch_thinking":
+            # 动态档位由当前 Provider/model capability 决定；Control 只保存原生选择。
             payload = value.get("thinking")
+            turn = self._use("turn", rid)
+            future_settings = {**turn["settings"], "thinking": payload}
+            check = self.connection(future_settings)
+            validate_model_selection(future_settings, check.get("details"))
         else:
             payload = None
 
