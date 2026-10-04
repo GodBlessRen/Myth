@@ -13,6 +13,7 @@ from ..strategies import RuleIntentPicker, RuleResolutionController
 from ..platform.context_anchor import build_context_anchor
 from ..network_recovery import reconnect_delay
 from ..session_statistics import measured_integer
+from ..platform.retrieval import reciprocal_rank_scores
 
 # SCHEMA：本仓储拥有的表、索引与约束；升级补齐旧字段，删除列须有迁移证据。
 # projects.root 是明确项目范围；archived/pinned 只管理未来可见性，不删除既有引用。
@@ -98,6 +99,7 @@ class SqliteWorkspaceRepository:
         intent_picker=None,
         resolution_controller=None,
         resolution_policy_id=None,
+        vector_index=None,
     ):
         # runtime：共享 Runtime 装配对象；其 SQLite 连接只在所属线程使用。
         self.runtime = runtime
@@ -113,6 +115,8 @@ class SqliteWorkspaceRepository:
         self.resolution_controller = resolution_controller or RuleResolutionController()
         # resolution_policy_id：本次准入固定的表示策略版本身份；活动指针变化不倒写历史 Turn。
         self.resolution_policy_id = str(resolution_policy_id or "injected/default")
+        # vector_index：可选派生检索适配器；SQLite 文档/chunk 仍是来源、权限和版本真相。
+        self.vector_index = vector_index
         # sota_route：由 Workspace 装配后注入；仓储缺省仍可独立工作，避免隐藏硬依赖。
         self.sota_route = None
         self.store.db.executescript(SCHEMA)
@@ -395,11 +399,58 @@ class SqliteWorkspaceRepository:
                 "INSERT INTO workspace_chunks VALUES(?,?,?)",
                 [(did, i, part) for i, part in enumerate(chunks(text))],
             )
-        return {
+        result = {
             "id": did,
             "title": title,
             "digest": digest,
             "chunks": len(chunks(text)),
+        }
+        # 向量索引是事务外可重建投影；失败不能回滚已经成功提交的权威文档。
+        self._sync_document_vector(did)
+        return result
+
+    # 把一个已提交文档的当前 chunks 幂等投影到向量库；失败返回状态而不篡改 SQLite 事实。
+    def _sync_document_vector(self, document_id):
+        if self.vector_index is None:
+            return {"configured": False, "synced": 0}
+        document = self.document(document_id)
+        rows = self.store.db.execute(
+            "SELECT chunk_index,content FROM workspace_chunks WHERE document_id=? ORDER BY chunk_index",
+            (document_id,),
+        ).fetchall()
+        payload = [
+            {
+                "record_id": f"doc:{document_id}:{int(row['chunk_index'])}",
+                "source_version": document["digest"],
+                "text": document["title"] + "\n" + row["content"],
+                "document_id": document_id,
+                "chunk_index": int(row["chunk_index"]),
+                "project_id": document.get("project_id") or "",
+            }
+            for row in rows
+        ]
+        try:
+            result = self.vector_index.sync_knowledge(payload)
+            return {"configured": True, "synced": result.get("upserted", 0)}
+        except RuntimeError:
+            return {"configured": True, "synced": 0, "degraded": True}
+
+    # 显式重建当前可见知识的派生向量索引；调用方可在安装/迁移后运行，失败不影响词面检索。
+    def rebuild_vector_index(self, project_id=None):
+        if self.vector_index is None:
+            return {"configured": False, "documents": 0, "synced": 0}
+        documents = self.documents(project_id)
+        synced = 0
+        degraded = False
+        for document in documents:
+            result = self._sync_document_vector(document["id"])
+            synced += int(result.get("synced") or 0)
+            degraded = degraded or bool(result.get("degraded"))
+        return {
+            "configured": True,
+            "documents": len(documents),
+            "synced": synced,
+            "degraded": degraded,
         }
 
     # 按保存摘要读取完整文档对象；对象库校验字节身份，归档状态由调用者判断。
@@ -447,7 +498,7 @@ class SqliteWorkspaceRepository:
         }
 
     # 遍历全可见候选后保留有界 top-k，报告 scanned/matched/pages；不能在排序前用 LIMIT 静默丢候选。
-    def search_report(self, query, project_id=None, limit=5):
+    def _lexical_search_report(self, query, project_id=None, limit=5):
         if not isinstance(query, str) or len(query) > 1000:
             raise ValueError("query up to 1000 characters")
         if type(limit) is not int or not 1 <= limit <= 8:
@@ -499,6 +550,93 @@ class SqliteWorkspaceRepository:
                 "pages": pages,
                 "exhausted": True,
                 "truncated_before_ranking": False,
+            },
+        }
+
+    # 先以词面全覆盖建立可靠基线，再按可选 Milvus 候选做 RRF；每个向量命中必须回 SQLite 校验版本/作用域。
+    def search_report(self, query, project_id=None, limit=5):
+        lexical = self._lexical_search_report(query, project_id, limit)
+        if self.vector_index is None or not str(query).strip():
+            return lexical
+        try:
+            hits = self.vector_index.search_knowledge(
+                str(query), limit=max(32, int(limit) * 8)
+            )
+        except RuntimeError:
+            lexical["retrieval"]["vector_status"] = "unavailable"
+            lexical["retrieval"]["degraded"] = True
+            return lexical
+
+        vector_rows = []
+        stale_rejected = 0
+        for hit in hits:
+            record_id = str(hit.get("record_id") or "")
+            parts = record_id.split(":")
+            if len(parts) != 3 or parts[0] != "doc":
+                stale_rejected += 1
+                continue
+            try:
+                chunk_index = int(parts[2])
+            except ValueError:
+                stale_rejected += 1
+                continue
+            row = self.store.db.execute(
+                "SELECT c.document_id,c.chunk_index,c.content,d.title,d.digest,d.project_id,d.archived "
+                "FROM workspace_chunks c JOIN workspace_documents d ON d.id=c.document_id "
+                "WHERE c.document_id=? AND c.chunk_index=?",
+                (parts[1], chunk_index),
+            ).fetchone()
+            if (
+                row is None
+                or int(row["archived"])
+                or row["project_id"] not in {None, project_id}
+                or str(row["digest"]) != str(hit.get("source_version") or "")
+            ):
+                stale_rejected += 1
+                continue
+            item = dict(row)
+            item.pop("archived", None)
+            item.pop("project_id", None)
+            item["citation"] = f"doc:{item['document_id']}:{item['chunk_index']}"
+            item["vector_distance"] = hit.get("distance")
+            vector_rows.append(item)
+
+        lexical_rows = list(lexical["sources"])
+        identity = lambda item: f"{item['document_id']}:{int(item['chunk_index'])}"
+        rrf = reciprocal_rank_scores(
+            (
+                tuple(identity(item) for item in lexical_rows),
+                tuple(identity(item) for item in vector_rows),
+            )
+        )
+        merged = {}
+        for item in lexical_rows + vector_rows:
+            key = identity(item)
+            if key not in merged:
+                merged[key] = dict(item)
+        sources = []
+        for key, item in merged.items():
+            item["hybrid_score"] = round(rrf.get(key, 0.0), 8)
+            sources.append(item)
+        sources.sort(
+            key=lambda item: (
+                -float(item.get("hybrid_score") or 0.0),
+                item["document_id"],
+                int(item["chunk_index"]),
+            )
+        )
+        sources = sources[:limit]
+        return {
+            "sources": sources,
+            "retrieval": {
+                **lexical["retrieval"],
+                "backend": "lexical+milvus",
+                "candidate_policy": "lexical-full-cover+milvus-hydrated-rrf-v1",
+                "vector_candidates": len(hits),
+                "vector_hydrated": len(vector_rows),
+                "vector_stale_rejected": stale_rejected,
+                "vector_status": "ready",
+                "degraded": False,
             },
         }
 
