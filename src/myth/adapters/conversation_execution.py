@@ -345,6 +345,42 @@ class LocalConversationExecution:
             "next_offset": value["next_cursor"],
         }
 
+    # 从当前 Run 的已结算 Tool Operation 精确回读字段；分页只改变投影，不重跑工具或重新总结。
+    def _read_observation(self, turn, args):
+        decision_id = str(args.get("decision_id") or "").strip()
+        field = str(args.get("field") or "").strip()
+        if not decision_id or len(decision_id) > 200:
+            raise ValueError("observation.read decision_id is required")
+        if field not in {"content", "output", "diff", "stdout", "stderr", "summary"}:
+            raise ValueError("observation.read field is not recallable")
+        saved = self.repository.operation(decision_id)
+        if not saved or saved.get("run_id") != turn["run_id"]:
+            raise PermissionError("observation belongs to another turn or is unavailable")
+        if saved.get("state") != "RESOLVED":
+            raise RecoveryRequired("observation is not durably resolved")
+        result = saved.get("result") if isinstance(saved.get("result"), dict) else {}
+        value = result.get(field)
+        if not isinstance(value, str):
+            raise ValueError("requested observation field is not text")
+        offset = args.get("offset", 0)
+        limit = args.get("max_chars", 6000)
+        if type(offset) is not int or offset < 0 or type(limit) is not int or not 1 <= limit <= 12000:
+            raise ValueError("invalid observation pagination")
+        preview = value[offset : offset + limit]
+        digest = sha256_bytes(value.encode("utf-8"))
+        return {
+            "decision_id": decision_id,
+            "field": field,
+            "content": preview,
+            "source_digest": digest,
+            "source_chars": len(value),
+            "offset": offset,
+            "next_offset": offset + len(preview) if offset + len(preview) < len(value) else None,
+            "has_more": offset + len(preview) < len(value),
+            "source_ref": f"observation:{decision_id}:{field}@{digest}",
+            "projection": "exact-recall",
+        }
+
     # 有界读取 UTF-8 项目文件并记录快照摘要；offset/limit 是 Unicode 字符，不是字节。
     def _read_project(self, turn, args):
         _, path = self.project_path(turn, args.get("path"))
@@ -867,6 +903,8 @@ class LocalConversationExecution:
             result.update(self.list_project(turn, args.get("path", ".")))
         elif capability == "project.read":
             result.update(self._read_project(turn, args))
+        elif capability == "observation.read":
+            result.update(self._read_observation(turn, args))
         elif capability == "project.search":
             result.update(self._search_project(turn, args))
         elif capability == "diff.preview":
