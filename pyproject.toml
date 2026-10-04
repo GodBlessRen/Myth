@@ -13,6 +13,11 @@ requires-python = ">=3.12"
 authors = [{name = "GodBlessRen"}]
 dependencies = ["PyJWT[crypto]>=2.14.0,<3", "keyring>=25"]
 
+[project.optional-dependencies]
+# Milvus 保持可选 Adapter：普通安装不下载 embedding 栈；Lite 当前仅在非 Windows 平台声明。
+milvus = ["pymilvus[model]>=3.0.2,<4"]
+milvus-lite = ["pymilvus[model,milvus-lite]>=3.0.2,<4; platform_system != 'Windows'"]
+
 [project.scripts]
 myth = "myth.cli:main"
 
