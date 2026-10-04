@@ -79,7 +79,6 @@ class OptimizationDecision:
     projected_net_saving: int | None = None
 
     # 转成事件/UI 可持久投影；不添加未测量字段或重新计算结论。
-    # 转成只读可达性投影；调用不会改变 enabled/available/exposed 事实。
     def as_dict(self) -> dict[str, object]:
         return {
             "mechanism_id": self.mechanism_id,
@@ -168,6 +167,7 @@ class MechanismReachability:
     # reason_code：不可达或可达的稳定解释码。
     reason_code: str
 
+    # 转成只读可达性投影；调用不会改变 enabled/available/exposed 事实。
     def as_dict(self) -> dict[str, object]:
         return {
             "mechanism_id": self.mechanism_id,
