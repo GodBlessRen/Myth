@@ -24,6 +24,7 @@ from .platform.evaluation import (
     release_gate,
     summarize_observations,
 )
+from .platform.evaluation_store import SqliteEvaluationLedger
 from .runtime import MythRuntime
 from .strategies import (
     RuleIntentPicker,
@@ -33,7 +34,7 @@ from .strategies import (
 from .workspace import Workspace
 
 
-# _SETTINGS：安全的产品设置默认值；只影响新准入，不倒写历史模型请求。
+# CONTROLLED_HARNESS_MECHANISMS：内置受控实验真正能切换的现有机制；未知机制拒绝，避免“只改标签”的伪消融。
 CONTROLLED_HARNESS_MECHANISMS = frozenset(
     {"context_compaction", "observation_recall", "action_fusion"}
 )
@@ -665,3 +666,50 @@ def run_controlled_harness_experiment(
         result["evaluation_partition"] = "discovery"
         results.append(result)
     return results
+
+
+
+# 执行全部受控 Harness 变体、持久进 Eval Ledger，并立即生成 Task×Harness×Mechanism 归因结果。
+def run_record_controlled_harness_experiment(
+    runtime,
+    path: str | Path,
+    mechanisms: Iterable[str],
+    *,
+    policy_id: str = "production-default",
+    policy_config: dict | None = None,
+    case_ids: Iterable[str] | None = None,
+    prefix: str = "harness",
+) -> dict:
+    requested = tuple(sorted({str(item).strip() for item in mechanisms if str(item).strip()}))
+    results = run_controlled_harness_experiment(
+        path,
+        requested,
+        policy_id=policy_id,
+        policy_config=policy_config,
+        case_ids=case_ids,
+        prefix=prefix,
+    )
+    ledger = SqliteEvaluationLedger(runtime)
+    recorded = [ledger.record(item, policy_id=policy_id) for item in results]
+    baseline = next(
+        item for item in recorded if not item.get("harness_mechanisms")
+    )
+    full_set = set(requested)
+    full = next(
+        item
+        for item in recorded
+        if set(item.get("harness_mechanisms") or ()) == full_set
+    )
+    variant_ids = tuple(
+        item["eval_run_id"]
+        for item in recorded
+        if item["eval_run_id"] not in {baseline["eval_run_id"], full["eval_run_id"]}
+    )
+    return {
+        "runs": recorded,
+        "attribution": ledger.controlled_attribution(
+            baseline_eval_run_id=baseline["eval_run_id"],
+            full_eval_run_id=full["eval_run_id"],
+            variant_eval_run_ids=variant_ids,
+        ),
+    }
