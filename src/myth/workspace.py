@@ -29,7 +29,12 @@ class Workspace:
         # vector_index：可选 Milvus 派生索引；延迟连接/加载，缺失时词面检索保持完整可用。
         self.vector_index = create_milvus_vector_index(runtime)
         # components：横向能力组合目录；运行状态仍归具体仓储，目录不授予执行权。
-        self.components = MythComponents.default(milvus_ready=self.vector_index is not None)
+        self.components = MythComponents.default(
+            milvus_ready=bool(
+                self.vector_index
+                and self.vector_index.status().get("healthy")
+            )
+        )
         # 保留旧公开调用方的薄别名；与 components 指向同一对象，不维护另一套状态。
         # kernel：旧公开兼容别名，指向 components；新代码使用 components，避免误认为强制执行层。
         self.kernel = self.components
