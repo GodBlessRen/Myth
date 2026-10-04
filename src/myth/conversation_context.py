@@ -52,6 +52,13 @@ def _fold_activity(activity):
             folded.append(key)
     if folded:
         result["context_folded_fields"] = folded
+        decision_id = activity.get("decision_id")
+        if decision_id:
+            result["observation_recall"] = {
+                "decision_id": decision_id,
+                "fields": [key for key in folded if key in {"content", "output", "diff", "stdout", "stderr", "summary"}],
+                "capability": "observation.read",
+            }
     return {**activity, "result": result}, bool(folded)
 
 
@@ -274,7 +281,7 @@ def compile_conversation_context(
         "memory": sum(1 for ref in selected_order if ref.startswith("memory:")),
     }
     report = {
-        "policy": "conversation-budget-v2",
+        "policy": "conversation-budget-v3",
         "degradation_policy": "required-first, then deterministic priority; optional items drop whole rather than substring-cut",
         "bytes_used": frame.bytes_used,
         "max_bytes": frame.max_bytes,
@@ -284,6 +291,12 @@ def compile_conversation_context(
         "delivered": delivered_counts,
         "memory_retrieval_report": snapshot.get("memory_retrieval_report") or {},
         "folded": [ref for ref in folded if ref in selected],
+        "projection": {
+            "source_of_truth": "durable-state",
+            "provider_visible_only": True,
+            "recall_capability": "observation.read",
+            "fold_reason_code": "older_observation_preview" if folded else None,
+        },
         "compact_requested": compact,
         "control_revision": control.get("revision"),
         "intent_route": intent_pick.get("route"),
