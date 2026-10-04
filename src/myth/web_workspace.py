@@ -511,7 +511,7 @@ class ConversationWebService:
             if goal_id:
                 goal_context = workspace.personal.goal_view(goal_id)
             session = workspace.repository.session(sid)
-            memory = workspace.memory.search(
+            memory_report = workspace.memory.search_view_report(
                 str(text or ""),
                 limit=6,
                 project_id=session.get("project_id"),
@@ -522,7 +522,8 @@ class ConversationWebService:
                 text,
                 value.get("request_id"),
                 value.get("document_ids"),
-                memory_records=memory,
+                memory_records=memory_report["memories"],
+                memory_retrieval_report=memory_report["retrieval"],
                 goal_id=goal_id,
                 goal_context=goal_context,
             )
