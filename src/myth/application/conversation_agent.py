@@ -143,8 +143,8 @@ class ConversationAgent:
                             run_id, step["step"], decision_id, decision
                         )
                         self.repository.network_restored(run_id)
-                    capability_id = decision.capability_id
                         self.control.consume_compaction(run_id, decision_id=decision_id)
+                    capability_id = decision.capability_id
 
                     # 模型在途时到达的 Pause/Stop 在这里被观察；新工具派发前再次检查安全点。
                     if self._gate(run_id):
