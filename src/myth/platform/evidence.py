@@ -11,16 +11,24 @@ from typing import Iterable
 
 # 证据类型只表达来源用途，不把模型判断升级为事实。
 class EvidenceKind(StrEnum):
+    # FAILURE：直接描述失败事实的来源片段。
     FAILURE = "failure"
+    # SUCCESS：直接描述成功事实的来源片段。
     SUCCESS = "success"
+    # TARGET：定位到关键对象/位置的来源片段。
     TARGET = "target"
+    # WARNING：非致命但应保留的警告证据。
     WARNING = "warning"
+    # SUMMARY：来源中的原始摘要片段，不是模型新生成的总结。
     SUMMARY = "summary"
 
 
+# 一条必须逐字存在于固定来源中的证据引用；kind 只帮助下游解释用途。
 @dataclass(frozen=True)
 class EvidenceQuote:
+    # kind：证据用途分类，不改变来源事实。
     kind: EvidenceKind
+    # quote：必须能在 source text 中逐字找到的原文。
     quote: str
 
     def __post_init__(self) -> None:
@@ -30,12 +38,18 @@ class EvidenceQuote:
             raise ValueError("evidence quote exceeds 2000 characters")
 
 
+# 非可信 Transformer 的候选 Receipt；通过验证前不能替代 source artifact。
 @dataclass(frozen=True)
 class EvidenceReceipt:
+    # source_ref：原始证据对象的稳定引用。
     source_ref: str
+    # source_digest：原始 UTF-8 文本的 SHA-256 身份。
     source_digest: str
+    # status：候选对来源状态的结构化描述；最终仍需证据约束。
     status: str
+    # evidence：逐字证据集合。
     evidence: tuple[EvidenceQuote, ...]
+    # summary：可读摘要；本身不产生可信度。
     summary: str = ""
 
     def __post_init__(self) -> None:
@@ -45,10 +59,14 @@ class EvidenceReceipt:
             raise ValueError("source_digest must be a SHA-256 hex digest")
 
 
+# Receipt 验证结果；拒绝原因可用于有界 repair，但不能放松后续同一验证器。
 @dataclass(frozen=True)
 class EvidenceValidation:
+    # accepted：source digest 与全部必要 quote 是否通过固定验证。
     accepted: bool
+    # reason_code：稳定拒绝/通过原因码。
     reason_code: str
+    # rejected_quotes：未能逐字绑定来源的候选 quote。
     rejected_quotes: tuple[str, ...] = ()
 
     def as_dict(self) -> dict[str, object]:
