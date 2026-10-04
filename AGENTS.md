@@ -131,7 +131,7 @@ node --check src/myth/webui/goals.js
 - Context / provider：补窗口、截断、usage 回归；
 - Goal / Personal：补跨 session / restart；
 - UI observability：保证第三栏身份与 renderer 仍存在；
-- Evaluation / Evolution：必须使用固定 suite，不允许挑题发布。
+- Evaluation / Evolution：必须使用固定 suite，不允许挑题发布；重复试次同时报告 pass@k / pass^k，缺测和 mixed outcome 保持显式，成本优先按 successful outcome 归一。
 - Goal schedule：覆盖同请求去重、到期争抢、提交后进程退出、暂停、断连重试、过期合并和 UNKNOWN 不自动重放。
 
 ## 6. 文档规则
