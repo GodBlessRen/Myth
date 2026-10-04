@@ -6,6 +6,7 @@ from __future__ import annotations
 from collections import Counter
 from datetime import datetime, timezone
 import json
+from math import sqrt
 from pathlib import Path
 import re
 import time
@@ -93,6 +94,95 @@ def check_acceptance(workspace, turn, case):
             Path(project["root"]) / name
         ).read_bytes() == expected.encode("utf-8")
     return checks, answer, list(artifacts.values())
+
+
+# 计算固定比例的 Wilson 95% 区间；只描述当前完成 case 的采样不确定性，不把缺测补成成功或失败。
+def _wilson_95(successes, total):
+    if total <= 0:
+        return None
+    z = 1.959963984540054
+    rate = successes / total
+    denominator = 1.0 + (z * z / total)
+    center = (rate + z * z / (2.0 * total)) / denominator
+    margin = (
+        z
+        * sqrt(rate * (1.0 - rate) / total + z * z / (4.0 * total * total))
+        / denominator
+    )
+    return [max(0.0, center - margin), min(1.0, center + margin)]
+
+
+# 汇总一个 benchmark arm 的重复试次；pass@k 表示至少成功一次，pass^k 表示同 case 的 k 次全部成功。
+def _arm_summary(trials, arm, case_ids, repeats):
+    group = [trial for trial in trials if trial["arm"] == arm]
+    grouped = {case_id: [] for case_id in case_ids}
+    for trial in group:
+        case_id = trial.get("case_id")
+        if case_id in grouped:
+            grouped[case_id].append(trial)
+
+    complete_cases = [
+        case_id for case_id in case_ids if len(grouped[case_id]) == repeats
+    ]
+    incomplete_cases = [
+        case_id for case_id in case_ids if len(grouped[case_id]) != repeats
+    ]
+    successes = {
+        case_id: sum(bool(trial.get("success")) for trial in grouped[case_id])
+        for case_id in complete_cases
+    }
+    capability_cases = [case_id for case_id in complete_cases if successes[case_id] > 0]
+    reliable_cases = [
+        case_id for case_id in complete_cases if successes[case_id] == repeats
+    ]
+    mixed_cases = [
+        case_id for case_id in complete_cases if 0 < successes[case_id] < repeats
+    ]
+    failed_cases = [case_id for case_id in complete_cases if successes[case_id] == 0]
+
+    passed = sum(bool(trial.get("success")) for trial in group)
+    model_calls_not_measured = sum(trial.get("model_calls") is None for trial in group)
+    model_calls = sum(
+        int(trial.get("model_calls") or 0)
+        for trial in group
+        if trial.get("model_calls") is not None
+    )
+    failure_taxonomy = Counter(
+        trial.get("failure_taxonomy")
+        for trial in group
+        if not trial.get("success") and trial.get("failure_taxonomy")
+    )
+    complete_count = len(complete_cases)
+    return {
+        "trials": len(group),
+        "passed": passed,
+        "trial_pass_rate": (passed / len(group)) if group else None,
+        "completion_without_acceptance": sum(
+            trial.get("completion_without_acceptance", False) for trial in group
+        ),
+        "human_takeover": sum(trial.get("human_takeover", False) for trial in group),
+        "model_calls": model_calls,
+        "model_calls_not_measured": model_calls_not_measured,
+        "model_calls_per_success": (
+            None
+            if passed == 0 or model_calls_not_measured
+            else model_calls / passed
+        ),
+        "failure_taxonomy": dict(sorted(failure_taxonomy.items())),
+        "k": repeats,
+        "complete_case_count": complete_count,
+        "incomplete_cases": incomplete_cases,
+        "pass_at_k_cases": len(capability_cases),
+        "pass_at_k": (
+            len(capability_cases) / complete_count if complete_count else None
+        ),
+        "pass_at_k_ci95": _wilson_95(len(capability_cases), complete_count),
+        "pass_pow_k_cases": len(reliable_cases),
+        "pass_pow_k": len(reliable_cases) / complete_count if complete_count else None,
+        "pass_pow_k_ci95": _wilson_95(len(reliable_cases), complete_count),
+        "mixed_outcome_cases": mixed_cases,
+        "all_failed_cases": failed_cases,
+    }
 
 
 # 在独立持久 root 执行固定任务，并实际重开 Goal 数据库；记录所有 Run、状态、计量与独立 checks。
@@ -339,23 +429,13 @@ def run_task_benchmark(
     )
     path = output / "report.json"
 
-    # 原子保存增量报告及分组汇总；进程中断仍可读取此前试次，未知计量保持未测量标记。
+    selected_case_ids = tuple(case["id"] for case in selected)
+
+    # 原子保存增量报告及分组汇总；未完成 k 次的 case 保持 incomplete，不能提前伪装 pass^k。
     def save():
         trials = report["trials"]
         report["summary"] = {
-            arm: {
-                "trials": len(group := [t for t in trials if t["arm"] == arm]),
-                "passed": sum(t["success"] for t in group),
-                "completion_without_acceptance": sum(
-                    t["completion_without_acceptance"] for t in group
-                ),
-                "human_takeover": sum(t["human_takeover"] for t in group),
-                "model_calls": sum(t["model_calls"] or 0 for t in group),
-                "model_calls_not_measured": sum(
-                    t["model_calls"] is None for t in group
-                ),
-            }
-            for arm in arms
+            arm: _arm_summary(trials, arm, selected_case_ids, repeats) for arm in arms
         }
         atomic_write(
             path, json.dumps(report, ensure_ascii=False, indent=2).encode("utf-8")
