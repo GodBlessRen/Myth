@@ -1204,9 +1204,46 @@ class SqliteWorkspaceRepository:
                 {"step": step, "phase": "TOOL_RECORDED", "checkpoint_step": step},
             )
 
-    # 记录已知参数/权限拒绝为反馈；拒绝不冒充 Ticket 后的 UNKNOWN。
+    # 原子记入非工具 Observation；失败/Stop Guard 反馈被消费，但不冒充 Tool Receipt。
+    def finish_observation(self, rid, step, result):
+        with self.store.tx() as db:
+            db.execute(
+                "UPDATE workspace_steps SET state='DONE',result_json=? WHERE run_id=? AND step=?",
+                (canonical_json(result), rid, step),
+            )
+            kind = str(result.get("observation_kind") or "observation")
+            self._checkpoint(
+                db,
+                rid,
+                step,
+                "OBSERVATION_RECORDED",
+                checkpoint_step=step,
+                detail=kind,
+            )
+            self.store._event(
+                db,
+                rid,
+                "ConversationObservationRecorded",
+                {
+                    "step": step,
+                    "kind": kind,
+                    "failure_code": ((result.get("failure") or {}).get("code")),
+                },
+            )
+            self.store._event(
+                db,
+                rid,
+                "ExecutionCheckpoint",
+                {"step": step, "phase": "OBSERVATION_RECORDED", "checkpoint_step": step},
+            )
+
+    # 兼容旧字符串拒绝入口；新路径通过 failures.py 产生结构化 failure。
     def reject(self, rid, step, reason):
-        self.finish_tool(rid, step, {"error": reason})
+        self.finish_observation(
+            rid,
+            step,
+            {"error": str(reason), "observation_kind": "failure"},
+        )
 
     # 把回答/问题、步骤状态及游标一起提交；普通 COMPLETED 只表示对话回答已结束。
     def finish_reply(self, rid, step, text, question_id=None):
