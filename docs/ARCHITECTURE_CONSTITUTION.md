@@ -174,6 +174,31 @@ Token / Latency / Tool Cost
 
 当前状态：**connected（offline evidence）**。Gain 只从同 suite/version、同 case 的 paired EvalObservation 推导；成本默认保持向量，只有显式 Cost Model 才计算 gain-per-cost。它不直接控制 live admission，也不能自动 Promote policy。
 
+### Live Information Control / 实时信息控制
+
+实时信息控制把 Progressive Disclosure 接入正在运行的 Agent Loop，但不增加新的执行层或另一套 Tool。
+
+稳定动作只有：
+
+```text
+KEEP    当前信息足够，继续推理/执行/回答
+SEEK    寻找新的候选来源或导航范围
+EXPAND  展开已知来源的更多细节/证据
+```
+
+当前实现把既有 `knowledge.search / project.search / project.list` 视为 SEEK，把 `knowledge.resolve / knowledge.read / project.read` 视为 EXPAND。LLM 只提出信息需求；Context 侧策略在 Tool Ticket 前执行准入，Runtime 仍负责真正的 Ticket / Receipt / Budget。
+
+第一版坚持四个不变量：
+
+- **Novelty**：同一 Run 内已经结算的精确信息请求不能重复派发；
+- **Progress**：分页必须沿 `next_cursor / next_offset` 前进，已耗尽视图不能继续假装获取新信息；
+- **Bounded**：实时信息动作有全局、SEEK / EXPAND 和单来源上限，并始终至少给最终非信息步骤保留机会；
+- **Observable**：每次已准入 SEEK / EXPAND 将小型控制投影保存在现有 activity 结果中；恢复和 UI 从 durable facts 重建，不依赖进程内计数器。
+
+`KEEP` 不产生工具调用；当模型不再申请信息工具而继续任务时即成立。Offline Information Gain 目前只作为评测/未来策略证据，不直接控制线上准入，避免未经充分校准的分数成为 Runtime 真理。
+
+当前状态：**connected（bounded-live-v1）**。
+
 ## 5. 六边形边界
 
 Core/Domain 依赖 Port，不依赖具体厂商。
