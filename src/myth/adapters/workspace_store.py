@@ -132,6 +132,7 @@ class SqliteWorkspaceRepository:
             value = json.loads(row[0])
             value.setdefault("num_ctx", 8192)
             value.setdefault("temperature", 0.0)
+            value.setdefault("thinking", None)
             if value.get("provider") == "pi-openai":
                 value["provider"] = "chatgpt"
             return value
@@ -141,7 +142,7 @@ class SqliteWorkspaceRepository:
             "ollama_url": "http://127.0.0.1:11434",
             "max_steps": 12,
             "max_output_tokens": 2048,
-            "thinking": False,
+            "thinking": None,
             "num_ctx": 8192,
             "temperature": 0.0,
         }
@@ -175,14 +176,12 @@ class SqliteWorkspaceRepository:
             type(steps) is not int
             or not 2 <= steps <= 32
             or type(tokens) is not int
-            or not 128 <= tokens <= 8192
+            or not 128 <= tokens <= 393216
         ):
             raise ValueError("invalid step or token limit")
-        if (
-            type(num_ctx) is not int
-            or not 2048 <= num_ctx <= 262144
-            or num_ctx <= tokens + 512
-        ):
+        if type(num_ctx) is not int or not 2048 <= num_ctx <= 262144:
+            raise ValueError("num_ctx must be between 2048 and 262144")
+        if provider == "ollama" and num_ctx <= min(tokens, 261632) + 512:
             raise ValueError(
                 "num_ctx must leave room for output tokens and context reserve"
             )
@@ -191,15 +190,16 @@ class SqliteWorkspaceRepository:
             or not 0 <= float(temperature) <= 2
         ):
             raise ValueError("temperature must be between 0 and 2")
-        if type(value.get("thinking", False)) is not bool:
-            raise ValueError("thinking must be boolean")
+        # thinking 保存 Provider 原生选项；Core 只限制形状，不维护全局 effort 枚举。
+        from ..providers.capabilities import normalize_thinking
+        thinking = normalize_thinking(value.get("thinking"))
         clean = {
             "provider": provider,
             "model": model,
             "ollama_url": endpoint,
             "max_steps": steps,
             "max_output_tokens": tokens,
-            "thinking": value.get("thinking", False),
+            "thinking": thinking,
             "num_ctx": num_ctx,
             "temperature": float(temperature),
         }

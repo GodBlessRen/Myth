@@ -12,6 +12,7 @@ from .runtime import MythRuntime
 from .workspace import Workspace
 from .providers import create_provider
 from .providers.ollama import OllamaProvider
+from .providers.capabilities import validate_model_selection
 from .platform.control import ControlCommand
 from .strategies import RuleIntentPicker
 from .goal_scheduler import GoalScheduler
@@ -480,10 +481,7 @@ class ConversationWebService:
             check = self.connection(settings)
             if not check["ready"]:
                 raise ValueError("模型服务未连接，请在设置中检查模型连接。")
-            if settings["provider"] == "ollama" and settings["model"] not in check[
-                "details"
-            ].get("models", []):
-                raise ValueError("所选模型未安装，请选择已有 Ollama 模型。")
+            validate_model_selection(settings, check.get("details"))
 
         with MythRuntime(self.root) as runtime:
             workspace = Workspace(runtime)
@@ -542,10 +540,28 @@ class ConversationWebService:
 
         if action == "steer":
             payload = value.get("text")
-        elif action == "switch_model":
-            payload = value.get("model")
-        elif action == "switch_thinking":
-            payload = value.get("thinking")
+        elif action in {"switch_model", "switch_thinking"}:
+            payload = value.get("model") if action == "switch_model" else value.get("thinking")
+            # 动态模型/档位必须相对当前 Control 投影验证；连续切换不能退回 Turn 最初设置。
+            with MythRuntime(self.root) as runtime:
+                workspace = Workspace(runtime)
+                turn = workspace.repository.turn(rid)
+                current = workspace.control.view(rid)
+            current_model = current.get("model") or turn["settings"]["model"]
+            current_thinking = (
+                current["thinking"]
+                if "thinking" in current
+                else turn["settings"].get("thinking")
+            )
+            future_settings = {
+                **turn["settings"],
+                "model": payload if action == "switch_model" else current_model,
+                "thinking": payload if action == "switch_thinking" else current_thinking,
+            }
+            check = self.connection(future_settings)
+            if not check["ready"]:
+                raise ValueError("模型服务未连接，不能切换未来模型设置。")
+            validate_model_selection(future_settings, check.get("details"))
         else:
             payload = None
 

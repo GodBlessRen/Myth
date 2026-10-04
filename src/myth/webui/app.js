@@ -266,6 +266,106 @@ async function refresh() {
   state.data = await api("");
   renderSidebar();
 }
+// 读取当前连接目录中某模型的公开能力；目录缺失时返回空，不用品牌猜测补齐。
+function modelCapability(modelId = $("model").value.trim()) {
+  const profiles = state.connection?.details?.model_capabilities;
+  return profiles && typeof profiles === "object" ? profiles[modelId] || null : null;
+}
+// 将动态 Thinking 选择还原为持久设置；default 表示交给 Provider 使用其模型默认值。
+function reasoningSelectionValue(select = $("reasoningSetting")) {
+  if (!select || select.value === "default") return null;
+  if (select.value === "__on__") return true;
+  if (select.value === "__off__") return false;
+  return select.value;
+}
+// 按 Provider/model capability 生成原生 reasoning 选项；不制造 Myth 全局 effort 档位。
+function fillReasoningSelect(select, profile, current, metaNode = null) {
+  select.replaceChildren();
+  const reasoning = profile?.reasoning;
+  if (!reasoning) return false;
+  const add = (value, label) => {
+    const option = el("option");
+    option.value = value;
+    option.textContent = label;
+    select.append(option);
+  };
+  add(
+    "default",
+    reasoning.default ? `默认 · ${reasoning.default}` : "默认 · Provider 决定",
+  );
+  const seen = new Set();
+  if (reasoning.off !== undefined && reasoning.off !== null) {
+    const raw = typeof reasoning.off === "boolean"
+      ? (reasoning.off ? "__on__" : "__off__")
+      : String(reasoning.off);
+    seen.add(raw);
+    add(raw, `关闭 · ${String(reasoning.off)}`);
+  }
+  (reasoning.levels || []).forEach((level) => {
+    const raw = String(level);
+    if (seen.has(raw)) return;
+    seen.add(raw);
+    add(raw, raw);
+  });
+  const currentRaw =
+    current === null || current === undefined
+      ? "default"
+      : current === true
+        ? "__on__"
+        : current === false
+          ? "__off__"
+          : String(current);
+  if (![...select.options].some((option) => option.value === currentRaw)) {
+    add(currentRaw, `${currentRaw} · 已保存`);
+  }
+  select.value = currentRaw;
+  if (metaNode) {
+    const source = profile.source === "remote" ? "Provider 实时发现" : "Provider 能力声明";
+    metaNode.textContent = `${source} · ${reasoning.kind || "reasoning"}`;
+  }
+  return true;
+}
+// 根据当前模型能力调整设置表单；只显示当前 Provider 真正声明/发现的控制。
+function renderAdaptiveModelSettings() {
+  const provider = $("provider").value;
+  show("ollamaEndpointField", provider === "ollama");
+  show("ollamaContextField", provider === "ollama");
+  const profile = modelCapability();
+  const savedModel = state.data?.settings?.model || "";
+  const currentThinking =
+    $("model").value.trim() === savedModel ? state.data?.settings?.thinking : null;
+  const reasoningVisible = fillReasoningSelect(
+    $("reasoningSetting"),
+    profile,
+    currentThinking,
+    $("reasoningMeta"),
+  );
+  show("reasoningField", reasoningVisible);
+  const facts = [];
+  if (profile?.context_window) facts.push(`Context ${Number(profile.context_window).toLocaleString()} tokens`);
+  if (profile?.max_output_tokens) {
+    facts.push(`Max output ${Number(profile.max_output_tokens).toLocaleString()}`);
+    $("maxTokens").max = String(profile.max_output_tokens);
+  } else {
+    $("maxTokens").max = "393216";
+  }
+  if (profile?.input_modalities?.length) facts.push(`Input ${profile.input_modalities.join(" + ")}`);
+  $("modelCapabilityMeta").textContent = facts.join(" · ");
+  show("modelCapabilityMeta", facts.length > 0);
+}
+// Control 面板复用同一 capability 目录，但保持当前 Run 已保存的原生值可见。
+function renderTurnReasoning(turn, current) {
+  const model = $("turnModelInput").value.trim() || turn?.settings?.model || "";
+  const profile = modelCapability(model);
+  const visible = fillReasoningSelect(
+    $("turnThinkingInput"),
+    profile,
+    current,
+    $("turnThinkingMeta"),
+  );
+  show("turnThinkingField", visible || current !== null && current !== undefined);
+}
+
 // 从表单收集非秘钥模型配置；服务端校验并固定到未来 Turn。
 function settingsPayload() {
   return {
@@ -276,7 +376,7 @@ function settingsPayload() {
     max_output_tokens: Number($("maxTokens").value),
     num_ctx: Number($("numCtx").value),
     temperature: Number($("temperature").value),
-    thinking: $("thinking").checked,
+    thinking: reasoningSelectionValue(),
   };
 }
 // 回填保存设置及认证展示；不会改变在途请求的配置。
@@ -289,8 +389,8 @@ function loadSettings() {
   $("maxTokens").value = s.max_output_tokens;
   $("numCtx").value = s.num_ctx ?? 8192;
   $("temperature").value = s.temperature ?? 0;
-  $("thinking").checked = s.thinking === true;
   renderChatGPTAuth();
+  renderAdaptiveModelSettings();
 }
 // 仅展示公开账号/scope 状态；身份已连接与 plan usage 已授权分开。
 function renderChatGPTAuth() {
@@ -417,6 +517,7 @@ function renderConnection() {
       $("modelOptions").append(o);
     });
   }
+  renderAdaptiveModelSettings();
 }
 // 提交明确当前配置做连接检查；模型列表只是可用目录，保存设置后影响未来工作。
 async function checkConnection(auto = false) {
@@ -1002,13 +1103,9 @@ function openControlDialog() {
   const control = turn.control || {};
   $("steerInput").value = control.steering_note || "";
   $("turnModelInput").value = control.model || turn.settings?.model || "";
-  const thinking = control.thinking;
-  $("turnThinkingInput").value =
-    thinking === true
-      ? "on"
-      : thinking === false
-        ? "off"
-        : thinking || "default";
+  const thinking =
+    control.thinking !== undefined ? control.thinking : turn.settings?.thinking;
+  renderTurnReasoning(turn, thinking);
   $("controlRevision").textContent =
     `control revision ${control.revision || 1}`;
   if (!$("controlDialog").open) $("controlDialog").showModal();
@@ -1586,7 +1683,7 @@ $("applyModelSwitch").onclick = async () => {
 };
 $("applyThinkingSwitch").onclick = async () => {
   await controlTurn("switch_thinking", {
-    thinking: $("turnThinkingInput").value,
+    thinking: reasoningSelectionValue($("turnThinkingInput")),
   });
   openControlDialog();
 };
@@ -1749,8 +1846,10 @@ $("chatFiles").onchange = async () => {
 };
 $("provider").onchange = () => {
   state.connection = null;
+  $("model").value = "";
   renderChatGPTAuth();
   renderConnection();
+  renderAdaptiveModelSettings();
 };
 $("chatgptLogin").onclick = beginChatGPTLogin;
 $("chatgptLogout").onclick = async () => {
@@ -1768,6 +1867,12 @@ $("chatgptLogout").onclick = async () => {
     toast(e.message);
   }
 };
+$("model").addEventListener("change", renderAdaptiveModelSettings);
+$("model").addEventListener("input", renderAdaptiveModelSettings);
+$("turnModelInput").addEventListener("change", () => {
+  const turn = state.session?.turns.at(-1);
+  if (turn) renderTurnReasoning(turn, turn.control?.thinking ?? turn.settings?.thinking);
+});
 $("checkConnection").onclick = () => checkConnection(false);
 $("saveSettings").onclick = async () => {
   try {

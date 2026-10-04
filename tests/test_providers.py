@@ -294,13 +294,41 @@ class DeepSeekProviderTests(unittest.TestCase):
         self.assertFalse(status.ready)
         self.assertEqual(status.provider_id, "deepseek")
         self.assertEqual(status.auth_type, "api_key")
-        self.assertEqual(status.details["models"], ["deepseek-flash", "deepseek-v4-pro"])
         self.assertIn("DEEPSEEK_API_KEY", status.details["error"])
 
-        with patch.dict("os.environ", {"DEEPSEEK_API_KEY": "ds-secret"}, clear=True):
+        catalog = {
+            "object": "list",
+            "data": [
+                {
+                    "id": "deepseek-flash",
+                    "name": "DeepSeek-V4.1-Flash",
+                    "context_window": 1048576,
+                    "max_output_tokens": 393216,
+                    "input_modalities": ["text", "image"],
+                    "output_modalities": ["text"],
+                    "effort": {
+                        "supported_levels": ["low", "high", "max"],
+                        "default_level": "high",
+                    },
+                }
+            ],
+        }
+        with (
+            patch.dict("os.environ", {"DEEPSEEK_API_KEY": "ds-secret"}, clear=True),
+            patch(
+                "myth.providers.deepseek.open_credential_request",
+                return_value=FakeResponse(catalog),
+            ),
+        ):
             ready = DeepSeekApiKeyProvider().check()
         self.assertTrue(ready.ready)
         self.assertEqual(ready.details["endpoint"], "https://api.deepseek.com")
+        profile = ready.details["model_capabilities"]["deepseek-flash"]
+        self.assertEqual(profile["reasoning"]["levels"], ["low", "high", "max"])
+        self.assertEqual(profile["reasoning"]["default"], "high")
+        self.assertEqual(profile["reasoning"]["off"], "none")
+        self.assertEqual(profile["context_window"], 1048576)
+        self.assertEqual(profile["max_output_tokens"], 393216)
 
     # DeepSeek 的 developer 会退化为 user，因此 system 必须原样发送；thinking 显式映射到 reasoning.effort。
     def test_request_preserves_system_role_and_maps_thinking(self) -> None:
@@ -350,7 +378,7 @@ class DeepSeekProviderTests(unittest.TestCase):
             ),
             response_schema=STEP_DECISION_SCHEMA,
             max_output_tokens=256,
-            thinking=True,
+            thinking="max",
             temperature=0.3,
         )
         with (
@@ -365,7 +393,7 @@ class DeepSeekProviderTests(unittest.TestCase):
         self.assertEqual(captured["url"], "https://api.deepseek.com/responses")
         self.assertEqual(captured["auth"], "Bearer ds-secret")
         self.assertEqual(captured["body"]["input"][0]["role"], "system")
-        self.assertEqual(captured["body"]["reasoning"], {"effort": "high"})
+        self.assertEqual(captured["body"]["reasoning"], {"effort": "max"})
         self.assertEqual(captured["body"]["temperature"], 0.3)
         self.assertEqual(captured["body"]["max_output_tokens"], 256)
         self.assertEqual(result.usage["cached_input_tokens"], 8)
@@ -383,3 +411,17 @@ class DeepSeekProviderTests(unittest.TestCase):
             thinking=False,
         )
         self.assertEqual(provider._reasoning_options(request), {"effort": "none"})
+
+
+# 能力投影只验证 Provider 原生值，不建立跨厂商 effort 对照表。
+class AdaptiveCapabilityTests(unittest.TestCase):
+    # DeepSeek 原生档位必须原样通过；不存在的 medium 不应被 Myth 悄悄映射成 high。
+    def test_deepseek_does_not_cross_map_reasoning_levels(self) -> None:
+        provider = DeepSeekApiKeyProvider()
+        request = ModelRequest(
+            model="deepseek-flash",
+            messages=(ModelMessage("user", "goal"),),
+            response_schema=STEP_DECISION_SCHEMA,
+            thinking="medium",
+        )
+        self.assertEqual(provider._reasoning_options(request), {"effort": "medium"})
