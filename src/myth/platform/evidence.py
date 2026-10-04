@@ -31,6 +31,7 @@ class EvidenceQuote:
     # quote：必须能在 source text 中逐字找到的原文。
     quote: str
 
+    # 构造时限制空引用和异常长引用；真正来源绑定仍由 validator 完成。
     def __post_init__(self) -> None:
         if not self.quote:
             raise ValueError("evidence quote must not be empty")
@@ -52,6 +53,7 @@ class EvidenceReceipt:
     # summary：可读摘要；本身不产生可信度。
     summary: str = ""
 
+    # 构造时固定来源身份形状；摘要是否可信仍必须逐字验证。
     def __post_init__(self) -> None:
         if not self.source_ref.strip():
             raise ValueError("source_ref is required")
@@ -69,6 +71,7 @@ class EvidenceValidation:
     # rejected_quotes：未能逐字绑定来源的候选 quote。
     rejected_quotes: tuple[str, ...] = ()
 
+    # 转成验证结果投影；拒绝 quote 保留用于有界修复，不放松验证条件。
     def as_dict(self) -> dict[str, object]:
         return {
             "accepted": self.accepted,
