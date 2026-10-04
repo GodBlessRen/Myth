@@ -5,18 +5,18 @@ API key 仅在调用时从环境变量读取，不进入 SQLite、事件、Web J
 
 from __future__ import annotations
 
+import json
 import os
+from urllib import request
 
+from ..auth.transport import open_credential_request, read_bounded
 from ..models import ModelRequest, ProviderStatus
+from .capabilities import model_capability, reasoning_capability
 from .openai import OpenAIResponsesProvider
 
 
 # DeepSeek 官方 Responses API 根地址；固定 HTTPS 端点避免用户设置把凭据发送到任意主机。
 DEEPSEEK_BASE_URL = "https://api.deepseek.com"
-# 当前 Responses API 文档公开模型目录；目录是产品提示，不代表远端某次请求一定成功。
-DEEPSEEK_MODELS = ("deepseek-flash", "deepseek-v4-pro")
-
-
 # DeepSeek API Key 适配器；复用 Responses 传输/恢复语义，不复制 Agent Loop 或业务状态。
 class DeepSeekApiKeyProvider(OpenAIResponsesProvider):
     # provider_id：供应商合同身份；Run/Turn 固定后恢复时必须仍使用同一身份。
@@ -31,29 +31,76 @@ class DeepSeekApiKeyProvider(OpenAIResponsesProvider):
                 raise RuntimeError(f"{env_var} is not set")
             return value
 
-        # status_check：只证明凭据存在及当前客户端支持哪些官方模型；不发业务推理请求。
+        # status_check：读取 DeepSeek 官方 /models 公开能力目录；失败不回退到写死模型表，避免过期能力误导 UI。
         def status_check() -> ProviderStatus:
             try:
-                token()
+                access_token = token()
             except Exception:
                 return ProviderStatus(
                     self.provider_id,
                     False,
                     auth_type="api_key",
-                    details={
-                        "error": f"{env_var} is not set",
-                        "models": list(DEEPSEEK_MODELS),
+                    details={"error": f"{env_var} is not set"},
+                )
+            try:
+                req = request.Request(
+                    f"{DEEPSEEK_BASE_URL}/models",
+                    method="GET",
+                    headers={
+                        "authorization": f"Bearer {access_token}",
+                        "accept": "application/json",
                     },
                 )
-            return ProviderStatus(
-                self.provider_id,
-                True,
-                auth_type="api_key",
-                details={
-                    "models": list(DEEPSEEK_MODELS),
-                    "endpoint": DEEPSEEK_BASE_URL,
-                },
-            )
+                with open_credential_request(req, timeout=min(timeout, 30.0)) as response:
+                    value = json.loads(read_bounded(response).decode("utf-8"))
+                rows = value.get("data") if isinstance(value, dict) else None
+                if not isinstance(rows, list):
+                    raise ValueError("invalid model catalog")
+                profiles = {}
+                for item in rows:
+                    if not isinstance(item, dict) or not isinstance(item.get("id"), str):
+                        continue
+                    effort = item.get("effort") if isinstance(item.get("effort"), dict) else {}
+                    reasoning = None
+                    levels = effort.get("supported_levels")
+                    if isinstance(levels, list):
+                        reasoning = reasoning_capability(
+                            kind="effort",
+                            levels=[level for level in levels if isinstance(level, str)],
+                            default=effort.get("default_level"),
+                            off="none",
+                            source="remote",
+                        )
+                    profile = model_capability(
+                        item["id"],
+                        display_name=item.get("name"),
+                        context_window=item.get("context_window"),
+                        max_output_tokens=item.get("max_output_tokens"),
+                        input_modalities=item.get("input_modalities") or (),
+                        output_modalities=item.get("output_modalities") or (),
+                        reasoning=reasoning,
+                        source="remote",
+                    )
+                    profiles[item["id"]] = profile
+                models = list(profiles)
+                return ProviderStatus(
+                    self.provider_id,
+                    bool(models),
+                    auth_type="api_key",
+                    details={
+                        "models": models,
+                        "model_capabilities": profiles,
+                        "endpoint": DEEPSEEK_BASE_URL,
+                        "capability_source": "remote",
+                    },
+                )
+            except Exception:
+                return ProviderStatus(
+                    self.provider_id,
+                    False,
+                    auth_type="api_key",
+                    details={"error": "DeepSeek model capability catalog is unavailable"},
+                )
 
         super().__init__(
             provider_id=self.provider_id,
@@ -70,33 +117,19 @@ class DeepSeekApiKeyProvider(OpenAIResponsesProvider):
     def _message_role(self, role: str) -> str:
         return role
 
-    # 将 Myth 的统一 thinking 开关/等级映射到 DeepSeek reasoning.effort；None 保留供应商默认。
+    # 将用户选择直接投影到 DeepSeek 原生 effort；字符串不做跨厂商档位映射，旧 bool 仅保留开关兼容。
     def _reasoning_options(self, model_request: ModelRequest) -> dict | None:
         thinking = model_request.thinking
         if thinking is None:
             return None
         if thinking is True:
-            return {"effort": "high"}
+            return {}
         if thinking is False:
             return {"effort": "none"}
         value = str(thinking).strip().lower()
         if value in {"", "default"}:
             return None
-        aliases = {
-            "off": "none",
-            "false": "none",
-            "none": "none",
-            "minimal": "low",
-            "low": "low",
-            "medium": "high",
-            "high": "high",
-            "xhigh": "high",
-            "max": "max",
-        }
-        effort = aliases.get(value)
-        if effort is None:
-            raise ValueError(f"unsupported DeepSeek thinking level: {thinking}")
-        return {"effort": effort}
+        return {"effort": value}
 
     # DeepSeek Responses 支持 temperature；thinking 模式下远端可能忽略它，但仍保持请求配置可观测一致。
     def _extra_payload(self, model_request: ModelRequest) -> dict:
