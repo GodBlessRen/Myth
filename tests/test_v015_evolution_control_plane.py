@@ -230,6 +230,48 @@ class EvolutionControlPlaneTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 evolution.promote(candidate["candidate_id"])
 
+    # 回归断言：同一候选已经用于 discovery 的 case 不能再次冒充 held-out final promotion evidence。
+    def test_discovery_cases_cannot_reappear_in_final_promotion_evidence(self):
+        with MythRuntime(self.root) as runtime:
+            evolution = SqliteEvolutionControl(runtime)
+            candidate = evolution.create_candidate(
+                candidate_id="policy-heldout-leak",
+                config={"mode": "rule"},
+                changes=["exercise held-out isolation"],
+            )
+            ledger = SqliteEvaluationLedger(runtime)
+            base_result = FoundationEvalRunner.from_path(
+                self.suite,
+                policy_id=candidate["baseline_policy_id"],
+                policy_config=evolution.policy(candidate["baseline_policy_id"])["config"],
+            ).run()
+            discovery_result = FoundationEvalRunner.from_path(
+                self.suite,
+                policy_id=candidate["candidate_id"],
+                policy_config=candidate["config"],
+            ).run()
+            discovery_result["evaluation_partition"] = "discovery"
+            final_result = FoundationEvalRunner.from_path(
+                self.suite,
+                policy_id=candidate["candidate_id"],
+                policy_config=candidate["config"],
+            ).run()
+            before = ledger.record(
+                base_result, policy_id=candidate["baseline_policy_id"]
+            )
+            ledger.record(
+                discovery_result, policy_id=candidate["candidate_id"]
+            )
+            after = ledger.record(
+                final_result, policy_id=candidate["candidate_id"]
+            )
+            with self.assertRaisesRegex(ValueError, "held-out final"):
+                evolution.attach_evaluation(
+                    candidate["candidate_id"],
+                    baseline_eval_run_id=before["eval_run_id"],
+                    candidate_eval_run_id=after["eval_run_id"],
+                )
+
     # 回归断言：显式发布只改变未来 Turn，旧快照固定策略，回退也保留历史。
     def test_candidate_promote_freezes_future_turn_policy_and_rollback(self):
         with MythRuntime(self.root) as runtime:
