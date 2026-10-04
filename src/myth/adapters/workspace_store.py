@@ -149,7 +149,7 @@ class SqliteWorkspaceRepository:
     # 校验 endpoint、模型、窗口与输出/步骤上限后保存白名单字段；拒绝 token 等未声明持久字段。
     def save_settings(self, value):
         provider = value.get("provider", "ollama")
-        if provider not in {"ollama", "openai", "chatgpt"}:
+        if provider not in {"ollama", "openai", "chatgpt", "deepseek"}:
             raise ValueError("unsupported model provider")
         from urllib.parse import urlparse
 
@@ -532,7 +532,7 @@ class SqliteWorkspaceRepository:
             raise ValueError("request_id is required")
         settings = dict(_settings) if _settings is not None else self.settings()
         if not settings["model"]:
-            raise ValueError("请先在模型设置中选择 Ollama 模型。")
+            raise ValueError("请先在模型设置中选择模型。")
         document_ids = document_ids or []
         memory_records = memory_records or []
         if (
