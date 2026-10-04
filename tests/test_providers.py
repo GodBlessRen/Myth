@@ -335,7 +335,11 @@ class DeepSeekProviderTests(unittest.TestCase):
         captured = {}
         completed = {
             "id": "resp_ds",
+            "model": "deepseek-v4-pro",
+            "created_at": 1791077000,
             "status": "completed",
+            "service_tier": "default",
+            "custom_provider_metric": {"phase": "decode", "value": 17},
             "output": [
                 {
                     "type": "reasoning",
@@ -400,6 +404,12 @@ class DeepSeekProviderTests(unittest.TestCase):
         self.assertEqual(result.usage["reasoning_tokens"], 9)
         self.assertNotIn("private reasoning body", json.dumps(result.raw))
         self.assertNotIn("ds-secret", json.dumps(result.raw))
+        self.assertEqual(result.raw["model"], "deepseek-v4-pro")
+        self.assertEqual(result.raw["created_at"], 1791077000)
+        self.assertEqual(result.raw["service_tier"], "default")
+        self.assertEqual(
+            result.raw["custom_provider_metric"], {"phase": "decode", "value": 17}
+        )
 
     # thinking=False 明确关闭 DeepSeek 默认思考，避免 UI 关闭开关却仍产生 reasoning token。
     def test_false_thinking_maps_to_none_effort(self) -> None:
