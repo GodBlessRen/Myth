@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import json
-import os
 import time
 from pathlib import Path
 from typing import Callable
@@ -492,13 +491,21 @@ class OpenAIApiKeyProvider(OpenAIResponsesProvider):
     provider_id = "openai"
 
     # 保存本实例的协作对象与配置；状态/I/O 边界见类合同，实例字段不能替代持久执行事实。
-    def __init__(self, env_var: str = "OPENAI_API_KEY", timeout: float = 180.0) -> None:
-        # 调用时从指定环境变量读取 API key；缺失显式失败，秘钥不持久化。
-        def token() -> str:
+    def __init__(
+        self,
+        env_var: str = "OPENAI_API_KEY",
+        timeout: float = 180.0,
+        token_supplier: TokenSupplier | None = None,
+    ) -> None:
+        # token_supplier 由 Credential Hub 注入；直接构造时仍保留环境变量兼容旧 CLI/测试。
+        def env_token() -> str:
+            import os
             value = os.environ.get(env_var, "").strip()
             if not value:
                 raise RuntimeError(f"{env_var} is not set")
             return value
+
+        token = token_supplier or env_token
 
         # API key 路径读取官方模型目录；OpenAI /models 不含 effort 元数据，因此能力由本 adapter 的公开模型族规则补充。
         def status_check() -> ProviderStatus:
