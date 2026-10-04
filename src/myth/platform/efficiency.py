@@ -45,6 +45,7 @@ class OptimizationEconomics:
     # emergency_required：安全/窗口保护要求时允许越过普通经济门槛。
     emergency_required: bool = False
 
+    # 构造时拒绝负成本/负计数和空机制身份；缺测只能用 None 表达。
     def __post_init__(self) -> None:
         if not self.mechanism_id.strip():
             raise ValueError("mechanism_id is required")
@@ -77,6 +78,8 @@ class OptimizationDecision:
     # projected_net_saving：当前 horizon 下的净节约估计；缺测保持 None。
     projected_net_saving: int | None = None
 
+    # 转成事件/UI 可持久投影；不添加未测量字段或重新计算结论。
+    # 转成只读可达性投影；调用不会改变 enabled/available/exposed 事实。
     def as_dict(self) -> dict[str, object]:
         return {
             "mechanism_id": self.mechanism_id,
@@ -244,6 +247,7 @@ class RecoveryBudget:
     # can_reacquire：当前权限/来源是否允许重新取证。
     can_reacquire: bool = True
 
+    # 构造时固定恢复次数上限；负数会破坏有界恢复语义，因此提前拒绝。
     def __post_init__(self) -> None:
         for value in (
             self.repair_attempts,
