@@ -32,7 +32,7 @@ def _sse_events(response, *, deadline=None):
     while True:
         raw_line = response.readline(2 * 1024 * 1024 + 1)
         if deadline is not None and time.monotonic() > deadline:
-            raise RuntimeError(f"{self.provider_name} Responses stream exceeded its deadline")
+            raise RuntimeError("Responses stream exceeded its deadline")
         if not raw_line:
             if fields:
                 yield "\n".join(fields), frame_size
@@ -40,7 +40,7 @@ def _sse_events(response, *, deadline=None):
         frame_size += len(raw_line)
         total_size += len(raw_line)
         if frame_size > 2 * 1024 * 1024 or total_size > MAX_RESPONSE_BYTES:
-            raise RuntimeError(f"{self.provider_name} Responses stream exceeds the byte limit")
+            raise RuntimeError("Responses stream exceeds the byte limit")
         line = raw_line.decode("utf-8").rstrip("\r\n")
         if not line:
             if fields:
@@ -307,7 +307,7 @@ class OpenAIResponsesProvider:
             if not response_started and is_pre_dispatch_disconnect(exc.reason):
                 raise ProviderUnavailable() from None
             raise RuntimeError(
-                "OpenAI Responses request failed before completion"
+                f"{self.provider_name} Responses request failed before completion"
             ) from None
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise RuntimeError(f"{self.provider_name} Responses returned malformed data") from None
