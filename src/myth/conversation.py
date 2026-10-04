@@ -12,6 +12,7 @@ from .conversation_context import (
     compile_conversation_context,
     conversation_budget_bytes,
 )
+from .platform.tool_discovery import visible_tool_ids
 
 
 # 构造统一工具参数 schema；目录描述参数形状，不替代实际参数/范围校验。
@@ -95,6 +96,17 @@ _TOOL_ARGUMENTS = {
         },
         ["task"],
     ),
+    "tool.search": object_schema(
+        {
+            "query": {"type": "string", "minLength": 1, "maxLength": 200},
+            "limit": {"type": "integer", "minimum": 1, "maximum": 8},
+        },
+        ["query"],
+    ),
+    "tool.describe": object_schema(
+        {"capability_id": {"type": "string", "minLength": 1, "maxLength": 200}},
+        ["capability_id"],
+    ),
 }
 # CONVERSATION_SCHEMA：Conversation 的统一决定传输合同；不能替代工具参数专用校验。
 CONVERSATION_SCHEMA = {
@@ -125,6 +137,40 @@ CONVERSATION_SCHEMA = {
         ],
     ]
 }
+
+
+# 按当前可见工具生成 Ollama 线协议；延迟工具不进入本步 schema，发现结果只影响下一步。
+def conversation_schema(tool_ids) -> dict:
+    visible = set(tool_ids)
+    return {
+        "oneOf": [
+            object_schema(
+                {
+                    "action": {"type": "string", "enum": ["reply"]},
+                    "reason": _TEXT,
+                    "claim": _TEXT,
+                }
+            ),
+            object_schema(
+                {
+                    "action": {"type": "string", "enum": ["ask"]},
+                    "reason": _TEXT,
+                    "question": _TEXT,
+                }
+            ),
+            *[
+                object_schema(
+                    {
+                        "action": {"type": "string", "enum": [name]},
+                        "reason": _TEXT,
+                        "arguments": args,
+                    }
+                )
+                for name, args in _TOOL_ARGUMENTS.items()
+                if name in visible
+            ],
+        ]
+    }
 
 # TOOL_CATALOG：对话能力名称及参数形状目录；实际执行受已准入范围限制。
 TOOL_CATALOG = {
@@ -179,6 +225,13 @@ TOOL_CATALOG = {
         "context": "minimal context needed by the child; parent history is not inherited",
         "expected_output": "optional concise result contract",
         "source_refs": "0-20 source/evidence refs already observed by the parent",
+    },
+    "tool.search": {
+        "query": "words describing a capability you need",
+        "limit": "1-8 catalog matches; discovery only",
+    },
+    "tool.describe": {
+        "capability_id": "one tool id returned by tool.search or otherwise already known",
     },
 }
 
@@ -271,6 +324,9 @@ def calculate(expression):
 
 # 根据统一工具合同和冻结事实编译有界消息；Ollama 窗口与输出预留对齐，远端保持本地投影上限。
 def conversation_request(settings, snapshot, messages, activities, control=None):
+    visible_ids = visible_tool_ids(TOOL_CATALOG, activities)
+    visible_catalog = {tool_id: TOOL_CATALOG[tool_id] for tool_id in visible_ids}
+    deferred_ids = [tool_id for tool_id in TOOL_CATALOG if tool_id not in visible_catalog]
     system = (
         "你是 Myth，一个能聊天、阅读资料、处理项目的助手。用用户的语言简明回答。每次只返回一个符合 schema 的 JSON 对象。\n"
         '普通回答：{"action":"reply","reason":"直接回答","claim":"完整的自然语言回答"}。\n'
@@ -289,10 +345,16 @@ def conversation_request(settings, snapshot, messages, activities, control=None)
         "信息获取遵循 bounded live control：knowledge.search/project.search/project.list 属于 SEEK，knowledge.resolve/knowledge.read/project.read 属于 EXPAND。"
         "只在当前任务确实缺信息时继续获取；相同请求不要重复，分页必须使用返回的 next_cursor/next_offset 前进，已有信息足够时直接继续任务或回答（KEEP）。"
         "Runtime 会在 Tool Ticket 前拒绝重复、停滞或超出本轮信息预算的请求；不要通过改写同义参数绕过预算。\n"
-        "可用工具参数：" + canonical_json(TOOL_CATALOG)
+        "可用工具参数：" + canonical_json(visible_catalog)
     )
+    if deferred_ids:
+        system += (
+            "\n工具目录采用渐进披露：当前只暴露常用/已发现能力。"
+            "若需要当前未展示的专门能力，先调用 tool.search，再按需 tool.describe；"
+            "发现只改变下一步可见目录，不会绕过 Capability/Ticket/权限准入。"
+        )
     schema = (
-        CONVERSATION_SCHEMA
+        conversation_schema(visible_ids)
         if settings["provider"] == "ollama"
         else STEP_DECISION_SCHEMA
     )
@@ -314,6 +376,8 @@ def conversation_request(settings, snapshot, messages, activities, control=None)
         if is_ollama
         else "remote-projection-cap=42000"
     )
+    report["visible_tools"] = list(visible_ids)
+    report["deferred_tools"] = deferred_ids
     return ModelRequest(
         settings["model"],
         projected,
