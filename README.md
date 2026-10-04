@@ -15,7 +15,7 @@ Long-term Goal
   -> continue the same Goal
 ```
 
-当前版本：**v0.24.0**
+当前版本：**v0.24.1**
 
 登录、密钥边界、逐模块审查和本地性能对照见 [沉淀期审查](docs/REFINEMENT_REVIEW.md)。
 

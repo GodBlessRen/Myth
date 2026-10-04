@@ -123,7 +123,7 @@ class MilvusRetrievalTests(unittest.TestCase):
             text="The remembered architecture decision keeps SQLite authoritative. " * 20,
             source_ref="decision:vector-boundary",
         )
-        views = self.workspace.memory.search_views("semantic-only", limit=3)
+        views = self.workspace.memory.search_view_report("semantic-only", limit=3)["memories"]
         self.assertEqual(views[0]["memory_id"], row["memory_id"])
         self.assertEqual(views[0]["resolution"], "L0")
         self.assertLess(len(views[0]["text"]), len(row["text"]))

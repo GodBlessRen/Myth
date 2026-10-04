@@ -127,7 +127,7 @@ class SqliteMemoryStore:
             raise ValueError("memory fact_level must be context/user_asserted/verified")
 
         # 本地事务边界：正文、当前 evidence 与 immutable revision snapshot 一起提交；Memory Domain 内部可加入同连接活动事务。
-        with self.store.admission_transaction(_db) as db:
+        with self.store.transaction_scope(_db) as db:
             row = db.execute(
                 "SELECT * FROM workspace_memories WHERE kind=? AND source_ref=?",
                 (memory_kind.value, source),
@@ -785,24 +785,6 @@ class SqliteMemoryStore:
             for item in report["memories"]
         ]
         return {"memories": views, "retrieval": report["retrieval"]}
-
-    # 兼容调用只取 L0 结果；完整观测使用 search_view_report，避免把正文直接塞进初始 Context。
-    def search_views(
-        self,
-        query: str,
-        *,
-        kinds: Iterable[str | MemoryKind] | None = None,
-        limit: int = 6,
-        project_id: str | None = None,
-        session_id: str | None = None,
-    ) -> list[dict]:
-        return self.search_view_report(
-            query,
-            kinds=kinds,
-            limit=limit,
-            project_id=project_id,
-            session_id=session_id,
-        )["memories"]
 
     # 以命中 Memory 为锚点读取邻近同作用域记录，提供 chronology/navigation；不是新事实，也不改变 revision。
     def timeline(

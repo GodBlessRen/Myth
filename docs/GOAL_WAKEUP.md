@@ -1,6 +1,6 @@
 # Goal 定时唤醒
 
-Myth 服务运行时，可以让显式计划到期创建一个正常的工作轮次。计划持久化在 SQLite；Web 页面关闭不会取消计划，Web 服务关闭期间不执行。
+Web 内置执行器或独立 `myth worker` 运行时，显式计划到期可创建正常工作轮次。计划持久化在 SQLite；页面关闭不取消计划，两个执行入口都停止期间不执行。重启接续原持久机会，不创建替代 Run。
 
 ## 工作台
 
@@ -28,7 +28,7 @@ Myth 服务运行时，可以让显式计划到期创建一个正常的工作轮
 
 `due_at` 必须含时区，持久化为 UTC epoch；UI 输入和显示使用浏览器本地时区。`interval_seconds` 省略/null 表示仅一次；整数范围 60–31536000。固定秒数间隔不是时区感知 cron，跨夏令时不承诺保持同一个当地时刻。
 
-`request_id` 固定入口意图，网络重试应使用同一个 ID。重复请求返回已有计划；改 prompt/Goal/session/time/settings 会冲突。旧客户端可以省略 ID，此时每次请求都是新计划。
+`request_id` 固定入口意图，网络重试应使用同一个 ID。重复请求返回已有计划；改 prompt/Goal/session/time/settings 会冲突。省略 ID 表示每次请求创建新计划；需要重试去重的调用方应始终提供稳定 ID。
 
 读取：`GET /api/workspace/schedules`、`GET /api/workspace/goals/{goal_id}/schedules`。响应包括 enabled、下一次 due time、固定 settings、last_error、最近 20 次 Wakeup/Run/status。
 

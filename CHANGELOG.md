@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.24.1 — 控制原子提交与委派恢复
+
+- 控制命令、Turn/Core、Goal checkpoint 与事件同事务提交，状态写入归回各自仓储；安全点不再用旧快照覆盖终态。
+- 控制响应固定自身 revision；Core 栅栏独立递增，模型/推理设置提交核对能力预检时的 revision。
+- 委派先预留父工具额度、签发 Ticket，再调用子模型；模型完成而工具收据未发布时，重开只复用固定子结果。
+- 移除 15 个无调用者 Protocol、未使用帮助函数/类型、旧知识读取入口及仓储别名；缺失 Goal 进度/验收合同明确报错，不合成空状态。
+- 知识分片分页回归 Knowledge 仓储，统一知识展开入口及分页单位；补齐中文指导注释，更新安全、架构、路线图与发布验证文档。
+- 全文件处置表覆盖本轮基线 234 个跟踪文件；原版 10 项故障回归全部失败，修改版全量 426 通过、1 跳过，前端 35 通过，Foundation 完整集 48/48。
+
 ## v0.24.0 — 深化、瘦身与原子边界
 
 - 知识正文/分片/检索拆为独立 SqliteKnowledgeRepository；模型能力合同移入供应商中立内圈。
@@ -101,7 +110,7 @@
 - 完整替换工作台视觉与布局，提供奶油白、星空黑及跟随系统主题；对话、项目、知识、会话、Goal 与计划、设置和 Runtime 统一简体中文与响应式控件。
 - 保留完整 Runtime 观测及最新 Provider 能力，Turn 完成与验收状态分开显示；连接目录、草稿与异步证据按各自身份隔离。
 - 新增快捷命令、抽屉/弹窗键盘焦点管理与增量渲染；轮询不重建等值消息、Goal 或最近会话节点。
-- 设计取舍、实际截图与验证范围见 [重构记录](docs/UI_REDESIGN.md)。
+- 设计取舍、实际截图与验证范围记录于历史 `UI_REDESIGN.md`，现已移入垃圾站。
 
 ## 未发布 — v0.25 SOTA Route
 
@@ -122,7 +131,7 @@
 - 普通 Conversation 新增 Acceptance Ledger（UNVERIFIED / PASSED / FAILED / INCONCLUSIVE），绑定当前回答与产物摘要；Runtime 第三栏新增 Delivery 区。
 - 新增持久 Work item / plan revision / evidence / human attention 计量，为跨阶段项目工作建立可检查身份。
 - `test.run` 首次进入 executable：只运行用户显式 `trusted_project=true` 的 Python unittest profile；无任意 shell，并明确不宣称 OS 级网络隔离。
-- 详细边界与 0–12 周阶段映射见 [v0.24 交付闭环](docs/DELIVERY_WORKFLOW_V024.md)。
+- 详细边界与 0–12 周阶段映射记录于历史 `DELIVERY_WORKFLOW_V024.md`，现已移入垃圾站；当前合同见 [DELIVERY](docs/DELIVERY.md)。
 
 
 ## 未发布 — 会话统计
@@ -149,7 +158,7 @@
 - 项目读取复核链接实际路径；搜索剪枝私有/依赖目录，Git diff 排除敏感文件并禁用外部 diff/textconv/fsmonitor。
 - 后台 worker 从可信安装目录加载；策略发布、回退与证据不可变校验在写事务内完成。
 - 会话查询补索引，Memory 全扫描只保留 top-k，公开模型目录短时缓存减少重复 preflight。
-- 增加安全反例、合成系统凭据 smoke、固定本地开销对照及不回显匹配值的历史秘钥模式扫描；边界见 [审查报告](docs/SECURITY_PERFORMANCE_AUDIT.md)。
+- 增加安全反例、合成系统凭据 smoke、固定本地开销对照及不回显匹配值的历史秘钥模式扫描；当时结果记录于已归档的 `SECURITY_PERFORMANCE_AUDIT.md`，当前边界见 [SECURITY](SECURITY.md)。
 
 ## v0.23 — Long-run Soak + Worked Time
 
@@ -176,7 +185,7 @@
 - 独立精确文件入口的 Run/账号/Action/Attempt/预留一起提交，准备或资源失败不留下空 Run。
 - 两条应用共用独立本机锁；公开入口按需导出，保留旧类身份；同摘要对象发布失败仅在核对完全一致字节后复用。
 - 旧固定评测和诊断工具归档；删除重复 Goal 绑定、三处无用导入及可重建旧包镜像；历史回归/迁移/收据保留。
-- 完整审阅、清理清单和验证范围见 [ANNOTATION_AUDIT_V0211.md](docs/archive/ANNOTATION_AUDIT_V0211.md)。
+- 完整审阅、清理清单和验证范围记录于历史 `ANNOTATION_AUDIT_V0211.md`，现已移入垃圾站。
 
 ## v0.21 — Goal Wake-up and Measured Daily Tasks
 

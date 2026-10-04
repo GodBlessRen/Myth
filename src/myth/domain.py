@@ -88,10 +88,6 @@ class RecoveryRequired(MythError):
     """执行事实需核对或有 Driver 竞争；不授权盲目重发。"""
 
 
-class VerificationFailed(MythError):
-    """缺少可信 PASS 时拒绝交付；模型完成声明不能替代报告。"""
-
-
 class PatchContractError(MythError):
     """固定基线或精确参数不符合合同；发生于效果前时是已知拒绝，允许纠正参数。"""
 
@@ -131,19 +127,6 @@ class ReceiptData:
     evidence_ref: str
     # usage：供应商/执行器测得的各 meter 用量；缺项表示未测量而非零成本。
     usage: dict[str, int]
-
-
-# 绑定候选摘要与证据引用的独立验收结果；不会自行提交交付。
-@dataclass(frozen=True)
-class VerificationResult:
-    # report_id：独立验收报告身份；不能拿其他候选报告交付。
-    report_id: str
-    # verdict：验收/评测结论；不足证据保留 INCONCLUSIVE。
-    verdict: Verdict
-    # candidate_digest：被验收候选的内容身份；报告只对该摘要有效。
-    candidate_digest: str
-    # evidence_ref：不可变证据引用；调用方必须核对它属于当前工作。
-    evidence_ref: str
 
 
 # 计算原始字节 SHA-256；身份不做换行、BOM 或 Unicode 归一化。

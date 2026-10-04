@@ -1,4 +1,4 @@
-"""项目、会话、知识与对话步骤的 SQLite 状态所有者。
+"""项目、会话与对话步骤的 SQLite 状态所有者。
 协调 Turn 的事务准入和恢复游标；Goal 写入通过个人仓储加入同一事务，检索/快照是数据投影而非权限。"""
 
 from __future__ import annotations
@@ -10,6 +10,7 @@ from ..domain import canonical_json, digest_json, IdentityConflict, BudgetExceed
 from ..decision_runtime import DecisionRuntime
 from ..strategies import RuleIntentPicker, RuleResolutionController
 from ..platform.context_anchor import build_context_anchor
+from ..platform.control import ControlCommand, ControlSnapshot
 from ..network_recovery import reconnect_delay
 from ..session_statistics import measured_integer
 from .knowledge_store import SqliteKnowledgeRepository
@@ -18,7 +19,6 @@ from .knowledge_store import SqliteKnowledgeRepository
 # projects.root 是明确项目范围；archived/pinned 只管理未来可见性，不删除既有引用。
 # turns.snapshot_json 冻结准入上下文；settings_json 可经显式 Control 修订，已发出的模型请求对象不改写。
 # steps 的 step/current_step 单位为规划步骤；decision/result 绑定固定机会，不因重新渲染生成另一项执行。
-# documents.digest 绑定原始 UTF-8 对象，bytes 为字节；chunks 的 chunk_index 是字符分片索引。
 # operations 的 reserved_bytes 是写入字节预留；ticket_id 是授权，result_json 不能靠模型自述填成收据。
 # execution_cursors.checkpoint_step 表示已持久消费步骤；leases 时间为 UTC epoch 秒，owner/generation 防迟到释放。
 SCHEMA = """
@@ -1214,11 +1214,69 @@ class SqliteWorkspaceRepository:
                 detail="User answer persisted",
             )
 
-    # 持久记录阻塞/结束状态及原因；不抹掉已签发凭证和晚到收据。
-    def block(self, rid, status, reason):
+    def control_target(self, db, rid):
+        """向控制协调器提供最小 Turn 数据；不加载历史消息、知识正文、步骤或对象文件。"""
+        with self.store.transaction_scope(db):
+            row = db.execute(
+                "SELECT status,settings_json,snapshot_json,question_id,current_step "
+                "FROM workspace_turns WHERE run_id=?", (rid,)
+            ).fetchone()
+            if row is None:
+                raise KeyError(rid)
+            return {
+                "status": row["status"], "settings": json.loads(row["settings_json"]),
+                "snapshot": json.loads(row["snapshot_json"]), "question_id": row["question_id"],
+                "current_step": row["current_step"],
+            }
+
+    def apply_control(self, db, rid, control: ControlSnapshot, *, command=None):
+        """在 Control 的提交事务内更新本仓储状态，并请 Core/Goal 所有者加入。
+
+        控制只阻止后续准入，已获 Ticket 的机会照常留收据。暂停待答问题时保留
+        WAITING_USER；Resume 不能替用户回答，也不能把未决效果当作可重放。
+        """
+        turn = self.control_target(db, rid)
+        if turn["status"] not in ACTIVE_TURN_STATUSES:
+            return None
+        if command in {ControlCommand.SWITCH_MODEL, ControlCommand.SWITCH_THINKING}:
+            settings = turn["settings"]
+            settings.update(model=control.model, thinking=control.thinking)
+            db.execute("UPDATE workspace_turns SET settings_json=? WHERE run_id=?", (canonical_json(settings), rid))
+
+        if control.stopped:
+            self.block(rid, "CANCELLED", "用户已终止本轮。已获 Ticket 的调用仍会保留真实晚到结果。", _db=db)
+            status = "CANCELLED"
+        elif control.paused and turn["status"] in {"RUNNING", "INTERRUPTED", "UNKNOWN"}:
+            db.execute("UPDATE workspace_turns SET status='PAUSED',error=NULL WHERE run_id=?", (rid,))
+            self.store.project_control(db, rid, state="PAUSED")
+            self.store._event(db, rid, "RunPaused", {"revision": control.revision, "safe_point": True})
+            status = "PAUSED"
+        elif command is ControlCommand.RESUME and turn["status"] == "PAUSED":
+            # Resume 只重新允许驱动；ConversationAgent 在任何新派发前必须先 recover，未知效果仍不重发。
+            status = "RUNNING"
+            db.execute("UPDATE workspace_turns SET status=?,error=NULL WHERE run_id=?", (status, rid))
+            self.store.project_control(db, rid, state="RUNNING")
+            self.store._event(db, rid, "RunResumed", {"revision": control.revision})
+        else:
+            status = turn["status"]
+
+        if command in {ControlCommand.PAUSE, ControlCommand.RESUME, ControlCommand.STOP}:
+            goal_id = (turn["snapshot"].get("goal") or {}).get("goal_id")
+            if goal_id and self.personal is not None:
+                self.personal.checkpoint_run(
+                    goal_id, rid, status="PAUSED" if control.paused else status,
+                    summary=f"Control action applied: {command.value}.",
+                    waiting_for=(turn["snapshot"].get("messages") or [{}])[-1].get("content", "")
+                    if status == "WAITING_USER" else "", _db=db,
+                )
+        return "CANCELLED" if control.stopped else "PAUSED" if control.paused else None
+
+    # 持久记录阻塞/结束状态及原因；_db 可加入控制事务，不抹掉凭证与晚到收据。
+    def block(self, rid, status, reason, *, _db=None):
         # 本地事务边界：下列写入一起提交，异常整体回滚；文件/网络效果须在事务外另行核对。
-        with self.store.tx() as db:
-            if self.turn(rid)["status"] not in {
+        with self.store.transaction_scope(_db) as db:
+            turn = self.turn(rid)
+            if turn["status"] not in {
                 "RUNNING",
                 "INTERRUPTED",
                 "UNKNOWN",
@@ -1248,20 +1306,18 @@ class SqliteWorkspaceRepository:
             )
             if status in {"FAILED", "CANCELLED", "BUDGET_EXHAUSTED", "COMPLETED"}:
                 db.execute("DELETE FROM workspace_network_retries WHERE run_id=?", (rid,))
-            db.execute(
-                "UPDATE runs SET state=?,control_revision=control_revision+1 WHERE run_id=?",
-                ("RECOVERING" if status == "UNKNOWN" else status, rid),
-            )
+            self.store.project_control(db, rid, state="RECOVERING" if status == "UNKNOWN" else status,
+                                       advance_revision=True)
             recovery = "RECONCILE" if status == "UNKNOWN" else "NONE"
             self._checkpoint(
                 db,
                 rid,
-                self.turn(rid)["current_step"],
+                turn["current_step"],
                 status,
                 checkpoint_step=max(
                     [
                         int(item["step"])
-                        for item in self.turn(rid)["activities"]
+                        for item in turn["activities"]
                         if item["state"] == "DONE"
                     ]
                     or [0]

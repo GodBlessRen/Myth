@@ -48,7 +48,7 @@ python -m build
 python scripts/validate_release.py dist
 ```
 
-关键路径补对应故障回归：准入/恢复检查 UNKNOWN、崩溃、租约和同 Run 接续；Goal 检查跨 Session/restart；调度检查争抢与提交后退出；认证检查协议、凭据轮换与泄漏；Context 检查来源、窗口和用量；验收检查对象摘要与完整评测。
+关键路径补对应故障回归：Control 检查跨聚合回滚、终态竞争与提交前后进程退出；委派检查父工具额度先于子模型费用、收据间崩溃与无 Provider 恢复；准入/恢复检查 UNKNOWN、崩溃、租约和同 Run 接续；Goal 检查跨 Session/restart；调度检查争抢与提交后退出；认证检查协议、凭据轮换与泄漏；Context 检查来源、窗口和用量；验收检查对象摘要与完整评测。
 
 安装 wheel 后运行 `scripts/validate_package.py --package-dir <安装目录>`，核对真实导入、HTTP 资源和基本 API。
 

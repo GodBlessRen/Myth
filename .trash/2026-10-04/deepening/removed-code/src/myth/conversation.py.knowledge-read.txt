@@ -1,0 +1,3 @@
+    "knowledge.read": object_schema(
+    "knowledge.read": {
+        "信息获取遵循 bounded live control：knowledge.search/memory.search/project.search/project.list 属于 SEEK，knowledge.resolve/knowledge.read/memory.timeline/memory.resolve/project.read 属于 EXPAND。"

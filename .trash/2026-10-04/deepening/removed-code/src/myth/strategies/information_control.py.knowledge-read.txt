@@ -1,0 +1,4 @@
+        "knowledge.read": InformationControlAction.EXPAND,
+        if capability == "knowledge.read":
+        if capability in {"knowledge.resolve", "knowledge.read"}:
+        if capability == "knowledge.read":

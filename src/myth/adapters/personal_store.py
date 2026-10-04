@@ -117,19 +117,7 @@ class SqlitePersonalState:
         goal = self.goal(goal_id)
         if goal["state"] != GoalState.ACTIVE.value:
             raise ValueError("only an active Goal admits new work")
-        db.execute(
-            "INSERT OR IGNORE INTO goal_work_state(goal_id,current_state,next_action,progress_note) VALUES(?,?,?,?)",
-            (
-                goal_id,
-                "READY",
-                "Review the Goal and choose the next action.",
-                "Legacy goal initialized.",
-            ),
-        )
-        work = db.execute(
-            "SELECT * FROM goal_work_state WHERE goal_id=?", (goal_id,)
-        ).fetchone()
-        return {**goal, "work": dict(work)}
+        return {**goal, "work": self.work_state(goal_id)}
 
     def bind_admitted_run(self, db, goal_id: str, run_id: str) -> None:
         """在调用方准入事务加入 Goal/Run 关联和 IN_PROGRESS checkpoint；本方法不另开或提交事务。"""
@@ -207,27 +195,14 @@ class SqlitePersonalState:
             ).fetchall()
         ]
 
-    # 读取进度，缺失的旧 Goal 幂等初始化；INSERT OR IGNORE 支持另一连接同时补齐。
+    # 当前格式的 Goal 与进度原子创建；缺行属于损坏，读取不得编造 READY 进度。
     def work_state(self, goal_id: str) -> dict[str, Any]:
         self.goal(goal_id)
         row = self.store.db.execute(
             "SELECT * FROM goal_work_state WHERE goal_id=?", (goal_id,)
         ).fetchone()
         if row is None:
-            # 本地事务边界：下列写入一起提交，异常整体回滚；文件/网络效果须在事务外另行核对。
-            with self.store.tx() as db:
-                db.execute(
-                    "INSERT OR IGNORE INTO goal_work_state(goal_id,current_state,next_action,progress_note) VALUES (?,?,?,?)",
-                    (
-                        goal_id,
-                        "READY",
-                        "Continue this goal.",
-                        "Legacy goal initialized.",
-                    ),
-                )
-            row = self.store.db.execute(
-                "SELECT * FROM goal_work_state WHERE goal_id=?", (goal_id,)
-            ).fetchone()
+            raise RuntimeError(f"goal work state missing: {goal_id}")
         return dict(row)
 
     # 合并 Goal 身份与当前 work state 为产品投影；历史 Turn 仍读取自己的冻结副本。
@@ -253,15 +228,11 @@ class SqlitePersonalState:
         progress_note: str | None = None,
         last_run_id: str | None = None,
         expected_run_id: str | None = None,
+        _db=None,
     ) -> dict[str, Any]:
-        self.work_state(goal_id)
-        # 本地事务边界：下列写入一起提交，异常整体回滚；文件/网络效果须在事务外另行核对。
-        with self.store.tx() as db:
-            current = dict(
-                db.execute(
-                    "SELECT * FROM goal_work_state WHERE goal_id=?", (goal_id,)
-                ).fetchone()
-            )
+        # _db 由 Control 等协调入口显式传入；所有者仍是本仓储，提交点归调用者。
+        with self.store.transaction_scope(_db) as db:
+            current = self.work_state(goal_id)
             # 旧 Run 回答后可能迟到写进度；只允许仍为 last_run_id 的轮次更新，避免覆盖新准入 Turn。
             if expected_run_id is not None and current["last_run_id"] not in {
                 None,
@@ -324,6 +295,7 @@ class SqlitePersonalState:
         summary: str = "",
         next_action: str = "",
         waiting_for: str = "",
+        _db=None,
     ) -> dict[str, Any]:
         mapping = {
             "COMPLETED": "READY",
@@ -353,6 +325,7 @@ class SqlitePersonalState:
             progress_note=summary,
             last_run_id=run_id,
             expected_run_id=run_id,
+            _db=_db,
         )
 
     # 保存有界显式 Trigger 参数；该记录不自动变成 executable schedule。

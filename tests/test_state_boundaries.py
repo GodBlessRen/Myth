@@ -217,16 +217,16 @@ class StateBoundaryTests(unittest.TestCase):
     # 显式事务协作不能传入另一连接或已提交连接；拒绝发生在任何 Core 写入前。
     def test_core_admission_rejects_foreign_or_inactive_transaction(self):
         with self.assertRaises(RuntimeError):
-            self.runtime.store.admission_transaction(self.runtime.store.db)
+            self.runtime.store.transaction_scope(self.runtime.store.db)
         with MythRuntime(Path(self.temp.name)) as other:
             with other.store.tx() as db:
                 with self.assertRaises(RuntimeError):
-                    self.runtime.store.admission_transaction(db)
+                    self.runtime.store.transaction_scope(db)
         self.assert_no_patch_admission()
 
-    # 历史 Goal 缺工作状态时，调度在同一准入事务补齐；不能触发嵌套事务或只留下初始化进度。
-    def test_schedule_initializes_legacy_goal_inside_its_admission_transaction(self):
-        goal = self.workspace.personal.create_goal("legacy goal")
+    # 当前格式的 Goal 若缺工作状态，调度拒绝准入且不消耗计划机会；不能伪造 READY。
+    def test_schedule_rejects_missing_goal_progress_without_partial_admission(self):
+        goal = self.workspace.personal.create_goal("damaged goal")
         session = self.workspace.repository.create_session()
         scheduler = GoalScheduler(self.workspace)
         schedule = scheduler.create(
@@ -235,18 +235,16 @@ class StateBoundaryTests(unittest.TestCase):
                 "session_id": session["id"],
                 "prompt": "continue",
                 "due_at": "2020-01-01T00:00:00Z",
-                "request_id": "legacy-admission",
+                "request_id": "damaged-admission",
             },
         )
         self.runtime.store.db.execute(
             "DELETE FROM goal_work_state WHERE goal_id=?", (goal["goal_id"],)
         )
-        rid = scheduler.admit(schedule["schedule_id"])
-        self.assertEqual(
-            self.workspace.personal.work_state(goal["goal_id"])["last_run_id"],
-            rid,
-        )
-        self.assertEqual(len(scheduler.get(schedule["schedule_id"])["wakeups"]), 1)
+        with self.assertRaisesRegex(RuntimeError, "work state missing"):
+            scheduler.admit(schedule["schedule_id"])
+        self.assertEqual(len(scheduler.get(schedule["schedule_id"])["wakeups"]), 0)
+        self.assertEqual(self.runtime.store.db.execute("SELECT count(*) FROM runs").fetchone()[0], 0)
 
     # 回归断言：第二次初始进度写入触发真实 SQL 错误，Goal 也整体回滚。
     def test_goal_and_initial_work_state_rollback_together(self):

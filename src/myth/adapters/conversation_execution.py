@@ -14,13 +14,14 @@ import time
 from ..artifacts import atomic_write
 from .driver_lock import local_run_lock
 from ..conversation import TOOL_CATALOG, conversation_request, calculate
-from ..domain import RecoveryRequired, canonical_json, exact_patch, sha256_bytes
+from ..domain import BudgetExceeded, RecoveryRequired, canonical_json, exact_patch, sha256_bytes
 from ..platform.capabilities import CapabilityState, default_capabilities
-from ..models import ModelMessage, ModelRequest, StepDecision
+from ..models import ModelMessage, ModelRequest, StepDecision, ProviderKnownFailure
 from ..platform.subagents import SUBAGENT_RESULT_SCHEMA, default_subagents
 from ..platform.tool_discovery import describe_tool, search_tools, visible_tool_ids
 from ..strategies import LiveInformationController, RuleIntentPicker
 from ..verification import SqliteVerificationProfiles
+from ..failures import failure_result, observe_failure
 
 # EXCLUDED：项目读取/检索排除项；避免把秘钥、版本库和生成缓存纳入上下文。
 EXCLUDED = {
@@ -273,7 +274,9 @@ class LocalConversationExecution:
             raise ValueError("cursor must be a non-negative integer")
         source_ref = f"doc:{document_id}@{document['digest']}"
         if resolution == "L0":
-            excerpt = document["content"][: min(600, max(120, int(limit) * 40))]
+            if cursor != 0 or type(limit) is not int or not 1 <= limit <= 20:
+                raise ValueError("L0 cursor must be 0 and limit must be 1-20 preview units")
+            excerpt = document["content"][: min(600, max(120, limit * 40))]
             return {
                 "document_id": document_id,
                 "title": document["title"],
@@ -287,35 +290,13 @@ class LocalConversationExecution:
                 "has_more": False,
             }
         if resolution == "L1":
-            if type(limit) is not int or not 1 <= limit <= 20:
-                raise ValueError("L1 limit must be 1-20 chunks")
-            rows = self.repository.store.db.execute(
-                "SELECT chunk_index,content FROM workspace_chunks "
-                "WHERE document_id=? AND chunk_index>=? ORDER BY chunk_index LIMIT ?",
-                (document_id, cursor, limit + 1),
-            ).fetchall()
-            values = [
-                {
-                    "chunk_index": int(row["chunk_index"]),
-                    "preview": row["content"][:500],
-                    "citation": f"doc:{document_id}:{row['chunk_index']}",
-                }
-                for row in rows[:limit]
-            ]
-            has_more = len(rows) > limit
-            next_cursor = (
-                (values[-1]["chunk_index"] + 1) if values and has_more else None
-            )
             return {
                 "document_id": document_id,
                 "title": document["title"],
                 "digest": document["digest"],
                 "resolution": "L1",
                 "source_ref": source_ref,
-                "chunks": values,
-                "cursor": cursor,
-                "next_cursor": next_cursor,
-                "has_more": has_more,
+                **self.repository.knowledge.chunk_page(document_id, cursor=cursor, limit=limit),
             }
         if resolution != "L2":
             raise ValueError("resolution must be L0/L1/L2")
@@ -337,24 +318,6 @@ class LocalConversationExecution:
             "has_more": cursor + len(preview) < len(text),
             "resolution": "L2",
             "source_ref": source_ref,
-        }
-
-    # 读取该作用域知识文档的 L2 分页证据；固定来源摘要随结果返回。
-    def _read_knowledge(self, turn, args):
-        value = self._resolve_knowledge(
-            turn,
-            {
-                "document_id": args.get("document_id"),
-                "resolution": "L2",
-                "cursor": args.get("offset", 0),
-                "limit": args.get("max_chars", 6000),
-            },
-        )
-        # 旧 knowledge.read 的 offset/next_offset 保留线协议兼容；新分页仍固定 document/digest 来源。
-        return {
-            **value,
-            "offset": value["cursor"],
-            "next_offset": value["next_cursor"],
         }
 
     # 从当前 Run 的已结算 Tool Operation 精确回读字段；分页只改变投影，不重跑工具或重新总结。
@@ -761,14 +724,34 @@ class LocalConversationExecution:
                 },
             },
         )
-        worker_decision_id, worker = self.repository.decisions.request_decision(
-            run_id=turn["run_id"],
-            provider=provider,
-            model=settings["model"],
-            max_output_tokens=child_output_tokens,
-            request_key=request_key,
-            model_request_override=request,
-        )
+        contract = {
+            "request_key": request_key, "source_refs": list(source_refs), "role_id": spec.role_id,
+            "max_steps": spec.max_steps, "output_token_limit": child_output_tokens,
+        }
+        # 先预留父工具额度；没有这张 Ticket 就不能为了委派再花一次模型费用。
+        op = self.repository.start_operation(turn["run_id"], decision_id, "agent.delegate", {
+            "write_bytes": 0, "requires_receipt": True, "delegate": contract,
+        })
+        started = time.monotonic()
+        try:
+            worker_decision_id, worker = self.repository.decisions.request_decision(
+                run_id=turn["run_id"], provider=provider, model=settings["model"],
+                max_output_tokens=child_output_tokens, request_key=request_key, model_request_override=request,
+            )
+            return self._delegate_result(contract, worker_decision_id, worker)
+        except (ValueError, BudgetExceeded, ProviderKnownFailure) as exc:
+            models = self.repository.decisions.status(turn["run_id"])["model_invocations"]
+            if any(item["state"] in {"TICKETED", "UNKNOWN"} for item in models):
+                raise RecoveryRequired("delegated model outcome is unresolved") from exc
+            # 已知拒绝仍有父工具机会，需要闭合收据；未知传输错误由外层按 UNKNOWN 核对。
+            result = failure_result(observe_failure(exc, capability_id="agent.delegate"))
+            self._record_tool_receipt(op, result, max(0, int((time.monotonic() - started) * 1000)))
+            raise
+
+    @staticmethod
+    def _delegate_result(contract, worker_decision_id, worker):
+        """依据准入时固定的委派合同投影子结果；同样用于崩溃后的本地补收据。"""
+        source_refs = contract["source_refs"]
         if worker.decision_type != "request_completion":
             raise ValueError("sub-agent may only return request_completion")
         if any(item not in source_refs for item in worker.evidence_refs):
@@ -776,15 +759,16 @@ class LocalConversationExecution:
                 "sub-agent returned an evidence_ref outside the delegated contract"
             )
         return {
+            "capability_id": "agent.delegate",
             "subagent": {
-                "role_id": spec.role_id,
+                "role_id": contract["role_id"],
                 "decision_id": worker_decision_id,
-                "request_key": request_key,
+                "request_key": contract["request_key"],
                 "context_isolated": True,
                 "write_access": False,
                 "recursive_delegation": False,
-                "max_steps": spec.max_steps,
-                "output_token_limit": child_output_tokens,
+                "max_steps": contract["max_steps"],
+                "output_token_limit": contract["output_token_limit"],
             },
             "summary": worker.claim or "",
             "coverage": worker.goal_coverage or "",
@@ -806,6 +790,15 @@ class LocalConversationExecution:
         if target == root or not target.is_relative_to(root):
             raise PermissionError("output escapes session scope")
         return target
+
+    def _record_tool_receipt(self, op, result, tool_wall_ms=None):
+        """先原子发布固定 Ticket/结果，再结算数据库；崩溃窗口由 recover 复用这份收据。"""
+        atomic_write(
+            self.receipts / f"{op['decision_id']}.json",
+            json.dumps({"decision_id": op["decision_id"], "ticket_id": op["ticket_id"],
+                        "result": result, "tool_wall_ms": tool_wall_ms}, ensure_ascii=False).encode("utf-8"),
+        )
+        return self.repository.settle_operation(op["decision_id"], result, tool_wall_ms=tool_wall_ms)
 
     # 执行已校验/准入的工作并留下结果证据；已存在稳定绑定时复用事实而非重复效果。
     def execute(self, turn, decision_id, decision, *, provider=None):
@@ -850,21 +843,7 @@ class LocalConversationExecution:
             tool_started = time.monotonic()
             result = self.verification.run(turn, args.get("profile_id"))
             tool_wall_ms = max(0, int((time.monotonic() - tool_started) * 1000))
-            atomic_write(
-                self.receipts / f"{decision_id}.json",
-                json.dumps(
-                    {
-                        "decision_id": decision_id,
-                        "ticket_id": op["ticket_id"],
-                        "result": result,
-                        "tool_wall_ms": tool_wall_ms,
-                    },
-                    ensure_ascii=False,
-                ).encode("utf-8"),
-            )
-            return self.repository.settle_operation(
-                decision_id, result, tool_wall_ms=tool_wall_ms
-            )
+            return self._record_tool_receipt(op, result, tool_wall_ms)
 
         # 单调时钟只测本次真实执行/结果准备；已结算的稳定决定在上方直接复用，不重复测量或累加。
         tool_started = time.monotonic()
@@ -879,8 +858,6 @@ class LocalConversationExecution:
                 args.get("limit", 5),
             )
             result.update(report)
-        elif capability == "knowledge.read":
-            result.update(self._read_knowledge(turn, args))
         elif capability == "knowledge.resolve":
             result.update(self._resolve_knowledge(turn, args))
         elif capability == "memory.search":
@@ -1072,19 +1049,7 @@ class LocalConversationExecution:
             )
         # 时间与结果一起先发布到收据；崩溃后的恢复复用原毫秒，不把等待/重启时间算为工具耗时。
         tool_wall_ms = max(0, int((time.monotonic() - tool_started) * 1000))
-        atomic_write(
-            self.receipts / f"{decision_id}.json",
-            json.dumps(
-                {
-                    "decision_id": decision_id,
-                    "ticket_id": op["ticket_id"],
-                    "result": result,
-                    "tool_wall_ms": tool_wall_ms,
-                },
-                ensure_ascii=False,
-            ).encode("utf-8"),
-        )
-        return self.repository.settle_operation(decision_id, result, tool_wall_ms=tool_wall_ms)
+        return self._record_tool_receipt(op, result, tool_wall_ms)
 
     # 用已有请求、Ticket、收据和对象核对执行状态；没有足够事实时保留 UNKNOWN，不盲目重发。
     def recover(self, rid):
@@ -1107,8 +1072,20 @@ class LocalConversationExecution:
                 ):
                     raise RecoveryRequired("receipt differs from fixed tool intent")
                 result = value["result"]
-                # 旧收据缺计量保持未报告；坏观测字段由仓储忽略，不能改变工具效果核对/预算结算。
+                # 缺测保持未报告；坏观测字段由仓储忽略，不能改变工具效果核对/预算结算。
                 tool_wall_ms = value.get("tool_wall_ms")
+            elif op["intent"].get("delegate"):
+                # 子模型的 durable receipt 已由上面的 recover 核对；只还原结果，不传 Provider。
+                contract = op["intent"]["delegate"]
+                try:
+                    recorded = self.repository.decisions.recorded_decision(rid, contract["request_key"])
+                    if recorded is None:
+                        raise ValueError("delegated model was not started or reported no dispatch")
+                    result = self._delegate_result(contract, *recorded)
+                except (ValueError, ProviderKnownFailure) as exc:
+                    result = failure_result(observe_failure(exc, capability_id="agent.delegate"))
+                self._record_tool_receipt(op, result)
+                continue
             elif op["intent"].get("requires_receipt"):
                 # 动态执行结果不能由 Intent 猜测；没有收据就保持不明。
                 return False

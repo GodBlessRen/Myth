@@ -95,7 +95,7 @@ class MentalModelAutoRefreshTests(unittest.TestCase):
             text="Myth uses SQLite as authority and durable Evidence.",
             source_ref="decision:auto-refresh-source",
         )
-        self.model = self.workspace.mental_models.create_model(
+        self.model = self.workspace.knowledge_views.create_model(
             name="Architecture",
             source_query="Myth SQLite Evidence",
         )
@@ -156,7 +156,7 @@ class MentalModelAutoRefreshTests(unittest.TestCase):
         self.assertEqual(result["state"], "SUCCEEDED")
         self.assertEqual(provider.calls, 1)
         self.assertEqual(self.runtime.store.get_run(run_id)["state"], "SUCCEEDED")
-        model = self.workspace.mental_models.model(self.model["model_id"], resolution="L2")
+        model = self.workspace.knowledge_views.model(self.model["model_id"], resolution="L2")
         self.assertEqual(model["freshness"], "fresh")
         self.assertEqual(
             model["content"]["text"],
@@ -203,7 +203,7 @@ class MentalModelAutoRefreshTests(unittest.TestCase):
         first = self.refresh.run(run_id, old, owner_id="worker-a")
         self.assertEqual(first["state"], "RUNNING")
         self.assertIsNone(
-            self.workspace.mental_models.model(self.model["model_id"])["content"]
+            self.workspace.knowledge_views.model(self.model["model_id"])["content"]
         )
 
         new = RefreshProvider()
@@ -223,7 +223,7 @@ class MentalModelAutoRefreshTests(unittest.TestCase):
             "SELECT * FROM model_invocations WHERE run_id=? ORDER BY rowid DESC LIMIT 1",
             (run_id,),
         ).fetchone()
-        prepared = self.workspace.mental_models.prepare_refresh(
+        prepared = self.workspace.knowledge_views.prepare_refresh(
             self.model["model_id"], limit=12, resolution="L1"
         )
         source_ref = prepared["sources"][0]["source_ref"]
@@ -283,7 +283,7 @@ class MentalModelAutoRefreshTests(unittest.TestCase):
 
         self.assertEqual(result["state"], "SUPERSEDED")
         self.assertEqual(self.runtime.store.get_run(run_id)["state"], "CANCELLED")
-        current = self.workspace.mental_models.model(self.model["model_id"], resolution="L2")
+        current = self.workspace.knowledge_views.model(self.model["model_id"], resolution="L2")
         self.assertEqual(current["freshness"], "unmaterialized")
         self.assertIsNone(current["content"])
 

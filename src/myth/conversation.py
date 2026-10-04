@@ -35,14 +35,6 @@ _TOOL_ARGUMENTS = {
         {"query": _TEXT, "limit": {"type": "integer", "minimum": 1, "maximum": 8}},
         ["query"],
     ),
-    "knowledge.read": object_schema(
-        {
-            "document_id": _TEXT,
-            "offset": {"type": "integer", "minimum": 0},
-            "max_chars": {"type": "integer", "minimum": 1, "maximum": 12000},
-        },
-        ["document_id"],
-    ),
     "knowledge.resolve": object_schema(
         {
             "document_id": _TEXT,
@@ -210,16 +202,11 @@ TOOL_CATALOG = {
         "query": "search question",
         "limit": "1-8; project + shared knowledge only",
     },
-    "knowledge.read": {
-        "document_id": "document id from a citation/source",
-        "offset": "character offset",
-        "max_chars": "1-12000 characters; default 6000; L2 alias",
-    },
     "knowledge.resolve": {
         "document_id": "document id",
         "resolution": "L0 metadata/excerpt, L1 chunk navigation, L2 detailed source text",
         "cursor": "resolution-specific continuation cursor",
-        "limit": "L1 chunks <=20 or L2 characters <=12000",
+        "limit": "L0 preview units 1-20 (cursor=0), L1 chunks 1-20, L2 characters 1-12000",
     },
     "memory.search": {
         "query": "search long-term memory",
@@ -319,16 +306,6 @@ def score_chunk(query, item):
     }
 
 
-# 在已给可见候选中按稳定键排序 top-k；调用方负责完整候选覆盖。
-def rank_chunks(query, candidates, limit=5):
-    scored = [
-        value for item in candidates if (value := score_chunk(query, item)) is not None
-    ]
-    return sorted(
-        scored, key=lambda x: (-x["score"], x["document_id"], x["chunk_index"])
-    )[:limit]
-
-
 # 只解析有界 AST 算术表达式，限制节点/大小/指数；不使用 eval 或允许函数调用。
 def calculate(expression):
     if not isinstance(expression, str) or len(expression) > 200:
@@ -399,7 +376,7 @@ def conversation_request(settings, snapshot, messages, activities, control=None)
         "你可以自行判断是否使用 agent.delegate。只有独立子任务、上下文隔离或独立复核明显有价值时才委派；简单任务直接完成。"
         "Sub-Agent 是只读隔离 worker：只收到你显式传入的 task/context/source_refs，不继承完整父对话、Memory 或工具目录，不能写入、调用工具、再次委派或向用户提问。"
         "子 Agent 返回的是观察/建议，不是验收；最终结论、工具执行与交付责任仍属于父 Agent。\n"
-        "信息获取遵循 bounded live control：knowledge.search/memory.search/project.search/project.list 属于 SEEK，knowledge.resolve/knowledge.read/memory.timeline/memory.resolve/project.read 属于 EXPAND。"
+        "信息获取遵循 bounded live control：knowledge.search/memory.search/project.search/project.list 属于 SEEK，knowledge.resolve/memory.timeline/memory.resolve/project.read 属于 EXPAND。"
         "只在当前任务确实缺信息时继续获取；相同请求不要重复，分页必须使用返回的 next_cursor/next_offset 前进，已有信息足够时直接继续任务或回答（KEEP）。"
         "Runtime 会在 Tool Ticket 前拒绝重复、停滞或超出本轮信息预算的请求；不要通过改写同义参数绕过预算。\n"
         "可用工具参数：" + canonical_json(visible_catalog)

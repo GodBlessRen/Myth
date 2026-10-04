@@ -52,7 +52,7 @@ class GoalWorkLoopTests(unittest.TestCase):
             goal_context=goal,
         )
         self.workspace.personal.bind_run(goal["goal_id"], first["run_id"])
-        self.workspace.control.ensure(first["run_id"], first["settings"])
+        self.workspace.control.ensure(first["run_id"])
         self.workspace.run(
             first["run_id"],
             ChatProvider([decision(claim="第一步已经完成，下一步检查真实任务基线。")]),
@@ -93,7 +93,7 @@ class GoalWorkLoopTests(unittest.TestCase):
             goal_context=goal,
         )
         self.workspace.personal.bind_run(goal["goal_id"], turn["run_id"])
-        self.workspace.control.ensure(turn["run_id"], turn["settings"])
+        self.workspace.control.ensure(turn["run_id"])
         provider = ChatProvider([decision(kind="ask_user", question="请选择 A 或 B")])
         self.workspace.run(turn["run_id"], provider)
         work = self.workspace.personal.work_state(goal["goal_id"])

@@ -42,7 +42,7 @@ class ControlTowerTests(unittest.TestCase):
                     session["id"], "hello", "req-control"
                 )
                 rid = turn["run_id"]
-                workspace.control.ensure(rid, turn["settings"])
+                workspace.control.ensure(rid)
 
                 paused = workspace.control.command(rid, ControlCommand.PAUSE)
                 self.assertTrue(paused["paused"])

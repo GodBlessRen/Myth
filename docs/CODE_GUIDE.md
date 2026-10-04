@@ -40,6 +40,7 @@ Myth 是共享 SQLite 的单机模块化应用。纯合同、策略和应用用�
 | 新 Conversation | Run、账号、Turn、消息、游标；可包含 Goal 关联/进度 | 模型/工具尚未派发；冻结来源对象的读取会占用准入写锁 |
 | 到期计划 | occurrence + Conversation admission + 下一 due/sequence + 事件 | provider 检查、Driver 派发在外；提交后接管原 Run，UNKNOWN 不自动继续 |
 | 独立精确修改入口 | Run、账号、Action、Attempt、资源预留及初始事件 | 对象/私有基线先准备；DB 失败可留下未引用字节，它们没有 Ticket，不修改原项目 |
+| 控制命令 | 命令/设置、Turn/Core、Goal checkpoint 与事件，所有者共用短事务 | 模型能力网络检查在外；提交 CAS；安全点重新读取，终态不可重开 |
 | 模型 / 工具开始 | 唯一 Ticket、机会状态和事件 | 实际外部调用；超时或崩溃先核对 |
 | 效果结算 | 收据事实、资源转移、事件 / 步骤状态 | 收据文件先发布；字节核对只证明效果，不补造用量 |
 | 策略发布 | 活动指针与发布历史 | 固定完整评测先执行；明确发布才影响未来 Turn |
@@ -47,7 +48,7 @@ Myth 是共享 SQLite 的单机模块化应用。纯合同、策略和应用用�
 
 ## 当前需要继续约束的耦合
 
-- `SqliteControlService.command` 仍直接更新 `workspace_turns.settings_json` 和 `runs.control_revision`，Resume 的状态投影还有独立事务。控制聚合到工作区/Core 的写入未全面归回对应所有者。
+- Control 命令、安全点与 Turn/Core/Goal 投影已通过所有者加入同一事务。模型能力检查在事务外执行，提交用控制 revision 核对检查基础；Core 栅栏独立递增。委派先签发父工具 Ticket，再调用子模型，恢复只消费持久子决定。
 - 回答、Memory、Goal checkpoint 与 Driver 释放仍分别提交；持久 finalization 义务负责补偿，`last_run_id` 防止旧进度覆盖新工作。补偿不是跨系统事务。
 - `SqliteWorkspaceRepository` 负责项目、会话、工具机会和恢复游标；知识已交给 `SqliteKnowledgeRepository`，通过共享连接保留文档/分片事务；`ConversationWebService` 同时负责 API 门面、Driver 和计划线程。下一次按真实改动压力拆职责，拆分时保留现有原子准入协调入口。
 - 跨聚合 join、DDL 装配和外键共享同一个数据库。当前的直接 import 守卫与纯领域冷导入测试不证明所有传递依赖都可独立部署。
