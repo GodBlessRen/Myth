@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import uuid
 from typing import Any, Iterable, Mapping
@@ -297,7 +298,7 @@ class SqliteMemoryStore:
         if row is None:
             raise KeyError(f"{memory_id}@{revision}")
         value = dict(row)
-        value["evidence"] = __import__("json").loads(value.pop("evidence_json"))
+        value["evidence"] = json.loads(value.pop("evidence_json"))
         return value
 
     # freshness：只对 Memory-linked evidence 比较当前 source revision/active；外部 provenance 无水位时保持 untracked。
