@@ -36,7 +36,7 @@ def _fold_activity(activity):
     """折叠旧工具展示内容并保留身份/摘要/错误；完整结果仍在持久对象里。"""
     result = dict(activity.get("result") or {})
     folded = []
-    for key in ("content", "output", "diff"):
+    for key in ("content", "output", "diff", "stdout", "stderr", "summary"):
         if isinstance(result.get(key), str) and len(result[key]) > 200:
             result[key] = result[key][:200] + "\n[older preview folded]"
             folded.append(key)
