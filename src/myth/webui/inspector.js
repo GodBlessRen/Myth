@@ -927,7 +927,9 @@ function renderInspectorContext(session, turn) {
         "Compact seed",
         (compiled.compaction_seed.selected ? "selected" : "not selected") +
           " · " + inspectorNumber(compiled.compaction_seed.observations) +
-          " evidence items",
+          " evidence items · " +
+          inspectorNumber(compiled.compaction_seed.semantic_boundaries) +
+          " semantic boundaries",
       );
     }
   }
