@@ -18,6 +18,7 @@ from .platform.evaluation import (
     EvalObservation,
     EvalSuite,
     EvalVerdict,
+    HarnessVariant,
     controlled_harness_variants,
     load_eval_suite,
     release_gate,
@@ -72,7 +73,11 @@ class FoundationEvalRunner:
         self.resolution_controller = resolution_controller or RuleResolutionController()
         # harness_id/mechanisms：Evaluation 维度身份，只描述本次受控变体；不新增 Runtime 权限或执行层。
         self.harness_id = str(harness_id or "").strip() or None
-        self.harness_mechanisms = tuple(str(item).strip() for item in harness_mechanisms if str(item).strip())
+        self.harness_mechanisms = tuple(
+            str(item).strip() for item in harness_mechanisms if str(item).strip()
+        )
+        if self.harness_id is not None:
+            HarnessVariant(self.harness_id, self.harness_mechanisms)
 
     # 加载指定固定版本评测集并装配 Runner；不根据失败改题或预期。
     @classmethod
