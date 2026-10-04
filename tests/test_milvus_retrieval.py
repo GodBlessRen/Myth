@@ -16,23 +16,28 @@ from myth.platform.retrieval import reciprocal_rank_scores
 class FakeVectorIndex:
     """只模拟向量候选身份/版本；正文和权限必须由被测 SQLite 仓储重新 hydration。"""
 
+    # 初始化纯内存候选索引；替身不模拟真实 Milvus 网络/一致性。
     def __init__(self):
         self.knowledge = {}
         self.memories = {}
 
+    # 返回固定健康投影供装配测试；不证明真实服务可用。
     def status(self):
         return {"backend": "milvus", "configured": True, "healthy": True}
 
+    # 保存知识 source version，供 hydration 回归构造候选。
     def sync_knowledge(self, rows):
         for row in rows:
             self.knowledge[row["record_id"]] = dict(row)
         return {"received": len(rows), "upserted": len(rows), "skipped": 0}
 
+    # 保存 Memory revision，供 revoke/freshness 回归构造候选。
     def sync_memories(self, rows):
         for row in rows:
             self.memories[row["record_id"]] = dict(row)
         return {"received": len(rows), "upserted": len(rows), "skipped": 0}
 
+    # 按插入顺序返回知识候选；排序质量不属于本替身证明范围。
     def search_knowledge(self, query, *, limit=64):
         rows = list(self.knowledge.values())[:limit]
         return [
@@ -45,6 +50,7 @@ class FakeVectorIndex:
             for index, row in enumerate(rows)
         ]
 
+    # 按插入顺序返回 Memory 候选；真实 embedding 质量另做集成评测。
     def search_memories(self, query, *, limit=64):
         rows = list(self.memories.values())[:limit]
         return [
@@ -59,6 +65,7 @@ class FakeVectorIndex:
 
 
 class MilvusRetrievalTests(unittest.TestCase):
+    # 为每个测试创建独立 Runtime，并只在被测仓储上注入 Vector Adapter 替身。
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.runtime = MythRuntime(Path(self.tmp.name))
@@ -69,15 +76,18 @@ class MilvusRetrievalTests(unittest.TestCase):
         self.workspace.memory.vector_index = self.fake
         self.repo = self.workspace.repository
 
+    # 关闭 SQLite/临时目录，避免测试间共享权威状态。
     def tearDown(self):
         self.runtime.close()
         self.tmp.cleanup()
 
+    # 证明 Hybrid 只融合排名，不要求 lexical score 与向量距离处于同一数值空间。
     def test_rrf_fuses_rankings_without_comparing_raw_scores(self):
         scores = reciprocal_rank_scores((("a", "b"), ("b", "c")))
         self.assertGreater(scores["b"], scores["a"])
         self.assertGreater(scores["b"], scores["c"])
 
+    # 证明纯向量命中最终正文仍来自当前 SQLite chunk，而非 Milvus metadata。
     def test_vector_only_knowledge_hit_is_hydrated_from_current_sqlite_source(self):
         doc = self.repo.import_document(
             {"title": "architecture", "content": "alpha beta gamma"}
@@ -88,6 +98,7 @@ class MilvusRetrievalTests(unittest.TestCase):
         self.assertEqual(report["sources"][0]["content"], "alpha beta gamma")
         self.assertIn("hybrid_score", report["sources"][0])
 
+    # 证明陈旧 digest 的远端向量候选不能重新进入当前知识结果。
     def test_stale_vector_knowledge_version_is_rejected(self):
         doc = self.repo.import_document({"title": "v1", "content": "first"})
         key = next(iter(self.fake.knowledge))
@@ -103,6 +114,7 @@ class MilvusRetrievalTests(unittest.TestCase):
         self.assertGreaterEqual(report["retrieval"]["vector_stale_rejected"], 1)
         self.assertEqual(self.repo.document(doc["id"])["content"], "first")
 
+    # 证明 Memory 初始召回保持 L0，显式升级到 L2 时仍绑定同一 memory revision。
     def test_memory_search_returns_l0_then_resolves_same_revision_to_l2(self):
         row = self.workspace.memory.remember(
             kind="semantic",
@@ -120,6 +132,7 @@ class MilvusRetrievalTests(unittest.TestCase):
         self.assertEqual(full["source_ref"], views[0]["source_ref"])
         self.assertEqual(full["provenance_ref"], "decision:vector-boundary")
 
+    # 证明已 revoke Memory 即使仍残留向量记录也会被权威 active/revision 检查拒绝。
     def test_revoked_memory_stale_vector_hit_cannot_reenter_context(self):
         row = self.workspace.memory.remember(
             kind="semantic",
@@ -131,6 +144,7 @@ class MilvusRetrievalTests(unittest.TestCase):
         self.assertEqual(report["memories"], [])
         self.assertGreaterEqual(report["retrieval"]["vector_stale_rejected"], 1)
 
+    # 证明 timeline 只导航邻近 Memory，所有返回仍保留各自稳定 source_ref。
     def test_memory_timeline_is_navigation_not_source_rewrite(self):
         ids = []
         for index in range(4):
