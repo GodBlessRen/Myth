@@ -275,3 +275,91 @@ def release_gate(
     if report.inconclusive_count:
         return False, "inconclusive cases remain"
     return True, "quality gate passed"
+
+
+# 能力下限 + Pareto 效率发布门：候选可以更省，但不能用未测/安全回归/超容差能力损失换取效率。
+def capability_efficiency_gate(
+    baseline: EvalReport,
+    candidate: EvalReport,
+    comparisons: Iterable[PairedEvalComparison],
+    *,
+    max_pass_rate_loss: float = 0.0,
+) -> tuple[bool, str, dict[str, float]]:
+    if baseline.suite_id != candidate.suite_id or baseline.total != candidate.total:
+        return False, "baseline/candidate suite identity differs", {}
+    if candidate.safety_regressions:
+        return False, "safety/runtime invariant regression", {}
+    if candidate.unsupported_count or candidate.inconclusive_count:
+        return False, "candidate has unsupported or inconclusive cases", {}
+    if baseline.measured_total <= 0 or candidate.measured_total <= 0:
+        return False, "no measured paired capability", {}
+    baseline_rate = baseline.pass_count / baseline.measured_total
+    candidate_rate = candidate.pass_count / candidate.measured_total
+    if candidate_rate + max_pass_rate_loss < baseline_rate:
+        return (
+            False,
+            f"capability floor violated: {candidate_rate:.3f} < {baseline_rate:.3f} - {max_pass_rate_loss:.3f}",
+            {},
+        )
+    aggregate: dict[str, float] = {}
+    values = tuple(comparisons)
+    if not values or any(not item.calibrated for item in values):
+        return False, "paired attribution is incomplete", {}
+    for item in values:
+        for meter, delta in item.cost_delta.items():
+            aggregate[meter] = aggregate.get(meter, 0.0) + float(delta)
+    if not aggregate:
+        return False, "no common measured efficiency meters", {}
+    if any(delta > 0 for delta in aggregate.values()):
+        return False, "candidate is not Pareto-nonworse on measured efficiency", aggregate
+    if not any(delta < 0 for delta in aggregate.values()):
+        return False, "candidate has no measured efficiency improvement", aggregate
+    return True, "capability floor held and measured efficiency improved", aggregate
+
+
+# 从同题不同 policy 的观测构造 task×policy 与 outcome flip 投影；只做归因导航，不把相关性冒充机制因果。
+def attribution_matrix(
+    observations: Iterable[EvalObservation],
+) -> dict[str, object]:
+    values = tuple(observations)
+    policies = sorted({item.policy_id for item in values if item.policy_id})
+    cases = sorted({item.case_id for item in values})
+    matrix = {
+        case_id: {
+            policy: next(
+                (
+                    item.verdict.value
+                    for item in values
+                    if item.case_id == case_id and item.policy_id == policy
+                ),
+                None,
+            )
+            for policy in policies
+        }
+        for case_id in cases
+    }
+    flips = []
+    if len(policies) >= 2:
+        baseline = policies[0]
+        for candidate in policies[1:]:
+            for case_id in cases:
+                before = matrix[case_id][baseline]
+                after = matrix[case_id][candidate]
+                if before is not None and after is not None and before != after:
+                    flips.append(
+                        {
+                            "case_id": case_id,
+                            "baseline_policy_id": baseline,
+                            "candidate_policy_id": candidate,
+                            "baseline_verdict": before,
+                            "candidate_verdict": after,
+                        }
+                    )
+    return {
+        "policies": policies,
+        "cases": cases,
+        "matrix": matrix,
+        "outcome_flips": flips,
+        "causal_attribution": False,
+        "note": "mechanism causality requires one-mechanism/leave-one-out or equivalent controlled reruns",
+    }
