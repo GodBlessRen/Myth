@@ -15,6 +15,8 @@ DEFAULT_VISIBLE_TOOL_IDS = (
     "project.list",
     "project.read",
     "project.search",
+    "git.status",
+    "git.diff",
     "artifact.write",
     "project.patch_exact",
     "test.run",
