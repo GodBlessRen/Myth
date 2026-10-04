@@ -39,6 +39,7 @@ from myth.platform.evidence import (
 )
 
 
+# Harness 效率经济、可达性、恢复与语义边界的固定纯合同回归集合。
 class EfficiencyControlTests(unittest.TestCase):
     # 回归断言：只有 provider-visible 的已测节约能进入回本计算，raw history 估算缺失时保持 DEFERRED。
     def test_economics_refuses_unmeasured_savings(self):
@@ -140,6 +141,7 @@ class EfficiencyControlTests(unittest.TestCase):
         )
 
 
+# Evaluation/Evolution 的能力下限、归因、held-out 与实验 lineage 固定回归集合。
 class EvaluationEvolutionEfficiencyTests(unittest.TestCase):
     # 回归断言：候选只有在 capability floor 不退化且共同测量成本 Pareto 改善时才获得效率资格。
     def test_capability_floor_precedes_efficiency_gain(self):
@@ -232,6 +234,7 @@ class EvaluationEvolutionEfficiencyTests(unittest.TestCase):
         )
 
 
+# Evidence-bound transformation 的固定来源摘要与逐字引用验证回归集合。
 class EvidenceBoundTransformationTests(unittest.TestCase):
     # 回归断言：逐字 quote 与 source digest 同时成立才能接受；流畅 summary 本身不产生可信度。
     def test_exact_quotes_bind_receipt_to_source(self):
