@@ -198,7 +198,7 @@ function renderExecutionGraph(turn) {
   );
   graph.nodes.forEach((node, index) => {
     const row = el("div", "execution-graph-row " + (node.kind || ""));
-    row.style.setProperty("--graph-depth", String(Math.max(0, Number(node.depth) || 0)));
+    row.style["--graph-depth"] = String(Math.max(0, Number(node.depth) || 0));
     const edge = edgeByTarget.get(node.id);
     const lead = el("span", "execution-graph-lead", index === 0 ? "●" : edge?.kind === "delegate" ? "↳" : "↓");
     const copy = el("div", "execution-graph-copy");
