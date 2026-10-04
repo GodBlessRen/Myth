@@ -1,14 +1,14 @@
 # Changelog
 
-## 未发布 — Harness Efficiency Gold
+## 未发布 — Context / Evaluation 深化
 
-- 把 SoL-Pi 可长期复用的机制吸收到现有 Myth 骨架，不新增平行 Runtime：State/Context 分离、exact Observation recall、grounded Compact seed、deterministic successor fusion、Evidence Receipt verifier、Optimization economics/reachability、bounded recovery、capability floor 与 held-out eval。
+- 把 SoL-Pi 可长期复用的机制继续吸收到现有 Myth 骨架，不新增平行 Runtime：State/Context 分离、exact Observation recall、grounded Compact seed、deterministic successor、来源绑定验证、Context 投影选择、Capability 可达性、bounded recovery、capability floor 与 held-out eval。
 - 新增 `observation.read`：按当前 Run 已结算 decision/field 精确分页回读原 Tool Observation，绑定 source digest，不重跑 Tool。
 - `project.patch_exact` 融合 deterministic diff successor；mutation 与 successor 状态分开，source precondition 变化时 successor 显式 SKIPPED，不开放任意 shell。
-- Context fold/Compact 在已有 `ConversationContextCompiled` 报告 reason-coded optimization 与 mechanism reachability；Runtime Observatory 展示 Optimization、Reachability 与 grounded seed。
-- Sub-Agent 协作明确为 Evidence Bus：共享 bounded context + admitted source refs，不继承完整父聊天历史。
-- Evaluation 新增 capability-floor + Pareto efficiency gate、task×policy outcome flip/机制线索和 held-out identity boundary；Evolution 新增 disposable Discover/Harden experiment contract。
-- 架构宪法固定 fail-open optimization、provider-visible economics、optimization debt/hysteresis、representation transition ≠ semantic transition 等不变量。
+- Context 直接比较 normal / compact 的真实 provider-visible 投影，在已结算语义边界与窗口压力下按滞回选择模式；`ConversationContextCompiled` 与 Runtime Observatory 展示 Context mode、reason、实测节约和 Capability 可达性。
+- Sub-Agent 只共享 bounded context + admitted source/evidence refs，不继承完整父聊天历史。
+- Evaluation 的 capability-floor + Pareto efficiency gate 直接接入现有 Candidate → ELIGIBLE → Promote 路径；逐题机制事件持久进入 Eval Ledger，供 task×policy outcome attribution；held-out identity boundary 与 Discover/Harden 实验合同继续留在现有 Evaluation/Evolution。
+- 架构宪法固定 State ≠ Context、来源绑定、失败回原路径、provider-visible 计量、hysteresis、representation transition ≠ semantic transition 等不变量。
 
 ## 未发布 — Historical Replay World
 
