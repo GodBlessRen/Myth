@@ -9,6 +9,7 @@ from .application.conversation_agent import ConversationAgent
 from .platform import MythComponents
 from .platform.control_store import SqliteControlService
 from .platform.memory_store import SqliteMemoryStore
+from .platform.knowledge_views import SqliteKnowledgeViews
 from .platform.evolution_store import SqliteEvolutionControl
 from .delivery import DeliveryLedger
 from .sota_route import SotaRouteLedger
@@ -66,6 +67,11 @@ class Workspace:
         self.control = SqliteControlService(runtime, self.repository)
         # memory：有来源记忆协作对象；不授予权限。
         self.memory = SqliteMemoryStore(runtime, vector_index=self.vector_index)
+        # knowledge_views：Memory Domain 的派生高阶视图；Mental Model 持有内容视图，Knowledge Page 只持有树结构。
+        self.knowledge_views = SqliteKnowledgeViews(runtime, self.memory)
+        # mental_models / knowledge_pages：发现性别名，指向同一深模块，不复制状态或实现。
+        self.mental_models = self.knowledge_views
+        self.knowledge_pages = self.knowledge_views
         # delivery：回答终态、验收、Work item 与人工关注的持久交付账本。
         self.delivery = DeliveryLedger(runtime, sota_route=self.sota_route)
         # execution：用例执行端口/实现；外部效果须经过 Ticket 和收据协议。
