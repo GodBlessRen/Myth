@@ -74,6 +74,7 @@ class FoundationEvalRunner:
         self.resolution_controller = resolution_controller or RuleResolutionController()
         # harness_id/mechanisms：Evaluation 维度身份，只描述本次受控变体；不新增 Runtime 权限或执行层。
         self.harness_id = str(harness_id or "").strip() or None
+        # harness_mechanisms：本次受控变体实际启用的现有机制集合；只影响 Evaluation override，不扩大权限。
         self.harness_mechanisms = tuple(
             str(item).strip() for item in harness_mechanisms if str(item).strip()
         )
