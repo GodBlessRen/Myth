@@ -145,6 +145,7 @@ _PROVIDER_EVIDENCE_DENY = {
 }
 
 
+# 递归清理 Provider 原始响应；保留未知可观察字段，删除凭据与私有推理正文后才允许进入不可变对象库。
 def _provider_evidence(value):
     if isinstance(value, dict):
         result = {}
