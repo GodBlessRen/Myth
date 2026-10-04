@@ -15,7 +15,7 @@ from .evaluation import capability_efficiency_gate, eval_report_from_dict
 from .evaluation_store import SqliteEvaluationLedger
 
 
-# SCHEMA：本仓储拥有的表、索引与约束；升级补齐旧字段，删除列须有迁移证据。
+# SCHEMA：本仓储拥有的当前表、索引与约束；由 Store 原子初始化，不叠加旧格式迁移。
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS policy_versions(
     policy_id TEXT PRIMARY KEY,
@@ -71,15 +71,7 @@ class SqliteEvolutionControl:
         self.runtime = runtime
         # store：持久事实仓储；短事务维护本地一致性；外部效果不能并入数据库事务。
         self.store = runtime.store
-        self.store.db.executescript(SCHEMA)
-        columns = {
-            row["name"]
-            for row in self.store.db.execute("PRAGMA table_info(policy_candidates)")
-        }
-        if "efficiency_gate_json" not in columns:
-            self.store.db.execute(
-                "ALTER TABLE policy_candidates ADD COLUMN efficiency_gate_json TEXT"
-            )
+        self.store.ensure_schema(SCHEMA)
         self._ensure_builtin()
 
     # 生成带类型前缀的新身份；重试去重使用已固定的 request/decision 身份，不靠新 UUID 判断已执行。

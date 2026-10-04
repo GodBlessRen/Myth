@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.24.0 — 深化、瘦身与原子边界
+
+- 知识正文/分片/检索拆为独立 SqliteKnowledgeRepository；模型能力合同移入供应商中立内圈。
+- 移除无使用者的 Kernel/ControlPlane/abort 别名、旧库迁移/回填、旧凭据格式和占位组件；旧评测、历史诊断与画面移入 `.trash/`。
+- 当前数据库显式格式版本；逐句事务 DDL、并发首次 WAL 初始化与同快照格式核对，旧实验库原样拒绝。
+- 修复未准入步骤可完成任务、重复结果覆写/游标退回、并发工作项序号冲突/字段丢失、验收摘要核对与写入分离等问题。
+- 筛选评测不再具发布资格，未知题号明确拒绝；活跃回归统一当前固定集。
+- 重写宪法与开发地图，替换无内容中文套话；新增逐文件处置记录、故障回归和性能对照。
+- wheel/sdist/Git 源码包排除垃圾站，CI 增加真实构建及安装后 HTTP 检查。
+
+
 ## 未发布 — Durable Mental Model Auto Refresh
 
 - Mental Model 新增显式 opt-in 自动刷新 policy；冻结 Provider/Model/Thinking/Context/Output 设置，未来全局设置不倒写已配置 policy。

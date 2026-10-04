@@ -7,17 +7,10 @@ from myth.conversation import TOOL_CATALOG
 from myth.domains.coordination import RouteTarget, StrategyState
 from myth.platform import Maturity, MythComponents
 from myth.platform.capabilities import CapabilityState
-from myth.platform.context import ContextItem
-from myth.platform.control import ControlCommand, ControlSnapshot
+from myth.platform.context import ContextItem, ContextCompiler
+from myth.platform.control import ControlCommand, ControlSnapshot, ControlService
 from myth.platform.evaluation import EvalReport, release_gate
 from myth.platform.evolution import PolicyCandidate, PromotionDecision, decide_promotion
-from myth.platform.memory import MemoryCatalog, MemoryKind, MemoryRecord
-from myth.platform.workflow import (
-    WorkflowSpec,
-    WorkflowStep,
-    ready_steps,
-    validate_workflow,
-)
 
 
 # 组合能力合同与成熟度的固定测试集合/替身；临时资源由本用例拥有，生产状态必须从实际仓储核对。
@@ -66,16 +59,13 @@ class PlatformSkeletonTests(unittest.TestCase):
             {
                 "direct",
                 "agent_loop",
-                "workflow",
-                "routing",
                 "multi_agent",
-                "managed_agent",
                 "personal_agent",
             }
             <= strategy_ids
         )
         self.assertTrue(
-            {"sqlite", "local_files", "ollama", "openai", "chatgpt_oauth", "mcp", "a2a"}
+            {"sqlite", "local_files", "ollama", "openai", "chatgpt_oauth"}
             <= adapter_ids
         )
         self.assertNotIn("pi_oauth", adapter_ids)
@@ -98,9 +88,8 @@ class PlatformSkeletonTests(unittest.TestCase):
         self.assertEqual(domains["evolution"]["maturity"], Maturity.USABLE.value)
         self.assertIn("project.read", snapshot["executable_capabilities"])
         self.assertNotIn("shell.exec", snapshot["executable_capabilities"])
-        self.assertEqual(
-            components.capabilities.get("shell.exec").state, CapabilityState.PLANNED
-        )
+        with self.assertRaises(KeyError):
+            components.capabilities.get("shell.exec")
 
     # 回归断言：当前真实工具目录标为 executable，规划目录不混入。
     def test_existing_conversation_tools_are_registered_executable_capabilities(self):
@@ -122,26 +111,27 @@ class PlatformSkeletonTests(unittest.TestCase):
         self.assertEqual(worker.capability_allowlist, ())
         self.assertEqual(RouteTarget.REMOTE_AGENT.value, "remote_agent")
 
-    # 回归断言：当前 Stop 与旧 Abort 兼容，只有一套控制语义。
-    def test_control_uses_stop_vocabulary_and_legacy_abort_alias(self):
+    # 停止后不再接纳 Resume；控制协议只保留当前 Stop 词汇。
+    def test_control_stop_is_terminal(self):
         components = MythComponents.default()
         state = ControlSnapshot()
-        state = components.control.apply(
+        state = ControlService().apply(
             state, ControlCommand.STEER, "focus on runtime"
         )
-        state = components.control.apply(state, ControlCommand.SWITCH_MODEL, "model-b")
-        state = components.control.apply(state, ControlCommand.PAUSE)
+        state = ControlService().apply(state, ControlCommand.SWITCH_MODEL, "model-b")
+        state = ControlService().apply(state, ControlCommand.PAUSE)
         self.assertTrue(state.paused)
-        state = components.control.apply(state, ControlCommand.RESUME)
-        state = components.control.apply(state, ControlCommand.STOP)
+        state = ControlService().apply(state, ControlCommand.RESUME)
+        state = ControlService().apply(state, ControlCommand.STOP)
         self.assertTrue(state.stopped)
-        self.assertTrue(state.aborted)
         with self.assertRaises(ValueError):
-            components.control.apply(state, ControlCommand.RESUME)
+            ControlCommand("abort")
+        with self.assertRaises(ValueError):
+            ControlService().apply(state, ControlCommand.RESUME)
 
     # 回归断言：有界装箱先保必需来源，再按优先级选择可选片段。
     def test_context_preserves_required_items_before_optional_depth(self):
-        frame = MythComponents.default().context.compile(
+        frame = ContextCompiler().compile(
             [
                 ContextItem("history:old", "x" * 30, priority=0),
                 ContextItem("goal", "GOAL", priority=100, required=True),
@@ -152,45 +142,7 @@ class PlatformSkeletonTests(unittest.TestCase):
         self.assertEqual([item.source_ref for item in frame.items], ["goal", "recent"])
         self.assertIn("history:old", frame.dropped)
 
-    # 回归断言：记忆类型、revision 和未来可见性明确；撤下不倒写历史。
-    def test_memory_is_typed_revisioned_and_revocable(self):
-        memory = MemoryCatalog()
-        memory.put(
-            MemoryRecord(
-                "m1",
-                MemoryKind.SEMANTIC,
-                "user prefers concise Chinese",
-                "conversation:1",
-            )
-        )
-        self.assertEqual(memory.search("concise Chinese")[0].memory_id, "m1")
-        memory.revoke("m1", revision=2)
-        self.assertEqual(memory.search("concise Chinese"), [])
 
-    # 回归断言：工作流验证节点依赖/无环，只提供策略原语而非自动执行。
-    def test_workflow_is_a_strategy_primitive_not_a_mandatory_layer(self):
-        spec = WorkflowSpec(
-            "w1",
-            (
-                WorkflowStep("read", "project.read"),
-                WorkflowStep("patch", "project.patch_exact", ("read",)),
-            ),
-        )
-        validate_workflow(spec)
-        self.assertEqual([step.step_id for step in ready_steps(spec, set())], ["read"])
-        self.assertEqual(
-            [step.step_id for step in ready_steps(spec, {"read"})], ["patch"]
-        )
-        with self.assertRaises(ValueError):
-            validate_workflow(
-                WorkflowSpec(
-                    "bad",
-                    (
-                        WorkflowStep("a", "x", ("b",)),
-                        WorkflowStep("b", "x", ("a",)),
-                    ),
-                )
-            )
 
     # 回归断言：缺固定完整质量证据不发布，资格也不自动切换活动指针。
     def test_evolution_never_auto_promotes_without_quality_gate(self):

@@ -55,7 +55,8 @@ def main():
                 return json.load(response)
 
         try:
-            for asset in ("/", "/app.css", "/app.js", "/inspector.js", "/goals.js"):
+            for asset in ("/", "/app.css", "/app.js", "/inspector.js", "/goals.js",
+                          "/theme.js", "/reconnect.js", "/statistics.js", "/favicon.svg"):
                 with request.urlopen(base + asset, timeout=5) as response:
                     if response.status != 200 or not response.read():
                         raise RuntimeError(f"missing packaged asset: {asset}")

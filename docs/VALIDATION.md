@@ -1,6 +1,6 @@
 # Validation
 
-这份文档只说明**当前怎么验证**以及**当前验证不能证明什么**。历史验证记录见 [archive/VALIDATION_HISTORY.md](archive/VALIDATION_HISTORY.md)。
+这份文档只说明**当前怎么验证**以及**当前验证不能证明什么**。本次版本证据见 [REFINEMENT_REVIEW](REFINEMENT_REVIEW.md)。历史记录进入仓库垃圾站，不作为当前版本通过证据。
 
 ## 自动检查
 
@@ -13,6 +13,8 @@ node --check src/myth/webui/app.js
 node --check src/myth/webui/inspector.js
 node --check src/myth/webui/goals.js
 ```
+
+发布前另行构建 wheel/sdist，执行 `python scripts/validate_release.py dist` 和安装包 HTTP 验证。
 
 根据改动范围增加专项检查：
 
@@ -62,7 +64,7 @@ node --check src/myth/webui/goals.js
 
 当前开发主线要求建立真实任务集，而不是继续用单个 happy-path 证明“可用”。
 
-固定日常任务已提供 `evals/daily-v1.json` 和 `myth task-benchmark`。默认包含 Myth 与 simple-loop 两组，每题重复三次；所有试次、失败、产物字节校验和运行数据库都会保存。使用方法见 [TASK_BENCHMARK.md](TASK_BENCHMARK.md)，本次实测见 [archive/VALIDATION_V021.md](archive/VALIDATION_V021.md)。
+固定日常任务已提供 `evals/daily-v1.json` 和 `myth task-benchmark`。默认包含 Myth 与 simple-loop 两组，每题重复三次；所有试次、失败、产物字节校验和运行数据库都会保存。使用方法见 [TASK_BENCHMARK.md](TASK_BENCHMARK.md)；真实模型验证需另行记录当前版本结果。
 
 ## 浏览器验证
 
@@ -100,4 +102,4 @@ node --check src/myth/webui/goals.js
 3. model claim 不等于 verification。
 4. UI projection 不等于 durable truth。
 5. UNKNOWN 不等于 FAILED。
-6. 历史测试数字进入 CHANGELOG / archive，不进入当前架构说明。
+6. 历史测试数字进入 CHANGELOG / 垃圾站，不进入当前架构说明。

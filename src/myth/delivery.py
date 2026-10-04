@@ -77,12 +77,12 @@ ON delivery_attention(run_id);
 """
 
 
-# 该入口按持久合同处理输入与输出，失败保持显式而不伪造完成。
+# 按规范 JSON 的 UTF-8 字节计算摘要；它绑定交付内容身份，不判断内容质量。
 def _digest(value: Any) -> str:
     return hashlib.sha256(canonical_json(value).encode("utf-8")).hexdigest()
 
 
-# 该入口按持久合同处理输入与输出，失败保持显式而不伪造完成。
+# 在写事务前把声明数据编码为有界 JSON；超出字节上限明确拒绝，不截断证据。
 def _bounded_json(value: Any, *, max_bytes: int = 32_000) -> str:
     raw = canonical_json(value)
     if len(raw.encode("utf-8")) > max_bytes:
@@ -90,26 +90,25 @@ def _bounded_json(value: Any, *, max_bytes: int = 32_000) -> str:
     return raw
 
 
-# 该类型集中拥有当前职责，避免把状态真相分散到多个适配器。
 class DeliveryLedger:
     """拥有交付事实；运行执行权仍属于原 Conversation/Control/Runtime。"""
 
-    # 该入口按持久合同处理输入与输出，失败保持显式而不伪造完成。
+    # 复用本线程 Runtime 连接并原子建立交付表；SOTA 只消费验收事实，不参与执行授权。
     def __init__(self, runtime, *, sota_route=None) -> None:
-        # 持有当前协作对象；生命周期与所属 Runtime/仓储一致。
+        # runtime：所属线程的装配根；凭据由独立认证适配器持有。
         self.runtime = runtime
-        # 持有当前协作对象；生命周期与所属 Runtime/仓储一致。
+        # store：本线程共享连接；当前聚合的写入统一经过短事务。
         self.store = runtime.store
         # sota_route：验收通过后才同步成功路径；失败/撤销会取消比较资格。
         self.sota_route = sota_route
-        self.store.db.executescript(SCHEMA)
+        self.store.ensure_schema(SCHEMA)
 
-    # 下列辅助入口保持边界显式，调用不隐式扩大权限或真实性。
+    # 为新账本条目生成类别前缀身份；重试收尾仍按固定 run_id 去重。
     @staticmethod
     def _id(prefix: str) -> str:
         return f"{prefix}_{uuid.uuid4().hex}"
 
-    # 该入口按持久合同处理输入与输出，失败保持显式而不伪造完成。
+    # 先保存待履行的收尾义务，再提交回答；崩溃后根据持久回答决定是否补齐。
     def prepare_completion(
         self,
         run_id: str,
@@ -150,7 +149,7 @@ class DeliveryLedger:
             )
         return self.finalization(run_id)
 
-    # 该入口按持久合同处理输入与输出，失败保持显式而不伪造完成。
+    # 回答已落库后把 PREPARED 转为 PENDING；重复通知不会重置已经完成的收尾。
     def mark_answer_committed(self, run_id: str) -> dict[str, Any]:
         with self.store.tx() as db:
             db.execute(
@@ -160,14 +159,14 @@ class DeliveryLedger:
             )
         return self.finalization(run_id)
 
-    # 该入口按持久合同处理输入与输出，失败保持显式而不伪造完成。
+    # 读取该 Run 的收尾状态和已履行标志；返回普通副本，不在读取时推动模型或工具。
     def finalization(self, run_id: str) -> dict[str, Any] | None:
         row = self.store.db.execute(
             "SELECT * FROM delivery_finalizations WHERE run_id=?", (run_id,)
         ).fetchone()
         return dict(row) if row else None
 
-    # 该入口按持久合同处理输入与输出，失败保持显式而不伪造完成。
+    # 从已保存回答与已结算产物计算验收对象摘要，去重收据来源；摘要随产物改变。
     def _subject(self, run_id: str) -> tuple[str, list[Any]]:
         answer_row = self.store.db.execute(
             "SELECT content,metadata_json FROM workspace_messages "
@@ -214,17 +213,19 @@ class DeliveryLedger:
                 deduped.append(item)
         return _digest(subject), deduped[:100]
 
-    # 该入口按持久合同处理输入与输出，失败保持显式而不伪造完成。
+    # 为当前交付建立 UNVERIFIED 记录；对象摘要变化时撤销旧验收，不能沿用旧 PASS。
     def ensure_acceptance(
         self, run_id: str, subject_digest: str | None = None, evidence: list[Any] | None = None
     ) -> dict[str, Any]:
-        current_digest, current_evidence = self._subject(run_id)
-        digest = subject_digest or current_digest
-        if digest != current_digest:
-            raise ValueError("acceptance subject digest must match current delivery")
-        evidence = current_evidence if evidence is None else evidence
-        raw_evidence = _bounded_json(evidence, max_bytes=48_000)
         with self.store.tx() as db:
+            # 对象读取、摘要核对和验收写入共享写锁，阻止核对后产物被另一连接替换。
+            current_digest, current_evidence = self._subject(run_id)
+            digest = subject_digest or current_digest
+            if digest != current_digest:
+                raise ValueError("acceptance subject digest must match current delivery")
+            raw_evidence = _bounded_json(
+                current_evidence if evidence is None else evidence, max_bytes=48_000
+            )
             row = db.execute(
                 "SELECT * FROM delivery_acceptance WHERE run_id=?", (run_id,)
             ).fetchone()
@@ -258,7 +259,7 @@ class DeliveryLedger:
                 )
         return self.acceptance(run_id)
 
-    # 该入口按持久合同处理输入与输出，失败保持显式而不伪造完成。
+    # 读取验收状态、对象摘要、检查者和证据；无记录返回 None，不把缺测写成通过。
     def acceptance(self, run_id: str) -> dict[str, Any] | None:
         row = self.store.db.execute(
             "SELECT * FROM delivery_acceptance WHERE run_id=?", (run_id,)
@@ -269,7 +270,7 @@ class DeliveryLedger:
         value["evidence"] = json.loads(value.pop("evidence_json"))
         return value
 
-    # 该入口按持久合同处理输入与输出，失败保持显式而不伪造完成。
+    # 显式提交与当前对象摘要绑定的验收修订；之后同步成功路径资格，模型不能调用此入口自批。
     def set_acceptance(
         self,
         run_id: str,
@@ -287,16 +288,17 @@ class DeliveryLedger:
         checker = str(checker_id or "").strip()
         if not checker or len(checker) > 200:
             raise ValueError("checker_id must contain 1-200 characters")
-        current_digest, default_evidence = self._subject(run_id)
-        if subject_digest is not None and subject_digest != current_digest:
-            raise ValueError("stale acceptance subject digest")
-        raw_evidence = _bounded_json(
-            default_evidence if evidence is None else evidence, max_bytes=48_000
-        )
         message = str(note or "")
         if len(message.encode("utf-8")) > 8_000:
             raise ValueError("acceptance note exceeds 8000 UTF-8 bytes")
         with self.store.tx() as db:
+            # 验收针对的是本次提交锁定的回答和产物；旧摘要在这里拒绝，不能写出过期 PASS。
+            current_digest, default_evidence = self._subject(run_id)
+            if subject_digest is not None and subject_digest != current_digest:
+                raise ValueError("stale acceptance subject digest")
+            raw_evidence = _bounded_json(
+                default_evidence if evidence is None else evidence, max_bytes=48_000
+            )
             row = db.execute(
                 "SELECT * FROM delivery_acceptance WHERE run_id=?", (run_id,)
             ).fetchone()
@@ -329,7 +331,7 @@ class DeliveryLedger:
             )
         return accepted
 
-    # 该入口按持久合同处理输入与输出，失败保持显式而不伪造完成。
+    # 按 run_id/ordinal=1 幂等建立本轮根工作项；标题来自当前用户意图，验收仍独立。
     def ensure_root_work_item(self, turn: dict[str, Any]) -> dict[str, Any]:
         run_id = turn["run_id"]
         goal = (turn.get("snapshot") or {}).get("goal") or {}
@@ -362,7 +364,7 @@ class DeliveryLedger:
             )
         return self.work_items(run_id)[0]
 
-    # 该入口按持久合同处理输入与输出，失败保持显式而不伪造完成。
+    # 按 ordinal 读取计划与进度，将 JSON 字段展开为只读副本；不执行依赖图。
     def work_items(self, run_id: str) -> list[dict[str, Any]]:
         rows = self.store.db.execute(
             "SELECT * FROM delivery_work_items WHERE run_id=? ORDER BY ordinal",
@@ -376,24 +378,16 @@ class DeliveryLedger:
             values.append(item)
         return values
 
-    # 该入口按持久合同处理输入与输出，失败保持显式而不伪造完成。
+    # 校验有界计划后，原子分配递增 revision 和 ordinal；保留旧计划供追溯，不覆盖历史。
     def plan_work_items(
         self, run_id: str, items: list[dict[str, Any]], *, plan_revision: int | None = None
     ) -> list[dict[str, Any]]:
         if not isinstance(items, list) or not 1 <= len(items) <= 24:
             raise ValueError("work item plan must contain 1-24 items")
-        row = self.store.db.execute(
-            "SELECT max(plan_revision) FROM delivery_work_items WHERE run_id=?", (run_id,)
-        ).fetchone()
-        current = int(row[0] or 0)
-        revision = current + 1 if plan_revision is None else int(plan_revision)
-        if revision <= current:
-            raise ValueError("plan revision must increase")
-        start = self.store.db.execute(
-            "SELECT coalesce(max(ordinal),0) FROM delivery_work_items WHERE run_id=?", (run_id,)
-        ).fetchone()[0]
+        if plan_revision is not None and (type(plan_revision) is not int or plan_revision < 1):
+            raise ValueError("plan revision must be a positive integer")
         prepared = []
-        for offset, item in enumerate(items, start=1):
+        for item in items:
             title = str(item.get("title") or "").strip()
             if not title or len(title) > 200:
                 raise ValueError("work item title must contain 1-200 characters")
@@ -402,10 +396,7 @@ class DeliveryLedger:
                     self._id("work"),
                     run_id,
                     item.get("goal_id"),
-                    int(start) + offset,
                     title,
-                    "PLANNED",
-                    revision,
                     str(item.get("input_digest") or ""),
                     _bounded_json(item.get("dependencies") or [], max_bytes=8_000),
                     _bounded_json(item.get("acceptance") or {}, max_bytes=16_000),
@@ -413,16 +404,25 @@ class DeliveryLedger:
                 )
             )
         with self.store.tx() as db:
+            # revision/ordinal 的读取也必须持有写锁；否则两个计划都读取同一旧值后相撞。
+            current, start = db.execute(
+                "SELECT coalesce(max(plan_revision),0),coalesce(max(ordinal),0) "
+                "FROM delivery_work_items WHERE run_id=?", (run_id,),
+            ).fetchone()
+            revision = current + 1 if plan_revision is None else plan_revision
+            if revision <= current:
+                raise ValueError("plan revision must increase")
             db.executemany(
                 "INSERT INTO delivery_work_items("
                 "work_item_id,run_id,goal_id,ordinal,title,status,plan_revision,input_digest,"
                 "dependencies_json,acceptance_json,budget_json"
                 ") VALUES(?,?,?,?,?,?,?,?,?,?,?)",
-                prepared,
+                [row[:3] + (start + offset, row[3], "PLANNED", revision) + row[4:]
+                 for offset, row in enumerate(prepared, start=1)],
             )
         return self.work_items(run_id)
 
-    # 该入口按持久合同处理输入与输出，失败保持显式而不伪造完成。
+    # 在写事务内读取当前字段，再合并本次明确更新；省略字段保持原值，避免并发丢更新。
     def update_work_item(
         self,
         work_item_id: str,
@@ -431,23 +431,23 @@ class DeliveryLedger:
         progress_note: str | None = None,
         evidence: list[Any] | None = None,
     ) -> dict[str, Any]:
-        row = self.store.db.execute(
-            "SELECT * FROM delivery_work_items WHERE work_item_id=?", (work_item_id,)
-        ).fetchone()
-        if not row:
-            raise KeyError(work_item_id)
-        target = row["status"] if status is None else str(status).upper()
-        if target not in WORK_ITEM_STATES:
-            raise ValueError("invalid work item state")
-        note = row["progress_note"] if progress_note is None else str(progress_note)
-        if len(note.encode("utf-8")) > 8_000:
-            raise ValueError("work item progress note exceeds 8000 UTF-8 bytes")
-        raw_evidence = (
-            row["evidence_json"]
-            if evidence is None
-            else _bounded_json(evidence, max_bytes=48_000)
-        )
         with self.store.tx() as db:
+            row = db.execute(
+                "SELECT * FROM delivery_work_items WHERE work_item_id=?", (work_item_id,)
+            ).fetchone()
+            if not row:
+                raise KeyError(work_item_id)
+            target = row["status"] if status is None else str(status).upper()
+            if target not in WORK_ITEM_STATES:
+                raise ValueError("invalid work item state")
+            note = row["progress_note"] if progress_note is None else str(progress_note)
+            if len(note.encode("utf-8")) > 8_000:
+                raise ValueError("work item progress note exceeds 8000 UTF-8 bytes")
+            raw_evidence = (
+                row["evidence_json"]
+                if evidence is None
+                else _bounded_json(evidence, max_bytes=48_000)
+            )
             db.execute(
                 "UPDATE delivery_work_items SET status=?,progress_note=?,evidence_json=?,"
                 "updated_at=CURRENT_TIMESTAMP WHERE work_item_id=?",
@@ -455,7 +455,7 @@ class DeliveryLedger:
             )
         return next(item for item in self.work_items(row["run_id"]) if item["work_item_id"] == work_item_id)
 
-    # 该入口按持久合同处理输入与输出，失败保持显式而不伪造完成。
+    # 按稳定的根工作项身份更新阶段进度；没有根项时不凭空补造一次准入。
     def update_root_work_item(
         self,
         run_id: str,
@@ -473,7 +473,7 @@ class DeliveryLedger:
                 row["work_item_id"], status=status, progress_note=progress_note, evidence=evidence
             )
 
-    # 该入口按持久合同处理输入与输出，失败保持显式而不伪造完成。
+    # 将已结算工具来源追加到根项证据，保留 test.run 的明确状态；记录不自动产生验收。
     def record_tool_result(self, run_id: str, result: dict[str, Any]) -> None:
         items = self.work_items(run_id)
         if not items:
@@ -505,7 +505,7 @@ class DeliveryLedger:
             evidence=deduped[:100],
         )
 
-    # 该入口按持久合同处理输入与输出，失败保持显式而不伪造完成。
+    # 记录用户明确报告的关注种类、整数秒数与备注；它不是自动推算的劳动时间。
     def record_attention(
         self, run_id: str, *, kind: str, seconds: int, note: str = ""
     ) -> dict[str, Any]:
@@ -530,7 +530,7 @@ class DeliveryLedger:
             ).fetchone()
         )
 
-    # 该入口按持久合同处理输入与输出，失败保持显式而不伪造完成。
+    # 组合一个 Run 的收尾、验收、工作项和人工秒数投影；所有数值来自各自账本。
     def run_view(self, run_id: str) -> dict[str, Any]:
         attention = self.store.db.execute(
             "SELECT coalesce(sum(seconds),0) AS seconds,count(*) AS entries "
@@ -544,7 +544,7 @@ class DeliveryLedger:
             "attention": dict(attention),
         }
 
-    # 该入口按持久合同处理输入与输出，失败保持显式而不伪造完成。
+    # 以所有已登记交付为分母聚合验收和人工成本；空分母保持 None，不用零冒充成功率。
     def metrics(self) -> dict[str, Any]:
         rows = self.store.db.execute(
             "SELECT state,count(*) AS n FROM delivery_acceptance GROUP BY state"
@@ -573,7 +573,7 @@ class DeliveryLedger:
             "human_attention_entries": int(attention[1] or 0),
         }
 
-    # 该入口按持久合同处理输入与输出，失败保持显式而不伪造完成。
+    # 仅为 COMPLETED 回答补 Memory/Goal 派生事实；分别记录履行标志，失败留原因供再次补偿。
     def reconcile_pending(
         self,
         repository,

@@ -13,7 +13,7 @@ from .domain import canonical_json, digest_json, IdentityConflict
 from .network_recovery import reconnect_delay
 
 
-# SCHEMA：本仓储拥有的表、索引与约束；升级补齐旧字段，删除列须有迁移证据。
+# SCHEMA：本仓储拥有的当前表、索引与约束；由 Store 原子初始化，不叠加旧格式迁移。
 # due_at/retry_at/admitted_at 为 UTC epoch 秒，interval_seconds 为秒；禁用不删除已准入历史。
 # sequence 标识同一计划的机会；(schedule_id,sequence) 唯一，不能用重新启用重发一次性机会。
 # request_id/entry_digest 绑定明确计划意图；settings_json 在创建时固定，未来全局设置不倒写。
@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS goal_schedules(
  request_id TEXT,entry_digest TEXT,
  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
 CREATE INDEX IF NOT EXISTS goal_schedules_due ON goal_schedules(enabled,due_at,retry_at);
+CREATE UNIQUE INDEX IF NOT EXISTS goal_schedule_requests ON goal_schedules(request_id);
 CREATE TABLE IF NOT EXISTS goal_wakeups(
  schedule_id TEXT NOT NULL REFERENCES goal_schedules(schedule_id),
  sequence INTEGER NOT NULL,due_at REAL NOT NULL,
@@ -69,21 +70,7 @@ class GoalScheduler:
         self.workspace = workspace
         # store：持久事实仓储；短事务维护本地一致性；外部效果不能并入数据库事务。
         self.store = workspace.repository.store
-        self.store.db.executescript(SCHEMA)
-        # 本地事务边界：下列写入一起提交，异常整体回滚；文件/网络效果须在事务外另行核对。
-        with self.store.tx() as db:
-            columns = {
-                row[1] for row in db.execute("PRAGMA table_info(goal_schedules)")
-            }
-            for column in ("request_id", "entry_digest"):
-                if column not in columns:
-                    db.execute(f"ALTER TABLE goal_schedules ADD COLUMN {column} TEXT")
-            if "retry_failures" not in columns:
-                db.execute("ALTER TABLE goal_schedules ADD COLUMN retry_failures INTEGER NOT NULL DEFAULT 0")
-            db.execute(
-                "CREATE UNIQUE INDEX IF NOT EXISTS goal_schedule_requests ON goal_schedules(request_id)"
-            )
-
+        self.store.ensure_schema(SCHEMA)
     # 固定用户计划、会话、模型设置与 request_id 摘要；同意图重试返回原计划，不同内容冲突。
     def create(self, goal_id, value):
         prompt = value.get("prompt")

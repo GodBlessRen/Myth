@@ -813,11 +813,11 @@ function renderInspectorControl(turn) {
     ["修订", control.revision ?? "—"],
     [
       "状态",
-      (control.stopped ?? control.aborted)
+      control.stopped
         ? "已停止"
         : control.paused
           ? "已暂停"
-          : control.paused === false || control.stopped === false || control.aborted === false
+          : control.paused === false || control.stopped === false
             ? "允许继续" : "未报告",
     ],
     ["模型", control.model || turn.settings?.model || "—"],

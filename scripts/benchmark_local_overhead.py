@@ -57,6 +57,9 @@ def main():
             with runtime.store.tx():
                 db.executemany("INSERT INTO workspace_memories(memory_id,kind,text,source_ref) VALUES (?,?,?,?)",
                     [(f"memory-{i:05}", "semantic", "apple banana " + "x" * 1000, f"source-{i}") for i in range(10000)])
+            # 固定同一万条 Memory，预热一次后量测反复装配；反映普通 API 请求的仓储初始化开销。
+            Workspace(runtime)
+            output["workspace_reopen_ms"] = median_ms(lambda: Workspace(runtime), repeats=5)
             tracemalloc.start()
             start = time.perf_counter()
             found = memory.search_report("apple banana", limit=6)

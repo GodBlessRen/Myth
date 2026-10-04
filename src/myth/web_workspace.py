@@ -12,7 +12,7 @@ from .runtime import MythRuntime
 from .workspace import Workspace
 from .providers import create_provider
 from .providers.ollama import OllamaProvider
-from .providers.capabilities import validate_model_selection
+from .model_capabilities import validate_model_selection
 from .platform.control import ControlCommand
 from .strategies import RuleIntentPicker
 from .goal_scheduler import GoalScheduler
@@ -123,6 +123,11 @@ class ConversationWebService:
         with MythRuntime(self.root) as runtime:
             return getattr(Workspace(runtime).repository, method)(*args)
 
+    def _use_knowledge(self, method, *args):
+        """把知识 API 交给知识仓储；请求自带连接生命周期，不让对话仓储代写文档。"""
+        with MythRuntime(self.root) as runtime:
+            return getattr(Workspace(runtime).repository.knowledge, method)(*args)
+
     # 组合组件地图与明确活动策略/历史投影；不自动修改活动策略。
     def platform(self):
         with MythRuntime(self.root) as runtime:
@@ -229,7 +234,7 @@ class ConversationWebService:
             projects = repository.projects()
             sessions = repository.sessions()
             settings = repository.settings()
-            documents = repository.documents()
+            documents = repository.knowledge.documents()
             goals = workspace.personal.goal_views()
         return {
             "projects": projects,
@@ -619,7 +624,6 @@ class ConversationWebService:
             "pause": ControlCommand.PAUSE,
             "resume": ControlCommand.RESUME,
             "stop": ControlCommand.STOP,
-            "abort": ControlCommand.STOP,
             "cancel": ControlCommand.STOP,
             "steer": ControlCommand.STEER,
             "switch_model": ControlCommand.SWITCH_MODEL,
@@ -984,9 +988,9 @@ class ConversationWebService:
         if len(parts) == 2 and parts[0] == "sessions":
             return self.session(parts[1])
         if len(parts) == 2 and parts[0] == "documents":
-            return self._use("document", parts[1])
+            return self._use_knowledge("document", parts[1])
         if parts == ["search"]:
-            return self._use(
+            return self._use_knowledge(
                 "search_report",
                 query.get("q", [""])[0],
                 query.get("project_id", [None])[0],
@@ -1042,7 +1046,7 @@ class ConversationWebService:
         if len(parts) == 3 and parts[0] == "sessions" and parts[2] == "messages":
             return self.send(parts[1], value)
         if parts == ["documents"]:
-            return self._use("import_document", value)
+            return self._use_knowledge("import_document", value)
         if len(parts) == 3 and parts[0] == "projects" and parts[2] == "verification-profiles":
             return self.create_verification_profile(parts[1], value)
         if len(parts) == 3 and parts[0] == "turns" and parts[2] == "acceptance":
@@ -1052,7 +1056,7 @@ class ConversationWebService:
         if len(parts) == 3 and parts[0] == "turns" and parts[2] == "work-items":
             return self.plan_work_items(parts[1], value)
         if len(parts) == 3 and parts[0] == "documents" and parts[2] == "archive":
-            return self._use("archive_document", parts[1])
+            return self._use_knowledge("archive_document", parts[1])
         if len(parts) == 3 and parts[0] == "turns":
             return self.control(parts[1], parts[2], value)
         raise KeyError("endpoint")

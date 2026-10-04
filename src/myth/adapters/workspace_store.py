@@ -6,16 +6,15 @@ import json
 import time
 import uuid
 from contextlib import nullcontext
-from ..conversation import chunks, score_chunk
-from ..domain import canonical_json, digest_json, IdentityConflict, BudgetExceeded
+from ..domain import canonical_json, digest_json, IdentityConflict, BudgetExceeded, InvalidTransition
 from ..decision_runtime import DecisionRuntime
 from ..strategies import RuleIntentPicker, RuleResolutionController
 from ..platform.context_anchor import build_context_anchor
 from ..network_recovery import reconnect_delay
 from ..session_statistics import measured_integer
-from ..platform.retrieval import reciprocal_rank_scores
+from .knowledge_store import SqliteKnowledgeRepository
 
-# SCHEMA：本仓储拥有的表、索引与约束；升级补齐旧字段，删除列须有迁移证据。
+# SCHEMA：本仓储拥有的当前表、索引与约束；由 Store 原子初始化，不叠加旧格式迁移。
 # projects.root 是明确项目范围；archived/pinned 只管理未来可见性，不删除既有引用。
 # turns.snapshot_json 冻结准入上下文；settings_json 可经显式 Control 修订，已发出的模型请求对象不改写。
 # steps 的 step/current_step 单位为规划步骤；decision/result 绑定固定机会，不因重新渲染生成另一项执行。
@@ -41,12 +40,6 @@ CREATE TABLE IF NOT EXISTS workspace_messages(
 CREATE TABLE IF NOT EXISTS workspace_steps(
  run_id TEXT REFERENCES workspace_turns(run_id),step INTEGER NOT NULL,state TEXT NOT NULL,
  decision_id TEXT,decision_json TEXT,result_json TEXT,PRIMARY KEY(run_id,step));
-CREATE TABLE IF NOT EXISTS workspace_documents(
- id TEXT PRIMARY KEY,project_id TEXT REFERENCES workspace_projects(id),title TEXT NOT NULL,
- digest TEXT NOT NULL,bytes INTEGER NOT NULL,archived INTEGER NOT NULL DEFAULT 0,created_at TEXT DEFAULT CURRENT_TIMESTAMP);
-CREATE TABLE IF NOT EXISTS workspace_chunks(
- document_id TEXT REFERENCES workspace_documents(id),chunk_index INTEGER,content TEXT NOT NULL,
- PRIMARY KEY(document_id,chunk_index));
 CREATE TABLE IF NOT EXISTS workspace_settings(id INTEGER PRIMARY KEY CHECK(id=1),value_json TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS workspace_operations(
  decision_id TEXT PRIMARY KEY,run_id TEXT REFERENCES workspace_turns(run_id),capability TEXT NOT NULL,
@@ -74,7 +67,6 @@ CREATE INDEX IF NOT EXISTS workspace_messages_session ON workspace_messages(sess
 CREATE INDEX IF NOT EXISTS workspace_messages_run ON workspace_messages(run_id);
 CREATE INDEX IF NOT EXISTS workspace_turns_session ON workspace_turns(session_id);
 CREATE INDEX IF NOT EXISTS workspace_sessions_project ON workspace_sessions(project_id,archived);
-CREATE INDEX IF NOT EXISTS workspace_documents_project ON workspace_documents(project_id,archived);
 CREATE INDEX IF NOT EXISTS workspace_operations_run ON workspace_operations(run_id,state);
 """
 
@@ -90,7 +82,7 @@ ACTIVE_TURN_STATUSES = {"RUNNING", "INTERRUPTED", "UNKNOWN", "WAITING_USER", "PA
 
 # 拥有工作区与 Turn 状态的适配器；准入协调同连接个人仓储，冻结历史快照且维护恢复游标。
 class SqliteWorkspaceRepository:
-    # 保存共享连接及个人状态协作者，幂等建表/补齐旧游标字段；跨聚合准入必须加入同连接活动事务。
+    # 保存共享连接及个人状态协作者，原子建立当前表；跨聚合准入必须加入同连接活动事务。
     def __init__(
         self,
         runtime,
@@ -116,8 +108,6 @@ class SqliteWorkspaceRepository:
         self.resolution_controller = resolution_controller or RuleResolutionController()
         # resolution_policy_id：本次准入固定的表示策略版本身份；活动指针变化不倒写历史 Turn。
         self.resolution_policy_id = str(resolution_policy_id or "injected/default")
-        # vector_index：可选派生检索适配器；SQLite 文档/chunk 仍是来源、权限和版本真相。
-        self.vector_index = vector_index
         # evaluation_harness_mechanisms：仅固定评测注入；None 表示生产默认全部现有机制，显式集合用于受控消融。
         self.evaluation_harness_mechanisms = (
             None
@@ -126,27 +116,16 @@ class SqliteWorkspaceRepository:
         )
         # sota_route：由 Workspace 装配后注入；仓储缺省仍可独立工作，避免隐藏硬依赖。
         self.sota_route = None
-        self.store.db.executescript(SCHEMA)
-        # 正常只读检查不争写锁；旧工具不回填估算，真正迁移在写事务中重查，避免并发重复加列。
-        columns = {row[1] for row in self.store.db.execute("PRAGMA table_info(workspace_operations)")}
-        if "tool_wall_ms" not in columns:
-            with self.store.tx() as db:
-                columns = {row[1] for row in db.execute("PRAGMA table_info(workspace_operations)")}
-                if "tool_wall_ms" not in columns:
-                    db.execute("ALTER TABLE workspace_operations ADD COLUMN tool_wall_ms INTEGER")
-
-    # 读取显式产品模型设置并补齐旧字段；旧供应商名称只映射到当前合同，不读取旧应用凭据。
+        self.store.ensure_schema(SCHEMA)
+        # knowledge：独立知识状态所有者；项目身份只经显式只读回调核对，共用连接便于冻结准入快照。
+        self.knowledge = SqliteKnowledgeRepository(runtime, project_lookup=self.project, vector_index=vector_index)
+    # 读取当前完整设置；首次未配置时提供默认值，保存后的配置不再做旧字段映射。
     def settings(self):
         row = self.store.db.execute(
             "SELECT value_json FROM workspace_settings WHERE id=1"
         ).fetchone()
         if row:
             value = json.loads(row[0])
-            value.setdefault("num_ctx", 8192)
-            value.setdefault("temperature", 0.0)
-            value.setdefault("thinking", None)
-            if value.get("provider") == "pi-openai":
-                value["provider"] = "chatgpt"
             return value
         return {
             "provider": "ollama",
@@ -203,7 +182,7 @@ class SqliteWorkspaceRepository:
         ):
             raise ValueError("temperature must be between 0 and 2")
         # thinking 保存 Provider 原生选项；Core 只限制形状，不维护全局 effort 枚举。
-        from ..providers.capabilities import normalize_thinking
+        from ..model_capabilities import normalize_thinking
         thinking = normalize_thinking(value.get("thinking"))
         clean = {
             "provider": provider,
@@ -369,289 +348,6 @@ class SqliteWorkspaceRepository:
             )
         return self.session(sid)
 
-    # 读取可见知识文档及 chunk 数；project 过滤决定检索范围。
-    def documents(self, project_id=None):
-        return [
-            dict(r)
-            for r in self.store.db.execute(
-                "SELECT d.*,p.name project_name,(SELECT count(*) FROM workspace_chunks c WHERE c.document_id=d.id) chunks FROM workspace_documents d LEFT JOIN workspace_projects p ON p.id=d.project_id WHERE d.archived=0 ORDER BY d.rowid DESC"
-            )
-            if project_id is None or r["project_id"] == project_id
-        ]
-
-    # 先发布 UTF-8 不可变对象，再同事务保存文档和 chunks；发布后 DB 失败只留下未引用对象。
-    def import_document(self, value):
-        title = str(value.get("title", "")).strip()
-        text = value.get("content", "")
-        if (
-            not title
-            or len(title) > 200
-            or not isinstance(text, str)
-            or not text.strip()
-            or len(text.encode("utf-8")) > 1_000_000
-        ):
-            raise ValueError("document requires title and UTF-8 text up to 1 MB")
-        pid = value.get("project_id") or None
-        if pid:
-            self.project(pid)
-        digest = self.runtime.objects.put(text.encode("utf-8"))
-        did = new_id("doc")
-        # 本地事务边界：下列写入一起提交，异常整体回滚；文件/网络效果须在事务外另行核对。
-        with self.store.tx() as db:
-            db.execute(
-                "INSERT INTO workspace_documents(id,project_id,title,digest,bytes) VALUES(?,?,?,?,?)",
-                (did, pid, title, digest, len(text.encode("utf-8"))),
-            )
-            db.executemany(
-                "INSERT INTO workspace_chunks VALUES(?,?,?)",
-                [(did, i, part) for i, part in enumerate(chunks(text))],
-            )
-        result = {
-            "id": did,
-            "title": title,
-            "digest": digest,
-            "chunks": len(chunks(text)),
-        }
-        # 向量索引是事务外可重建投影；失败不能回滚已经成功提交的权威文档。
-        self._sync_document_vector(did)
-        return result
-
-    # 把一个已提交文档的当前 chunks 幂等投影到向量库；失败返回状态而不篡改 SQLite 事实。
-    def _sync_document_vector(self, document_id):
-        if self.vector_index is None:
-            return {"configured": False, "synced": 0}
-        document = self.document(document_id)
-        rows = self.store.db.execute(
-            "SELECT chunk_index,content FROM workspace_chunks WHERE document_id=? ORDER BY chunk_index",
-            (document_id,),
-        ).fetchall()
-        payload = [
-            {
-                "record_id": f"doc:{document_id}:{int(row['chunk_index'])}",
-                "source_version": document["digest"],
-                "text": document["title"] + "\n" + row["content"],
-                "document_id": document_id,
-                "chunk_index": int(row["chunk_index"]),
-                "project_id": document.get("project_id") or "",
-            }
-            for row in rows
-        ]
-        try:
-            result = self.vector_index.sync_knowledge(payload)
-            return {"configured": True, "synced": result.get("upserted", 0)}
-        except RuntimeError:
-            return {"configured": True, "synced": 0, "degraded": True}
-
-    # 显式重建当前可见知识的派生向量索引；调用方可在安装/迁移后运行，失败不影响词面检索。
-    def rebuild_vector_index(self, project_id=None):
-        if self.vector_index is None:
-            return {"configured": False, "documents": 0, "synced": 0}
-        documents = self.documents(project_id)
-        synced = 0
-        degraded = False
-        for document in documents:
-            result = self._sync_document_vector(document["id"])
-            synced += int(result.get("synced") or 0)
-            degraded = degraded or bool(result.get("degraded"))
-        return {
-            "configured": True,
-            "documents": len(documents),
-            "synced": synced,
-            "degraded": degraded,
-        }
-
-    # 按保存摘要读取完整文档对象；对象库校验字节身份，归档状态由调用者判断。
-    def document(self, did):
-        row = self.store.db.execute(
-            "SELECT * FROM workspace_documents WHERE id=?", (did,)
-        ).fetchone()
-        if not row:
-            raise KeyError(did)
-        return {
-            **dict(row),
-            "content": self.runtime.objects.get(row["digest"]).decode("utf-8"),
-        }
-
-    # 把文档从未来检索集合撤下；不删除冻结快照引用的原始对象。
-    def archive_document(self, did):
-        self.document(did)
-        # 本地事务边界：下列写入一起提交，异常整体回滚；文件/网络效果须在事务外另行核对。
-        with self.store.tx() as db:
-            db.execute("UPDATE workspace_documents SET archived=1 WHERE id=?", (did,))
-        return {"id": did}
-
-    def knowledge_candidates(self, project_id=None, *, cursor=0, page_size=512):
-        """按 SQLite rowid 分页扫描所有可见 chunk；cursor 是候选覆盖位置，不是相关度分数。"""
-        if type(cursor) is not int or cursor < 0:
-            raise ValueError("cursor must be a non-negative integer")
-        if type(page_size) is not int or not 1 <= page_size <= 2000:
-            raise ValueError("page_size must be 1-2000")
-        rows = self.store.db.execute(
-            "SELECT c.rowid AS candidate_cursor,c.document_id,c.chunk_index,c.content,"
-            "d.title,d.digest FROM workspace_chunks c "
-            "JOIN workspace_documents d ON d.id=c.document_id "
-            "WHERE c.rowid>? AND d.archived=0 AND (d.project_id IS NULL OR d.project_id=?) "
-            "ORDER BY c.rowid LIMIT ?",
-            (cursor, project_id, page_size + 1),
-        ).fetchall()
-        values = [dict(row) for row in rows[:page_size]]
-        has_more = len(rows) > page_size
-        next_cursor = values[-1]["candidate_cursor"] if values else cursor
-        return {
-            "candidates": values,
-            "cursor": cursor,
-            "next_cursor": next_cursor,
-            "has_more": has_more,
-        }
-
-    # 遍历全可见候选后保留有界 top-k，报告 scanned/matched/pages；不能在排序前用 LIMIT 静默丢候选。
-    def _lexical_search_report(self, query, project_id=None, limit=5):
-        if not isinstance(query, str) or len(query) > 1000:
-            raise ValueError("query up to 1000 characters")
-        if type(limit) is not int or not 1 <= limit <= 8:
-            raise ValueError("limit must be 1-8")
-        cursor = 0
-        scanned = 0
-        matched_count = 0
-        pages = 0
-        top = []
-        while True:
-            page = self.knowledge_candidates(project_id, cursor=cursor, page_size=512)
-            pages += 1
-            for item in page["candidates"]:
-                scanned += 1
-                scored = score_chunk(query, item)
-                if scored is None:
-                    continue
-                matched_count += 1
-                top.append(scored)
-                if len(top) > limit * 4:
-                    top = sorted(
-                        top,
-                        key=lambda value: (
-                            -value["score"],
-                            value["document_id"],
-                            value["chunk_index"],
-                        ),
-                    )[:limit]
-            cursor = page["next_cursor"]
-            if not page["has_more"]:
-                break
-        sources = sorted(
-            top,
-            key=lambda value: (
-                -value["score"],
-                value["document_id"],
-                value["chunk_index"],
-            ),
-        )[:limit]
-        for source in sources:
-            source.pop("candidate_cursor", None)
-        return {
-            "sources": sources,
-            "retrieval": {
-                "backend": "local-lexical",
-                "candidate_policy": "all-visible-chunks-v2",
-                "scanned": scanned,
-                "matched": matched_count,
-                "pages": pages,
-                "exhausted": True,
-                "truncated_before_ranking": False,
-            },
-        }
-
-    # 先以词面全覆盖建立可靠基线，再按可选 Milvus 候选做 RRF；每个向量命中必须回 SQLite 校验版本/作用域。
-    def search_report(self, query, project_id=None, limit=5):
-        lexical = self._lexical_search_report(query, project_id, limit)
-        if self.vector_index is None or not str(query).strip():
-            return lexical
-        try:
-            # 首次启用 Milvus 时补齐已有文档；适配器按 source version 幂等跳过本进程已同步项。
-            self.rebuild_vector_index(project_id)
-            hits = self.vector_index.search_knowledge(
-                str(query), limit=max(32, int(limit) * 8)
-            )
-        except RuntimeError:
-            lexical["retrieval"]["vector_status"] = "unavailable"
-            lexical["retrieval"]["degraded"] = True
-            return lexical
-
-        vector_rows = []
-        stale_rejected = 0
-        for hit in hits:
-            record_id = str(hit.get("record_id") or "")
-            parts = record_id.split(":")
-            if len(parts) != 3 or parts[0] != "doc":
-                stale_rejected += 1
-                continue
-            try:
-                chunk_index = int(parts[2])
-            except ValueError:
-                stale_rejected += 1
-                continue
-            row = self.store.db.execute(
-                "SELECT c.document_id,c.chunk_index,c.content,d.title,d.digest,d.project_id,d.archived "
-                "FROM workspace_chunks c JOIN workspace_documents d ON d.id=c.document_id "
-                "WHERE c.document_id=? AND c.chunk_index=?",
-                (parts[1], chunk_index),
-            ).fetchone()
-            if (
-                row is None
-                or int(row["archived"])
-                or row["project_id"] not in {None, project_id}
-                or str(row["digest"]) != str(hit.get("source_version") or "")
-            ):
-                stale_rejected += 1
-                continue
-            item = dict(row)
-            item.pop("archived", None)
-            item.pop("project_id", None)
-            item["citation"] = f"doc:{item['document_id']}:{item['chunk_index']}"
-            item["vector_distance"] = hit.get("distance")
-            vector_rows.append(item)
-
-        lexical_rows = list(lexical["sources"])
-        identity = lambda item: f"{item['document_id']}:{int(item['chunk_index'])}"
-        rrf = reciprocal_rank_scores(
-            (
-                tuple(identity(item) for item in lexical_rows),
-                tuple(identity(item) for item in vector_rows),
-            )
-        )
-        merged = {}
-        for item in lexical_rows + vector_rows:
-            key = identity(item)
-            if key not in merged:
-                merged[key] = dict(item)
-        sources = []
-        for key, item in merged.items():
-            item["hybrid_score"] = round(rrf.get(key, 0.0), 8)
-            sources.append(item)
-        sources.sort(
-            key=lambda item: (
-                -float(item.get("hybrid_score") or 0.0),
-                item["document_id"],
-                int(item["chunk_index"]),
-            )
-        )
-        sources = sources[:limit]
-        return {
-            "sources": sources,
-            "retrieval": {
-                **lexical["retrieval"],
-                "backend": "lexical+milvus",
-                "candidate_policy": "lexical-full-cover+milvus-hydrated-rrf-v1",
-                "vector_candidates": len(hits),
-                "vector_hydrated": len(vector_rows),
-                "vector_stale_rejected": stale_rejected,
-                "vector_status": "ready",
-                "degraded": False,
-            },
-        }
-
-    # 读取当前作用域的检索结果；相似度只用于排序，不升级为已验证事实。
-    def search(self, query, project_id=None, limit=5):
-        return self.search_report(query, project_id, limit)["sources"]
 
     # 同事务去重入口、校验会话/Goal、冻结上下文、预算、Turn、Goal 关联和游标；调度 occurrence 可加入同一连接事务。
     def create_turn(
@@ -736,10 +432,10 @@ class SqliteWorkspaceRepository:
             project = (
                 self.project(session["project_id"]) if session["project_id"] else None
             )
-            retrieval = self.search_report(text, session["project_id"])
+            retrieval = self.knowledge.search_report(text, session["project_id"])
             knowledge = list(retrieval["sources"])
             for did in document_ids:
-                document = self.document(did)
+                document = self.knowledge.document(did)
                 if document["archived"]:
                     raise ValueError("attachment was removed from the retrieval index")
                 if document["project_id"] not in {None, session["project_id"]}:
@@ -812,7 +508,7 @@ class SqliteWorkspaceRepository:
                         : plan.max_chars_per_source
                     ]
                 elif plan.resolution.value == "L2":
-                    document = self.document(item["document_id"])
+                    document = self.knowledge.document(item["document_id"])
                     chunk_index = int(item.get("chunk_index") or 0)
                     start = max(0, chunk_index * 1600 - 800)
                     item["content"] = document["content"][
@@ -990,42 +686,15 @@ class SqliteWorkspaceRepository:
             ),
         )
 
-    # 读取持久游标；旧记录缺游标时根据已完成步骤返回兼容投影，不据投影重复发出效果。
+    # 读取准入时原子创建的持久游标；缺失显式报错，禁止推算或制造恢复进度。
     def execution_cursor(self, rid):
         self.turn(rid)
         row = self.store.db.execute(
             "SELECT * FROM workspace_execution_cursors WHERE run_id=?", (rid,)
         ).fetchone()
-        if row:
-            return dict(row)
-        turn = self.turn(rid)
-        completed = max(
-            [
-                int(item["step"])
-                for item in turn["activities"]
-                if item["state"] == "DONE"
-            ]
-            or [0]
-        )
-        phase = (
-            "COMPLETED"
-            if turn["status"] == "COMPLETED"
-            else "WAITING_USER" if turn["status"] == "WAITING_USER" else "LEGACY"
-        )
-        recovery = (
-            "RECONCILE"
-            if turn["status"] == "UNKNOWN"
-            else "RESUME" if turn["status"] == "INTERRUPTED" else "NONE"
-        )
-        return {
-            "run_id": rid,
-            "step": int(turn["current_step"]),
-            "phase": phase,
-            "checkpoint_step": completed,
-            "recovery_state": recovery,
-            "detail": "Legacy cursor inferred from durable steps.",
-            "updated_at": turn["created_at"],
-        }
+        if row is None:
+            raise RuntimeError(f"execution cursor missing for {rid}")
+        return dict(row)
 
     # 在写事务竞争 owner/generation/到期时间；租约只声明负责人，真实互斥另由本机 Run 锁负责。
     def claim_driver(self, rid, owner_id, ttl_seconds=12):
@@ -1246,14 +915,6 @@ class SqliteWorkspaceRepository:
         result = dict(row)
         result["settings"] = json.loads(result.pop("settings_json"))
         result["snapshot"] = json.loads(result.pop("snapshot_json"))
-        if "turn_message_start" not in result["snapshot"]:
-            # 旧快照的近期历史后跟当前任务/问答；从持久边界推断，不能为兼容倒写数据库。
-            count = self.store.db.execute(
-                "SELECT count(*) FROM workspace_messages WHERE run_id=?", (rid,)
-            ).fetchone()[0]
-            result["snapshot"]["turn_message_start"] = max(
-                0, len(result["snapshot"]["messages"]) - count
-            )
         result["activities"] = [
             {
                 **dict(r),
@@ -1360,14 +1021,37 @@ class SqliteWorkspaceRepository:
                 {"step": step, "phase": "DECISION_BOUND", "decision_id": decision_id},
             )
 
-    # 原子记入工具结果与步骤完成事实；之后安全点才可派发新动作。
+    def _consume_step(self, db, rid, step, result_json=None):
+        """在调用方事务里消费当前步骤；重复相同结果幂等，冲突或未准入步骤拒绝。
+
+        先核对步骤存在和当前序号，再更新 DONE。否则 UPDATE 影响零行时也可能
+        继续写消息/事件/游标，制造不存在的进度；重复回调还会覆盖已经完成的证据。
+        """
+        row = db.execute(
+            "SELECT s.state,s.result_json,t.current_step FROM workspace_steps s "
+            "JOIN workspace_turns t ON t.run_id=s.run_id WHERE s.run_id=? AND s.step=?",
+            (rid, step),
+        ).fetchone()
+        if row is None:
+            raise InvalidTransition("step has not been admitted")
+        if row["state"] == "DONE":
+            if row["result_json"] != result_json:
+                raise IdentityConflict("completed step cannot accept a different result")
+            return False
+        if row["current_step"] != step:
+            raise InvalidTransition("only the current step can be consumed")
+        db.execute(
+            "UPDATE workspace_steps SET state='DONE',result_json=? WHERE run_id=? AND step=?",
+            (result_json, rid, step),
+        )
+        return True
+
+    # 原子记入工具结果与步骤完成事实；相同结果重试不重复事件，也不回退游标。
     def finish_tool(self, rid, step, result):
         # 本地事务边界：下列写入一起提交，异常整体回滚；文件/网络效果须在事务外另行核对。
         with self.store.tx() as db:
-            db.execute(
-                "UPDATE workspace_steps SET state='DONE',result_json=? WHERE run_id=? AND step=?",
-                (canonical_json(result), rid, step),
-            )
+            if not self._consume_step(db, rid, step, canonical_json(result)):
+                return
             self._checkpoint(
                 db,
                 rid,
@@ -1400,10 +1084,8 @@ class SqliteWorkspaceRepository:
     # 原子记入非工具 Observation；失败/Stop Guard 反馈被消费，但不冒充 Tool Receipt。
     def finish_observation(self, rid, step, result):
         with self.store.tx() as db:
-            db.execute(
-                "UPDATE workspace_steps SET state='DONE',result_json=? WHERE run_id=? AND step=?",
-                (canonical_json(result), rid, step),
-            )
+            if not self._consume_step(db, rid, step, canonical_json(result)):
+                return
             kind = str(result.get("observation_kind") or "observation")
             self._checkpoint(
                 db,
@@ -1430,13 +1112,6 @@ class SqliteWorkspaceRepository:
                 {"step": step, "phase": "OBSERVATION_RECORDED", "checkpoint_step": step},
             )
 
-    # 兼容旧字符串拒绝入口；新路径通过 failures.py 产生结构化 failure。
-    def reject(self, rid, step, reason):
-        self.finish_observation(
-            rid,
-            step,
-            {"error": str(reason), "observation_kind": "failure"},
-        )
 
     # 把回答/问题、步骤状态及游标一起提交；普通 COMPLETED 只表示对话回答已结束。
     def finish_reply(self, rid, step, text, question_id=None):
@@ -1446,10 +1121,8 @@ class SqliteWorkspaceRepository:
             if turn["status"] != "RUNNING":
                 return
             status = "WAITING_USER" if question_id else "COMPLETED"
-            db.execute(
-                "UPDATE workspace_steps SET state='DONE' WHERE run_id=? AND step=?",
-                (rid, step),
-            )
+            if not self._consume_step(db, rid, step):
+                return
             self._message(
                 db,
                 turn["session_id"],

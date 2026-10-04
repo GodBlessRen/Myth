@@ -1,0 +1,12 @@
+# sdist 是可复现的当前源码；淘汰内容和本机生成物永不进入发布包。
+include AGENTS.md CHANGELOG.md PRODUCT.md README.md SECURITY.md start-myth.ps1
+recursive-include docs *.md *.json
+recursive-include evals *.json
+recursive-include examples *.json *.txt
+recursive-include scripts *.py
+recursive-include tests *.py *.cjs
+recursive-include src *.py *.html *.css *.js *.svg
+prune .trash
+prune output
+prune .runtime
+global-exclude __pycache__ *.py[cod]

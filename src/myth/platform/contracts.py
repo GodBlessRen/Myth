@@ -1,5 +1,5 @@
 """组件成熟度与职责的纯描述合同。
-这是架构元数据而非强制执行层；旧别名保留导入兼容，成熟度声明必须与源码和验证证据一致。"""
+元数据只描述当前职责；成熟度声明必须与源码和验证证据一致。"""
 
 from __future__ import annotations
 
@@ -7,14 +7,12 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 
-# 架构条目的成熟度；旧 WIRED 别名只兼容导入，不作为新命名。
+# 架构条目的成熟度；与 Run 生命周期是两个独立概念。
 class Maturity(StrEnum):
     # EXISTS：合同/组件存在，尚不宣称完整产品装配。
     EXISTS = "exists"
     # CONNECTED：当前路径已经装配，真实验证范围另见证据。
     CONNECTED = "connected"
-    # WIRED：旧公开兼容值，与 CONNECTED 相同；新代码不再使用。
-    WIRED = "connected"  # v0.6-v0.8 compatibility alias; do not use in new UI/docs.
     # USABLE：已有明确可用路径；不能外推为所有场景稳定。
     USABLE = "usable"
     # HARDENED：声明的加固成熟度；需要对应测试和证据支持。
@@ -49,10 +47,3 @@ class ArchitectureItem:
             "responsibility": self.responsibility,
             "depends_on": list(self.depends_on),
         }
-
-
-# 保留旧公开导出名供迁移；新代码使用 Maturity/ArchitectureItem，不把组合结构误建成强制层栈。
-# LayerState：旧成熟度兼容名；新代码使用 Maturity，不能混用 Run 状态。
-LayerState = Maturity
-# PlatformLayer：旧架构条目兼容名；描述对象不构成强制层次。
-PlatformLayer = ArchitectureItem

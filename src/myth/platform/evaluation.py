@@ -85,7 +85,7 @@ class EvalObservation:
     comparison_key: str | None = None
     # mechanism_events：本题实际触发/应用/回退的优化机制身份；只做归因线索，不自动证明因果。
     mechanism_events: tuple[str, ...] = ()
-    # harness_id：本次受控评测的完整 Harness 变体身份；普通评测可为空，放末尾保持旧位置参数兼容。
+    # harness_id：本次受控评测的完整 Harness 变体身份；普通评测可为空；受控消融时必须固定身份。
     harness_id: str | None = None
 
 
@@ -305,7 +305,7 @@ EFFICIENCY_METERS = frozenset(
 
 
 
-# 从持久 JSON 报告恢复 EvalReport；缺失字段按旧版本兼容默认值处理，不重新计算观测。
+# 从持久 JSON 报告恢复 EvalReport；可选观测缺测时使用明确默认值，不重新计算观测。
 def eval_report_from_dict(value: dict[str, Any]) -> EvalReport:
     return EvalReport(
         suite_id=str(value.get("suite_id") or ""),

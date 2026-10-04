@@ -7,10 +7,10 @@ from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import Any
 
-from ..providers.capabilities import normalize_thinking
+from ..model_capabilities import normalize_thinking
 
 
-# 用户显式控制词汇；STOP 停止未来调度，ABORT 仅兼容旧已保存命令。
+# 用户显式控制词汇；STOP 停止未来调度，已经发出的调用仍需结算。
 class ControlCommand(StrEnum):
     # STEER：追加明确方向修正；不改已签发 Ticket 的范围。
     STEER = "steer"
@@ -20,9 +20,6 @@ class ControlCommand(StrEnum):
     RESUME = "resume"
     # STOP：明确终止未来派发；不能抹去晚到效果。
     STOP = "stop"
-    # 兼容已保存/API 的旧 ABORT 词汇；当前产品使用 Stop。
-    # ABORT：旧 Stop 兼容名称；保持既有调用方迁移。
-    ABORT = "abort"
     # SWITCH_MODEL：明确修改未来模型调用选择；历史请求对象保持不变。
     SWITCH_MODEL = "switch_model"
     # SWITCH_THINKING：明确修改未来推理选项；不修改已发出调用。
@@ -49,11 +46,6 @@ class ControlSnapshot:
     # compact_requested：未来上下文压缩请求；按实际使用的 control revision 消费。
     compact_requested: bool = False
 
-    @property
-    def aborted(self) -> bool:
-        """旧调用方的只读 stopped 别名；停止只阻止未来派发。"""
-
-        return self.stopped
 
 
 class ControlService:
@@ -78,7 +70,7 @@ class ControlService:
             if not state.paused:
                 raise ValueError("run is not paused")
             update["paused"] = False
-        elif command in {ControlCommand.STOP, ControlCommand.ABORT}:
+        elif command is ControlCommand.STOP:
             update["stopped"] = True
             update["paused"] = False
         elif command is ControlCommand.SWITCH_MODEL:
@@ -101,14 +93,9 @@ class ControlService:
         return replace(state, **update)
 
 
-# 旧公开名称兼容；新文档/实现按 Control 使用，不增加另一套控制状态。
-# ControlPlane：旧公开控制合同兼容名；不代表横向能力都由它拥有。
-ControlPlane = ControlService
-
-# __all__：公开导出名单；兼容别名只有在确认外部迁移完成后才删除。
+# __all__：当前公开入口；新增入口必须有实际调用方。
 __all__ = [
     "ControlCommand",
     "ControlSnapshot",
     "ControlService",
-    "ControlPlane",
 ]

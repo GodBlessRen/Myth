@@ -234,21 +234,21 @@ class WorkspaceTests(unittest.TestCase):
     ):
         p = self.repo.create_project({"name": "A", "instructions": "始终用中文"})
         other = self.repo.create_project({"name": "B"})
-        self.repo.import_document(
+        self.repo.knowledge.import_document(
             {
                 "title": "计划",
                 "content": "Myth 的交付代号是 SILVER-92，发布时间是周五。",
                 "project_id": p["id"],
             }
         )
-        self.repo.import_document(
+        self.repo.knowledge.import_document(
             {
                 "title": "秘密",
                 "content": "SILVER-92 不应该泄露到 A。",
                 "project_id": other["id"],
             }
         )
-        self.repo.import_document(
+        self.repo.knowledge.import_document(
             {"title": "共享", "content": "发布时间需要明确验证。"}
         )
         rid = self.turn(self.session(p["id"]), "Myth 的发布时间和交付代号是什么？")
@@ -259,7 +259,7 @@ class WorkspaceTests(unittest.TestCase):
 
     # 回归断言：显式附件不因词面无重叠而被遗漏；检索相关度不能撤销用户选择。
     def test_attached_document_is_pinned_even_without_query_overlap(self):
-        doc = self.repo.import_document(
+        doc = self.repo.knowledge.import_document(
             {"title": "random", "content": "唯一口令是 ZEBRA-482。"}
         )
         rid = self.turn(self.session(), "总结刚附加的资料", docs=[doc["id"]])
@@ -550,12 +550,12 @@ class WorkspaceTests(unittest.TestCase):
 
     # 回归断言：撤下未来知识召回后，旧快照的固定来源仍可核对。
     def test_archived_knowledge_keeps_historical_citation_readable(self):
-        doc = self.repo.import_document(
+        doc = self.repo.knowledge.import_document(
             {"title": "资料", "content": "学习代号 SILVER-92"}
         )
-        self.repo.archive_document(doc["id"])
-        self.assertEqual(self.repo.search("SILVER-92"), [])
-        self.assertIn("SILVER-92", self.repo.document(doc["id"])["content"])
+        self.repo.knowledge.archive_document(doc["id"])
+        self.assertEqual(self.repo.knowledge.search("SILVER-92"), [])
+        self.assertIn("SILVER-92", self.repo.knowledge.document(doc["id"])["content"])
         with self.assertRaises(ValueError):
             self.turn(self.session(), docs=[doc["id"]])
 

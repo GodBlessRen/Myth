@@ -1,0 +1,1991 @@
+{
+  "date": "2026-10-04",
+  "baseline_revision": "c0446dded0a9d614c104a4845fbe4a6028ac9acc",
+  "metrics": {
+    "baseline_files": 253,
+    "baseline_bytes": 5422232,
+    "decisions": {
+      "保留": 108,
+      "修改并保留": 80,
+      "移出生产树": 65,
+      "新增": 10
+    },
+    "baseline_python_source_bytes": 1211901,
+    "current_python_source_bytes": 1193964,
+    "active_files": 198,
+    "active_bytes": 2591245
+  },
+  "scope": "逐文件职责/引用/处置核对；关键事务路径深入复现。未宣称每条路径或真实模型组合已穷尽证明。",
+  "benchmark": {
+    "before": {
+      "fixture": {
+        "sessions": 1000,
+        "messages": 100000,
+        "memories": 10000,
+        "preflight_calls": 10,
+        "simulated_catalog_ms": 20
+      },
+      "real_model": false,
+      "message_query_ms": 0.138,
+      "message_rows": 100,
+      "message_query_plan": [
+        "SEARCH workspace_messages USING INDEX workspace_messages_session (session_id=?)"
+      ],
+      "workspace_reopen_ms": 45.03,
+      "memory_ms": 271.126,
+      "memory_peak_bytes": 848582,
+      "memory_ids": [
+        "memory-09999",
+        "memory-09998",
+        "memory-09997",
+        "memory-09996",
+        "memory-09995",
+        "memory-09994"
+      ],
+      "memory_retrieval": {
+        "backend": "memory-lexical",
+        "candidate_policy": "all-visible-active-memories-v2",
+        "scanned": 10000,
+        "visible": 10000,
+        "matched": 10000,
+        "pages": 50,
+        "exhausted": true,
+        "truncated_before_ranking": false
+      },
+      "preflight_total_ms": 20.193,
+      "catalog_requests": 1
+    },
+    "after": {
+      "fixture": {
+        "sessions": 1000,
+        "messages": 100000,
+        "memories": 10000,
+        "preflight_calls": 10,
+        "simulated_catalog_ms": 20
+      },
+      "real_model": false,
+      "message_query_ms": 0.141,
+      "message_rows": 100,
+      "message_query_plan": [
+        "SEARCH workspace_messages USING INDEX workspace_messages_session (session_id=?)"
+      ],
+      "workspace_reopen_ms": 0.963,
+      "memory_ms": 259.184,
+      "memory_peak_bytes": 855606,
+      "memory_ids": [
+        "memory-09999",
+        "memory-09998",
+        "memory-09997",
+        "memory-09996",
+        "memory-09995",
+        "memory-09994"
+      ],
+      "memory_retrieval": {
+        "backend": "memory-lexical",
+        "candidate_policy": "all-visible-active-memories-v2",
+        "scanned": 10000,
+        "visible": 10000,
+        "matched": 10000,
+        "pages": 50,
+        "exhausted": true,
+        "truncated_before_ranking": false
+      },
+      "preflight_total_ms": 20.796,
+      "catalog_requests": 1
+    }
+  },
+  "original_bug_probes": [
+    {
+      "case": "missing-step",
+      "turn_status": "COMPLETED",
+      "checkpoint_step": 999,
+      "activity_count": 0
+    },
+    {
+      "case": "duplicate-result",
+      "overwritten_result": {
+        "capability_id": "math.calculate",
+        "value": 2
+      },
+      "extra_events": 2
+    },
+    {
+      "case": "ddl",
+      "partial_table_exists": true
+    }
+  ],
+  "validation": {
+    "python_suite": {
+      "tests": 410,
+      "passed": 409,
+      "skipped": 1,
+      "seconds": 58.217,
+      "skip_reason": "Windows symlink creation not permitted"
+    },
+    "frontend_tests": 35,
+    "js_syntax_files": 6,
+    "foundation": {
+      "cases": 48,
+      "passed": 48,
+      "complete_suite": true,
+      "release_gate_passed": true
+    },
+    "parallel_database_first_open_repetitions": 100,
+    "browser": {
+      "steps": 21,
+      "passed": true,
+      "console_errors": 0,
+      "page_errors": 0,
+      "http_errors": 0,
+      "request_failures": 0,
+      "provider": "fixed test transport"
+    },
+    "installed_wheel_http": "PASS",
+    "annotations": "PASS",
+    "known_secret_patterns": "no findings",
+    "real_provider": "not run"
+  },
+  "files": [
+    {
+      "path": ".github/workflows/ci.yml",
+      "decision": "修改并保留",
+      "reason": ".github/workflows/ci.yml；保留四平台回归，补全 35 项前端行为与真实构建/安装后 HTTP 检查。",
+      "before_bytes": 1572,
+      "active_bytes": 2362
+    },
+    {
+      "path": ".gitignore",
+      "decision": "修改并保留",
+      "reason": ".gitignore；一次性 output 不再反复提交为生产文件。",
+      "before_bytes": 374,
+      "active_bytes": 381
+    },
+    {
+      "path": "AGENTS.md",
+      "decision": "修改并保留",
+      "reason": "Myth 开发规范；压缩重复原则，固定当前修改、中文说明、淘汰、验证和发布流程。",
+      "before_bytes": 6594,
+      "active_bytes": 3937
+    },
+    {
+      "path": "CHANGELOG.md",
+      "decision": "修改并保留",
+      "reason": "Changelog；同步当前事实/导航，职责仍成立。",
+      "before_bytes": 25699,
+      "active_bytes": 26665
+    },
+    {
+      "path": "PRODUCT.md",
+      "decision": "保留",
+      "reason": "Myth 产品事实；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 3015,
+      "active_bytes": 3015
+    },
+    {
+      "path": "README.md",
+      "decision": "修改并保留",
+      "reason": "Myth；同步当前事实/导航，职责仍成立。",
+      "before_bytes": 7900,
+      "active_bytes": 8149
+    },
+    {
+      "path": "SECURITY.md",
+      "decision": "保留",
+      "reason": "Security & Privacy Boundary；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 6958,
+      "active_bytes": 6958
+    },
+    {
+      "path": "docs/ARCHITECTURE.md",
+      "decision": "修改并保留",
+      "reason": "Myth Architecture；同步当前事实/导航，职责仍成立。",
+      "before_bytes": 22156,
+      "active_bytes": 22180
+    },
+    {
+      "path": "docs/ARCHITECTURE_CONSTITUTION.md",
+      "decision": "修改并保留",
+      "reason": "Myth 架构宪法；重写为当前可执行边界，保留安全/来源/UNKNOWN/独立验收，删旧兼容与未来清单。",
+      "before_bytes": 19654,
+      "active_bytes": 8428
+    },
+    {
+      "path": "docs/CODE_GUIDE.md",
+      "decision": "修改并保留",
+      "reason": "代码阅读与修改指南；知识所有权、持久 finalization、schema 和当前验证入口同步实现。",
+      "before_bytes": 7670,
+      "active_bytes": 7805
+    },
+    {
+      "path": "docs/DELIVERY_WORKFLOW_V024.md",
+      "decision": "移出生产树",
+      "reason": "阶段模拟计划已完成的部分改为当前 DELIVERY.md，旧设计留档。",
+      "before_bytes": 4402,
+      "active_bytes": 0
+    },
+    {
+      "path": "docs/DESIGN.md",
+      "decision": "修改并保留",
+      "reason": "Myth 界面设计；同步当前事实/导航，职责仍成立。",
+      "before_bytes": 4940,
+      "active_bytes": 4917
+    },
+    {
+      "path": "docs/GOAL_WAKEUP.md",
+      "decision": "保留",
+      "reason": "Goal 定时唤醒；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 4334,
+      "active_bytes": 4334
+    },
+    {
+      "path": "docs/LONG_RUN_VALIDATION.md",
+      "decision": "保留",
+      "reason": "Long-run Validation / 长任务耐久验证；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 2390,
+      "active_bytes": 2390
+    },
+    {
+      "path": "docs/MEMORY_LIFECYCLE.md",
+      "decision": "保留",
+      "reason": "Memory Lifecycle；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 6257,
+      "active_bytes": 6257
+    },
+    {
+      "path": "docs/MILVUS_RETRIEVAL.md",
+      "decision": "保留",
+      "reason": "Milvus Retrieval Adapter；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 2444,
+      "active_bytes": 2444
+    },
+    {
+      "path": "docs/NETWORK_RECOVERY.md",
+      "decision": "修改并保留",
+      "reason": "断网恢复；同步当前事实/导航，职责仍成立。",
+      "before_bytes": 4721,
+      "active_bytes": 4708
+    },
+    {
+      "path": "docs/OBSERVABILITY.md",
+      "decision": "保留",
+      "reason": "Runtime Observatory Contract；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 10784,
+      "active_bytes": 10784
+    },
+    {
+      "path": "docs/PLATFORM_MAP.md",
+      "decision": "修改并保留",
+      "reason": "当前组件地图；只列实际装配，修正定时器和只读委派状态，删除占位成熟度。",
+      "before_bytes": 3388,
+      "active_bytes": 2326
+    },
+    {
+      "path": "docs/README.md",
+      "decision": "修改并保留",
+      "reason": "Myth Documentation；同步当前事实/导航，职责仍成立。",
+      "before_bytes": 2206,
+      "active_bytes": 2365
+    },
+    {
+      "path": "docs/ROADMAP.md",
+      "decision": "修改并保留",
+      "reason": "Myth Roadmap；同步当前事实/导航，职责仍成立。",
+      "before_bytes": 6294,
+      "active_bytes": 6287
+    },
+    {
+      "path": "docs/SECURITY_PERFORMANCE_AUDIT.md",
+      "decision": "移出生产树",
+      "reason": "历史诊断/过期版本证据，移出当前架构导航与发布内容。",
+      "before_bytes": 25788,
+      "active_bytes": 0
+    },
+    {
+      "path": "docs/SESSION_STATISTICS.md",
+      "decision": "保留",
+      "reason": "会话统计；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 2270,
+      "active_bytes": 2270
+    },
+    {
+      "path": "docs/SOTA_ROUTE.md",
+      "decision": "保留",
+      "reason": "Myth v0.25 — SOTA Route；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 7828,
+      "active_bytes": 7828
+    },
+    {
+      "path": "docs/TASK_BENCHMARK.md",
+      "decision": "保留",
+      "reason": "固定日常任务基线；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 5868,
+      "active_bytes": 5868
+    },
+    {
+      "path": "docs/UI_REDESIGN.md",
+      "decision": "移出生产树",
+      "reason": "历史诊断/过期版本证据，移出当前架构导航与发布内容。",
+      "before_bytes": 9998,
+      "active_bytes": 0
+    },
+    {
+      "path": "docs/VALIDATION.md",
+      "decision": "修改并保留",
+      "reason": "Validation；同步当前事实/导航，职责仍成立。",
+      "before_bytes": 3844,
+      "active_bytes": 3992
+    },
+    {
+      "path": "docs/archive/ANNOTATION_AUDIT_V0211.md",
+      "decision": "移出生产树",
+      "reason": "历史诊断/过期版本证据，移出当前架构导航与发布内容。",
+      "before_bytes": 8974,
+      "active_bytes": 0
+    },
+    {
+      "path": "docs/archive/REVIEW_2026-10-03.md",
+      "decision": "移出生产树",
+      "reason": "历史诊断/过期版本证据，移出当前架构导航与发布内容。",
+      "before_bytes": 14753,
+      "active_bytes": 0
+    },
+    {
+      "path": "docs/archive/VALIDATION_HISTORY.md",
+      "decision": "移出生产树",
+      "reason": "历史诊断/过期版本证据，移出当前架构导航与发布内容。",
+      "before_bytes": 4439,
+      "active_bytes": 0
+    },
+    {
+      "path": "docs/archive/VALIDATION_V021.md",
+      "decision": "移出生产树",
+      "reason": "历史诊断/过期版本证据，移出当前架构导航与发布内容。",
+      "before_bytes": 5315,
+      "active_bytes": 0
+    },
+    {
+      "path": "docs/archive/tools/README.md",
+      "decision": "移出生产树",
+      "reason": "历史诊断/过期版本证据，移出当前架构导航与发布内容。",
+      "before_bytes": 310,
+      "active_bytes": 0
+    },
+    {
+      "path": "docs/archive/tools/diagnose_v010.py",
+      "decision": "移出生产树",
+      "reason": "历史诊断/过期版本证据，移出当前架构导航与发布内容。",
+      "before_bytes": 6364,
+      "active_bytes": 0
+    },
+    {
+      "path": "docs/evidence/annotation-audit-v0211.json",
+      "decision": "移出生产树",
+      "reason": "历史诊断/过期版本证据，移出当前架构导航与发布内容。",
+      "before_bytes": 6297,
+      "active_bytes": 0
+    },
+    {
+      "path": "docs/evidence/daily-v1-before.json",
+      "decision": "保留",
+      "reason": "docs/evidence/daily-v1-before.json；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 75777,
+      "active_bytes": 75777
+    },
+    {
+      "path": "docs/evidence/daily-v1-v021.json",
+      "decision": "保留",
+      "reason": "docs/evidence/daily-v1-v021.json；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 81555,
+      "active_bytes": 81555
+    },
+    {
+      "path": "docs/evidence/security-performance-2026-10-03.json",
+      "decision": "移出生产树",
+      "reason": "历史诊断/过期版本证据，移出当前架构导航与发布内容。",
+      "before_bytes": 5785,
+      "active_bytes": 0
+    },
+    {
+      "path": "evals/archive/README.md",
+      "decision": "移出生产树",
+      "reason": "旧固定集；活跃回归统一当前 foundation-v4。",
+      "before_bytes": 386,
+      "active_bytes": 0
+    },
+    {
+      "path": "evals/archive/foundation-v1.json",
+      "decision": "移出生产树",
+      "reason": "旧固定集；活跃回归统一当前 foundation-v4。",
+      "before_bytes": 2335,
+      "active_bytes": 0
+    },
+    {
+      "path": "evals/archive/foundation-v2.json",
+      "decision": "移出生产树",
+      "reason": "旧固定集；活跃回归统一当前 foundation-v4。",
+      "before_bytes": 3351,
+      "active_bytes": 0
+    },
+    {
+      "path": "evals/archive/foundation-v3.json",
+      "decision": "移出生产树",
+      "reason": "旧固定集；活跃回归统一当前 foundation-v4。",
+      "before_bytes": 4930,
+      "active_bytes": 0
+    },
+    {
+      "path": "evals/daily-v1.json",
+      "decision": "保留",
+      "reason": "当前固定任务/评测夹具；版本与题目身份参与验证；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 4243,
+      "active_bytes": 4243
+    },
+    {
+      "path": "evals/foundation-v4.json",
+      "decision": "保留",
+      "reason": "当前固定任务/评测夹具；版本与题目身份参与验证；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 14806,
+      "active_bytes": 14806
+    },
+    {
+      "path": "examples/acceptance.json",
+      "decision": "保留",
+      "reason": "examples/acceptance.json；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 92,
+      "active_bytes": 92
+    },
+    {
+      "path": "examples/example.txt",
+      "decision": "保留",
+      "reason": "examples/example.txt；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 23,
+      "active_bytes": 23
+    },
+    {
+      "path": "output/playwright/before-desktop.png",
+      "decision": "移出生产树",
+      "reason": "一次性设计截图/报告，不承担运行和发布职责；保留原文件。",
+      "before_bytes": 88706,
+      "active_bytes": 0
+    },
+    {
+      "path": "output/playwright/design-directions.html",
+      "decision": "移出生产树",
+      "reason": "一次性设计截图/报告，不承担运行和发布职责；保留原文件。",
+      "before_bytes": 227880,
+      "active_bytes": 0
+    },
+    {
+      "path": "output/playwright/final-desktop-dark.png",
+      "decision": "移出生产树",
+      "reason": "一次性设计截图/报告，不承担运行和发布职责；保留原文件。",
+      "before_bytes": 62896,
+      "active_bytes": 0
+    },
+    {
+      "path": "output/playwright/final-desktop-light.png",
+      "decision": "移出生产树",
+      "reason": "一次性设计截图/报告，不承担运行和发布职责；保留原文件。",
+      "before_bytes": 62472,
+      "active_bytes": 0
+    },
+    {
+      "path": "output/playwright/final-dialog-motion-end.png",
+      "decision": "移出生产树",
+      "reason": "一次性设计截图/报告，不承担运行和发布职责；保留原文件。",
+      "before_bytes": 30904,
+      "active_bytes": 0
+    },
+    {
+      "path": "output/playwright/final-dialog-motion-middle.png",
+      "decision": "移出生产树",
+      "reason": "一次性设计截图/报告，不承担运行和发布职责；保留原文件。",
+      "before_bytes": 30904,
+      "active_bytes": 0
+    },
+    {
+      "path": "output/playwright/final-dialog-motion-start.png",
+      "decision": "移出生产树",
+      "reason": "一次性设计截图/报告，不承担运行和发布职责；保留原文件。",
+      "before_bytes": 37358,
+      "active_bytes": 0
+    },
+    {
+      "path": "output/playwright/final-mobile-light.png",
+      "decision": "移出生产树",
+      "reason": "一次性设计截图/报告，不承担运行和发布职责；保留原文件。",
+      "before_bytes": 22935,
+      "active_bytes": 0
+    },
+    {
+      "path": "output/playwright/final-mobile-observatory.png",
+      "decision": "移出生产树",
+      "reason": "一次性设计截图/报告，不承担运行和发布职责；保留原文件。",
+      "before_bytes": 20546,
+      "active_bytes": 0
+    },
+    {
+      "path": "output/playwright/final-navigation-motion-end.png",
+      "decision": "移出生产树",
+      "reason": "一次性设计截图/报告，不承担运行和发布职责；保留原文件。",
+      "before_bytes": 24924,
+      "active_bytes": 0
+    },
+    {
+      "path": "output/playwright/final-navigation-motion-middle.png",
+      "decision": "移出生产树",
+      "reason": "一次性设计截图/报告，不承担运行和发布职责；保留原文件。",
+      "before_bytes": 29788,
+      "active_bytes": 0
+    },
+    {
+      "path": "output/playwright/final-navigation-motion-start.png",
+      "decision": "移出生产树",
+      "reason": "一次性设计截图/报告，不承担运行和发布职责；保留原文件。",
+      "before_bytes": 24473,
+      "active_bytes": 0
+    },
+    {
+      "path": "output/playwright/final-settings-dark-bottom.png",
+      "decision": "移出生产树",
+      "reason": "一次性设计截图/报告，不承担运行和发布职责；保留原文件。",
+      "before_bytes": 88222,
+      "active_bytes": 0
+    },
+    {
+      "path": "output/playwright/final-settings-dark.png",
+      "decision": "移出生产树",
+      "reason": "一次性设计截图/报告，不承担运行和发布职责；保留原文件。",
+      "before_bytes": 88222,
+      "active_bytes": 0
+    },
+    {
+      "path": "output/playwright/final-settings-deepseek.png",
+      "decision": "移出生产树",
+      "reason": "一次性设计截图/报告，不承担运行和发布职责；保留原文件。",
+      "before_bytes": 90675,
+      "active_bytes": 0
+    },
+    {
+      "path": "output/playwright/final-settings-light.png",
+      "decision": "移出生产树",
+      "reason": "一次性设计截图/报告，不承担运行和发布职责；保留原文件。",
+      "before_bytes": 91009,
+      "active_bytes": 0
+    },
+    {
+      "path": "output/playwright/final-settings-zoom-200.png",
+      "decision": "移出生产树",
+      "reason": "一次性设计截图/报告，不承担运行和发布职责；保留原文件。",
+      "before_bytes": 66401,
+      "active_bytes": 0
+    },
+    {
+      "path": "output/playwright/final-welcome-motion-end.png",
+      "decision": "移出生产树",
+      "reason": "一次性设计截图/报告，不承担运行和发布职责；保留原文件。",
+      "before_bytes": 62472,
+      "active_bytes": 0
+    },
+    {
+      "path": "output/playwright/final-welcome-motion-middle.png",
+      "decision": "移出生产树",
+      "reason": "一次性设计截图/报告，不承担运行和发布职责；保留原文件。",
+      "before_bytes": 69415,
+      "active_bytes": 0
+    },
+    {
+      "path": "output/playwright/final-welcome-motion-start.png",
+      "decision": "移出生产树",
+      "reason": "一次性设计截图/报告，不承担运行和发布职责；保留原文件。",
+      "before_bytes": 62459,
+      "active_bytes": 0
+    },
+    {
+      "path": "output/playwright/qa-browser-report.json",
+      "decision": "移出生产树",
+      "reason": "一次性设计截图/报告，不承担运行和发布职责；保留原文件。",
+      "before_bytes": 30020,
+      "active_bytes": 0
+    },
+    {
+      "path": "output/playwright/qa-chat-320-dark.png",
+      "decision": "移出生产树",
+      "reason": "一次性设计截图/报告，不承担运行和发布职责；保留原文件。",
+      "before_bytes": 25033,
+      "active_bytes": 0
+    },
+    {
+      "path": "output/playwright/qa-chat-320-light.png",
+      "decision": "移出生产树",
+      "reason": "一次性设计截图/报告，不承担运行和发布职责；保留原文件。",
+      "before_bytes": 24998,
+      "active_bytes": 0
+    },
+    {
+      "path": "output/playwright/qa-chat-390-dark.png",
+      "decision": "移出生产树",
+      "reason": "一次性设计截图/报告，不承担运行和发布职责；保留原文件。",
+      "before_bytes": 27599,
+      "active_bytes": 0
+    },
+    {
+      "path": "output/playwright/qa-chat-390-light.png",
+      "decision": "移出生产树",
+      "reason": "一次性设计截图/报告，不承担运行和发布职责；保留原文件。",
+      "before_bytes": 27536,
+      "active_bytes": 0
+    },
+    {
+      "path": "output/playwright/qa-desktop-chat-dark.png",
+      "decision": "移出生产树",
+      "reason": "一次性设计截图/报告，不承担运行和发布职责；保留原文件。",
+      "before_bytes": 95694,
+      "active_bytes": 0
+    },
+    {
+      "path": "output/playwright/qa-desktop-chat-light.png",
+      "decision": "移出生产树",
+      "reason": "一次性设计截图/报告，不承担运行和发布职责；保留原文件。",
+      "before_bytes": 95134,
+      "active_bytes": 0
+    },
+    {
+      "path": "output/playwright/qa-document-preview-light.png",
+      "decision": "移出生产树",
+      "reason": "一次性设计截图/报告，不承担运行和发布职责；保留原文件。",
+      "before_bytes": 126462,
+      "active_bytes": 0
+    },
+    {
+      "path": "output/playwright/qa-goals-dark.png",
+      "decision": "移出生产树",
+      "reason": "一次性设计截图/报告，不承担运行和发布职责；保留原文件。",
+      "before_bytes": 107322,
+      "active_bytes": 0
+    },
+    {
+      "path": "output/playwright/qa-knowledge-light.png",
+      "decision": "移出生产树",
+      "reason": "一次性设计截图/报告，不承担运行和发布职责；保留原文件。",
+      "before_bytes": 108224,
+      "active_bytes": 0
+    },
+    {
+      "path": "output/playwright/qa-late-preview-1024.png",
+      "decision": "移出生产树",
+      "reason": "一次性设计截图/报告，不承担运行和发布职责；保留原文件。",
+      "before_bytes": 95695,
+      "active_bytes": 0
+    },
+    {
+      "path": "output/playwright/qa-late-preview-390.png",
+      "decision": "移出生产树",
+      "reason": "一次性设计截图/报告，不承担运行和发布职责；保留原文件。",
+      "before_bytes": 29911,
+      "active_bytes": 0
+    },
+    {
+      "path": "output/playwright/qa-navigation-320.png",
+      "decision": "移出生产树",
+      "reason": "一次性设计截图/报告，不承担运行和发布职责；保留原文件。",
+      "before_bytes": 26961,
+      "active_bytes": 0
+    },
+    {
+      "path": "output/playwright/qa-navigation-390.png",
+      "decision": "移出生产树",
+      "reason": "一次性设计截图/报告，不承担运行和发布职责；保留原文件。",
+      "before_bytes": 36773,
+      "active_bytes": 0
+    },
+    {
+      "path": "output/playwright/qa-project-light.png",
+      "decision": "移出生产树",
+      "reason": "一次性设计截图/报告，不承担运行和发布职责；保留原文件。",
+      "before_bytes": 101049,
+      "active_bytes": 0
+    },
+    {
+      "path": "output/playwright/qa-runtime-1024.png",
+      "decision": "移出生产树",
+      "reason": "一次性设计截图/报告，不承担运行和发布职责；保留原文件。",
+      "before_bytes": 81823,
+      "active_bytes": 0
+    },
+    {
+      "path": "output/playwright/qa-runtime-320.png",
+      "decision": "移出生产树",
+      "reason": "一次性设计截图/报告，不承担运行和发布职责；保留原文件。",
+      "before_bytes": 28683,
+      "active_bytes": 0
+    },
+    {
+      "path": "output/playwright/qa-runtime-390.png",
+      "decision": "移出生产树",
+      "reason": "一次性设计截图/报告，不承担运行和发布职责；保留原文件。",
+      "before_bytes": 35731,
+      "active_bytes": 0
+    },
+    {
+      "path": "output/playwright/qa-sessions-dark.png",
+      "decision": "移出生产树",
+      "reason": "一次性设计截图/报告，不承担运行和发布职责；保留原文件。",
+      "before_bytes": 74294,
+      "active_bytes": 0
+    },
+    {
+      "path": "output/playwright/qa-settings-dark.png",
+      "decision": "移出生产树",
+      "reason": "一次性设计截图/报告，不承担运行和发布职责；保留原文件。",
+      "before_bytes": 99100,
+      "active_bytes": 0
+    },
+    {
+      "path": "output/playwright/qa-settings-light.png",
+      "decision": "移出生产树",
+      "reason": "一次性设计截图/报告，不承担运行和发布职责；保留原文件。",
+      "before_bytes": 98863,
+      "active_bytes": 0
+    },
+    {
+      "path": "output/playwright/qa-standard-runtime.png",
+      "decision": "移出生产树",
+      "reason": "一次性设计截图/报告，不承担运行和发布职责；保留原文件。",
+      "before_bytes": 79998,
+      "active_bytes": 0
+    },
+    {
+      "path": "output/playwright/qa-tablet-dark.png",
+      "decision": "移出生产树",
+      "reason": "一次性设计截图/报告，不承担运行和发布职责；保留原文件。",
+      "before_bytes": 56253,
+      "active_bytes": 0
+    },
+    {
+      "path": "output/playwright/qa-tablet-light.png",
+      "decision": "移出生产树",
+      "reason": "一次性设计截图/报告，不承担运行和发布职责；保留原文件。",
+      "before_bytes": 55677,
+      "active_bytes": 0
+    },
+    {
+      "path": "output/playwright/standard-preview-report.json",
+      "decision": "移出生产树",
+      "reason": "一次性设计截图/报告，不承担运行和发布职责；保留原文件。",
+      "before_bytes": 279,
+      "active_bytes": 0
+    },
+    {
+      "path": "pyproject.toml",
+      "decision": "修改并保留",
+      "reason": "pyproject.toml；版本同步 0.24.0；仍以 src 为唯一生产根与当前静态资源包。",
+      "before_bytes": 1123,
+      "active_bytes": 1123
+    },
+    {
+      "path": "scripts/audit_secret_patterns.py",
+      "decision": "保留",
+      "reason": "已知秘钥格式的本地审计，不打印匹配值。；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 3233,
+      "active_bytes": 3233
+    },
+    {
+      "path": "scripts/benchmark_local_overhead.py",
+      "decision": "修改并保留",
+      "reason": "固定本机开销对照，不访问真实模型或读取用户项目。；新增相同 10000 Memory 夹具下 Workspace 重开中位数对照。",
+      "before_bytes": 4203,
+      "active_bytes": 4454
+    },
+    {
+      "path": "scripts/check_annotations.py",
+      "decision": "保留",
+      "reason": "项目宪法的中文说明覆盖守卫。；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 5824,
+      "active_bytes": 5824
+    },
+    {
+      "path": "scripts/soak_long_run.py",
+      "decision": "保留",
+      "reason": "长任务 Durable Executor 浸泡/故障注入工具。；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 10210,
+      "active_bytes": 10210
+    },
+    {
+      "path": "scripts/validate_os_credentials.py",
+      "decision": "保留",
+      "reason": "系统凭据库容量/轮转/清理 smoke。；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 1813,
+      "active_bytes": 1813
+    },
+    {
+      "path": "scripts/validate_package.py",
+      "decision": "修改并保留",
+      "reason": "在隔离根核对真实安装 wheel、HTTP 静态资源和计划 API。；安装 wheel 后通过真实 HTTP 校验全部静态资源和 Goal/session/计划。",
+      "before_bytes": 4324,
+      "active_bytes": 4413
+    },
+    {
+      "path": "src/myth/__init__.py",
+      "decision": "修改并保留",
+      "reason": "公开 Runtime/组件入口与按需导出。；清理旧导出、字段或依赖；当前合同与真实调用路径保留。",
+      "before_bytes": 1540,
+      "active_bytes": 1410
+    },
+    {
+      "path": "src/myth/acceptance.py",
+      "decision": "保留",
+      "reason": "Exact Agent 的固定验收与有界上下文纯函数。；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 10387,
+      "active_bytes": 10387
+    },
+    {
+      "path": "src/myth/adapters/__init__.py",
+      "decision": "保留",
+      "reason": "具体 I/O 与状态仓储适配器包入口。；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 157,
+      "active_bytes": 157
+    },
+    {
+      "path": "src/myth/adapters/agent_execution.py",
+      "decision": "保留",
+      "reason": "Exact Agent 的本机执行适配器。；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 8605,
+      "active_bytes": 8605
+    },
+    {
+      "path": "src/myth/adapters/agent_store.py",
+      "decision": "修改并保留",
+      "reason": "Exact Agent 的 SQLite 仓储实现。；当前 schema 由 Store 原子装配，删除旧库迁移；聚合所有权保留。",
+      "before_bytes": 24364,
+      "active_bytes": 24368
+    },
+    {
+      "path": "src/myth/adapters/conversation_execution.py",
+      "decision": "修改并保留",
+      "reason": "对话工具的本机执行适配器。；知识操作调用独立仓储，模型能力依赖内移，项目检索排除垃圾站。",
+      "before_bytes": 52214,
+      "active_bytes": 52249
+    },
+    {
+      "path": "src/myth/adapters/driver_lock.py",
+      "decision": "保留",
+      "reason": "Exact Agent 与 Conversation 共用的本机 Driver 锁。；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 1901,
+      "active_bytes": 1901
+    },
+    {
+      "path": "src/myth/adapters/milvus_retrieval.py",
+      "decision": "保留",
+      "reason": "Milvus 向量检索适配器。；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 13277,
+      "active_bytes": 13277
+    },
+    {
+      "path": "src/myth/adapters/personal_store.py",
+      "decision": "修改并保留",
+      "reason": "长期 Goal、进度、关联、Trigger 与个人设置的 SQLite 状态所有者。；当前 schema 由 Store 原子装配，删除旧库迁移；聚合所有权保留。",
+      "before_bytes": 19232,
+      "active_bytes": 19236
+    },
+    {
+      "path": "src/myth/adapters/workspace_store.py",
+      "decision": "修改并保留",
+      "reason": "项目、会话、知识与对话步骤的 SQLite 状态所有者。；拆出知识状态；删除旧库补丁；已准入步骤只消费一次，结果冲突拒绝。",
+      "before_bytes": 83718,
+      "active_bytes": 69315
+    },
+    {
+      "path": "src/myth/agent_runtime.py",
+      "decision": "保留",
+      "reason": "Exact Agent 的公开装配入口。；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 4248,
+      "active_bytes": 4248
+    },
+    {
+      "path": "src/myth/application/__init__.py",
+      "decision": "保留",
+      "reason": "纯应用用例包入口。；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 137,
+      "active_bytes": 137
+    },
+    {
+      "path": "src/myth/application/agent.py",
+      "decision": "保留",
+      "reason": "Exact Agent 的有界应用用例。；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 6386,
+      "active_bytes": 6386
+    },
+    {
+      "path": "src/myth/application/conversation_agent.py",
+      "decision": "保留",
+      "reason": "Conversation 与长期 Goal 的应用循环。；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 13985,
+      "active_bytes": 13985
+    },
+    {
+      "path": "src/myth/artifacts.py",
+      "decision": "保留",
+      "reason": "不可变对象、受管文件和收据日志的文件系统适配器。；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 8276,
+      "active_bytes": 8276
+    },
+    {
+      "path": "src/myth/auth/__init__.py",
+      "decision": "修改并保留",
+      "reason": "本应用独立认证包入口。；清理旧导出、字段或依赖；当前合同与真实调用路径保留。",
+      "before_bytes": 678,
+      "active_bytes": 657
+    },
+    {
+      "path": "src/myth/auth/chatgpt.py",
+      "decision": "修改并保留",
+      "reason": "Myth 自有 ChatGPT OAuth 的认证适配器。；保留 OAuth/OIDC 与原子凭据代际切换，删除旧单记录格式读取/清理。",
+      "before_bytes": 63313,
+      "active_bytes": 62959
+    },
+    {
+      "path": "src/myth/auth/provider_keys.py",
+      "decision": "修改并保留",
+      "reason": "远端模型 API Key 的应用内安全凭据中心。；清理旧导出、字段或依赖；当前合同与真实调用路径保留。",
+      "before_bytes": 6007,
+      "active_bytes": 6003
+    },
+    {
+      "path": "src/myth/auth/transport.py",
+      "decision": "保留",
+      "reason": "认证外圈的受限 HTTP 传输。；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 4878,
+      "active_bytes": 4878
+    },
+    {
+      "path": "src/myth/cli.py",
+      "decision": "保留",
+      "reason": "命令行装配入口。；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 24069,
+      "active_bytes": 24069
+    },
+    {
+      "path": "src/myth/conversation.py",
+      "decision": "保留",
+      "reason": "对话的纯检索、算术及模型请求投影规则。；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 23044,
+      "active_bytes": 23044
+    },
+    {
+      "path": "src/myth/conversation_context.py",
+      "decision": "修改并保留",
+      "reason": "从持久对话事实生成有预算的模型上下文。；删除旧附件快照兼容；固定附件与普通召回按真实来源分别预算。",
+      "before_bytes": 19219,
+      "active_bytes": 19178
+    },
+    {
+      "path": "src/myth/conversation_ports.py",
+      "decision": "修改并保留",
+      "reason": "对话用例的仓储、执行、控制、记忆和 Goal checkpoint 合同。；删除无调用者的 reject 别名；保留当前应用依赖合同。",
+      "before_bytes": 6428,
+      "active_bytes": 6255
+    },
+    {
+      "path": "src/myth/core/__init__.py",
+      "decision": "修改并保留",
+      "reason": "最小核心合同的公开导出。；清理旧导出、字段或依赖；当前合同与真实调用路径保留。",
+      "before_bytes": 319,
+      "active_bytes": 298
+    },
+    {
+      "path": "src/myth/core/primitives.py",
+      "decision": "保留",
+      "reason": "长期 Goal 的最小不可变合同。；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 1464,
+      "active_bytes": 1464
+    },
+    {
+      "path": "src/myth/decision_runtime.py",
+      "decision": "修改并保留",
+      "reason": "模型调用的持久准入、派发、收据和决策绑定协调器。；清理旧导出、字段或依赖；当前合同与真实调用路径保留。",
+      "before_bytes": 41827,
+      "active_bytes": 41824
+    },
+    {
+      "path": "src/myth/delivery.py",
+      "decision": "修改并保留",
+      "reason": "Conversation 交付账本：终态收尾、验收、工作项和人工关注。；计划分配、部分字段更新、验收摘要核对进入同一写事务；重写具体中文说明。",
+      "before_bytes": 30631,
+      "active_bytes": 31456
+    },
+    {
+      "path": "src/myth/demo.py",
+      "decision": "保留",
+      "reason": "可重复的本地精确替换演示工厂。；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 1272,
+      "active_bytes": 1272
+    },
+    {
+      "path": "src/myth/domain.py",
+      "decision": "保留",
+      "reason": "纯领域词汇与字节级确定性规则。；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 8388,
+      "active_bytes": 8388
+    },
+    {
+      "path": "src/myth/domains/__init__.py",
+      "decision": "修改并保留",
+      "reason": "同级纯领域合同包入口。；清理旧导出、字段或依赖；当前合同与真实调用路径保留。",
+      "before_bytes": 1004,
+      "active_bytes": 983
+    },
+    {
+      "path": "src/myth/domains/coordination.py",
+      "decision": "修改并保留",
+      "reason": "组织工作方式的纯策略合同与登记表。；删除未接入组织策略登记，保留当前 Intent/Agent/只读委派路径。",
+      "before_bytes": 7671,
+      "active_bytes": 6776
+    },
+    {
+      "path": "src/myth/domains/information.py",
+      "decision": "保留",
+      "reason": "Intent 与信息分辨率/增量/增益的纯数据合同。；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 5052,
+      "active_bytes": 5052
+    },
+    {
+      "path": "src/myth/domains/intent.py",
+      "decision": "修改并保留",
+      "reason": "Intent Pick 的纯协议。；清理旧导出、字段或依赖；当前合同与真实调用路径保留。",
+      "before_bytes": 739,
+      "active_bytes": 718
+    },
+    {
+      "path": "src/myth/domains/personal.py",
+      "decision": "保留",
+      "reason": "个人 Trigger 的纯合同。；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 1916,
+      "active_bytes": 1916
+    },
+    {
+      "path": "src/myth/durable_executor.py",
+      "decision": "修改并保留",
+      "reason": "独立常驻 Durable Executor。；清理旧导出、字段或依赖；当前合同与真实调用路径保留。",
+      "before_bytes": 33108,
+      "active_bytes": 33105
+    },
+    {
+      "path": "src/myth/evaluation_runner.py",
+      "decision": "修改并保留",
+      "reason": "Foundation 固定版本评测的本机运行器。；筛选题目明确 partial 不发布；未知题号拒绝，当前全套评测保持固定。",
+      "before_bytes": 31573,
+      "active_bytes": 31976
+    },
+    {
+      "path": "src/myth/failures.py",
+      "decision": "修改并保留",
+      "reason": "把已知失败标准化为模型可恢复、UI 可观测的数据。；清理旧导出、字段或依赖；当前合同与真实调用路径保留。",
+      "before_bytes": 8996,
+      "active_bytes": 8997
+    },
+    {
+      "path": "src/myth/goal_scheduler.py",
+      "decision": "修改并保留",
+      "reason": "显式一次性/固定间隔 Goal 计划的本地调度适配器。；清理旧导出、字段或依赖；当前合同与真实调用路径保留。",
+      "before_bytes": 15559,
+      "active_bytes": 14864
+    },
+    {
+      "path": "src/myth/mental_model_refresh.py",
+      "decision": "修改并保留",
+      "reason": "Mental Model 自动刷新调度与持久工作协调。；清理旧导出、字段或依赖；当前合同与真实调用路径保留。",
+      "before_bytes": 32288,
+      "active_bytes": 31151
+    },
+    {
+      "path": "src/myth/models.py",
+      "decision": "保留",
+      "reason": "供应商无关的模型请求、结果与决策合同。；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 14079,
+      "active_bytes": 14079
+    },
+    {
+      "path": "src/myth/network_recovery.py",
+      "decision": "保留",
+      "reason": "断连恢复的纯规则。；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 1516,
+      "active_bytes": 1516
+    },
+    {
+      "path": "src/myth/platform/__init__.py",
+      "decision": "修改并保留",
+      "reason": "横向能力合同与目录的公开导出。；清理旧导出、字段或依赖；当前合同与真实调用路径保留。",
+      "before_bytes": 477,
+      "active_bytes": 405
+    },
+    {
+      "path": "src/myth/platform/calibration.py",
+      "decision": "保留",
+      "reason": "配对增益证据的纯校准矩阵。；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 5352,
+      "active_bytes": 5352
+    },
+    {
+      "path": "src/myth/platform/capabilities.py",
+      "decision": "修改并保留",
+      "reason": "能力描述和执行白名单的纯注册表。；只登记可执行或确有合同使用的能力，去掉零实现 planned 工具。",
+      "before_bytes": 10557,
+      "active_bytes": 9688
+    },
+    {
+      "path": "src/myth/platform/completion.py",
+      "decision": "保留",
+      "reason": "Conversation 的 Verify-on-Stop 纯策略。；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 4748,
+      "active_bytes": 4748
+    },
+    {
+      "path": "src/myth/platform/components.py",
+      "decision": "修改并保留",
+      "reason": "产品组件与架构地图的装配登记。；移除占位登记、未使用持有对象，保留真实第三栏观测依赖。",
+      "before_bytes": 12325,
+      "active_bytes": 10660
+    },
+    {
+      "path": "src/myth/platform/context.py",
+      "decision": "保留",
+      "reason": "小型组件上下文的纯预算投影器。；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 7443,
+      "active_bytes": 7443
+    },
+    {
+      "path": "src/myth/platform/context_anchor.py",
+      "decision": "保留",
+      "reason": "可持久的增量 Context Anchor。；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 4024,
+      "active_bytes": 4024
+    },
+    {
+      "path": "src/myth/platform/contracts.py",
+      "decision": "修改并保留",
+      "reason": "组件成熟度与职责的纯描述合同。；删旧 WIRED/Layer 包装；成熟度合同仍由组件地图使用。",
+      "before_bytes": 2618,
+      "active_bytes": 2031
+    },
+    {
+      "path": "src/myth/platform/control.py",
+      "decision": "修改并保留",
+      "reason": "控制命令的纯状态转换规则。；只保留当前控制合同，移除 abort 词汇和重复包装。",
+      "before_bytes": 5011,
+      "active_bytes": 4389
+    },
+    {
+      "path": "src/myth/platform/control_store.py",
+      "decision": "修改并保留",
+      "reason": "Control 命令、revision 与投影的 SQLite 所有者。；当前字段统一 stopped；去掉 ControlPlane 与旧别名，保留晚到事实。",
+      "before_bytes": 14748,
+      "active_bytes": 14111
+    },
+    {
+      "path": "src/myth/platform/cost_model.py",
+      "decision": "修改并保留",
+      "reason": "显式成本权重合同及 SQLite 版本目录。；清理旧导出、字段或依赖；当前合同与真实调用路径保留。",
+      "before_bytes": 5268,
+      "active_bytes": 5272
+    },
+    {
+      "path": "src/myth/platform/evaluation.py",
+      "decision": "修改并保留",
+      "reason": "固定评测集、观测、配对比较与发布门槛合同。；清理旧导出、字段或依赖；当前合同与真实调用路径保留。",
+      "before_bytes": 28914,
+      "active_bytes": 28908
+    },
+    {
+      "path": "src/myth/platform/evaluation_store.py",
+      "decision": "修改并保留",
+      "reason": "评测运行和逐题观测的 SQLite 证据账本。；当前 schema 由 Store 原子装配，删除旧库迁移；聚合所有权保留。",
+      "before_bytes": 16469,
+      "active_bytes": 15388
+    },
+    {
+      "path": "src/myth/platform/evolution.py",
+      "decision": "保留",
+      "reason": "策略候选及人工发布决定的纯合同。；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 4702,
+      "active_bytes": 4702
+    },
+    {
+      "path": "src/myth/platform/evolution_store.py",
+      "decision": "修改并保留",
+      "reason": "候选、证据、活动策略与发布历史的 SQLite 所有者。；当前 schema 由 Store 原子装配，删除旧库迁移；聚合所有权保留。",
+      "before_bytes": 18591,
+      "active_bytes": 18264
+    },
+    {
+      "path": "src/myth/platform/kernel.py",
+      "decision": "移出生产树",
+      "reason": "无生产调用者的旧 MythKernel 别名；唯一入口为 MythComponents。",
+      "before_bytes": 539,
+      "active_bytes": 0
+    },
+    {
+      "path": "src/myth/platform/knowledge_views.py",
+      "decision": "修改并保留",
+      "reason": "Mental Model 与 Knowledge Page 的持久派生视图。；清理旧导出、字段或依赖；当前合同与真实调用路径保留。",
+      "before_bytes": 20949,
+      "active_bytes": 20946
+    },
+    {
+      "path": "src/myth/platform/mcp.py",
+      "decision": "移出生产树",
+      "reason": "只在组件地图/占位测试使用，没有执行路径。",
+      "before_bytes": 2823,
+      "active_bytes": 0
+    },
+    {
+      "path": "src/myth/platform/memory.py",
+      "decision": "修改并保留",
+      "reason": "Memory 的用途分类。；仅保留当前类型合同，去掉无生产调用者的第二套内存目录。",
+      "before_bytes": 3737,
+      "active_bytes": 741
+    },
+    {
+      "path": "src/myth/platform/memory_lifecycle.py",
+      "decision": "保留",
+      "reason": "Memory 生命周期的纯规则模块。；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 8909,
+      "active_bytes": 8909
+    },
+    {
+      "path": "src/myth/platform/memory_store.py",
+      "decision": "修改并保留",
+      "reason": "生产记忆的持久 SQLite 适配器。；保留 revision/freshness/派生视图；删除旧库升级与每次启动全量回填。",
+      "before_bytes": 39663,
+      "active_bytes": 37735
+    },
+    {
+      "path": "src/myth/platform/observability.py",
+      "decision": "保留",
+      "reason": "事件事实的纯轨迹投影。；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 9111,
+      "active_bytes": 9111
+    },
+    {
+      "path": "src/myth/platform/replay.py",
+      "decision": "保留",
+      "reason": "历史 Replay World：把同一冻结条件下已发生的 SOTA Route 合并为可重放的已实现搜索空间。；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 17635,
+      "active_bytes": 17635
+    },
+    {
+      "path": "src/myth/platform/retrieval.py",
+      "decision": "保留",
+      "reason": "检索后端可用性与模式的纯路由合同。；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 3567,
+      "active_bytes": 3567
+    },
+    {
+      "path": "src/myth/platform/skills.py",
+      "decision": "移出生产树",
+      "reason": "仅目录占位，没有生产调用者。",
+      "before_bytes": 1916,
+      "active_bytes": 0
+    },
+    {
+      "path": "src/myth/platform/subagents.py",
+      "decision": "保留",
+      "reason": "子 Agent 的隔离执行合同与预算分配原语。；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 5416,
+      "active_bytes": 5416
+    },
+    {
+      "path": "src/myth/platform/tool_discovery.py",
+      "decision": "保留",
+      "reason": "Conversation Tool 的渐进披露纯函数。；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 4425,
+      "active_bytes": 4425
+    },
+    {
+      "path": "src/myth/platform/workflow.py",
+      "decision": "移出生产树",
+      "reason": "未接入执行的占位实现，避免登记冒充功能。",
+      "before_bytes": 2607,
+      "active_bytes": 0
+    },
+    {
+      "path": "src/myth/ports.py",
+      "decision": "保留",
+      "reason": "Exact Agent 与横向能力的端口合同。；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 10535,
+      "active_bytes": 10535
+    },
+    {
+      "path": "src/myth/providers/__init__.py",
+      "decision": "修改并保留",
+      "reason": "统一供应商适配器导出。；清理旧导出、字段或依赖；当前合同与真实调用路径保留。",
+      "before_bytes": 2118,
+      "active_bytes": 1921
+    },
+    {
+      "path": "src/myth/providers/base.py",
+      "decision": "保留",
+      "reason": "模型 I/O 的结构化端口。；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 917,
+      "active_bytes": 917
+    },
+    {
+      "path": "src/myth/providers/capabilities.py",
+      "decision": "移出生产树",
+      "reason": "纯合同内移为 model_capabilities.py；旧导入路径淘汰。",
+      "before_bytes": 5943,
+      "active_bytes": 0
+    },
+    {
+      "path": "src/myth/providers/deepseek.py",
+      "decision": "修改并保留",
+      "reason": "DeepSeek Responses API 传输适配器。；能力合同依赖内移，保持当前厂商原生推理设置。",
+      "before_bytes": 7202,
+      "active_bytes": 7200
+    },
+    {
+      "path": "src/myth/providers/ollama.py",
+      "decision": "保留",
+      "reason": "本机 Ollama HTTP 适配器。；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 6771,
+      "active_bytes": 6771
+    },
+    {
+      "path": "src/myth/providers/openai.py",
+      "decision": "修改并保留",
+      "reason": "OpenAI Responses 与 ChatGPT 计划的传输适配器。；能力合同依赖内移，保留当前 Responses/流式完成/用量与认证路径。",
+      "before_bytes": 27505,
+      "active_bytes": 27509
+    },
+    {
+      "path": "src/myth/providers/scripted.py",
+      "decision": "保留",
+      "reason": "确定性的模型替身。；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 3422,
+      "active_bytes": 3422
+    },
+    {
+      "path": "src/myth/runtime.py",
+      "decision": "保留",
+      "reason": "受管精确文件任务的装配与执行协调入口。；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 23167,
+      "active_bytes": 23167
+    },
+    {
+      "path": "src/myth/session_statistics.py",
+      "decision": "保留",
+      "reason": "Observability 的会话统计纯投影。；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 3099,
+      "active_bytes": 3099
+    },
+    {
+      "path": "src/myth/sota_route.py",
+      "decision": "修改并保留",
+      "reason": "SOTA Route：从已验收成功 Run 中学习更省的可观察执行路径。；去掉旧数据全量导入与历史标记表；只消费显式验收，检索排除垃圾站。",
+      "before_bytes": 33689,
+      "active_bytes": 32128
+    },
+    {
+      "path": "src/myth/store.py",
+      "decision": "修改并保留",
+      "reason": "Core 执行事实与多资源预算的 SQLite 状态所有者。；当前格式身份、原子 DDL、并发 WAL 首启；业务事务与装配明确分开。",
+      "before_bytes": 34646,
+      "active_bytes": 38932
+    },
+    {
+      "path": "src/myth/strategies/__init__.py",
+      "decision": "修改并保留",
+      "reason": "可替换纯组织策略的公开导出。；清理旧导出、字段或依赖；当前合同与真实调用路径保留。",
+      "before_bytes": 992,
+      "active_bytes": 971
+    },
+    {
+      "path": "src/myth/strategies/information_control.py",
+      "decision": "保留",
+      "reason": "实时信息获取的纯准入策略。；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 17501,
+      "active_bytes": 17501
+    },
+    {
+      "path": "src/myth/strategies/information_gain.py",
+      "decision": "保留",
+      "reason": "配对固定评测证据的边际增益估计策略。；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 4772,
+      "active_bytes": 4772
+    },
+    {
+      "path": "src/myth/strategies/information_resolution.py",
+      "decision": "保留",
+      "reason": "同源信息 L0/L1/L2 的纯选择策略。；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 5595,
+      "active_bytes": 5595
+    },
+    {
+      "path": "src/myth/strategies/intent_pick.py",
+      "decision": "保留",
+      "reason": "保守 Intent Pick 的纯规则策略。；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 5310,
+      "active_bytes": 5310
+    },
+    {
+      "path": "src/myth/task_benchmark.py",
+      "decision": "修改并保留",
+      "reason": "固定日常任务的真实 Workspace 运行器与独立小型 oracle。；清理旧导出、字段或依赖；当前合同与真实调用路径保留。",
+      "before_bytes": 20456,
+      "active_bytes": 20466
+    },
+    {
+      "path": "src/myth/verification.py",
+      "decision": "修改并保留",
+      "reason": "受限项目测试 profile。；保留受限测试执行合同；中文说明按 profile、子进程和收据边界解释。",
+      "before_bytes": 13683,
+      "active_bytes": 13872
+    },
+    {
+      "path": "src/myth/web.py",
+      "decision": "修改并保留",
+      "reason": "本机 HTTP 入站与 Exact Agent 服务装配。；移除旧 abort 路由，当前 Stop 入口不变。",
+      "before_bytes": 31025,
+      "active_bytes": 31019
+    },
+    {
+      "path": "src/myth/web_workspace.py",
+      "decision": "修改并保留",
+      "reason": "对话 HTTP 产品门面与后台 Driver 生命周期。；知识 API 显式调用独立仓储，其他 Driver/Goal/验收路径保留。",
+      "before_bytes": 51090,
+      "active_bytes": 51391
+    },
+    {
+      "path": "src/myth/webui/app.css",
+      "decision": "保留",
+      "reason": "当前产品页面/静态资源；实际 HTTP 与前端行为回归覆盖；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 52931,
+      "active_bytes": 52931
+    },
+    {
+      "path": "src/myth/webui/app.js",
+      "decision": "修改并保留",
+      "reason": "当前产品页面/静态资源；实际 HTTP 与前端行为回归覆盖；清理旧导出、字段或依赖；当前合同与真实调用路径保留。",
+      "before_bytes": 99592,
+      "active_bytes": 99487
+    },
+    {
+      "path": "src/myth/webui/favicon.svg",
+      "decision": "保留",
+      "reason": "当前产品页面/静态资源；实际 HTTP 与前端行为回归覆盖；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 313,
+      "active_bytes": 313
+    },
+    {
+      "path": "src/myth/webui/goals.js",
+      "decision": "保留",
+      "reason": "当前产品页面/静态资源；实际 HTTP 与前端行为回归覆盖；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 11726,
+      "active_bytes": 11726
+    },
+    {
+      "path": "src/myth/webui/index.html",
+      "decision": "保留",
+      "reason": "当前产品页面/静态资源；实际 HTTP 与前端行为回归覆盖；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 32777,
+      "active_bytes": 32777
+    },
+    {
+      "path": "src/myth/webui/inspector.js",
+      "decision": "修改并保留",
+      "reason": "当前产品页面/静态资源；实际 HTTP 与前端行为回归覆盖；清理旧导出、字段或依赖；当前合同与真实调用路径保留。",
+      "before_bytes": 47446,
+      "active_bytes": 47396
+    },
+    {
+      "path": "src/myth/webui/reconnect.js",
+      "decision": "保留",
+      "reason": "当前产品页面/静态资源；实际 HTTP 与前端行为回归覆盖；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 2098,
+      "active_bytes": 2098
+    },
+    {
+      "path": "src/myth/webui/statistics.js",
+      "decision": "保留",
+      "reason": "当前产品页面/静态资源；实际 HTTP 与前端行为回归覆盖；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 2509,
+      "active_bytes": 2509
+    },
+    {
+      "path": "src/myth/webui/theme.js",
+      "decision": "保留",
+      "reason": "当前产品页面/静态资源；实际 HTTP 与前端行为回归覆盖；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 672,
+      "active_bytes": 672
+    },
+    {
+      "path": "src/myth/workspace.py",
+      "decision": "修改并保留",
+      "reason": "对话产品的装配根。；装配真实组件，去掉 Kernel 别名与历史 SOTA 回填。",
+      "before_bytes": 6454,
+      "active_bytes": 6020
+    },
+    {
+      "path": "start-myth.ps1",
+      "decision": "保留",
+      "reason": "start-myth.ps1；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 240,
+      "active_bytes": 240
+    },
+    {
+      "path": "tests/check_workspace_browser.cjs",
+      "decision": "保留",
+      "reason": "当前前端行为/浏览器回归与夹具入口；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 40130,
+      "active_bytes": 40130
+    },
+    {
+      "path": "tests/test_agent_runtime.py",
+      "decision": "保留",
+      "reason": "回归边界：Exact Agent 端口装配与固定文件范围。；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 10130,
+      "active_bytes": 10130
+    },
+    {
+      "path": "tests/test_architecture.py",
+      "decision": "修改并保留",
+      "reason": "回归边界：纯模块依赖方向。；模型能力和控制合同加入内圈导入守卫；纯领域冷导入保持可测。",
+      "before_bytes": 3814,
+      "active_bytes": 3814
+    },
+    {
+      "path": "tests/test_context_eval_integration.py",
+      "decision": "保留",
+      "reason": "Context、Capability、Recovery、Evaluation 与 Acceptance 的固定回归。；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 15253,
+      "active_bytes": 15253
+    },
+    {
+      "path": "tests/test_control_tower.py",
+      "decision": "修改并保留",
+      "reason": "回归边界：持久控制、记忆与受限项目工具。；同步当前调用/固定夹具；保留仍证明业务或恢复不变量的回归。",
+      "before_bytes": 8904,
+      "active_bytes": 9553
+    },
+    {
+      "path": "tests/test_conversation_context.py",
+      "decision": "修改并保留",
+      "reason": "回归边界：有界上下文与 Compact revision 消费。；同步当前调用/固定夹具；保留仍证明业务或恢复不变量的回归。",
+      "before_bytes": 20329,
+      "active_bytes": 19033
+    },
+    {
+      "path": "tests/test_decision_runtime.py",
+      "decision": "保留",
+      "reason": "回归边界：模型准入、收据和决定绑定。；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 13215,
+      "active_bytes": 13215
+    },
+    {
+      "path": "tests/test_delivery_workflow.py",
+      "decision": "保留",
+      "reason": "v0.24 交付闭环：终态补偿、验收、工作项、人工关注与受限测试 profile。；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 9493,
+      "active_bytes": 9493
+    },
+    {
+      "path": "tests/test_domain.py",
+      "decision": "保留",
+      "reason": "回归边界：纯字节替换规则。；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 1401,
+      "active_bytes": 1401
+    },
+    {
+      "path": "tests/test_durable_executor.py",
+      "decision": "保留",
+      "reason": "回归边界：独立 Durable Executor、同 Run 恢复与无进展观测。；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 7402,
+      "active_bytes": 7402
+    },
+    {
+      "path": "tests/test_execution_graph.py",
+      "decision": "保留",
+      "reason": "Execution Graph 只读投影测试。；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 4645,
+      "active_bytes": 4645
+    },
+    {
+      "path": "tests/test_harness_deepening.py",
+      "decision": "保留",
+      "reason": "Harness Engineering 四项深化的回归边界。；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 12045,
+      "active_bytes": 12045
+    },
+    {
+      "path": "tests/test_information_semantics.py",
+      "decision": "保留",
+      "reason": "回归边界：信息粒度、变化、增益和授权语义。；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 6155,
+      "active_bytes": 6155
+    },
+    {
+      "path": "tests/test_knowledge_views.py",
+      "decision": "保留",
+      "reason": "回归边界：Mental Model 是 materialized Memory view，Knowledge Page 只拥有树结构。；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 9077,
+      "active_bytes": 9077
+    },
+    {
+      "path": "tests/test_long_run_soak.py",
+      "decision": "保留",
+      "reason": "回归边界：长任务浸泡工具的健康路径与 UNKNOWN no-replay。；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 2486,
+      "active_bytes": 2486
+    },
+    {
+      "path": "tests/test_memory_lifecycle.py",
+      "decision": "保留",
+      "reason": "回归边界：Evidence-backed Memory、immutable revision、freshness 与受约束 Delta。；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 7548,
+      "active_bytes": 7548
+    },
+    {
+      "path": "tests/test_mental_model_auto_refresh.py",
+      "decision": "保留",
+      "reason": "回归边界：Mental Model 自动后台 Refresh 复用 Core Run / DecisionRuntime / DurableExecutor。；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 17836,
+      "active_bytes": 17836
+    },
+    {
+      "path": "tests/test_milvus_retrieval.py",
+      "decision": "修改并保留",
+      "reason": "回归边界：Milvus 派生索引、Hybrid hydration 与 Memory 渐进披露。；同步当前调用/固定夹具；保留仍证明业务或恢复不变量的回归。",
+      "before_bytes": 9284,
+      "active_bytes": 9354
+    },
+    {
+      "path": "tests/test_models.py",
+      "decision": "保留",
+      "reason": "回归边界：统一模型决定解析。；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 2118,
+      "active_bytes": 2118
+    },
+    {
+      "path": "tests/test_network_recovery.py",
+      "decision": "修改并保留",
+      "reason": "断网恢复的故障注入回归。；同步当前调用/固定夹具；保留仍证明业务或恢复不变量的回归。",
+      "before_bytes": 26975,
+      "active_bytes": 26008
+    },
+    {
+      "path": "tests/test_observatory_ui.cjs",
+      "decision": "保留",
+      "reason": "当前前端行为/浏览器回归与夹具入口；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 26650,
+      "active_bytes": 26650
+    },
+    {
+      "path": "tests/test_personal_agent_foundation.py",
+      "decision": "保留",
+      "reason": "回归边界：长期意图和描述性 Trigger。；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 4312,
+      "active_bytes": 4312
+    },
+    {
+      "path": "tests/test_platform_skeleton.py",
+      "decision": "修改并保留",
+      "reason": "回归边界：组合能力合同与成熟度。；同步当前调用/固定夹具；保留仍证明业务或恢复不变量的回归。",
+      "before_bytes": 8871,
+      "active_bytes": 6998
+    },
+    {
+      "path": "tests/test_platform_web.py",
+      "decision": "修改并保留",
+      "reason": "回归边界：组件架构投影。；验证 Web/Workspace 同一实际组件地图，明确不登记占位 A2A/MCP/Browser。",
+      "before_bytes": 1721,
+      "active_bytes": 1808
+    },
+    {
+      "path": "tests/test_process_crash.py",
+      "decision": "保留",
+      "reason": "回归边界：真实子进程硬退出窗口。；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 3380,
+      "active_bytes": 3380
+    },
+    {
+      "path": "tests/test_provider_keys.py",
+      "decision": "保留",
+      "reason": "回归边界：应用内 Provider API Key 安全存储与兼容回退。；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 4164,
+      "active_bytes": 4164
+    },
+    {
+      "path": "tests/test_providers.py",
+      "decision": "保留",
+      "reason": "回归边界：固定供应商传输夹具。；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 20083,
+      "active_bytes": 20083
+    },
+    {
+      "path": "tests/test_reconnect_ui.cjs",
+      "decision": "保留",
+      "reason": "当前前端行为/浏览器回归与夹具入口；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 1885,
+      "active_bytes": 1885
+    },
+    {
+      "path": "tests/test_replay_world.py",
+      "decision": "保留",
+      "reason": "Replay World 回归：历史只覆盖已发生分支，候选策略不能从离线重放获得线上发布权限。；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 5838,
+      "active_bytes": 5838
+    },
+    {
+      "path": "tests/test_runtime.py",
+      "decision": "保留",
+      "reason": "回归边界：精确文件效果、预算与恢复。；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 6990,
+      "active_bytes": 6990
+    },
+    {
+      "path": "tests/test_schedule_web.py",
+      "decision": "保留",
+      "reason": "回归边界：本机计划 HTTP 与后台生命周期。；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 6627,
+      "active_bytes": 6627
+    },
+    {
+      "path": "tests/test_security_performance.py",
+      "decision": "修改并保留",
+      "reason": "安全反例和延迟边界回归。；同步当前调用/固定夹具；保留仍证明业务或恢复不变量的回归。",
+      "before_bytes": 40170,
+      "active_bytes": 39972
+    },
+    {
+      "path": "tests/test_session_statistics.py",
+      "decision": "修改并保留",
+      "reason": "会话统计的计量、持久恢复与本机 HTTP 回归。；同步当前调用/固定夹具；保留仍证明业务或恢复不变量的回归。",
+      "before_bytes": 14773,
+      "active_bytes": 13988
+    },
+    {
+      "path": "tests/test_sota_route.py",
+      "decision": "保留",
+      "reason": "SOTA Route 回归：只从已验收成功 Run 学习同条件下更省的可观察路径。；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 8455,
+      "active_bytes": 8455
+    },
+    {
+      "path": "tests/test_state_boundaries.py",
+      "decision": "保留",
+      "reason": "回归边界：个人状态所有权与真实 SQL 故障回滚。；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 14910,
+      "active_bytes": 14910
+    },
+    {
+      "path": "tests/test_statistics_ui.cjs",
+      "decision": "保留",
+      "reason": "当前前端行为/浏览器回归与夹具入口；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 1847,
+      "active_bytes": 1847
+    },
+    {
+      "path": "tests/test_task_benchmark.py",
+      "decision": "保留",
+      "reason": "回归边界：固定任务 Harness 及独立验收。；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 5652,
+      "active_bytes": 5652
+    },
+    {
+      "path": "tests/test_v011_runtime_closure.py",
+      "decision": "修改并保留",
+      "reason": "回归边界：Control 竞争、Goal 准入和作用域。；同步当前调用/固定夹具；保留仍证明业务或恢复不变量的回归。",
+      "before_bytes": 11994,
+      "active_bytes": 12014
+    },
+    {
+      "path": "tests/test_v012_retrieval_eval.py",
+      "decision": "修改并保留",
+      "reason": "回归边界：全候选召回与历史固定评测。；同步当前调用/固定夹具；保留仍证明业务或恢复不变量的回归。",
+      "before_bytes": 8250,
+      "active_bytes": 8257
+    },
+    {
+      "path": "tests/test_v013_eval_routing.py",
+      "decision": "修改并保留",
+      "reason": "回归边界：固定知识路由和历史评测执行。；同步当前调用/固定夹具；保留仍证明业务或恢复不变量的回归。",
+      "before_bytes": 7531,
+      "active_bytes": 7552
+    },
+    {
+      "path": "tests/test_v014_information_gain.py",
+      "decision": "修改并保留",
+      "reason": "回归边界：同题配对增益与成本语义。；同步当前调用/固定夹具；保留仍证明业务或恢复不变量的回归。",
+      "before_bytes": 8378,
+      "active_bytes": 8353
+    },
+    {
+      "path": "tests/test_v015_evolution_control_plane.py",
+      "decision": "保留",
+      "reason": "回归边界：策略发布资格、版本固定与显式回退。；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 27258,
+      "active_bytes": 27258
+    },
+    {
+      "path": "tests/test_v016_intent_correctness.py",
+      "decision": "保留",
+      "reason": "回归边界：算术/知识路由反例。；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 6353,
+      "active_bytes": 6353
+    },
+    {
+      "path": "tests/test_v017_provider_context.py",
+      "decision": "修改并保留",
+      "reason": "回归边界：窗口、温度与旧设置升级。；同步当前调用/固定夹具；保留仍证明业务或恢复不变量的回归。",
+      "before_bytes": 2937,
+      "active_bytes": 2052
+    },
+    {
+      "path": "tests/test_v0181_cache_observability.py",
+      "decision": "保留",
+      "reason": "回归边界：实际缓存计量与缺测显示。；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 3671,
+      "active_bytes": 3671
+    },
+    {
+      "path": "tests/test_v018_goal_work_loop.py",
+      "decision": "保留",
+      "reason": "回归边界：跨会话/重启长期进度。；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 6345,
+      "active_bytes": 6345
+    },
+    {
+      "path": "tests/test_v019_native_oauth.py",
+      "decision": "保留",
+      "reason": "回归边界：独立 OAuth 边界与安全存储。；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 13534,
+      "active_bytes": 13534
+    },
+    {
+      "path": "tests/test_v020_recovery_runtime.py",
+      "decision": "保留",
+      "reason": "回归边界：持久游标、Driver Lease 与安全接管。；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 8740,
+      "active_bytes": 8740
+    },
+    {
+      "path": "tests/test_v021_goal_scheduler.py",
+      "decision": "修改并保留",
+      "reason": "回归边界：计划机会原子准入及恢复。；同步当前调用/固定夹具；保留仍证明业务或恢复不变量的回归。",
+      "before_bytes": 22027,
+      "active_bytes": 21175
+    },
+    {
+      "path": "tests/test_verified_agent.py",
+      "decision": "保留",
+      "reason": "回归边界：独立固定验收与 Agent 崩溃窗口。；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 21796,
+      "active_bytes": 21796
+    },
+    {
+      "path": "tests/test_web.py",
+      "decision": "保留",
+      "reason": "回归边界：包资源、HTTP 绑定与第三栏 DOM。；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 4254,
+      "active_bytes": 4254
+    },
+    {
+      "path": "tests/test_web_contract.py",
+      "decision": "保留",
+      "reason": "回归边界：真实本机 HTTP 合同、入口去重及跨站拒绝。；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 19320,
+      "active_bytes": 19320
+    },
+    {
+      "path": "tests/test_workspace.py",
+      "decision": "修改并保留",
+      "reason": "回归边界：对话、资料、受管产物和实际恢复。；同步当前调用/固定夹具；保留仍证明业务或恢复不变量的回归。",
+      "before_bytes": 28750,
+      "active_bytes": 28830
+    },
+    {
+      "path": "tests/test_workspace_interactions_ui.cjs",
+      "decision": "保留",
+      "reason": "当前前端行为/浏览器回归与夹具入口；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 18780,
+      "active_bytes": 18780
+    },
+    {
+      "path": "tests/ui_fixture_server.py",
+      "decision": "保留",
+      "reason": "浏览器回归专用 loopback 服务。；职责与当前入口/引用核对；未发现支持重写或删除的具体收益，保留并接受整体验证。",
+      "before_bytes": 3955,
+      "active_bytes": 3955
+    },
+    {
+      "path": ".gitattributes",
+      "decision": "新增",
+      "reason": "Git archive 明确排除垃圾站与一次性 output。",
+      "before_bytes": 0,
+      "active_bytes": 180
+    },
+    {
+      "path": "MANIFEST.in",
+      "decision": "新增",
+      "reason": "sdist 明确包含生产源码和当前资料，排除垃圾站/运行数据/缓存。",
+      "before_bytes": 0,
+      "active_bytes": 473
+    },
+    {
+      "path": "docs/DELIVERY.md",
+      "decision": "新增",
+      "reason": "把版本计划改写为当前验收、工作项、收尾和受限 test.run 合同。",
+      "before_bytes": 0,
+      "active_bytes": 2555
+    },
+    {
+      "path": "docs/FILE_REVIEW.md",
+      "decision": "新增",
+      "reason": "逐文件处置记录",
+      "before_bytes": 0,
+      "active_bytes": 49195
+    },
+    {
+      "path": "docs/REFINEMENT_REVIEW.md",
+      "decision": "新增",
+      "reason": "Myth 沉淀期审查与改进",
+      "before_bytes": 0,
+      "active_bytes": 7584
+    },
+    {
+      "path": "docs/evidence/refinement-2026-10-04.json",
+      "decision": "新增",
+      "reason": "docs/evidence/refinement-2026-10-04.json",
+      "before_bytes": 0,
+      "active_bytes": 83599
+    },
+    {
+      "path": "scripts/validate_release.py",
+      "decision": "新增",
+      "reason": "真实 wheel/sdist/ZIP 排除检查，防止垃圾站或旧入口被构建清单带回。",
+      "before_bytes": 0,
+      "active_bytes": 2617
+    },
+    {
+      "path": "src/myth/adapters/knowledge_store.py",
+      "decision": "新增",
+      "reason": "独立知识所有者；正文/分片原子提交，SQL 过滤作用域，派生向量回源核对。",
+      "before_bytes": 0,
+      "active_bytes": 14818
+    },
+    {
+      "path": "src/myth/model_capabilities.py",
+      "decision": "新增",
+      "reason": "供应商中立模型能力合同，供上下文内圈和外圈 Provider 共同依赖。",
+      "before_bytes": 0,
+      "active_bytes": 5943
+    },
+    {
+      "path": "tests/test_refinement.py",
+      "decision": "新增",
+      "reason": "新增真实 SQLite 故障窗口、并发读改写、来源摘要和 partial 发布资格回归。",
+      "before_bytes": 0,
+      "active_bytes": 14219
+    }
+  ]
+}

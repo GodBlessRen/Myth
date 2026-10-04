@@ -10,7 +10,7 @@ from typing import Mapping
 from ..domain import canonical_json
 
 
-# SCHEMA：本仓储拥有的表、索引与约束；升级补齐旧字段，删除列须有迁移证据。
+# SCHEMA：本仓储拥有的当前表、索引与约束；由 Store 原子初始化，不叠加旧格式迁移。
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS cost_models(
     cost_model_id TEXT PRIMARY KEY,
@@ -62,7 +62,7 @@ class SqliteCostModelRegistry:
     def __init__(self, runtime):
         # store：持久事实仓储；短事务维护本地一致性；外部效果不能并入数据库事务。
         self.store = runtime.store
-        self.store.db.executescript(SCHEMA)
+        self.store.ensure_schema(SCHEMA)
 
     # 以 cost_model_id 固定版本/权重内容，重复相同复用、不同内容拒绝覆盖。
     def put(self, model: CostModel) -> dict:

@@ -15,9 +15,9 @@ Long-term Goal
   -> continue the same Goal
 ```
 
-当前版本：**v0.23.0**
+当前版本：**v0.24.0**
 
-登录、密钥边界、逐模块审查和本地性能对照见 [安全与性能审查](docs/SECURITY_PERFORMANCE_AUDIT.md)。
+登录、密钥边界、逐模块审查和本地性能对照见 [沉淀期审查](docs/REFINEMENT_REVIEW.md)。
 
 ## 现在能做什么
 
@@ -34,6 +34,7 @@ Long-term Goal
 - Structured Failure Observation + Verify-on-Stop；已知失败可机器恢复，模型 completion 不能覆盖 remaining/失败 verifier；
 - project.read / search、diff.preview、git.status / diff；
 - Artifact 生成与固定对象下载；
+- 用户信任项目的受限 `test.run`、交付验收与可补偿收尾；
 - durable Ticket / Receipt / UNKNOWN / Recovery；
 - durable Execution Cursor + Driver Lease / Heartbeat，页面或 Driver 中断后可从 checkpoint 恢复；
 - [断网恢复](docs/NETWORK_RECOVERY.md)：保存同一 Run，按 1、2、4、8、16、32、60 秒重连，之后每分钟一次；已派发而结果不明的调用先核对；
@@ -86,13 +87,15 @@ Windows：
 .\start-myth.ps1
 ```
 
+当前只支持新数据库格式；旧实验工作区请保留原件，选择新的 `--root` 目录，不自动迁移。淘汰资料在 `.trash/` 留档，发布包排除它。
+
 打开：
 
 ```text
 http://127.0.0.1:8765/
 ```
 
-一般对话默认使用本机 Ollama；也可选择 OpenAI、DeepSeek 或 Myth 自己实现的 **Sign in with ChatGPT**。远端模型连接都在 Myth 设置页完成：OpenAI / DeepSeek 直接粘贴 API Key，验证成功后只保存到操作系统安全凭据库；ChatGPT 直接走 OAuth。正常用户不需要预先打开 PowerShell 设置环境变量。旧的 `OPENAI_API_KEY` / `DEEPSEEK_API_KEY` 仅作为兼容回退。
+一般对话默认使用本机 Ollama；也可选择 OpenAI、DeepSeek 或 Myth 自己实现的 **Sign in with ChatGPT**。远端模型连接都在 Myth 设置页完成：OpenAI / DeepSeek 直接粘贴 API Key，验证成功后只保存到操作系统安全凭据库；ChatGPT 直接走 OAuth。正常用户不需要预先打开 PowerShell 设置环境变量。命令行自动化也可使用 `OPENAI_API_KEY` / `DEEPSEEK_API_KEY` 配置连接。
 
 页面可配置：
 
@@ -146,7 +149,7 @@ Context / Memory / Personal State / Observability
 Evaluation / Evolution
 ```
 
-Intent Pick、Information Resolution、Agent Loop、Workflow、Routing、Multi-Agent 等属于可插拔 Strategy，不是固定 Layer。
+Intent Pick、Information Resolution、Agent Loop 和只读委派属于可替换 Strategy，不是固定 Layer。
 
 详细说明见 [Architecture](docs/ARCHITECTURE.md) 与 [Architecture Constitution](docs/ARCHITECTURE_CONSTITUTION.md)。
 
@@ -158,7 +161,7 @@ Intent Pick、Information Resolution、Agent Loop、Workflow、Routing、Multi-A
 
 1. 用固定的 10 个日常任务继续积累真实模型失败；
 2. 根据证据补 Tool / Context / Memory；
-3. 受限 `test.run`，让代码类任务可以验证候选改动；
+3. 用已有受限 `test.run` 验证完整代码任务交付，按失败夯实；
 4. 连续自用与计划故障注入，再决定高级架构是否值得深化。
 
 详见 [Roadmap](docs/ROADMAP.md)。

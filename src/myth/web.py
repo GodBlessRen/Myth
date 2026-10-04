@@ -83,7 +83,7 @@ class AgentWebService:
             "details": check.details or {},
         }
 
-    # 删除 Myth 管理的 API Key；环境变量兼容配置不由网页静默修改。
+    # 删除 Myth 管理的 API Key；环境变量配置不由网页静默修改。
     def provider_key_delete(self, payload: dict[str, Any]) -> dict[str, Any]:
         provider = str(payload.get("provider") or "").strip().lower()
         return self.provider_keys.delete(provider)

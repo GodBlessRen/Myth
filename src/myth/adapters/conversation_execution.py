@@ -26,6 +26,7 @@ from ..verification import SqliteVerificationProfiles
 EXCLUDED = {
     ".git",
     ".runtime",
+    ".trash",
     ".venv",
     "venv",
     "node_modules",
@@ -255,7 +256,7 @@ class LocalConversationExecution:
             or len(document_id) > 200
         ):
             raise ValueError("document_id is required")
-        document = self.repository.document(document_id)
+        document = self.repository.knowledge.document(document_id)
         project_id = (turn["snapshot"].get("project") or {}).get("id")
         if document["project_id"] not in {None, project_id}:
             raise PermissionError("knowledge document belongs to another project")
@@ -872,7 +873,7 @@ class LocalConversationExecution:
         if capability == "agent.delegate":
             result.update(self._delegate(turn, decision_id, args, provider))
         elif capability == "knowledge.search":
-            report = self.repository.search_report(
+            report = self.repository.knowledge.search_report(
                 args.get("query", ""),
                 (turn["snapshot"].get("project") or {}).get("id"),
                 args.get("limit", 5),

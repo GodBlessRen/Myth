@@ -31,11 +31,6 @@ CREATE TABLE IF NOT EXISTS sota_route_runs(
 );
 CREATE INDEX IF NOT EXISTS sota_route_runs_group
 ON sota_route_runs(comparison_key, eligible);
-CREATE TABLE IF NOT EXISTS sota_route_meta(
-    key TEXT PRIMARY KEY NOT NULL,
-    value TEXT NOT NULL,
-    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
 """
 
 # CORE_COSTS：同质量通过后才比较的基础成本；这些字段都来自持久预算/步骤事实。
@@ -56,7 +51,7 @@ OPTIONAL_COSTS = (
 
 # PROJECT_SKIP：项目状态指纹跳过版本库/依赖/秘钥目录；只用于“环境是否相同”的比较身份。
 PROJECT_SKIP = {
-    ".git", ".runtime", ".venv", "venv", "node_modules", "__pycache__",
+    ".git", ".runtime", ".trash", ".venv", "venv", "node_modules", "__pycache__",
     ".aws", ".ssh", ".codex", ".myth", ".config", "secrets",
 }
 # PROJECT_TEXT_SUFFIXES：与当前项目文本工具的主范围对齐；二进制资产不作为首版 SOTA Route 可比条件。
@@ -91,7 +86,7 @@ class SotaRouteLedger:
         self.runtime = runtime
         # store：只读取既有执行事实并保存 SOTA Route 派生账本。
         self.store = runtime.store
-        self.store.db.executescript(SOTA_ROUTE_SCHEMA)
+        self.store.ensure_schema(SOTA_ROUTE_SCHEMA)
 
     # 从固定设置生成模型条件键；不同模型/思考/上下文预算不混为同一比赛。
     def _model_key(self, settings: dict[str, Any]) -> str:
@@ -670,36 +665,7 @@ class SotaRouteLedger:
             )
         return self.view(run_id)
 
-    # 首次升级只回填一次旧 PASSED 记录；中断可幂等重试，成功后不在每次 Workspace 装配重复扫描。
-    def backfill_once(self, limit: int = 200) -> int:
-        marker = self.store.db.execute(
-            "SELECT value FROM sota_route_meta WHERE key='backfill-v1'"
-        ).fetchone()
-        if marker is not None and marker["value"] == "done":
-            return 0
-        synced = self.sync_existing(limit=limit)
-        with self.store.tx() as db:
-            db.execute(
-                "INSERT INTO sota_route_meta(key,value) VALUES('backfill-v1','done') "
-                "ON CONFLICT(key) DO UPDATE SET value='done',updated_at=CURRENT_TIMESTAMP"
-            )
-        return synced
 
-    # 补齐历史 PASSED 记录；只读取已有事实，不重跑模型、工具或验收。
-    def sync_existing(self, limit: int = 200) -> int:
-        rows = self.store.db.execute(
-            "SELECT run_id,subject_digest FROM delivery_acceptance "
-            "WHERE state='PASSED' ORDER BY rowid DESC LIMIT ?",
-            (max(1, min(int(limit), 1000)),),
-        ).fetchall()
-        synced = 0
-        for row in rows:
-            try:
-                self.observe(row["run_id"], subject_digest=row["subject_digest"])
-                synced += 1
-            except (KeyError, ValueError):
-                continue
-        return synced
 
     # 读取当前 Run 与同组 Champion 对比；未验收 Run 处于 WORKING，只观察实时成本与 Drift。
     def view(self, run_id: str) -> dict[str, Any]:

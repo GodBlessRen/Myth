@@ -1,106 +1,25 @@
-# Myth Platform Map
+# 当前组件地图
 
-Myth 的正式结构是：
+内圈领域/策略与 Port 由外圈 SQLite、文件、模型、认证和 HTTP 装配。此页只列当前接入的路径，成熟度按实测证据解释，不用占位实现代表功能。
 
-```text
-                    Core
- Goal / Run / Action / Attempt / Ticket
- Receipt / Artifact / Verification
-          ↙          ↓          ↘
-       Domains    Strategies     Ports
-          ↘          ↓          ↙
-                  Adapters
-```
-
-## Core
-
-| Core | 当前 | 含义 |
+| 职责 | 当前入口 | 实际路径 |
 | --- | --- | --- |
-| Goal | usable | 长期意图 + durable work state，可跨 Session 继续 |
-| Run | usable | 可恢复执行生命周期 |
-| Action | usable | 稳定原子意图 |
-| Attempt | usable | Action 的一次执行机会 |
-| Ticket | usable | effect 开始前的 durable authority |
-| Receipt | usable | 实际执行事实 |
-| Artifact | usable | 不可变产物 / evidence |
-| Verification | usable | 独立验收边界 |
+| 执行事实 | `runtime.py`、`store.py` | Run / Action / Attempt / Ticket / Receipt / Budget / Verification |
+| 对话 | `application/conversation_agent.py` | 有界 Agent Loop、固定步骤、恢复游标 |
+| 控制 | `platform/control_store.py` | Steer / Pause / Resume / Stop / Compact |
+| 上下文 | `conversation_context.py`、`model_capabilities.py` | 供应商中立预算、来源投影与模型能力合同 |
+| 知识 | `adapters/knowledge_store.py` | 正文、分片、作用域、词面检索；可选 Milvus 派生索引 |
+| 记忆 | `platform/memory_store.py` | 类型、revision、来源、freshness、Mental Model 与 Knowledge Page |
+| 长期状态 | `adapters/personal_store.py` | Goal 与显式个人状态 |
+| 调度 | `goal_scheduler.py`、`durable_executor.py` | 持久 occurrence、原子准入、lease、同 Run 接管 |
+| 交付 | `delivery.py` | 可补偿收尾、独立验收、并发工作项账本 |
+| 观测 | `platform/observability.py`、`webui/inspector.js` | 第三栏持久事实投影 |
+| 模型/认证 | `providers/`、`auth/` | Ollama、OpenAI、DeepSeek、Myth 自有 ChatGPT OAuth、系统凭据库 |
+| 评测/演进 | `evaluation_runner.py`、`platform/evaluation*`、`platform/evolution*` | 固定集、Ledger、候选、显式 Promote/Rollback |
+| 入站 | `cli.py`、`web.py`、`web_workspace.py` | CLI、本机 HTTP 和工作台 |
 
-## Domains
+实际策略包括 conservative Intent Pick、Direct、Agent Loop、Information Resolution、离线 Information Gain、Personal Agent 与 `agent.delegate` 单层只读委派。调用发生时仍经过原有准入、预算和证据边界。
 
-| Domain | 当前 | 真实能力 |
-| --- | --- | --- |
-| Coordination | usable | Direct / Agent Loop + conservative Intent Pick |
-| Control | usable | Steer / Pause / Resume / Stop / Model / Thinking / Compact |
-| Execution | usable | Model、文件、检索、Diff、Git 只读能力及对账 |
-| Capability | usable | Registry + admission |
-| State | usable | SQLite durable state / budget / event / command |
-| Context | usable | bounded projection + provider-aware context budget |
-| Memory | usable | typed revision / scope / provenance / recall |
-| Personal State | usable | Goal work state / explicit schedule / atomic wakeup admission / explicit state persistence |
-| Observability | usable | 第三栏 Goal / Flow / Trajectory / Tokens / Context / Tools / Control / Budget |
-| Evaluation | usable | fixed suites / Runner / Ledger / release evidence |
-| Evolution | usable | Cost Model / Candidate / Promote / Rollback；不自动发布 |
+已移除无调用者的 Workflow/MCP/Skills 占位类、内存 MemoryCatalog、Kernel/ControlPlane 旧别名和虚假的 planned adapter 登记。当前没有任意 Shell、A2A、浏览器执行或通用远程 Managed Agent；后续需求见 [ROADMAP](ROADMAP.md)，不在快照中冒充连接。
 
-## Strategies
-
-| Strategy | 当前 |
-| --- | --- |
-| Intent Pick | connected |
-| Information Resolution | connected |
-| Information Gain | connected, offline evidence |
-| Direct | usable |
-| Agent Loop | usable |
-| Workflow | connected |
-| Routing | exists |
-| Parallel | exists |
-| Multi-Agent | exists |
-| Managed Agent | exists |
-| Personal Agent | connected |
-
-Strategy 不升格成 Layer。真实任务没有暴露需求时，不继续横向深化。
-
-## Adapters
-
-| Adapter | 当前 |
-| --- | --- |
-| SQLite | usable |
-| Local Files | usable |
-| Ollama | usable |
-| OpenAI API Key | connected |
-| Sign in with ChatGPT | usable | Myth-owned PKCE/OIDC + secure OS credential store；不依赖 Pi/Codex auth |
-| MCP | exists |
-| A2A | planned |
-| Browser | planned |
-| bounded Test | planned |
-| arbitrary Shell | intentionally unavailable |
-| Timer / Schedule | planned minimal wake-up |
-
-## 六边形边界
-
-```text
-Inbound Adapter
-(Chat / future Timer)
-       ↓
-Application / Domain
-       ↓
-      Ports
-       ↓
-Outbound Adapters
-(Model / Tool / DB / future MCP)
-```
-
-发现能力不等于获得权限；外部系统只能通过 Port / admission 进入。
-
-## 成熟度
-
-- `exists`：合同/边界存在；
-- `connected`：进入真实装配或持久路径；
-- `usable`：有真实用户路径与 regression tests；
-- `hardened`：经过故障 / 安全 / 规模强化；
-- `planned`：只保留方向，不能宣称可用。
-
-当前开发策略：
-
-> **真实任务优先，按失败加深。**
-
-不是先铺更多形状。
+修改入口见 [CODE_GUIDE](CODE_GUIDE.md)，本次逐文件处置见 [FILE_REVIEW](FILE_REVIEW.md)。

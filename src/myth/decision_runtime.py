@@ -94,7 +94,7 @@ class DecisionRuntime:
         # receipt_dir：本适配器的收据目录；恢复读取稳定机会身份对应的文件。
         self.receipt_dir = runtime.runtime_dir / "model-receipts"
         self.receipt_dir.mkdir(parents=True, exist_ok=True)
-        self.store.db.executescript(MODEL_SCHEMA)
+        self.store.ensure_schema(MODEL_SCHEMA)
 
     # 生成带类型前缀的新身份；重试去重使用已固定的 request/decision 身份，不靠新 UUID 判断已执行。
     @staticmethod

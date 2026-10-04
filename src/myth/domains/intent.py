@@ -14,5 +14,5 @@ class IntentPicker(Protocol):
     def pick(self, value: str, context: dict[str, Any]) -> IntentPick: ...
 
 
-# __all__：公开导出名单；兼容别名只有在确认外部迁移完成后才删除。
+# __all__：当前公开入口；新增入口必须有实际调用方。
 __all__ = ["IntentPick", "IntentPicker"]

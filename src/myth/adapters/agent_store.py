@@ -8,7 +8,7 @@ from typing import Any
 from ..decision_runtime import DecisionRuntime
 from ..domain import BudgetExceeded, IdentityConflict, canonical_json, digest_json
 
-# SCHEMA：本仓储拥有的表、索引与约束；升级补齐旧字段，删除列须有迁移证据。
+# SCHEMA：本仓储拥有的当前表、索引与约束；由 Store 原子初始化，不叠加旧格式迁移。
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS agent_runs (
  run_id TEXT PRIMARY KEY REFERENCES runs(run_id), provider_id TEXT NOT NULL,
@@ -54,7 +54,7 @@ class SqliteAgentRepository:
         self.store = runtime.store
         # decisions：模型请求/收据协调器；提供固定身份，不授予模型直接执行权。
         self.decisions = DecisionRuntime(runtime)
-        self.store.db.executescript(SCHEMA)
+        self.store.ensure_schema(SCHEMA)
 
     # 生成带类型前缀的新身份；重试去重使用已固定的 request/decision 身份，不靠新 UUID 判断已执行。
     @staticmethod

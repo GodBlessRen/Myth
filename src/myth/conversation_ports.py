@@ -29,9 +29,6 @@ class ConversationRepository(Protocol):
     # 记录已知 Observation 并消费当前步骤；它不是工具收据，也不制造 UNKNOWN。
     def finish_observation(self, run_id: str, step: int, result: dict) -> None: ...
 
-    # 兼容字符串拒绝入口；新调用方优先写结构化 Observation。
-    def reject(self, run_id: str, step: int, reason: str) -> None: ...
-
     # 把回答/问题、步骤状态及游标一起提交；普通 COMPLETED 只表示对话回答已结束。
     def finish_reply(
         self, run_id: str, step: int, text: str, question_id: str | None = None
@@ -78,7 +75,7 @@ class ConversationControl(Protocol):
 
     # 只消费生成该决定时使用的 Compact revision；旧决定不能清除更新的压缩请求。
     def consume_compaction(
-        self, run_id: str, *, decision_id: str | None = None
+        self, run_id: str, *, decision_id: str
     ) -> None: ...
 
 

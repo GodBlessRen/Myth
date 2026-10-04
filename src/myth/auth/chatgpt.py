@@ -197,20 +197,18 @@ class KeyringCredentialStore:
             backend = self._backend()
             manifest = self._manifest(backend, profile_id)
             if manifest is None:
-                # 旧版单条记录只在没有 v2 清单时读取；下一次成功保存时迁移并清理。
-                raw = backend.get_password(self.service, profile_id)
-            else:
-                active = manifest.get("active")
-                if active is None:
-                    return None
-                entry = next(item for item in manifest["entries"] if item["generation"] == active)
-                pieces = [backend.get_password(self._part_service(profile_id, active, index), profile_id)
-                    for index in range(entry["parts"])]
-                if not all(isinstance(piece, str) for piece in pieces):
-                    raise ValueError("credential generation is incomplete")
-                raw = "".join(pieces)
-                if hashlib.sha256(raw.encode("ascii")).hexdigest() != entry["digest"]:
-                    raise ValueError("credential generation digest mismatch")
+                return None
+            active = manifest.get("active")
+            if active is None:
+                return None
+            entry = next(item for item in manifest["entries"] if item["generation"] == active)
+            pieces = [backend.get_password(self._part_service(profile_id, active, index), profile_id)
+                for index in range(entry["parts"])]
+            if not all(isinstance(piece, str) for piece in pieces):
+                raise ValueError("credential generation is incomplete")
+            raw = "".join(pieces)
+            if hashlib.sha256(raw.encode("ascii")).hexdigest() != entry["digest"]:
+                raise ValueError("credential generation digest mismatch")
         except CredentialStoreUnavailable:
             raise
         except Exception as exc:
@@ -262,7 +260,6 @@ class KeyringCredentialStore:
                     remaining.append(old)
             manifest["entries"] = remaining
             self._save_manifest(backend, profile_id, manifest)
-            self._delete_record(backend, self.service, profile_id)
         except CredentialStoreUnavailable:
             raise
         except Exception as exc:
@@ -279,7 +276,6 @@ class KeyringCredentialStore:
                 for entry in manifest["entries"]:
                     self._delete_generation(backend, profile_id, entry)
                 self._delete_record(backend, self._record_service(profile_id), profile_id)
-            self._delete_record(backend, self.service, profile_id)
         except CredentialStoreUnavailable:
             raise
         except Exception as exc:

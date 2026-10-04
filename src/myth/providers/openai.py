@@ -17,7 +17,7 @@ from ..auth.transport import (
 )
 from ..models import ModelRequest, ModelResult, ProviderStatus, ProviderKnownFailure, ProviderUnavailable
 from ..network_recovery import is_pre_dispatch_disconnect
-from .capabilities import model_capability, reasoning_capability
+from ..model_capabilities import model_capability, reasoning_capability
 
 
 
@@ -542,7 +542,7 @@ class OpenAIApiKeyProvider(OpenAIResponsesProvider):
         timeout: float = 180.0,
         token_supplier: TokenSupplier | None = None,
     ) -> None:
-        # token_supplier 由 Credential Hub 注入；直接构造时仍保留环境变量兼容旧 CLI/测试。
+        # token_supplier 由 Credential Hub 注入；直接构造时仍保留显式 CLI 环境变量配置。
         def env_token() -> str:
             import os
             value = os.environ.get(env_var, "").strip()

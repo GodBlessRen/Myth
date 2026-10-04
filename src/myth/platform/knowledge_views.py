@@ -89,7 +89,7 @@ class SqliteKnowledgeViews:
         self.store = runtime.store
         # memory：现有权威 Memory Store；派生视图复用其 Evidence/revision/freshness，不复制正文生命周期。
         self.memory = memory_store
-        self.store.db.executescript(SCHEMA)
+        self.store.ensure_schema(SCHEMA)
 
     # create_model：只登记“持续回答什么问题”；不偷偷调用模型，也不把空壳宣称已刷新。
     def create_model(

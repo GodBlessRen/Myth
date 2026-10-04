@@ -30,18 +30,17 @@ class ArchitectureTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
 
-    # 公开入口按需加载仍返回原类，旧 Kernel 别名不复制实现；目录发现未知名称也不触发新业务。
+    # 公开入口按需加载仍返回原类；目录发现未知名称也不触发新业务。
     def test_lazy_public_exports_preserve_class_identity_and_discovery(self):
         import myth
         from myth.agent_runtime import AgentRuntime
         from myth.runtime import MythRuntime
-        from myth.platform import MythComponents, MythKernel
+        from myth.platform import MythComponents
 
         for name, expected in (
             ("AgentRuntime", AgentRuntime),
             ("MythRuntime", MythRuntime),
             ("MythComponents", MythComponents),
-            ("MythKernel", MythKernel),
         ):
             self.assertIs(getattr(myth, name), expected)
             self.assertIn(name, dir(myth))
@@ -68,6 +67,8 @@ class ArchitectureTests(unittest.TestCase):
         files = [
             root / "domain.py",
             root / "models.py",
+            root / "model_capabilities.py",
+            root / "platform/control.py",
             root / "acceptance.py",
             root / "ports.py",
             root / "conversation.py",

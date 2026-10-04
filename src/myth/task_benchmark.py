@@ -204,7 +204,7 @@ def _trial(root, case, arm, settings, provider):
             path.write_bytes(content.encode("utf-8"))
         project = repo.create_project({"name": case["id"], "root": str(project_root)})
         for doc in case.get("documents", []):
-            repo.import_document({**doc, "project_id": project["id"]})
+            repo.knowledge.import_document({**doc, "project_id": project["id"]})
         goal = (
             workspace.personal.create_goal("Fixed continuity task")
             if case.get("first_prompt")

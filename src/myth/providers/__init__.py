@@ -29,10 +29,6 @@ def create_provider(
         if runtime_root is None:
             raise ValueError("chatgpt provider requires runtime_root")
         return ChatGPTPlanProvider(runtime_root)
-    if name == "pi-openai":
-        raise ValueError(
-            "legacy pi-openai authentication was removed; sign in with Myth OAuth and use provider=chatgpt"
-        )
     if name in {"openai", "deepseek"}:
         if runtime_root is None:
             raise ValueError(f"{name} provider requires runtime_root")
@@ -46,7 +42,7 @@ def create_provider(
     raise ValueError(f"unknown provider: {name}")
 
 
-# __all__：公开导出名单；兼容别名只有在确认外部迁移完成后才删除。
+# __all__：当前公开入口；新增入口必须有实际调用方。
 __all__ = [
     "ModelProvider",
     "OllamaProvider",

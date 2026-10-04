@@ -28,8 +28,7 @@ class InformationGainTests(unittest.TestCase):
         self.suite = (
             Path(__file__).resolve().parents[1]
             / "evals"
-            / "archive"
-            / "foundation-v3.json"
+            / "foundation-v4.json"
         )
 
     # 关闭本用例连接/服务并清理临时状态；清理失败不能覆盖被测异常。
