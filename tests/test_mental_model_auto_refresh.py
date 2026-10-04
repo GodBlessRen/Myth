@@ -186,6 +186,7 @@ class MentalModelAutoRefreshTests(unittest.TestCase):
 
         refresh = self.refresh
 
+        # LeaseLostProvider：模拟模型返回前旧 owner 已失租；用于验证 Receipt 与发布权分离。
         class LeaseLostProvider(RefreshProvider):
             # 模型返回前模拟新 owner 已接管；真实系统中这是旧 lease 过期后的 takeover。
             def invoke(self, request):
@@ -313,6 +314,7 @@ class MentalModelAutoRefreshTests(unittest.TestCase):
         self.refresh.configure(self.model["model_id"], enabled=True, min_interval_seconds=60)
         first_run = self.refresh.admit(self.model["model_id"], now=1000.0)
 
+        # NoEvidenceProvider：返回结构合法但无底层 Evidence 的已知坏 synthesis；用于验证失败后退避重试。
         class NoEvidenceProvider(RefreshProvider):
             # 返回结构合法但没有底层 Evidence 的 synthesis；Runtime 应已知失败而不是 UNKNOWN。
             def invoke(self, request):
