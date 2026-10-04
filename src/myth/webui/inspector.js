@@ -884,6 +884,18 @@ function renderInspectorContext(session, turn) {
       ["实际选入", (compiled.selected?.length || 0) + " 项"],
       ["旧记录折叠", (compiled.folded?.length || 0) + " 项"],
       ["未选入", (compiled.dropped?.length || 0) + " 项"],
+      [
+        "Context Anchor",
+        compiled.context_anchor
+          ? inspectorNumber(compiled.context_anchor.covered_messages) +
+            " 条 · " + inspectorNumber(compiled.context_anchor.bytes, " bytes")
+          : "未使用",
+      ],
+      [
+        "Tool visibility",
+        inspectorNumber(compiled.visible_tools?.length) +
+          " visible · " + inspectorNumber(compiled.deferred_tools?.length) + " deferred",
+      ],
     ].forEach(([k, v]) => {
       inspectorFact(box, k, v);
     });
