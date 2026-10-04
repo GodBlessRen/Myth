@@ -11,7 +11,7 @@ import time
 import unittest
 from contextlib import redirect_stdout
 from urllib import error, request
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 from test_workspace import ChatProvider, decision
 from myth.agent_runtime import AgentRuntime
 from myth.providers.scripted import ScriptedPatchProvider
@@ -130,6 +130,71 @@ class WebContractTests(unittest.TestCase):
             self.assertEqual(json.load(response)["run_id"], rid)
         self.assertEqual(len(self.service.list_runs()), 1)
         self.assertEqual(len(self.service.status(rid)["model"]["model_invocations"]), 3)
+
+
+    # 回归断言：API Key 可完全在 Myth Web 内连接，响应与状态都不能回显 secret。
+    def test_provider_api_key_connect_is_in_app_and_never_echoes_secret(self):
+        secret = "deepseek-secret-never-echo"
+        with (
+            patch.object(
+                self.service.provider_keys,
+                "prepare",
+                return_value=secret,
+            ) as prepare,
+            patch.object(
+                self.service.provider_keys,
+                "save",
+                return_value={
+                    "provider": "deepseek",
+                    "label": "DeepSeek",
+                    "configured": True,
+                    "source": "myth",
+                },
+            ) as save,
+            patch.object(
+                self.service,
+                "_provider",
+            ),
+        ):
+            # provider_key_save uses create_provider directly for candidate validation,
+            # so patch the factory at the module boundary rather than the service helper.
+            fake_provider = Mock()
+            fake_provider.check.return_value = unittest.mock.Mock(
+                ready=True,
+                details={"models": ["deepseek-test"]},
+            )
+            with patch("myth.web.create_provider", return_value=fake_provider):
+                with self.call(
+                    "/api/auth/providers/connect",
+                    {"provider": "deepseek", "api_key": secret},
+                ) as response:
+                    value = json.load(response)
+
+        prepare.assert_called_once_with("deepseek", secret)
+        save.assert_called_once_with("deepseek", secret)
+        self.assertTrue(value["ready"])
+        self.assertNotIn(secret, json.dumps(value))
+
+    # 回归断言：候选 API Key 验证失败时不得覆盖已有安全凭据。
+    def test_invalid_provider_api_key_never_replaces_existing_secret(self):
+        secret = "bad-secret-never-save"
+        with (
+            patch.object(self.service.provider_keys, "prepare", return_value=secret),
+            patch.object(self.service.provider_keys, "save") as save,
+        ):
+            fake_provider = Mock()
+            fake_provider.check.return_value = unittest.mock.Mock(
+                ready=False,
+                details={"error": "invalid credential"},
+            )
+            with patch("myth.web.create_provider", return_value=fake_provider):
+                with self.assertRaises(error.HTTPError) as raised:
+                    self.call(
+                        "/api/auth/providers/connect",
+                        {"provider": "openai", "api_key": secret},
+                    )
+        self.assertEqual(raised.exception.code, 400)
+        save.assert_not_called()
 
     # 回归断言：授权入口固定到本机 callback，不能由外部 Host 诱导重定向。
     def test_chatgpt_oauth_start_uses_exact_loopback_callback(self):
