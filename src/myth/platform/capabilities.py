@@ -95,6 +95,24 @@ def default_capabilities() -> CapabilityRegistry:
             "read",
         ),
         (
+            "memory.search",
+            "memory",
+            "Search visible long-term memories and return compact L0 index views.",
+            "read",
+        ),
+        (
+            "memory.timeline",
+            "memory",
+            "Navigate visible memories around one admitted anchor without changing source facts.",
+            "read",
+        ),
+        (
+            "memory.resolve",
+            "memory",
+            "Expand one visible memory at L0/L1/L2 while preserving memory identity and revision.",
+            "read",
+        ),
+        (
             "project.list",
             "file",
             "List an explicitly associated project directory.",
