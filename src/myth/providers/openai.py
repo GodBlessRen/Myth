@@ -204,6 +204,16 @@ def _usage(value: dict) -> dict[str, int]:
     cached_tokens = input_details.get("cached_tokens")
     if type(cached_tokens) is int and cached_tokens >= 0:
         result["cached_input_tokens"] = cached_tokens
+    # 兼容部分 Responses-compatible Provider 的公开缓存计量；仅保留明确整数，不推导价格或命中收益。
+    for source_key, target_key in (
+        ("cache_creation_input_tokens", "cache_write_input_tokens"),
+        ("cache_read_input_tokens", "cached_input_tokens"),
+        ("prompt_cache_hit_tokens", "cached_input_tokens"),
+        ("prompt_cache_miss_tokens", "cache_miss_input_tokens"),
+    ):
+        value = usage_value.get(source_key)
+        if type(value) is int and value >= 0:
+            result[target_key] = value
     output_details = (
         usage_value.get("output_tokens_details")
         if isinstance(usage_value.get("output_tokens_details"), dict)
