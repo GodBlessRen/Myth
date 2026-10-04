@@ -78,6 +78,16 @@ class DeepSeekApiKeyProvider(OpenAIResponsesProvider):
                             off="none",
                             source="remote",
                         )
+                    # known 字段进入跨 Provider capability；其余 DeepSeek 目录元数据原样留在折叠层，避免未来字段被静默丢弃。
+                    known = {
+                        "id", "name", "context_window", "max_output_tokens",
+                        "input_modalities", "output_modalities", "effort",
+                    }
+                    provider_metadata = {
+                        str(key): value
+                        for key, value in item.items()
+                        if key not in known
+                    }
                     profile = model_capability(
                         item["id"],
                         display_name=item.get("name"),
@@ -86,6 +96,7 @@ class DeepSeekApiKeyProvider(OpenAIResponsesProvider):
                         input_modalities=item.get("input_modalities") or (),
                         output_modalities=item.get("output_modalities") or (),
                         reasoning=reasoning,
+                        provider_metadata=provider_metadata,
                         source="remote",
                     )
                     profiles[item["id"]] = profile
