@@ -70,6 +70,7 @@ Evaluation 的分数只是证据的压缩投影，不是证据本身。
 - 成本比较优先报告 **cost per successful outcome**；失败试次的成本不能从分母中消失。
 - 缺测、样本不足和不确定性保持显式；不得把小样本波动直接包装为 Champion、Policy 增益或发布证据。
 - Evaluation 只提供证据与资格。SOTA Route 负责发现，Evolution 负责证明和显式发布；任一单次漂亮 Run 都不能直接改变生产策略。
+- Historical Replay 只能在同一冻结比较条件下重放“历史真实出现过的边”；未观察分支必须保持 `UNOBSERVED`，Replay 结果不能直接产生 `ELIGIBLE`、授权或 Promote。
 ## 3. Strategy，不升格成 Layer
 
 下面这些是可插拔策略，不是所有请求都必须经过的“层”：
