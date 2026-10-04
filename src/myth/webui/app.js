@@ -88,6 +88,7 @@ document
 // 奶油白 / 星空黑仅改变浏览器投影；主题选择保存在本机，不进入 Runtime 或会话事实。
 const THEME_STORAGE_KEY = "myth-theme";
 const themeMedia = window.matchMedia("(prefers-color-scheme: dark)");
+// 读取本机已保存的显式主题；读取失败返回空值并由系统偏好决定，不影响任何 Runtime 状态。
 function storedTheme() {
   try {
     const value = localStorage.getItem(THEME_STORAGE_KEY);
@@ -96,6 +97,7 @@ function storedTheme() {
     return null;
   }
 }
+// 应用纯展示主题并可选持久到 localStorage；不把 UI 外观写入会话、Run 或业务设置。
 function applyTheme(theme, persist = false) {
   const next = theme === "dark" ? "dark" : "light";
   document.documentElement.dataset.theme = next;
