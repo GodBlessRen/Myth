@@ -390,7 +390,9 @@ function renderConnection() {
       ? "连接 Ollama"
       : provider === "chatgpt"
         ? "连接 ChatGPT"
-        : "连接模型");
+        : provider === "deepseek"
+          ? "连接 DeepSeek"
+          : "连接模型");
   show("welcomeConnection", !state.data.settings.model || (c && !c.ready));
   if (c) {
     const fallback =
@@ -398,7 +400,9 @@ function renderConnection() {
         ? "未连接，请确认 Ollama 正在运行。"
         : provider === "chatgpt"
           ? "ChatGPT 尚未完成授权或当前计划不可用。"
-          : "模型提供方尚未就绪。";
+          : provider === "deepseek"
+            ? "DeepSeek 尚未就绪，请确认 DEEPSEEK_API_KEY 已设置。"
+            : "模型提供方尚未就绪。";
     $("connectionResult").textContent = c.ready
       ? `已连接 · ${c.details.models?.length || 0} 个可用模型`
       : c.details.error || c.details.reason || fallback;
