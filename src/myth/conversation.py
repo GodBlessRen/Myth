@@ -286,6 +286,9 @@ def conversation_request(settings, snapshot, messages, activities, control=None)
         "你可以自行判断是否使用 agent.delegate。只有独立子任务、上下文隔离或独立复核明显有价值时才委派；简单任务直接完成。"
         "Sub-Agent 是只读隔离 worker：只收到你显式传入的 task/context/source_refs，不继承完整父对话、Memory 或工具目录，不能写入、调用工具、再次委派或向用户提问。"
         "子 Agent 返回的是观察/建议，不是验收；最终结论、工具执行与交付责任仍属于父 Agent。\n"
+        "信息获取遵循 bounded live control：knowledge.search/project.search/project.list 属于 SEEK，knowledge.resolve/knowledge.read/project.read 属于 EXPAND。"
+        "只在当前任务确实缺信息时继续获取；相同请求不要重复，分页必须使用返回的 next_cursor/next_offset 前进，已有信息足够时直接继续任务或回答（KEEP）。"
+        "Runtime 会在 Tool Ticket 前拒绝重复、停滞或超出本轮信息预算的请求；不要通过改写同义参数绕过预算。\n"
         "可用工具参数：" + canonical_json(TOOL_CATALOG)
     )
     schema = (
