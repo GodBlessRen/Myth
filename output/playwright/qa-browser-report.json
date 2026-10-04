@@ -1,0 +1,1263 @@
+{
+  "runId": "2026-10-04T02-46-25-601Z-450ede",
+  "baseURL": "http://127.0.0.1:8770",
+  "boundary": "真实 HTTP、持久 Runtime；固定 Provider 传输，不验证远端模型、OAuth 或模型质量",
+  "steps": [
+    {
+      "name": "启动真实工作台",
+      "status": "PASS",
+      "durationMs": 690
+    },
+    {
+      "name": "四种 Provider 与双模型自适应参数",
+      "status": "PASS",
+      "durationMs": 6085
+    },
+    {
+      "name": "主题持久化与跟随系统",
+      "status": "PASS",
+      "durationMs": 1245
+    },
+    {
+      "name": "原生弹窗键盘焦点边界",
+      "status": "PASS",
+      "durationMs": 103
+    },
+    {
+      "name": "新建与编辑项目及关闭焦点恢复",
+      "status": "PASS",
+      "durationMs": 1315
+    },
+    {
+      "name": "项目资料文件导入、检索与安全预览",
+      "status": "PASS",
+      "durationMs": 6440
+    },
+    {
+      "name": "晚到资料预览释放 Runtime 抽屉并接管焦点",
+      "status": "PASS",
+      "durationMs": 1301
+    },
+    {
+      "name": "对话发送、执行完成与刷新持久化",
+      "status": "PASS",
+      "durationMs": 4196
+    },
+    {
+      "name": "会话编辑、置顶、搜索与导出",
+      "status": "PASS",
+      "durationMs": 1359
+    },
+    {
+      "name": "会话草稿隔离、附件与 IME 防误发",
+      "status": "PASS",
+      "durationMs": 1245
+    },
+    {
+      "name": "Goal 创建、明日计划、暂停与重新读取",
+      "status": "PASS",
+      "durationMs": 7201
+    },
+    {
+      "name": "快捷命令、键盘选择及焦点恢复",
+      "status": "PASS",
+      "durationMs": 106
+    },
+    {
+      "name": "双主题全部页面无横向溢出 1440×900",
+      "status": "PASS",
+      "durationMs": 1061
+    },
+    {
+      "name": "双主题全部页面无横向溢出 1024×768",
+      "status": "PASS",
+      "durationMs": 1875
+    },
+    {
+      "name": "导航与 Runtime 抽屉焦点及断点恢复 1024",
+      "status": "PASS",
+      "durationMs": 818
+    },
+    {
+      "name": "双主题全部页面无横向溢出 390×844",
+      "status": "PASS",
+      "durationMs": 1897
+    },
+    {
+      "name": "导航与 Runtime 抽屉焦点及断点恢复 390",
+      "status": "PASS",
+      "durationMs": 1559
+    },
+    {
+      "name": "双主题全部页面无横向溢出 320×740",
+      "status": "PASS",
+      "durationMs": 1846
+    },
+    {
+      "name": "导航与 Runtime 抽屉焦点及断点恢复 320",
+      "status": "PASS",
+      "durationMs": 1586
+    },
+    {
+      "name": "手机 Runtime 打开后切平板关闭不残留导航 inert",
+      "status": "PASS",
+      "durationMs": 401
+    },
+    {
+      "name": "标准服务实际页面加载",
+      "status": "PASS",
+      "durationMs": 3139
+    }
+  ],
+  "screenshots": [
+    "qa-settings-light.png",
+    "qa-settings-dark.png",
+    "qa-project-light.png",
+    "qa-document-preview-light.png",
+    "qa-knowledge-light.png",
+    "qa-late-preview-1024.png",
+    "qa-late-preview-390.png",
+    "qa-desktop-chat-light.png",
+    "qa-desktop-chat-dark.png",
+    "qa-sessions-dark.png",
+    "qa-goals-dark.png",
+    "qa-tablet-light.png",
+    "qa-tablet-dark.png",
+    "qa-runtime-1024.png",
+    "qa-chat-390-light.png",
+    "qa-chat-390-dark.png",
+    "qa-navigation-390.png",
+    "qa-runtime-390.png",
+    "qa-chat-320-light.png",
+    "qa-chat-320-dark.png",
+    "qa-navigation-320.png",
+    "qa-runtime-320.png",
+    "qa-standard-runtime.png"
+  ],
+  "console": [
+    {
+      "type": "verbose",
+      "text": "[DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o",
+      "location": {
+        "url": "http://127.0.0.1:8770/",
+        "line": 0,
+        "column": 0,
+        "lineNumber": 0,
+        "columnNumber": 0
+      }
+    },
+    {
+      "type": "verbose",
+      "text": "[DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o",
+      "location": {
+        "url": "http://127.0.0.1:8770/#settings",
+        "line": 0,
+        "column": 0,
+        "lineNumber": 0,
+        "columnNumber": 0
+      }
+    },
+    {
+      "type": "verbose",
+      "text": "[DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o",
+      "location": {
+        "url": "http://127.0.0.1:8770/#chat/session_1f8046ca1a6d4822b0415a70041957b5",
+        "line": 0,
+        "column": 0,
+        "lineNumber": 0,
+        "columnNumber": 0
+      }
+    },
+    {
+      "type": "verbose",
+      "text": "[DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o",
+      "location": {
+        "url": "http://127.0.0.1:8770/#goals",
+        "line": 0,
+        "column": 0,
+        "lineNumber": 0,
+        "columnNumber": 0
+      }
+    },
+    {
+      "type": "verbose",
+      "text": "[DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o",
+      "location": {
+        "url": "http://127.0.0.1:8769/",
+        "line": 0,
+        "column": 0,
+        "lineNumber": 0,
+        "columnNumber": 0
+      }
+    }
+  ],
+  "pageErrors": [],
+  "httpErrors": [],
+  "requestFailures": [],
+  "overflows": [
+    {
+      "label": "desktop initial",
+      "width": 1440,
+      "scrollWidth": 1440,
+      "offenders": []
+    },
+    {
+      "label": "late preview modal/1024",
+      "width": 1024,
+      "scrollWidth": 1024,
+      "offenders": []
+    },
+    {
+      "label": "late preview modal/390",
+      "width": 390,
+      "scrollWidth": 390,
+      "offenders": []
+    },
+    {
+      "label": "1440x900/light/chat",
+      "width": 1440,
+      "scrollWidth": 1440,
+      "offenders": []
+    },
+    {
+      "label": "1440x900/light/sessions",
+      "width": 1440,
+      "scrollWidth": 1440,
+      "offenders": []
+    },
+    {
+      "label": "1440x900/light/projects",
+      "width": 1440,
+      "scrollWidth": 1440,
+      "offenders": []
+    },
+    {
+      "label": "1440x900/light/projects",
+      "width": 1440,
+      "scrollWidth": 1440,
+      "offenders": []
+    },
+    {
+      "label": "1440x900/light/knowledge",
+      "width": 1440,
+      "scrollWidth": 1440,
+      "offenders": []
+    },
+    {
+      "label": "1440x900/light/goals",
+      "width": 1440,
+      "scrollWidth": 1440,
+      "offenders": []
+    },
+    {
+      "label": "1440x900/light/runtime",
+      "width": 1440,
+      "scrollWidth": 1440,
+      "offenders": []
+    },
+    {
+      "label": "1440x900/light/settings",
+      "width": 1440,
+      "scrollWidth": 1440,
+      "offenders": []
+    },
+    {
+      "label": "1440x900/dark/chat",
+      "width": 1440,
+      "scrollWidth": 1440,
+      "offenders": []
+    },
+    {
+      "label": "1440x900/dark/sessions",
+      "width": 1440,
+      "scrollWidth": 1440,
+      "offenders": []
+    },
+    {
+      "label": "1440x900/dark/projects",
+      "width": 1440,
+      "scrollWidth": 1440,
+      "offenders": []
+    },
+    {
+      "label": "1440x900/dark/projects",
+      "width": 1440,
+      "scrollWidth": 1440,
+      "offenders": []
+    },
+    {
+      "label": "1440x900/dark/knowledge",
+      "width": 1440,
+      "scrollWidth": 1440,
+      "offenders": []
+    },
+    {
+      "label": "1440x900/dark/goals",
+      "width": 1440,
+      "scrollWidth": 1440,
+      "offenders": []
+    },
+    {
+      "label": "1440x900/dark/runtime",
+      "width": 1440,
+      "scrollWidth": 1440,
+      "offenders": []
+    },
+    {
+      "label": "1440x900/dark/settings",
+      "width": 1440,
+      "scrollWidth": 1440,
+      "offenders": []
+    },
+    {
+      "label": "1024x768/light/chat",
+      "width": 1024,
+      "scrollWidth": 1024,
+      "offenders": []
+    },
+    {
+      "label": "1024x768/light/sessions",
+      "width": 1024,
+      "scrollWidth": 1024,
+      "offenders": []
+    },
+    {
+      "label": "1024x768/light/projects",
+      "width": 1024,
+      "scrollWidth": 1024,
+      "offenders": []
+    },
+    {
+      "label": "1024x768/light/projects",
+      "width": 1024,
+      "scrollWidth": 1024,
+      "offenders": []
+    },
+    {
+      "label": "1024x768/light/knowledge",
+      "width": 1024,
+      "scrollWidth": 1024,
+      "offenders": []
+    },
+    {
+      "label": "1024x768/light/goals",
+      "width": 1024,
+      "scrollWidth": 1024,
+      "offenders": []
+    },
+    {
+      "label": "1024x768/light/runtime",
+      "width": 1024,
+      "scrollWidth": 1024,
+      "offenders": []
+    },
+    {
+      "label": "1024x768/light/settings",
+      "width": 1024,
+      "scrollWidth": 1024,
+      "offenders": []
+    },
+    {
+      "label": "1024x768/dark/chat",
+      "width": 1024,
+      "scrollWidth": 1024,
+      "offenders": []
+    },
+    {
+      "label": "1024x768/dark/sessions",
+      "width": 1024,
+      "scrollWidth": 1024,
+      "offenders": []
+    },
+    {
+      "label": "1024x768/dark/projects",
+      "width": 1024,
+      "scrollWidth": 1024,
+      "offenders": []
+    },
+    {
+      "label": "1024x768/dark/projects",
+      "width": 1024,
+      "scrollWidth": 1024,
+      "offenders": []
+    },
+    {
+      "label": "1024x768/dark/knowledge",
+      "width": 1024,
+      "scrollWidth": 1024,
+      "offenders": []
+    },
+    {
+      "label": "1024x768/dark/goals",
+      "width": 1024,
+      "scrollWidth": 1024,
+      "offenders": []
+    },
+    {
+      "label": "1024x768/dark/runtime",
+      "width": 1024,
+      "scrollWidth": 1024,
+      "offenders": []
+    },
+    {
+      "label": "1024x768/dark/settings",
+      "width": 1024,
+      "scrollWidth": 1024,
+      "offenders": []
+    },
+    {
+      "label": "390x844/light/chat",
+      "width": 390,
+      "scrollWidth": 390,
+      "offenders": []
+    },
+    {
+      "label": "390x844/light/sessions",
+      "width": 390,
+      "scrollWidth": 390,
+      "offenders": []
+    },
+    {
+      "label": "390x844/light/projects",
+      "width": 390,
+      "scrollWidth": 390,
+      "offenders": []
+    },
+    {
+      "label": "390x844/light/projects",
+      "width": 390,
+      "scrollWidth": 390,
+      "offenders": []
+    },
+    {
+      "label": "390x844/light/knowledge",
+      "width": 390,
+      "scrollWidth": 390,
+      "offenders": []
+    },
+    {
+      "label": "390x844/light/goals",
+      "width": 390,
+      "scrollWidth": 390,
+      "offenders": []
+    },
+    {
+      "label": "390x844/light/runtime",
+      "width": 390,
+      "scrollWidth": 390,
+      "offenders": []
+    },
+    {
+      "label": "390x844/light/settings",
+      "width": 390,
+      "scrollWidth": 390,
+      "offenders": []
+    },
+    {
+      "label": "390x844/dark/chat",
+      "width": 390,
+      "scrollWidth": 390,
+      "offenders": []
+    },
+    {
+      "label": "390x844/dark/sessions",
+      "width": 390,
+      "scrollWidth": 390,
+      "offenders": []
+    },
+    {
+      "label": "390x844/dark/projects",
+      "width": 390,
+      "scrollWidth": 390,
+      "offenders": []
+    },
+    {
+      "label": "390x844/dark/projects",
+      "width": 390,
+      "scrollWidth": 390,
+      "offenders": []
+    },
+    {
+      "label": "390x844/dark/knowledge",
+      "width": 390,
+      "scrollWidth": 390,
+      "offenders": []
+    },
+    {
+      "label": "390x844/dark/goals",
+      "width": 390,
+      "scrollWidth": 390,
+      "offenders": []
+    },
+    {
+      "label": "390x844/dark/runtime",
+      "width": 390,
+      "scrollWidth": 390,
+      "offenders": []
+    },
+    {
+      "label": "390x844/dark/settings",
+      "width": 390,
+      "scrollWidth": 390,
+      "offenders": []
+    },
+    {
+      "label": "320x740/light/chat",
+      "width": 320,
+      "scrollWidth": 320,
+      "offenders": []
+    },
+    {
+      "label": "320x740/light/sessions",
+      "width": 320,
+      "scrollWidth": 320,
+      "offenders": []
+    },
+    {
+      "label": "320x740/light/projects",
+      "width": 320,
+      "scrollWidth": 320,
+      "offenders": []
+    },
+    {
+      "label": "320x740/light/projects",
+      "width": 320,
+      "scrollWidth": 320,
+      "offenders": [
+        {
+          "tag": "BUTTON",
+          "id": "projectChat",
+          "class": "primary",
+          "right": 330.234375
+        }
+      ]
+    },
+    {
+      "label": "320x740/light/knowledge",
+      "width": 320,
+      "scrollWidth": 320,
+      "offenders": []
+    },
+    {
+      "label": "320x740/light/goals",
+      "width": 320,
+      "scrollWidth": 320,
+      "offenders": []
+    },
+    {
+      "label": "320x740/light/runtime",
+      "width": 320,
+      "scrollWidth": 320,
+      "offenders": []
+    },
+    {
+      "label": "320x740/light/settings",
+      "width": 320,
+      "scrollWidth": 320,
+      "offenders": []
+    },
+    {
+      "label": "320x740/dark/chat",
+      "width": 320,
+      "scrollWidth": 320,
+      "offenders": []
+    },
+    {
+      "label": "320x740/dark/sessions",
+      "width": 320,
+      "scrollWidth": 320,
+      "offenders": []
+    },
+    {
+      "label": "320x740/dark/projects",
+      "width": 320,
+      "scrollWidth": 320,
+      "offenders": []
+    },
+    {
+      "label": "320x740/dark/projects",
+      "width": 320,
+      "scrollWidth": 320,
+      "offenders": [
+        {
+          "tag": "BUTTON",
+          "id": "projectChat",
+          "class": "primary",
+          "right": 330.234375
+        }
+      ]
+    },
+    {
+      "label": "320x740/dark/knowledge",
+      "width": 320,
+      "scrollWidth": 320,
+      "offenders": []
+    },
+    {
+      "label": "320x740/dark/goals",
+      "width": 320,
+      "scrollWidth": 320,
+      "offenders": []
+    },
+    {
+      "label": "320x740/dark/runtime",
+      "width": 320,
+      "scrollWidth": 320,
+      "offenders": []
+    },
+    {
+      "label": "320x740/dark/settings",
+      "width": 320,
+      "scrollWidth": 320,
+      "offenders": []
+    },
+    {
+      "label": "standard service Runtime",
+      "width": 1440,
+      "scrollWidth": 1440,
+      "offenders": []
+    }
+  ],
+  "identities": {
+    "projectId": "project_f1f066a89cbe47a2a2bead309df0b4a0",
+    "documentId": "doc_b140649f62f940e6a962b3f8f4000a74",
+    "sessionId": "session_1f8046ca1a6d4822b0415a70041957b5",
+    "secondSessionId": "session_08d82390742c46a796171e03949fe70f",
+    "goalId": "goal_0aef75775f61425f85e19c05083fa408",
+    "scheduleId": "schedule_baddea9c9a0a42638ad0148d314cc4eb"
+  },
+  "unexpectedErrors": {
+    "console": [],
+    "page": [],
+    "http": [],
+    "request": []
+  },
+  "passed": true,
+  "responsiveRefresh": {
+    "checkedAt": "2026-10-04T02:51:09.869Z",
+    "checks": [
+      {
+        "viewport": {
+          "width": 320,
+          "height": 740
+        },
+        "theme": "light",
+        "route": "chat/session_1f8046ca1a6d4822b0415a70041957b5",
+        "status": "PASS",
+        "measurement": {
+          "width": 320,
+          "scrollWidth": 320,
+          "shortLabel": {
+            "width": 24,
+            "height": 19.1875,
+            "lineHeight": 19.2,
+            "whiteSpace": "nowrap"
+          }
+        }
+      },
+      {
+        "viewport": {
+          "width": 320,
+          "height": 740
+        },
+        "theme": "light",
+        "route": "sessions",
+        "status": "PASS",
+        "measurement": {
+          "width": 320,
+          "scrollWidth": 320,
+          "shortLabel": {
+            "width": 24,
+            "height": 19.1875,
+            "lineHeight": 19.2,
+            "whiteSpace": "nowrap"
+          }
+        }
+      },
+      {
+        "viewport": {
+          "width": 320,
+          "height": 740
+        },
+        "theme": "light",
+        "route": "projects",
+        "status": "PASS",
+        "measurement": {
+          "width": 320,
+          "scrollWidth": 320,
+          "shortLabel": {
+            "width": 24,
+            "height": 19.1875,
+            "lineHeight": 19.2,
+            "whiteSpace": "nowrap"
+          }
+        }
+      },
+      {
+        "viewport": {
+          "width": 320,
+          "height": 740
+        },
+        "theme": "light",
+        "route": "projects/project_f1f066a89cbe47a2a2bead309df0b4a0",
+        "status": "PASS",
+        "measurement": {
+          "width": 320,
+          "scrollWidth": 320,
+          "shortLabel": {
+            "width": 24,
+            "height": 19.1875,
+            "lineHeight": 19.2,
+            "whiteSpace": "nowrap"
+          }
+        }
+      },
+      {
+        "viewport": {
+          "width": 320,
+          "height": 740
+        },
+        "theme": "light",
+        "route": "knowledge",
+        "status": "PASS",
+        "measurement": {
+          "width": 320,
+          "scrollWidth": 320,
+          "shortLabel": {
+            "width": 24,
+            "height": 19.1875,
+            "lineHeight": 19.2,
+            "whiteSpace": "nowrap"
+          }
+        }
+      },
+      {
+        "viewport": {
+          "width": 320,
+          "height": 740
+        },
+        "theme": "light",
+        "route": "goals",
+        "status": "PASS",
+        "measurement": {
+          "width": 320,
+          "scrollWidth": 320,
+          "shortLabel": {
+            "width": 24,
+            "height": 19.1875,
+            "lineHeight": 19.2,
+            "whiteSpace": "nowrap"
+          }
+        }
+      },
+      {
+        "viewport": {
+          "width": 320,
+          "height": 740
+        },
+        "theme": "light",
+        "route": "runtime",
+        "status": "PASS",
+        "measurement": {
+          "width": 320,
+          "scrollWidth": 320,
+          "shortLabel": {
+            "width": 24,
+            "height": 19.1875,
+            "lineHeight": 19.2,
+            "whiteSpace": "nowrap"
+          }
+        }
+      },
+      {
+        "viewport": {
+          "width": 320,
+          "height": 740
+        },
+        "theme": "light",
+        "route": "settings",
+        "status": "PASS",
+        "measurement": {
+          "width": 320,
+          "scrollWidth": 320,
+          "shortLabel": {
+            "width": 24,
+            "height": 19.1875,
+            "lineHeight": 19.2,
+            "whiteSpace": "nowrap"
+          }
+        }
+      },
+      {
+        "viewport": {
+          "width": 320,
+          "height": 740
+        },
+        "theme": "dark",
+        "route": "chat/session_1f8046ca1a6d4822b0415a70041957b5",
+        "status": "PASS",
+        "measurement": {
+          "width": 320,
+          "scrollWidth": 320,
+          "shortLabel": {
+            "width": 24,
+            "height": 19.1875,
+            "lineHeight": 19.2,
+            "whiteSpace": "nowrap"
+          }
+        }
+      },
+      {
+        "viewport": {
+          "width": 320,
+          "height": 740
+        },
+        "theme": "dark",
+        "route": "sessions",
+        "status": "PASS",
+        "measurement": {
+          "width": 320,
+          "scrollWidth": 320,
+          "shortLabel": {
+            "width": 24,
+            "height": 19.1875,
+            "lineHeight": 19.2,
+            "whiteSpace": "nowrap"
+          }
+        }
+      },
+      {
+        "viewport": {
+          "width": 320,
+          "height": 740
+        },
+        "theme": "dark",
+        "route": "projects",
+        "status": "PASS",
+        "measurement": {
+          "width": 320,
+          "scrollWidth": 320,
+          "shortLabel": {
+            "width": 24,
+            "height": 19.1875,
+            "lineHeight": 19.2,
+            "whiteSpace": "nowrap"
+          }
+        }
+      },
+      {
+        "viewport": {
+          "width": 320,
+          "height": 740
+        },
+        "theme": "dark",
+        "route": "projects/project_f1f066a89cbe47a2a2bead309df0b4a0",
+        "status": "PASS",
+        "measurement": {
+          "width": 320,
+          "scrollWidth": 320,
+          "shortLabel": {
+            "width": 24,
+            "height": 19.1875,
+            "lineHeight": 19.2,
+            "whiteSpace": "nowrap"
+          }
+        }
+      },
+      {
+        "viewport": {
+          "width": 320,
+          "height": 740
+        },
+        "theme": "dark",
+        "route": "knowledge",
+        "status": "PASS",
+        "measurement": {
+          "width": 320,
+          "scrollWidth": 320,
+          "shortLabel": {
+            "width": 24,
+            "height": 19.1875,
+            "lineHeight": 19.2,
+            "whiteSpace": "nowrap"
+          }
+        }
+      },
+      {
+        "viewport": {
+          "width": 320,
+          "height": 740
+        },
+        "theme": "dark",
+        "route": "goals",
+        "status": "PASS",
+        "measurement": {
+          "width": 320,
+          "scrollWidth": 320,
+          "shortLabel": {
+            "width": 24,
+            "height": 19.1875,
+            "lineHeight": 19.2,
+            "whiteSpace": "nowrap"
+          }
+        }
+      },
+      {
+        "viewport": {
+          "width": 320,
+          "height": 740
+        },
+        "theme": "dark",
+        "route": "runtime",
+        "status": "PASS",
+        "measurement": {
+          "width": 320,
+          "scrollWidth": 320,
+          "shortLabel": {
+            "width": 24,
+            "height": 19.1875,
+            "lineHeight": 19.2,
+            "whiteSpace": "nowrap"
+          }
+        }
+      },
+      {
+        "viewport": {
+          "width": 320,
+          "height": 740
+        },
+        "theme": "dark",
+        "route": "settings",
+        "status": "PASS",
+        "measurement": {
+          "width": 320,
+          "scrollWidth": 320,
+          "shortLabel": {
+            "width": 24,
+            "height": 19.1875,
+            "lineHeight": 19.2,
+            "whiteSpace": "nowrap"
+          }
+        }
+      },
+      {
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "theme": "light",
+        "route": "chat/session_1f8046ca1a6d4822b0415a70041957b5",
+        "status": "PASS",
+        "measurement": {
+          "width": 390,
+          "scrollWidth": 390,
+          "shortLabel": {
+            "width": 24,
+            "height": 19.1875,
+            "lineHeight": 19.2,
+            "whiteSpace": "nowrap"
+          }
+        }
+      },
+      {
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "theme": "light",
+        "route": "sessions",
+        "status": "PASS",
+        "measurement": {
+          "width": 390,
+          "scrollWidth": 390,
+          "shortLabel": {
+            "width": 24,
+            "height": 19.1875,
+            "lineHeight": 19.2,
+            "whiteSpace": "nowrap"
+          }
+        }
+      },
+      {
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "theme": "light",
+        "route": "projects",
+        "status": "PASS",
+        "measurement": {
+          "width": 390,
+          "scrollWidth": 390,
+          "shortLabel": {
+            "width": 24,
+            "height": 19.1875,
+            "lineHeight": 19.2,
+            "whiteSpace": "nowrap"
+          }
+        }
+      },
+      {
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "theme": "light",
+        "route": "projects/project_f1f066a89cbe47a2a2bead309df0b4a0",
+        "status": "PASS",
+        "measurement": {
+          "width": 390,
+          "scrollWidth": 390,
+          "shortLabel": {
+            "width": 24,
+            "height": 19.1875,
+            "lineHeight": 19.2,
+            "whiteSpace": "nowrap"
+          }
+        }
+      },
+      {
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "theme": "light",
+        "route": "knowledge",
+        "status": "PASS",
+        "measurement": {
+          "width": 390,
+          "scrollWidth": 390,
+          "shortLabel": {
+            "width": 24,
+            "height": 19.1875,
+            "lineHeight": 19.2,
+            "whiteSpace": "nowrap"
+          }
+        }
+      },
+      {
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "theme": "light",
+        "route": "goals",
+        "status": "PASS",
+        "measurement": {
+          "width": 390,
+          "scrollWidth": 390,
+          "shortLabel": {
+            "width": 24,
+            "height": 19.1875,
+            "lineHeight": 19.2,
+            "whiteSpace": "nowrap"
+          }
+        }
+      },
+      {
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "theme": "light",
+        "route": "runtime",
+        "status": "PASS",
+        "measurement": {
+          "width": 390,
+          "scrollWidth": 390,
+          "shortLabel": {
+            "width": 24,
+            "height": 19.1875,
+            "lineHeight": 19.2,
+            "whiteSpace": "nowrap"
+          }
+        }
+      },
+      {
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "theme": "light",
+        "route": "settings",
+        "status": "PASS",
+        "measurement": {
+          "width": 390,
+          "scrollWidth": 390,
+          "shortLabel": {
+            "width": 24,
+            "height": 19.1875,
+            "lineHeight": 19.2,
+            "whiteSpace": "nowrap"
+          }
+        }
+      },
+      {
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "theme": "dark",
+        "route": "chat/session_1f8046ca1a6d4822b0415a70041957b5",
+        "status": "PASS",
+        "measurement": {
+          "width": 390,
+          "scrollWidth": 390,
+          "shortLabel": {
+            "width": 24,
+            "height": 19.1875,
+            "lineHeight": 19.2,
+            "whiteSpace": "nowrap"
+          }
+        }
+      },
+      {
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "theme": "dark",
+        "route": "sessions",
+        "status": "PASS",
+        "measurement": {
+          "width": 390,
+          "scrollWidth": 390,
+          "shortLabel": {
+            "width": 24,
+            "height": 19.1875,
+            "lineHeight": 19.2,
+            "whiteSpace": "nowrap"
+          }
+        }
+      },
+      {
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "theme": "dark",
+        "route": "projects",
+        "status": "PASS",
+        "measurement": {
+          "width": 390,
+          "scrollWidth": 390,
+          "shortLabel": {
+            "width": 24,
+            "height": 19.1875,
+            "lineHeight": 19.2,
+            "whiteSpace": "nowrap"
+          }
+        }
+      },
+      {
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "theme": "dark",
+        "route": "projects/project_f1f066a89cbe47a2a2bead309df0b4a0",
+        "status": "PASS",
+        "measurement": {
+          "width": 390,
+          "scrollWidth": 390,
+          "shortLabel": {
+            "width": 24,
+            "height": 19.1875,
+            "lineHeight": 19.2,
+            "whiteSpace": "nowrap"
+          }
+        }
+      },
+      {
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "theme": "dark",
+        "route": "knowledge",
+        "status": "PASS",
+        "measurement": {
+          "width": 390,
+          "scrollWidth": 390,
+          "shortLabel": {
+            "width": 24,
+            "height": 19.1875,
+            "lineHeight": 19.2,
+            "whiteSpace": "nowrap"
+          }
+        }
+      },
+      {
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "theme": "dark",
+        "route": "goals",
+        "status": "PASS",
+        "measurement": {
+          "width": 390,
+          "scrollWidth": 390,
+          "shortLabel": {
+            "width": 24,
+            "height": 19.1875,
+            "lineHeight": 19.2,
+            "whiteSpace": "nowrap"
+          }
+        }
+      },
+      {
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "theme": "dark",
+        "route": "runtime",
+        "status": "PASS",
+        "measurement": {
+          "width": 390,
+          "scrollWidth": 390,
+          "shortLabel": {
+            "width": 24,
+            "height": 19.1875,
+            "lineHeight": 19.2,
+            "whiteSpace": "nowrap"
+          }
+        }
+      },
+      {
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "theme": "dark",
+        "route": "settings",
+        "status": "PASS",
+        "measurement": {
+          "width": 390,
+          "scrollWidth": 390,
+          "shortLabel": {
+            "width": 24,
+            "height": 19.1875,
+            "lineHeight": 19.2,
+            "whiteSpace": "nowrap"
+          }
+        }
+      }
+    ],
+    "refreshed": [
+      "qa-chat-320-light.png",
+      "qa-chat-320-dark.png",
+      "qa-navigation-320.png",
+      "qa-runtime-320.png",
+      "qa-chat-390-light.png",
+      "qa-chat-390-dark.png",
+      "qa-navigation-390.png",
+      "qa-runtime-390.png",
+      "qa-runtime-1024.png"
+    ],
+    "errors": [],
+    "completedModelTiming": true,
+    "savedButNotAccepted": true
+  }
+}
