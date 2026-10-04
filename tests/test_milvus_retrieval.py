@@ -10,6 +10,7 @@ import unittest
 
 from myth.runtime import MythRuntime
 from myth.workspace import Workspace
+from myth.conversation import conversation_request
 from myth.platform.retrieval import reciprocal_rank_scores
 
 
@@ -160,6 +161,44 @@ class MilvusRetrievalTests(unittest.TestCase):
         for item in timeline["memories"]:
             self.assertTrue(item["source_ref"].startswith("memory:"))
             self.assertEqual(item["resolution"], "L0")
+
+    # 证明 Context 指标统计的是预算选择后的实际交付量，而不是只复述召回数量。
+    def test_context_report_separates_retrieved_from_delivered_memory(self):
+        snapshot = {
+            "messages": [{"role": "user", "content": "current"}],
+            "memory": [
+                {
+                    "memory_id": f"m{index}",
+                    "kind": "semantic",
+                    "text": ("old-memory-" + str(index) + " ") * 500,
+                    "source_ref": f"memory:m{index}@1",
+                    "provenance_ref": f"run:{index}",
+                    "revision": 1,
+                    "resolution": "L0",
+                }
+                for index in range(8)
+            ],
+        }
+        request = conversation_request(
+            {
+                "provider": "ollama",
+                "model": "test",
+                "max_output_tokens": 512,
+                "num_ctx": 8192,
+                "temperature": 0.0,
+            },
+            snapshot,
+            snapshot["messages"],
+            [],
+        )
+        report = request.context_report
+        self.assertEqual(report["retrieved"]["memory"], 8)
+        self.assertEqual(
+            report["delivered"]["memory"],
+            len([ref for ref in report["selected"] if ref.startswith("memory:")]),
+        )
+        self.assertLessEqual(report["delivered"]["memory"], report["retrieved"]["memory"])
+
 
 
 if __name__ == "__main__":
