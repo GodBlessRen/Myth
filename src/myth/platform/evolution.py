@@ -49,19 +49,28 @@ def decide_promotion(
 
 # 实验阶段明确区分广度发现与深度加固；避免单一路线无限 DFS 把偶然局部最优堆成复杂架构。
 class ExperimentPhase(StrEnum):
+    # DISCOVER：广度提出相互独立的候选，不深挖单一路线。
     DISCOVER = "discover"
+    # HARDEN：只深化已有 lineage 中已经产生证据的候选。
     HARDEN = "harden"
 
 
 # Disposable Experiment 只保存可复现输入/变更/证据身份；实验编排器本身不成为生产 Runtime 的长期依赖。
 @dataclass(frozen=True)
 class ExperimentCandidate:
+    # experiment_id：单次研究候选的稳定身份。
     experiment_id: str
+    # hypothesis：本次实验要证伪/验证的明确假设。
     hypothesis: str
+    # phase：Discover 或 Harden，决定 lineage 规则。
     phase: ExperimentPhase
+    # changes：候选实际声明的机制/策略变化。
     changes: tuple[str, ...]
+    # parent_experiment_id：Harden 必须引用已有实验 lineage。
     parent_experiment_id: str | None = None
+    # frozen_suite_ref：进入加固/最终验证时固定的评测身份。
     frozen_suite_ref: str | None = None
+    # workspace_ephemeral：研究编排目录必须可丢弃，不进入生产 Runtime 依赖。
     workspace_ephemeral: bool = True
 
     def __post_init__(self) -> None:
