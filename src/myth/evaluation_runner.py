@@ -106,6 +106,9 @@ class FoundationEvalRunner:
             intent_picker=self.intent_picker,
             resolution_controller=self.resolution_controller,
             resolution_policy_id=self.policy_id,
+            evaluation_harness_mechanisms=(
+                self.harness_mechanisms if self.harness_id is not None else None
+            ),
         )
 
     # 执行选中或完整题集并保存覆盖标记；partial 只作研究，不能获得完整发布资格。
@@ -157,6 +160,7 @@ class FoundationEvalRunner:
                     {"latency_ms": round((time.perf_counter() - started) * 1000, 3)},
                     safety_regression=case.safety_critical,
                     policy_id=self.policy_id,
+                    harness_id=self.harness_id,
                     comparison_key=case.case_id,
                 )
             verdict, reason, evidence, metrics = method(case)
