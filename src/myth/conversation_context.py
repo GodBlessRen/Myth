@@ -9,6 +9,7 @@ from .acceptance import ContextBudgetError
 from .domain import canonical_json
 from .models import ModelMessage
 from .platform.context import ContextCompiler, ContextItem
+from .platform.context_anchor import render_context_anchor
 
 
 # DEFAULT_NUM_CTX：Ollama 默认上下文 Token 窗口；用户明确设置后固定到 Turn。
@@ -158,7 +159,10 @@ def compile_conversation_context(
         "缺少细节时重新读取相关来源。完整会话与执行记录仍保存在本地。"
     )
     if compact:
-        system += "\nCompact：只保留最多 8 条旧会话消息，本轮原始任务与澄清全部保留。"
+        system += (
+            "\nCompact：历史优先使用持久 Context Anchor + 最近原文尾部；"
+            "本轮原始任务与澄清保持必需，完整历史仍保存在本地。"
+        )
 
     candidates = []
     items = []
@@ -177,6 +181,16 @@ def compile_conversation_context(
         items.append(ContextItem(source_ref, encoded, priority, required))
 
     add("instructions", "system", system, required=True)
+    anchor = snapshot.get("context_anchor")
+    if anchor:
+        add(
+            "context-anchor",
+            "user",
+            render_context_anchor(anchor),
+            priority=25_000,
+            # Anchor 是派生导航；极小窗口可丢弃它，不能挤掉本轮任务/固定约束。
+            required=False,
+        )
     pinned = snapshot.get("attached_document_ids")
     for index, source in enumerate(snapshot.get("knowledge", [])):
         citation = source["citation"]
@@ -263,5 +277,15 @@ def compile_conversation_context(
         "retrieval_report": snapshot.get("retrieval_report") or {},
         "goal_id": goal.get("goal_id"),
         "goal_revision": (goal.get("work") or {}).get("revision"),
+        "context_anchor": (
+            {
+                "version": anchor.get("version"),
+                "covered_messages": anchor.get("covered_messages"),
+                "digest": anchor.get("digest"),
+                "bytes": anchor.get("bytes"),
+            }
+            if anchor
+            else None
+        ),
     }
     return projected, report

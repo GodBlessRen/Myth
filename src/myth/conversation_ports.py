@@ -26,7 +26,10 @@ class ConversationRepository(Protocol):
     # 原子记入工具结果与步骤完成事实；之后安全点才可派发新动作。
     def finish_tool(self, run_id: str, step: int, result: dict) -> None: ...
 
-    # 记录已知参数/权限拒绝为反馈；拒绝不冒充 Ticket 后的 UNKNOWN。
+    # 记录已知 Observation 并消费当前步骤；它不是工具收据，也不制造 UNKNOWN。
+    def finish_observation(self, run_id: str, step: int, result: dict) -> None: ...
+
+    # 兼容字符串拒绝入口；新调用方优先写结构化 Observation。
     def reject(self, run_id: str, step: int, reason: str) -> None: ...
 
     # 把回答/问题、步骤状态及游标一起提交；普通 COMPLETED 只表示对话回答已结束。

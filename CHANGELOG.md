@@ -1,5 +1,13 @@
 # Changelog
 
+## 未发布 — Harness Engineering Deepening
+
+- 已知参数/权限/合同/Information Control 失败统一保存为 **Structured Failure Observation**：稳定 `category/code/capability/retryable/expected/hint` 与兼容 `error` 文本并存，已知拒绝不制造 Tool Receipt 或 UNKNOWN。
+- Conversation 新增 **Verify-on-Stop**：`request_completion` 在停止前核对 remaining、durable evidence 引用和最近已执行 verifier；不满足条件时返回 Observation 并继续同一 Agent Loop。
+- 长会话新增 **Incremental Context Anchor**：Turn 准入时对变旧消息做确定性增量抽取，最近 8 条历史继续原文投影；Anchor 有 lineage/digest，完整消息仍保存在 durable store。
+- Conversation Tool Catalog 超阈值后启用 **Progressive Tool Disclosure**：常用工具 + `tool.search/tool.describe` 默认可见，搜索/描述结果在下一步解锁专门能力；猜中隐藏 tool 仍在 Ticket 前拒绝，失败偷调不会自动解锁。
+- 新增四项纯策略与 Conversation 集成回归，保持 Capability/Ticket/Receipt、UNKNOWN/RECONCILE、Acceptance、Sub-Agent 隔离等既有边界不变。
+
 ## 未发布 — Eval Reliability Evidence
 
 - 固定日常任务的重复试次新增 `pass@k`（Capability）与 `pass^k`（Reliability），不再用单一平均通过率替代稳定性。

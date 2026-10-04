@@ -18,6 +18,7 @@ from ..domain import RecoveryRequired, canonical_json, exact_patch, sha256_bytes
 from ..platform.capabilities import CapabilityState, default_capabilities
 from ..models import ModelMessage, ModelRequest, StepDecision
 from ..platform.subagents import SUBAGENT_RESULT_SCHEMA, default_subagents
+from ..platform.tool_discovery import describe_tool, search_tools, visible_tool_ids
 from ..strategies import LiveInformationController, RuleIntentPicker
 from ..verification import SqliteVerificationProfiles
 
@@ -761,6 +762,11 @@ class LocalConversationExecution:
         args = decision.arguments or {}
         if capability not in TOOL_CATALOG:
             raise PermissionError("tool is not admitted")
+        currently_visible = set(visible_tool_ids(TOOL_CATALOG, turn.get("activities") or []))
+        if capability not in currently_visible:
+            raise ValueError(
+                f"tool is deferred: {capability}; use tool.search/tool.describe before requesting it"
+            )
         spec = self.registry.get(capability)
         if spec.state is not CapabilityState.EXECUTABLE:
             raise PermissionError(f"capability is not executable: {capability}")
@@ -828,6 +834,33 @@ class LocalConversationExecution:
             result.update(self._git(turn, capability, args))
         elif capability == "math.calculate":
             result["value"] = calculate(args.get("expression"))
+        elif capability == "tool.search":
+            descriptions = {
+                spec.capability_id: spec.description
+                for spec in self.registry.list(executable_only=True)
+                if spec.capability_id in TOOL_CATALOG
+            }
+            result["matches"] = search_tools(
+                TOOL_CATALOG,
+                descriptions,
+                args.get("query"),
+                limit=args.get("limit", 6),
+            )
+            result["note"] = "discovery only; matched tools become visible on the next model step"
+        elif capability == "tool.describe":
+            descriptions = {
+                spec.capability_id: spec.description
+                for spec in self.registry.list(executable_only=True)
+                if spec.capability_id in TOOL_CATALOG
+            }
+            result.update(
+                describe_tool(
+                    TOOL_CATALOG,
+                    descriptions,
+                    args.get("capability_id"),
+                )
+            )
+            result["note"] = "description only; execution still requires normal capability admission"
         else:
             target = self._output_target(turn["session_id"], args.get("path"))
             if capability == "project.patch_exact":

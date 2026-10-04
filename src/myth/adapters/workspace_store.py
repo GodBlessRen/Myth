@@ -10,6 +10,7 @@ from ..conversation import chunks, score_chunk
 from ..domain import canonical_json, digest_json, IdentityConflict, BudgetExceeded
 from ..decision_runtime import DecisionRuntime
 from ..strategies import RuleIntentPicker, RuleResolutionController
+from ..platform.context_anchor import build_context_anchor
 from ..network_recovery import reconnect_delay
 from ..session_statistics import measured_integer
 
@@ -674,6 +675,32 @@ class SqliteWorkspaceRepository:
                     item["resolution_offset"] = start
                 item["resolution"] = plan.resolution.value
                 projected_knowledge.append(item)
+            # 长会话在 Turn 准入时增量推进 Context Anchor；原始消息仍保存在 workspace_messages。
+            history_messages = [
+                {"role": m["role"], "content": m["content"]}
+                for m in session["messages"]
+            ]
+            previous_anchor = None
+            previous_row = db.execute(
+                "SELECT snapshot_json FROM workspace_turns WHERE session_id=? ORDER BY rowid DESC LIMIT 1",
+                (sid,),
+            ).fetchone()
+            if previous_row:
+                previous_anchor = json.loads(previous_row["snapshot_json"]).get(
+                    "context_anchor"
+                )
+            context_anchor = (
+                build_context_anchor(
+                    previous_anchor,
+                    history_messages,
+                    cover_count=max(0, len(history_messages) - 8),
+                )
+                if len(history_messages) > 12
+                else previous_anchor
+            )
+            recent_history = (
+                history_messages[-8:] if context_anchor else history_messages[-30:]
+            )
             snapshot = {
                 "project": project,
                 "knowledge": projected_knowledge,
@@ -690,7 +717,8 @@ class SqliteWorkspaceRepository:
                     "information_resolution": self.resolution_policy_id,
                 },
                 "attached_document_ids": list(document_ids),
-                "turn_message_start": min(30, len(session["messages"])),
+                "context_anchor": context_anchor,
+                "turn_message_start": len(recent_history),
                 "memory": [
                     {
                         "memory_id": m.get("memory_id"),
@@ -704,10 +732,7 @@ class SqliteWorkspaceRepository:
                     }
                     for m in memory_records[:8]
                 ],
-                "messages": [
-                    {"role": m["role"], "content": m["content"]}
-                    for m in session["messages"][-30:]
-                ]
+                "messages": recent_history
                 + [{"role": "user", "content": text}],
                 "goal": dict(goal_context or {}),
             }
@@ -976,7 +1001,7 @@ class SqliteWorkspaceRepository:
         )
 
     # 根据持久未决效果选择 INTERRUPTED 或 UNKNOWN，保存恢复游标；安全中断才可继续规划。
-    def interrupt(self, rid, reason):
+    def interrupt(self, rid, reason, *, record_progress=True):
         # 崩溃可能发生在收据发布与数据库结算之间；先核对已有模型证据，不能把已知零派发永久锁在 UNKNOWN。
         self.decisions.recover(rid)
         # 本地事务边界：下列写入一起提交，异常整体回滚；文件/网络效果须在事务外另行核对。
@@ -1026,6 +1051,7 @@ class SqliteWorkspaceRepository:
                 ),
                 recovery_state=recovery,
                 detail=reason,
+                record_progress=record_progress,
             )
             self.store._event(
                 db,
@@ -1047,7 +1073,10 @@ class SqliteWorkspaceRepository:
         lease = self.driver_lease(rid)
         if lease is None or lease["expired"]:
             return self.interrupt(
-                rid, "Driver heartbeat expired; durable checkpoint preserved."
+                rid,
+                "Driver heartbeat expired; durable checkpoint preserved.",
+                # Lease/恢复扫描只是观察，不得刷新 durable progress 时间。
+                record_progress=False,
             )
         return turn
 
@@ -1204,9 +1233,46 @@ class SqliteWorkspaceRepository:
                 {"step": step, "phase": "TOOL_RECORDED", "checkpoint_step": step},
             )
 
-    # 记录已知参数/权限拒绝为反馈；拒绝不冒充 Ticket 后的 UNKNOWN。
+    # 原子记入非工具 Observation；失败/Stop Guard 反馈被消费，但不冒充 Tool Receipt。
+    def finish_observation(self, rid, step, result):
+        with self.store.tx() as db:
+            db.execute(
+                "UPDATE workspace_steps SET state='DONE',result_json=? WHERE run_id=? AND step=?",
+                (canonical_json(result), rid, step),
+            )
+            kind = str(result.get("observation_kind") or "observation")
+            self._checkpoint(
+                db,
+                rid,
+                step,
+                "OBSERVATION_RECORDED",
+                checkpoint_step=step,
+                detail=kind,
+            )
+            self.store._event(
+                db,
+                rid,
+                "ConversationObservationRecorded",
+                {
+                    "step": step,
+                    "kind": kind,
+                    "failure_code": ((result.get("failure") or {}).get("code")),
+                },
+            )
+            self.store._event(
+                db,
+                rid,
+                "ExecutionCheckpoint",
+                {"step": step, "phase": "OBSERVATION_RECORDED", "checkpoint_step": step},
+            )
+
+    # 兼容旧字符串拒绝入口；新路径通过 failures.py 产生结构化 failure。
     def reject(self, rid, step, reason):
-        self.finish_tool(rid, step, {"error": reason})
+        self.finish_observation(
+            rid,
+            step,
+            {"error": str(reason), "observation_kind": "failure"},
+        )
 
     # 把回答/问题、步骤状态及游标一起提交；普通 COMPLETED 只表示对话回答已结束。
     def finish_reply(self, rid, step, text, question_id=None):

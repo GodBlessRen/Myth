@@ -28,6 +28,9 @@ Long-term Goal
 - Steer / Pause / Resume / Stop / Compact；
 - Ollama，本地上下文窗口与 `num_ctx` 对齐；
 - Knowledge / Memory 检索与 provenance；
+- 增量 Context Anchor + recent verbatim tail；长会话压缩不删除 durable history；
+- Progressive Tool Disclosure：常用工具默认可见，专门能力通过 tool.search / tool.describe 渐进披露；
+- Structured Failure Observation + Verify-on-Stop；已知失败可机器恢复，模型 completion 不能覆盖 remaining/失败 verifier；
 - project.read / search、diff.preview、git.status / diff；
 - Artifact 生成与固定对象下载；
 - durable Ticket / Receipt / UNKNOWN / Recovery；

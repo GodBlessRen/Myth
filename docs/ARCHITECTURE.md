@@ -194,6 +194,22 @@ Ollama projection budget 与 `num_ctx` 对齐；远端 provider 使用本地 pro
 
 完整 durable history 不因 Compact / folding 被删除。
 
+### 7.2 Context Anchor / 增量压缩
+
+长会话不会把所有旧消息持续塞回模型窗口。Turn 准入时，旧消息按稳定序号增量合并为 **Context Anchor**，最近尾部继续保留原文：
+
+```text
+durable workspace_messages
+        ↓
+previous Context Anchor + newly aged messages
+        ↓ deterministic extractive merge
+bounded Context Anchor + recent verbatim tail
+        ↓
+ContextCompiler
+```
+
+Context Anchor 是有损派生投影，不是 Memory、权限或验证事实；它保存 covered message count、lineage digest 与自身 digest。极小窗口可以丢弃 Anchor，不能为了保留摘要挤掉当前任务、项目指令或固定来源。完整原始消息始终保存在 durable store。
+
 ## 8. Retrieval / Memory
 
 Knowledge：
@@ -214,6 +230,23 @@ Memory：
 
 Retrieval / Memory 都不能授予执行权限。
 
+### 8.1 Progressive Tool Disclosure
+
+Conversation Tool Catalog 超过阈值后不再把所有工具 schema 永久塞进 Prompt。默认只暴露常用能力和 `tool.search / tool.describe`：
+
+```text
+small visible catalog
+   ↓
+tool.search / tool.describe
+   ↓ durable Observation
+   ↓
+next model step sees discovered tool
+   ↓
+normal Capability admission -> Ticket -> Receipt
+```
+
+Discovery 只改变**下一模型步骤的可见目录**，不授予执行权限。远端模型即使猜中隐藏 capability，也会在 Ticket 前被本地 Runtime 拒绝；一次被拒绝的“偷调”不会自动解锁该工具。
+
 ## 9. Control
 
 产品术语：
@@ -225,6 +258,18 @@ Steer / Pause / Resume / Stop / Model Switch / Thinking Switch / Compact
 Stop 表示“不再调度新的工作”。
 
 它不宣称已经发出的 provider/tool effect 被撤销。晚到结果仍按真实事实记录。
+
+### 9.1 Structured Failure Observation + Verify-on-Stop
+
+已知参数、权限、合同、Information Control 等失败统一投影为结构化 Observation：
+
+```text
+category / code / capability / retryable / expected / hint
+```
+
+同时保留兼容的人类 `error` 文本。这个 Observation 发生在已知拒绝路径，不制造 Tool Receipt，也不把已知失败升级成 UNKNOWN。
+
+Conversation 的 `request_completion` 先经过 **Completion Guard**。模型仍列出 `remaining`、引用不存在的 evidence，或最近一次已执行 verifier 未通过时，停止请求会被退回为结构化 Observation，父 Loop 必须继续。Guard 不自己执行测试、不修改 Acceptance；没有已执行 verifier 时也不会伪造验证事实。
 
 ## 10. Exact verification path
 
