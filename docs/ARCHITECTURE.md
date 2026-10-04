@@ -280,6 +280,19 @@ Knowledge Page (tree/navigation only)
 - Knowledge Page 只保存 folder/page 树和 `mental_model_id`，不复制正文；
 - source scope 有新 Memory revision / revoke 后，Mental Model 只变 stale，不自动偷偷调用模型。
 
+当显式启用 Auto Refresh 后，stale 状态通过已有 Durable Executor 转成后台工作，而不是在 Memory 模块内启动线程：
+
+```text
+stale
+→ Refresh Policy
+→ Refresh Occurrence + Lease
+→ Core Run / model budget
+→ DecisionRuntime Ticket / Receipt
+→ commit or UNKNOWN / SUPERSEDED
+```
+
+自动刷新与 Goal Scheduler 共用同一个常驻 Durable Executor 和全局并发上限，但保持独立工作身份；它不是 Conversation Turn，也不占用用户会话。
+
 Milvus 是**可重建的派生 Vector Adapter**，不是新的事实数据库：
 
 ```text
