@@ -256,3 +256,22 @@ def optimization_event(
         "reason_code": reason_code,
         "metrics": dict(metrics or {}),
     }
+
+
+# 只从已经持久化的 activity 识别可压缩语义边界候选；返回 None 表示不能证明一个工作片段已稳定落地。
+def semantic_boundary(activity: Mapping[str, object]) -> str | None:
+    result = activity.get("result")
+    if not isinstance(result, Mapping):
+        return None
+    capability = activity.get("capability")
+    decision = activity.get("decision")
+    if not capability and isinstance(decision, Mapping):
+        capability = decision.get("capability_id")
+    if capability == "test.run" and result.get("status") in {"PASSED", "FAILED"}:
+        return "verification_settled"
+    if isinstance(result.get("artifact"), Mapping) and result.get("evidence_ref"):
+        return "artifact_settled"
+    subagent = result.get("subagent")
+    if isinstance(subagent, Mapping) and result.get("evidence_bus"):
+        return "delegation_settled"
+    return None
