@@ -141,6 +141,8 @@ class OpenAIProviderTests(unittest.TestCase):
                 "input_tokens": 8,
                 "output_tokens": 4,
                 "input_tokens_details": {"cached_tokens": 5},
+                "cache_creation_input_tokens": 3,
+                "prompt_cache_miss_tokens": 3,
             },
         }
 
@@ -172,6 +174,8 @@ class OpenAIProviderTests(unittest.TestCase):
         self.assertNotIn("secret-token", json.dumps(result.raw))
         self.assertEqual(result.usage["input_tokens"], 8)
         self.assertEqual(result.usage["cached_input_tokens"], 5)
+        self.assertEqual(result.usage["cache_write_input_tokens"], 3)
+        self.assertEqual(result.usage["cache_miss_input_tokens"], 3)
 
     # 回归断言：推理模型公开摘要/推理 Token 被保留为可观察证据，但不冒充原始 Chain-of-Thought。
     def test_reasoning_summary_and_cost_are_observable(self) -> None:
