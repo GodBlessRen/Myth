@@ -460,6 +460,7 @@
               ><select id="provider">
                 <option value="ollama">Ollama · 本地模型</option>
                 <option value="openai">OpenAI · 环境变量 API Key</option>
+                <option value="deepseek">DeepSeek · 环境变量 API Key</option>
                 <option value="chatgpt">ChatGPT · Myth OAuth</option>
               </select>
               <div id="chatgptAuthPanel" class="auth-panel hidden">
@@ -490,7 +491,7 @@
                   ><input
                     id="model"
                     list="modelOptions"
-                    placeholder="检查连接后选择本地模型"
+                    placeholder="检查连接后选择模型"
                   /><datalist id="modelOptions"></datalist>
                 </div>
                 <button id="checkConnection" class="secondary">检查连接</button>
