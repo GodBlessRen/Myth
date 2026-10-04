@@ -672,6 +672,41 @@ class RuntimeStore:
             )
         return delivery_id
 
+    # transition_run：由 Core 状态所有者提交非 Artifact 型后台工作的显式状态；调用方不能直接写 runs 表。
+    def transition_run(
+        self,
+        run_id: str,
+        state: RunState | str,
+        *,
+        event_kind: str,
+        payload: dict[str, Any] | None = None,
+        _db: sqlite3.Connection | None = None,
+    ) -> dict[str, Any]:
+        target = state if isinstance(state, RunState) else RunState(str(state))
+        if target not in {
+            RunState.RECOVERING,
+            RunState.SUCCEEDED,
+            RunState.FAILED,
+            RunState.CANCELLED,
+        }:
+            raise ValueError("transition_run only accepts explicit background outcome states")
+        if not isinstance(event_kind, str) or not event_kind.strip():
+            raise ValueError("event_kind is required")
+        with self.admission_transaction(_db) as db:
+            row = db.execute("SELECT state FROM runs WHERE run_id=?", (run_id,)).fetchone()
+            if row is None:
+                raise KeyError(run_id)
+            current = RunState(str(row["state"]))
+            if current in {RunState.SUCCEEDED, RunState.FAILED, RunState.CANCELLED}:
+                if current != target:
+                    raise InvalidTransition(
+                        f"terminal Run {current.value} cannot transition to {target.value}"
+                    )
+                return self.get_run(run_id)
+            db.execute("UPDATE runs SET state=? WHERE run_id=?", (target.value, run_id))
+            self._event(db, run_id, event_kind.strip(), dict(payload or {}))
+        return self.get_run(run_id)
+
     # 校验并读取 Core Run；返回状态数据，不暴露 SQL。
     def get_run(self, run_id: str) -> dict[str, Any]:
         row = self.db.execute("SELECT * FROM runs WHERE run_id=?", (run_id,)).fetchone()

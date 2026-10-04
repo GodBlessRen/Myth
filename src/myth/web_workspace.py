@@ -156,6 +156,65 @@ class ConversationWebService:
             values = memory.list(active_only=True, limit=min(int(limit), 100))
             return [item for item in values if not kind or item["kind"] == kind]
 
+    # mental_models：返回 materialized view 的紧凑状态并附加 auto-refresh policy；读取不会触发模型调用。
+    def mental_models(self):
+        with MythRuntime(self.root) as runtime:
+            workspace = Workspace(runtime)
+            values = workspace.mental_models.list_models()
+            for item in values:
+                try:
+                    item["auto_refresh"] = workspace.mental_model_refresh.policy(
+                        str(item["model_id"])
+                    )
+                except KeyError:
+                    item["auto_refresh"] = {
+                        "enabled": False,
+                        "configured": False,
+                    }
+            return values
+
+    # mental_model：读取单个模型及其 policy；L2 仍只展开已持久 materialized content，不自动刷新。
+    def mental_model(self, model_id):
+        with MythRuntime(self.root) as runtime:
+            workspace = Workspace(runtime)
+            value = workspace.mental_models.model(str(model_id), resolution="L2")
+            try:
+                value["auto_refresh"] = workspace.mental_model_refresh.policy(
+                    str(model_id)
+                )
+            except KeyError:
+                value["auto_refresh"] = {
+                    "enabled": False,
+                    "configured": False,
+                }
+            return value
+
+    # create_mental_model：显式登记持续问题；创建本身不调用模型，后台刷新仍需另行 opt-in。
+    def create_mental_model(self, value):
+        with MythRuntime(self.root) as runtime:
+            workspace = Workspace(runtime)
+            return workspace.mental_models.create_model(
+                name=value.get("name", ""),
+                source_query=value.get("source_query", ""),
+                scope_type=value.get("scope_type", "global"),
+                scope_id=value.get("scope_id"),
+            )
+
+    # configure_mental_model_refresh：产品入口只配置 policy；真正 Provider I/O 由独立 Durable Executor 驱动。
+    def configure_mental_model_refresh(self, model_id, value):
+        with MythRuntime(self.root) as runtime:
+            workspace = Workspace(runtime)
+            return workspace.mental_model_refresh.configure(
+                str(model_id),
+                enabled=value.get("enabled"),
+                min_interval_seconds=value.get("min_interval_seconds", 300),
+            )
+
+    # knowledge_pages：只返回导航树；正文继续由 backing Mental Model/Memory 持有。
+    def knowledge_pages(self):
+        with MythRuntime(self.root) as runtime:
+            return Workspace(runtime).knowledge_pages.tree()
+
     # 读取独立执行器心跳/租约投影；只反映 worker 生命，不把它冒充业务进度。
     def executor(self):
         with MythRuntime(self.root) as runtime:
@@ -881,6 +940,12 @@ class ConversationWebService:
                     int(query.get("limit", ["50"])[0]),
                 )
             }
+        if parts == ["mental-models"]:
+            return {"mental_models": self.mental_models()}
+        if len(parts) == 2 and parts[0] == "mental-models":
+            return self.mental_model(parts[1])
+        if parts == ["knowledge-pages"]:
+            return {"knowledge_pages": self.knowledge_pages()}
         if parts == ["goals"]:
             return {"goals": self.goals(query.get("archived", ["0"])[0] == "1")}
         if parts == ["schedules"]:
@@ -940,6 +1005,14 @@ class ConversationWebService:
             return self.connection(value, force=True)
         if parts == ["memories"]:
             return self.remember(value)
+        if parts == ["mental-models"]:
+            return self.create_mental_model(value)
+        if (
+            len(parts) == 3
+            and parts[0] == "mental-models"
+            and parts[2] == "auto-refresh"
+        ):
+            return self.configure_mental_model_refresh(parts[1], value)
         if parts == ["goals"]:
             return self.create_goal(value)
         if len(parts) == 3 and parts[0] == "schedules" and parts[2] == "enabled":

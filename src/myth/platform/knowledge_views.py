@@ -217,6 +217,17 @@ class SqliteKnowledgeViews:
             )
             for row in source_rows
         ]
+        previous_content = ""
+        if model.get("backing_memory_id"):
+            previous_content = str(
+                self.memory.resolve(
+                    str(model["backing_memory_id"]),
+                    resolution="L2",
+                    project_id=project_id,
+                    session_id=session_id,
+                ).get("text")
+                or ""
+            )
         return {
             "model_id": str(model["model_id"]),
             "model_revision": int(model["revision"]),
@@ -224,6 +235,8 @@ class SqliteKnowledgeViews:
             "source_query": str(model["source_query"]),
             "scope_type": str(model["scope_type"]),
             "scope_id": model.get("scope_id"),
+            # previous_content：仅作为“待演进文档基线”；不能自动进入 evidence_refs 或获得事实权重。
+            "previous_content": previous_content,
             "observed_change_seq": self.memory.current_change_seq(),
             "sources": sources,
             "retrieval": report["retrieval"],

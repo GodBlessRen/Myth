@@ -118,3 +118,55 @@ Mental Model 的正文唯一落在 backing Semantic Memory，因此原有 Eviden
 Memory 每次 revision/revoke 都追加单调 `change_seq`。Mental Model 保存 `last_seen_change_seq`；自身作用域后来出现新变化就确定性变为 stale。刷新不会自动发生，避免后台隐式模型成本与不可观测副作用。
 
 Knowledge Page 更薄：只保存 folder/page hierarchy 与 `mental_model_id`。树结构和内容状态分离，移动/重命名页面不会重写 Mental Model 正文。
+
+## Automatic Mental Model Refresh
+
+自动刷新是 **Durable Background Work**，不是 Memory 内部隐藏线程。
+
+```text
+Memory revision / revoke
+        ↓
+change_seq watermark
+        ↓
+Mental Model becomes stale
+        ↓
+opt-in Refresh Policy
+        ↓
+Refresh Occurrence + Lease
+        ↓
+Core Run + model budget
+        ↓
+DecisionRuntime: Intent → Ticket → Provider → Receipt
+        ↓
+Evidence + watermark re-check
+        ↓
+commit_refresh()
+```
+
+### Ownership
+
+- Mental Model：拥有 source query / backing Memory / materialized content freshness。
+- Refresh Policy：拥有是否自动刷新、最小间隔、冻结 Provider/Model 设置和 retry deadline。
+- Refresh Occurrence：拥有一次 `model_id + source_change_seq` 的后台工作身份、状态与 lease。
+- Core Run / DecisionRuntime：拥有模型预算、Ticket、Receipt、UNKNOWN 与 Provider Evidence。
+- Durable Executor：只发现和驱动已准入工作，不成为新的事实数据库。
+
+### Trigger is not permission
+
+`stale` 只表示“派生视图可能需要刷新”，不授权直接调用模型。自动刷新必须显式 opt-in；Policy 建立时冻结 Provider / Model / thinking / context window / output budget，之后全局模型设置改变不会悄悄改变已有后台任务。
+
+### Coalescing and leases
+
+同一个 `model_id + source_change_seq` 最多只有一个 occurrence。`min_interval_seconds` 合并短时间内连续 Memory 写入。Durable Executor 有全局 worker lease；每个 Refresh Occurrence 另有 owner / heartbeat / lease。前者回答“谁是当前 worker”，后者回答“谁正在驱动这次 refresh”。
+
+### UNKNOWN
+
+Provider 在 Ticket 前明确未派发，可以退避后再次准入模型机会。Provider 已获 Ticket 后结果不明时，Refresh Occurrence 进入 `UNKNOWN`，Core Run 进入 `RECOVERING`；该 Mental Model 不再进入自动 due / dispatch 集合，必须先 reconcile 原模型 Attempt。
+
+### Superseded synthesis
+
+如果模型生成期间 source scope 出现新 change watermark，已经返回的 synthesis 保留 Provider Receipt，但不发布为 Mental Model；旧 occurrence 标记 `SUPERSEDED`，Core Run 标记 `CANCELLED`，下一次基于新 watermark 建新 occurrence。
+
+### Previous content is baseline, not Evidence
+
+上一版 Mental Model 可以作为文档演进基线以减少 prose drift：`previous content + new admitted evidence → revised document`。但 `previous_content` 永远不能自动进入 `evidence_refs`，最终 Evidence 只能映射到本次 admitted 的底层 Memory sources。
