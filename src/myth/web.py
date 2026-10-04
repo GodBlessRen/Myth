@@ -64,20 +64,24 @@ class AgentWebService:
     def provider_key_status(self) -> dict[str, Any]:
         return {"providers": self.provider_keys.statuses()}
 
-    # 用户在 Myth 内显式连接 API Key；明文仅用于本次 loopback 请求并直接进入系统安全凭据库。
+    # 用户在 Myth 内显式连接 API Key；先用候选值验证远端，再原子切换系统凭据，坏 key 不覆盖旧连接。
     def provider_key_save(self, payload: dict[str, Any]) -> dict[str, Any]:
         provider = str(payload.get("provider") or "").strip().lower()
-        secret = payload.get("api_key")
+        secret = self.provider_keys.prepare(provider, payload.get("api_key"))
+        candidate = create_provider(
+            provider,
+            runtime_root=str(self.root),
+            token_supplier=lambda: secret,
+        )
+        check = candidate.check()
+        if not check.ready:
+            raise ValueError("API Key 验证失败；原有连接保持不变。")
         status = self.provider_keys.save(provider, secret)
-        # 保存后用真实 Provider check 验证，而不是把“写入成功”冒充“服务可用”。
-        check = self.provider_check({"provider": provider})
-        if not check["ready"]:
-            try:
-                self.provider_keys.delete(provider)
-            except Exception:
-                pass
-            raise ValueError("API Key 已保存但模型服务验证失败，Myth 已撤销本次连接。")
-        return {**status, "ready": True, "details": check.get("details") or {}}
+        return {
+            **status,
+            "ready": True,
+            "details": check.details or {},
+        }
 
     # 删除 Myth 管理的 API Key；环境变量兼容配置不由网页静默修改。
     def provider_key_delete(self, payload: dict[str, Any]) -> dict[str, Any]:
