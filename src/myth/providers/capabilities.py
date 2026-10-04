@@ -126,3 +126,23 @@ def validate_model_selection(
         and requested > ceiling
     ):
         raise ValueError(f"每步输出 Token 超过该模型上限 {ceiling}。")
+    reasoning = profile.get("reasoning") if isinstance(profile.get("reasoning"), dict) else None
+    thinking = normalize_thinking(settings.get("thinking"))
+    if reasoning is None:
+        if thinking is not None:
+            raise ValueError("当前模型未声明可调 Thinking；请使用 Provider 默认行为。")
+        return
+    if thinking is None or isinstance(thinking, bool):
+        return
+    allowed = {
+        str(value)
+        for value in (reasoning.get("levels") or [])
+        if isinstance(value, str)
+    }
+    off = reasoning.get("off")
+    if isinstance(off, str):
+        allowed.add(off)
+    if thinking not in allowed:
+        raise ValueError(
+            "当前模型不支持所选 Thinking 档位；请按模型能力重新选择。"
+        )
