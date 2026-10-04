@@ -178,6 +178,67 @@ class MentalModelAutoRefreshTests(unittest.TestCase):
         self.assertEqual(self.refresh.due(), [])
         self.assertEqual(provider.calls, 1)
 
+    # UNKNOWN 后迟到 Receipt 只恢复同一模型 Attempt；后续 commit 不得再次调用 Provider。
+    def test_late_receipt_reconciles_same_run_without_provider_replay(self):
+        self.refresh.configure(self.model["model_id"], enabled=True, min_interval_seconds=60)
+        run_id = self.refresh.admit(self.model["model_id"])
+        failing = RefreshProvider(fail_after_ticket=True)
+        self.assertEqual(self.refresh.run(run_id, failing)["state"], "UNKNOWN")
+
+        invocation = self.runtime.store.db.execute(
+            "SELECT * FROM model_invocations WHERE run_id=? ORDER BY rowid DESC LIMIT 1",
+            (run_id,),
+        ).fetchone()
+        prepared = self.workspace.mental_models.prepare_refresh(
+            self.model["model_id"], limit=12, resolution="L1"
+        )
+        source_ref = prepared["sources"][0]["source_ref"]
+        decision = {
+            "decision_type": "request_completion",
+            "reason": "Late but durable synthesis response.",
+            "capability_id": "",
+            "arguments_json": "{}",
+            "question": "",
+            "missing_info_category": "",
+            "claim": "Late receipt safely resumes the same refresh.",
+            "goal_coverage": "mental-model-refresh",
+            "evidence_refs": [source_ref],
+            "remaining": [],
+        }
+        raw = {
+            "id": "late-refresh-response",
+            "provider": "ollama",
+            "model": "test",
+            "status": "completed",
+        }
+        response_ref = self.runtime.objects.put(
+            json.dumps(raw, sort_keys=True).encode("utf-8")
+        )
+        receipt = {
+            "model_attempt_id": invocation["model_attempt_id"],
+            "request_digest": invocation["request_digest"],
+            "response_ref": response_ref,
+            "response_id": "late-refresh-response",
+            "text": json.dumps(decision),
+            "usage": {
+                "model_calls": 1,
+                "input_tokens": 120,
+                "output_tokens": 40,
+            },
+        }
+        self.workspace.repository.decisions._receipt_path(
+            invocation["model_attempt_id"]
+        ).write_text(json.dumps(receipt), encoding="utf-8")
+
+        reconciled = self.refresh.reconcile_unknown()
+        self.assertEqual(reconciled[0]["state"], "ADMITTED")
+
+        should_not_run = RefreshProvider()
+        result = self.refresh.run(run_id, should_not_run)
+        self.assertEqual(result["state"], "SUCCEEDED")
+        self.assertEqual(should_not_run.calls, 0)
+        self.assertEqual(self.runtime.store.get_run(run_id)["state"], "SUCCEEDED")
+
     # 模型调用期间来源水位变化时，旧 synthesis 已有收据但不能发布；Run 明确 SUPERSEDED/CANCELLED。
     def test_source_change_during_synthesis_supersedes_old_refresh(self):
         self.refresh.configure(self.model["model_id"], enabled=True, min_interval_seconds=60)
