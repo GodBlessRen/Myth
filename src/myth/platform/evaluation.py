@@ -413,6 +413,7 @@ class HeldOutEvalBoundary:
     # final_case_ids：只用于最终接受/拒绝、禁止回流搜索的 Case 身份。
     final_case_ids: tuple[str, ...]
 
+    # 构造时强制 discovery/final 身份互斥；重叠意味着 final 已不再 held-out。
     def __post_init__(self) -> None:
         discovery = set(self.discovery_case_ids)
         final = set(self.final_case_ids)
