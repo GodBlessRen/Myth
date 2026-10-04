@@ -1,5 +1,12 @@
 # Changelog
 
+## 未发布 — Controlled Evaluation 深化
+
+- Evaluation 新增持久 `harness_id + harness_mechanisms`，同一固定 Task 可比较 baseline / full / one-mechanism / leave-one-out。
+- Eval Ledger 新增受控 Task × Harness × Mechanism attribution；只有完整消融证据才标记 supported benefit/harm，缺证据保持 insufficient。
+- Foundation Eval Runner 可在 disposable Workspace 中实际切换 `context_compaction / observation_recall / action_fusion` 并批量记录 discovery Run；未知机制拒绝伪消融。
+- Context economics 支持同单位 upfront cost、outstanding debt、breakeven requests 和 projected net saving；缺测 debt 继续保持 N/A，接近窗口上限时安全保护优先。
+
 ## 未发布 — Context / Evaluation 深化
 
 - 把 SoL-Pi 可长期复用的机制继续吸收到现有 Myth 骨架，不新增平行 Runtime：State/Context 分离、exact Observation recall、grounded Compact seed、deterministic successor、来源绑定验证、Context 投影选择、Capability 可达性、bounded recovery、capability floor 与 held-out eval。

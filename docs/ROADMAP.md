@@ -41,10 +41,10 @@ Long-term Goal
 - exact recall 增加了多少额外 Tool round-trip；
 - Compact 的 upfront/cache debt 在多少请求后回本；
 - fused successor 是否真实减少 model calls，而不降低 Verification；
-- 哪些任务出现 outcome flip，具体机制是否真的触发；
+- 哪些任务出现 outcome flip；对关键机制用 one-mechanism + leave-one-out 受控复跑区分真实贡献与交互；
 - 同一候选在 held-out final suite 是否仍保持 capability floor。
 
-只有这些证据成立，才把实验参数从 policy candidate 提升为默认策略。
+当前 Evaluation 已能生成/持久化 baseline、full、one-mechanism、leave-one-out Harness 变体并输出受控 attribution；这些实验仍属于 discovery。只有这些证据与独立 held-out final 都成立，才把实验参数从 policy candidate 提升为默认策略。
 
 ## Next 4 — 连续自用与计划故障注入
 

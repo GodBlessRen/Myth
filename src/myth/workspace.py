@@ -26,6 +26,7 @@ class Workspace:
         intent_picker=None,
         resolution_controller=None,
         resolution_policy_id=None,
+        evaluation_harness_mechanisms=None,
     ):
         # vector_index：可选 Milvus 派生索引；延迟连接/加载，缺失时词面检索保持完整可用。
         self.vector_index = create_milvus_vector_index(runtime)
@@ -59,6 +60,7 @@ class Workspace:
             resolution_controller=resolution_controller,
             resolution_policy_id=resolution_policy_id,
             vector_index=self.vector_index,
+            evaluation_harness_mechanisms=evaluation_harness_mechanisms,
         )
         # sota_route：已验收成功路径的效率账本；只给未来 Run 提供冻结提示，不授予能力。
         self.sota_route = SotaRouteLedger(runtime)

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from math import ceil
 from typing import Mapping
 
 
@@ -77,7 +78,7 @@ def context_boundary(activity: Mapping[str, object]) -> str | None:
     return None
 
 
-# 在 normal/compact 两个真实 provider-visible 投影之间选择；阈值带滞回，缺测项保持 None。
+# 在 normal/compact 两个真实 provider-visible 投影之间选择；有同单位成本证据时按回本期判断，缺测保持 None。
 def choose_context_mode(
     *,
     normal_bytes: int,
@@ -86,6 +87,8 @@ def choose_context_mode(
     remaining_requests: int | None,
     previous_mode: str | None = None,
     manual_compact: bool = False,
+    upfront_cost_bytes: int | None = None,
+    outstanding_debt_bytes: int | None = None,
 ) -> dict[str, object]:
     if normal_bytes < 0 or max_bytes <= 0:
         raise ValueError("context byte counts must be non-negative and max_bytes positive")
@@ -93,26 +96,41 @@ def choose_context_mode(
         raise ValueError("compact_bytes must be non-negative when measured")
     if remaining_requests is not None and remaining_requests < 0:
         raise ValueError("remaining_requests must be non-negative when measured")
+    for value in (upfront_cost_bytes, outstanding_debt_bytes):
+        if value is not None and value < 0:
+            raise ValueError("context economics costs must be non-negative when measured")
 
     pressure = normal_bytes / max_bytes
     enter_threshold = 0.78
     exit_threshold = 0.62
-    saving = (
-        None
-        if compact_bytes is None
-        else max(0, normal_bytes - compact_bytes)
-    )
+    saving = None if compact_bytes is None else max(0, normal_bytes - compact_bytes)
     projected = (
         None
         if saving is None or remaining_requests is None
         else saving * remaining_requests
     )
+    measured_debt = (
+        None
+        if upfront_cost_bytes is None or outstanding_debt_bytes is None
+        else upfront_cost_bytes + outstanding_debt_bytes
+    )
+    breakeven_requests = (
+        None
+        if saving is None or saving <= 0 or measured_debt is None
+        else ceil(measured_debt / saving)
+    )
+    projected_net = (
+        None
+        if projected is None or measured_debt is None
+        else projected - measured_debt
+    )
 
-    if manual_compact:
+    # 统一生成 Context 选择投影，确保所有分支都保留相同经济字段与原因码。
+    def result(mode: str, outcome: str, reason_code: str) -> dict[str, object]:
         return {
-            "mode": "compact",
-            "outcome": "APPLIED",
-            "reason_code": "explicit_user_control",
+            "mode": mode,
+            "outcome": outcome,
+            "reason_code": reason_code,
             "normal_bytes": normal_bytes,
             "compact_bytes": compact_bytes,
             "provider_visible_saving_bytes": saving,
@@ -121,71 +139,35 @@ def choose_context_mode(
             "pressure": pressure,
             "enter_threshold": enter_threshold,
             "exit_threshold": exit_threshold,
-            "optimization_debt_bytes": None,
+            "upfront_cost_bytes": upfront_cost_bytes,
+            "optimization_debt_bytes": outstanding_debt_bytes,
+            "breakeven_requests": breakeven_requests,
+            "projected_net_saving_bytes": projected_net,
         }
 
+    if manual_compact:
+        return result("compact", "APPLIED", "explicit_user_control")
     if compact_bytes is None:
-        return {
-            "mode": "normal",
-            "outcome": "INELIGIBLE",
-            "reason_code": "no_settled_context_boundary",
-            "normal_bytes": normal_bytes,
-            "compact_bytes": None,
-            "provider_visible_saving_bytes": None,
-            "remaining_requests": remaining_requests,
-            "projected_saving_bytes": None,
-            "pressure": pressure,
-            "enter_threshold": enter_threshold,
-            "exit_threshold": exit_threshold,
-            "optimization_debt_bytes": None,
-        }
+        return result("normal", "INELIGIBLE", "no_settled_context_boundary")
 
     hold_compact = previous_mode == "compact" and pressure >= exit_threshold
     enter_compact = pressure >= enter_threshold
     if not enter_compact and not hold_compact:
-        return {
-            "mode": "normal",
-            "outcome": "DEFERRED",
-            "reason_code": "below_context_pressure_threshold",
-            "normal_bytes": normal_bytes,
-            "compact_bytes": compact_bytes,
-            "provider_visible_saving_bytes": saving,
-            "remaining_requests": remaining_requests,
-            "projected_saving_bytes": projected,
-            "pressure": pressure,
-            "enter_threshold": enter_threshold,
-            "exit_threshold": exit_threshold,
-            "optimization_debt_bytes": None,
-        }
-
+        return result("normal", "DEFERRED", "below_context_pressure_threshold")
     if saving is None or saving <= 0:
-        return {
-            "mode": "normal",
-            "outcome": "INELIGIBLE",
-            "reason_code": "no_provider_visible_saving",
-            "normal_bytes": normal_bytes,
-            "compact_bytes": compact_bytes,
-            "provider_visible_saving_bytes": saving,
-            "remaining_requests": remaining_requests,
-            "projected_saving_bytes": projected,
-            "pressure": pressure,
-            "enter_threshold": enter_threshold,
-            "exit_threshold": exit_threshold,
-            "optimization_debt_bytes": None,
-        }
+        return result("normal", "INELIGIBLE", "no_provider_visible_saving")
 
-    return {
-        "mode": "compact",
-        "outcome": "APPLIED",
-        "reason_code": "hysteresis_hold" if hold_compact and not enter_compact else "context_pressure",
-        "normal_bytes": normal_bytes,
-        "compact_bytes": compact_bytes,
-        "provider_visible_saving_bytes": saving,
-        "remaining_requests": remaining_requests,
-        "projected_saving_bytes": projected,
-        "pressure": pressure,
-        "enter_threshold": enter_threshold,
-        "exit_threshold": exit_threshold,
-        # Provider cache 重写代价尚无统一同单位计量；未知必须保持 None，不能偷偷按零定价。
-        "optimization_debt_bytes": None,
-    }
+    # 只有同单位 upfront/debt 真正测到时才进入经济门；缺测不是零债务。
+    if (
+        measured_debt is not None
+        and projected_net is not None
+        and projected_net < 0
+        and pressure < 0.90
+    ):
+        return result("normal", "DEFERRED", "context_economics_not_repaid")
+
+    return result(
+        "compact",
+        "APPLIED",
+        "hysteresis_hold" if hold_compact and not enter_compact else "context_pressure",
+    )

@@ -18,10 +18,13 @@ from .platform.evaluation import (
     EvalObservation,
     EvalSuite,
     EvalVerdict,
+    HarnessVariant,
+    controlled_harness_variants,
     load_eval_suite,
     release_gate,
     summarize_observations,
 )
+from .platform.evaluation_store import SqliteEvaluationLedger
 from .runtime import MythRuntime
 from .strategies import (
     RuleIntentPicker,
@@ -31,7 +34,12 @@ from .strategies import (
 from .workspace import Workspace
 
 
-# _SETTINGS：安全的产品设置默认值；只影响新准入，不倒写历史模型请求。
+# CONTROLLED_HARNESS_MECHANISMS：内置受控实验真正能切换的现有机制；未知机制拒绝，避免“只改标签”的伪消融。
+CONTROLLED_HARNESS_MECHANISMS = frozenset(
+    {"context_compaction", "observation_recall", "action_fusion"}
+)
+
+
 _SETTINGS = {
     "provider": "ollama",
     "model": "eval-local",
@@ -53,6 +61,8 @@ class FoundationEvalRunner:
         policy_id: str = "production-default",
         intent_picker=None,
         resolution_controller=None,
+        harness_id: str | None = None,
+        harness_mechanisms: tuple[str, ...] = (),
     ):
         # suite：固定版本完整题集；筛选后结果保留 partial 标记。
         self.suite = suite
@@ -62,6 +72,14 @@ class FoundationEvalRunner:
         self.intent_picker = intent_picker or RuleIntentPicker()
         # resolution_controller：同源信息表示策略；L0/L1/L2 不等于验收置信度。
         self.resolution_controller = resolution_controller or RuleResolutionController()
+        # harness_id/mechanisms：Evaluation 维度身份，只描述本次受控变体；不新增 Runtime 权限或执行层。
+        self.harness_id = str(harness_id or "").strip() or None
+        # harness_mechanisms：本次受控变体实际启用的现有机制集合；只影响 Evaluation override，不扩大权限。
+        self.harness_mechanisms = tuple(
+            str(item).strip() for item in harness_mechanisms if str(item).strip()
+        )
+        if self.harness_id is not None:
+            HarnessVariant(self.harness_id, self.harness_mechanisms)
 
     # 加载指定固定版本评测集并装配 Runner；不根据失败改题或预期。
     @classmethod
@@ -72,6 +90,8 @@ class FoundationEvalRunner:
         policy_id: str = "production-default",
         resolution_policy: str = "default",
         policy_config: dict | None = None,
+        harness_id: str | None = None,
+        harness_mechanisms: tuple[str, ...] = (),
     ) -> "FoundationEvalRunner":
         if policy_config is not None:
             controller = resolution_controller_from_config(policy_config)
@@ -88,6 +108,8 @@ class FoundationEvalRunner:
             load_eval_suite(path),
             policy_id=policy_id,
             resolution_controller=controller,
+            harness_id=harness_id,
+            harness_mechanisms=harness_mechanisms,
         )
 
     # 在临时目录创建真实持久 Workspace，并可注入明确路由/分辨率策略。
@@ -97,6 +119,9 @@ class FoundationEvalRunner:
             intent_picker=self.intent_picker,
             resolution_controller=self.resolution_controller,
             resolution_policy_id=self.policy_id,
+            evaluation_harness_mechanisms=(
+                self.harness_mechanisms if self.harness_id is not None else None
+            ),
         )
 
     # 执行选中或完整题集并保存覆盖标记；partial 只作研究，不能获得完整发布资格。
@@ -115,6 +140,8 @@ class FoundationEvalRunner:
             "version": self.suite.version,
             "principle": self.suite.principle,
             "policy_id": self.policy_id,
+            "harness_id": self.harness_id,
+            "harness_mechanisms": list(self.harness_mechanisms),
             "suite_case_count": len(self.suite.cases),
             "selected_case_count": len(observations),
             "complete_suite": len(observations) == len(self.suite.cases),
@@ -146,6 +173,7 @@ class FoundationEvalRunner:
                     {"latency_ms": round((time.perf_counter() - started) * 1000, 3)},
                     safety_regression=case.safety_critical,
                     policy_id=self.policy_id,
+                    harness_id=self.harness_id,
                     comparison_key=case.case_id,
                 )
             verdict, reason, evidence, metrics = method(case)
@@ -162,6 +190,7 @@ class FoundationEvalRunner:
                 safety_regression=case.safety_critical
                 and verdict is not EvalVerdict.PASS,
                 policy_id=self.policy_id,
+                harness_id=self.harness_id,
                 comparison_key=case.case_id,
             )
         except Exception as exc:
@@ -173,6 +202,7 @@ class FoundationEvalRunner:
                 (),
                 safety_regression=case.safety_critical,
                 policy_id=self.policy_id,
+                harness_id=self.harness_id,
                 comparison_key=case.case_id,
             )
 
@@ -605,3 +635,82 @@ def run_eval_suite(
         resolution_policy=resolution_policy,
         policy_config=policy_config,
     ).run(case_ids)
+
+
+
+# 在同一固定 suite 上实际执行 baseline/full/one-mechanism/leave-one-out 变体；工作区均为临时 disposable。
+def run_controlled_harness_experiment(
+    path: str | Path,
+    mechanisms: Iterable[str],
+    *,
+    policy_id: str = "production-default",
+    policy_config: dict | None = None,
+    case_ids: Iterable[str] | None = None,
+    prefix: str = "harness",
+) -> list[dict]:
+    requested = tuple(sorted({str(item).strip() for item in mechanisms if str(item).strip()}))
+    unsupported = set(requested) - CONTROLLED_HARNESS_MECHANISMS
+    if unsupported:
+        raise ValueError(
+            "unsupported controlled harness mechanisms: " + ",".join(sorted(unsupported))
+        )
+    results = []
+    for variant in controlled_harness_variants(requested, prefix=prefix):
+        runner = FoundationEvalRunner.from_path(
+            path,
+            policy_id=policy_id,
+            policy_config=policy_config,
+            harness_id=variant.harness_id,
+            harness_mechanisms=variant.mechanisms,
+        )
+        result = runner.run(case_ids)
+        result["evaluation_partition"] = "discovery"
+        results.append(result)
+    return results
+
+
+
+# 执行全部受控 Harness 变体、持久进 Eval Ledger，并立即生成 Task×Harness×Mechanism 归因结果。
+def run_record_controlled_harness_experiment(
+    runtime,
+    path: str | Path,
+    mechanisms: Iterable[str],
+    *,
+    policy_id: str = "production-default",
+    policy_config: dict | None = None,
+    case_ids: Iterable[str] | None = None,
+    prefix: str = "harness",
+) -> dict:
+    requested = tuple(sorted({str(item).strip() for item in mechanisms if str(item).strip()}))
+    results = run_controlled_harness_experiment(
+        path,
+        requested,
+        policy_id=policy_id,
+        policy_config=policy_config,
+        case_ids=case_ids,
+        prefix=prefix,
+    )
+    ledger = SqliteEvaluationLedger(runtime)
+    recorded = [ledger.record(item, policy_id=policy_id) for item in results]
+    baseline = next(
+        item for item in recorded if not item.get("harness_mechanisms")
+    )
+    full_set = set(requested)
+    full = next(
+        item
+        for item in recorded
+        if set(item.get("harness_mechanisms") or ()) == full_set
+    )
+    variant_ids = tuple(
+        item["eval_run_id"]
+        for item in recorded
+        if item["eval_run_id"] not in {baseline["eval_run_id"], full["eval_run_id"]}
+    )
+    return {
+        "runs": recorded,
+        "attribution": ledger.controlled_attribution(
+            baseline_eval_run_id=baseline["eval_run_id"],
+            full_eval_run_id=full["eval_run_id"],
+            variant_eval_run_ids=variant_ids,
+        ),
+    }

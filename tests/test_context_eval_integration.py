@@ -24,10 +24,13 @@ from myth.platform.evaluation import (
     EvalObservation,
     EvalReport,
     EvalVerdict,
+    HarnessVariant,
     HeldOutEvalBoundary,
     attribution_matrix,
     capability_efficiency_gate,
     compare_observations,
+    controlled_attribution,
+    controlled_harness_variants,
 )
 from myth.platform.evolution import (
     ExperimentCandidate,
@@ -76,6 +79,35 @@ class ContextCapabilityRecoveryTests(unittest.TestCase):
         )
         self.assertEqual(decision["mode"], "compact")
         self.assertEqual(decision["reason_code"], "hysteresis_hold")
+
+    # 回归断言：已有同单位 upfront/debt 证据时，Context 必须看剩余 horizon 是否能回本。
+    def test_context_economics_defers_until_debt_can_be_repaid(self):
+        decision = choose_context_mode(
+            normal_bytes=36000,
+            compact_bytes=26000,
+            max_bytes=42000,
+            remaining_requests=2,
+            upfront_cost_bytes=15000,
+            outstanding_debt_bytes=10000,
+        )
+        self.assertEqual(decision["mode"], "normal")
+        self.assertEqual(decision["reason_code"], "context_economics_not_repaid")
+        self.assertEqual(decision["breakeven_requests"], 3)
+        self.assertEqual(decision["projected_net_saving_bytes"], -5000)
+
+    # 回归断言：窗口进入保护区时可越过经济回本门，避免为了省钱把 Context 撑爆。
+    def test_context_pressure_can_override_unrepaid_debt_near_limit(self):
+        decision = choose_context_mode(
+            normal_bytes=39000,
+            compact_bytes=26000,
+            max_bytes=42000,
+            remaining_requests=1,
+            upfront_cost_bytes=20000,
+            outstanding_debt_bytes=10000,
+        )
+        self.assertEqual(decision["mode"], "compact")
+        self.assertEqual(decision["reason_code"], "context_pressure")
+        self.assertLess(decision["projected_net_saving_bytes"], 0)
 
     # 回归断言：enabled 不等于 reachable；直接复用现有 Capability Registry，不建立第二套机制目录。
     def test_capability_reachability_uses_existing_registry(self):
@@ -179,6 +211,82 @@ class EvaluationEvolutionTests(unittest.TestCase):
             value["outcome_flips"][0]["candidate_mechanisms"],
             ["context_compaction:APPLIED"],
         )
+
+    # 回归断言：两机制实验只需四个唯一 Harness 变体；one-mechanism 与另一机制的 leave-one-out 复用同一次真实 Run。
+    def test_controlled_harness_variant_plan_deduplicates_equivalent_ablations(self):
+        variants = controlled_harness_variants(("compact", "recall"), prefix="exp")
+        self.assertEqual(len(variants), 4)
+        self.assertEqual(
+            {frozenset(item.mechanisms) for item in variants},
+            {
+                frozenset(),
+                frozenset({"compact"}),
+                frozenset({"recall"}),
+                frozenset({"compact", "recall"}),
+            },
+        )
+
+    # 回归断言：真正的机制归因要求 full、one-mechanism 与 leave-one-out 同题对照；完整组合失败而去掉 compact 后恢复，标记受控负贡献。
+    def test_controlled_attribution_requires_one_and_leave_one_out(self):
+        variants = (
+            HarnessVariant("base", ()),
+            HarnessVariant("full", ("compact", "recall")),
+            HarnessVariant("only-compact", ("compact",)),
+            HarnessVariant("only-recall", ("recall",)),
+        )
+        observations = (
+            EvalObservation(
+                "case-1",
+                EvalVerdict.PASS,
+                "base",
+                {"input_tokens": 100, "cache_write_input_tokens": 0},
+                policy_id="p",
+                harness_id="base",
+            ),
+            EvalObservation(
+                "case-1",
+                EvalVerdict.FAIL,
+                "full",
+                {"input_tokens": 70, "cache_write_input_tokens": 20},
+                policy_id="p",
+                harness_id="full",
+            ),
+            EvalObservation(
+                "case-1",
+                EvalVerdict.FAIL,
+                "compact only",
+                {"input_tokens": 80, "cache_write_input_tokens": 20},
+                policy_id="p",
+                harness_id="only-compact",
+            ),
+            EvalObservation(
+                "case-1",
+                EvalVerdict.PASS,
+                "recall only",
+                {"input_tokens": 100, "cache_write_input_tokens": 0},
+                policy_id="p",
+                harness_id="only-recall",
+            ),
+        )
+        value = controlled_attribution(
+            observations,
+            variants,
+            baseline_harness_id="base",
+            full_harness_id="full",
+        )
+        compact = next(
+            item for item in value["effects"] if item["mechanism"] == "compact"
+        )
+        recall = next(
+            item for item in value["effects"] if item["mechanism"] == "recall"
+        )
+        self.assertTrue(compact["controlled"])
+        self.assertEqual(compact["classification"], "supported_harm")
+        self.assertEqual(compact["input_token_saving_per_request"], 30.0)
+        self.assertEqual(compact["cache_write_debt_tokens"], 20.0)
+        self.assertEqual(compact["breakeven_requests"], 1)
+        self.assertTrue(recall["controlled"])
+        self.assertEqual(recall["classification"], "mixed_or_interaction")
 
     # 回归断言：held-out final case identity 不能进入 discovery feedback 集。
     def test_held_out_eval_boundary_rejects_overlap(self):

@@ -996,7 +996,12 @@ class LocalConversationExecution:
                     "note": "output copy; original project files unchanged",
                 }
             )
-            if capability == "project.patch_exact":
+            eval_mechanisms = turn["snapshot"].get("evaluation_harness_mechanisms")
+            action_fusion_enabled = (
+                not isinstance(eval_mechanisms, list)
+                or "action_fusion" in set(str(item) for item in eval_mechanisms)
+            )
+            if capability == "project.patch_exact" and action_fusion_enabled:
                 # Action Fusion：精确 patch 的确定性后继是 diff 生成，不需要再花一次 LLM 决策。
                 # 后继失败不能抹掉已生成候选；因此把 mutation 与 successor 状态分开表达。
                 root, source = self.project_path(turn, args.get("path"))
