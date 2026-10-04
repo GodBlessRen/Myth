@@ -66,6 +66,21 @@ Workflow、Routing/Parallel、Multi-Agent、MCP/A2A 和更复杂 Evolution 暂�
 - 旧 Turn/Receipt/Artifact 不被未来策略倒写。
 - Core 不感知模型厂商、MCP/A2A 等协议名。
 
+## 长期研究 — Harness pretraining / recursive efficiency
+
+当真实长轨迹、Disposable Experiment、固定 capability floor 与 held-out final eval 都形成稳定证据后，可以研究 Harness 自身的数据飞轮：
+
+```text
+durable observable trajectories
+  -> repeated waste / failure hypotheses
+  -> broad disposable experiments
+  -> fixed capability + efficiency validation
+  -> explicitly released harness improvement
+  -> lower experiment cost / more evidence
+```
+
+这里的“数据”是 Ticket / Receipt / Artifact / Verification / provider-visible Context / Action Path 等可观察事实，不是隐藏 Chain-of-Thought。任何递归效率提升都仍经过人工可审计的候选、固定评测和显式发布；在真实长期实验成立前，不宣称 Myth 已具备自动 RSI 或稳定 scaling law。
+
 ## 长期方向
 
 只有明确部署需求出现后再推进系统常驻服务、分布式 worker、远端执行、多用户授权、组织 policy 和 fleet scheduling。当前固定间隔计划不是通用 cron/Event Bus/Trigger DSL。
