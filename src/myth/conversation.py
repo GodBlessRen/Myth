@@ -80,6 +80,15 @@ _TOOL_ARGUMENTS = {
         },
         ["path"],
     ),
+    "observation.read": object_schema(
+        {
+            "decision_id": {"type": "string", "minLength": 1, "maxLength": 200},
+            "field": {"type": "string", "enum": ["content", "output", "diff", "stdout", "stderr", "summary"]},
+            "offset": {"type": "integer", "minimum": 0},
+            "max_chars": {"type": "integer", "minimum": 1, "maximum": 12000},
+        },
+        ["decision_id", "field"],
+    ),
     "project.search": object_schema(
         {
             "query": _TEXT,
@@ -227,6 +236,12 @@ TOOL_CATALOG = {
         "path": "relative file",
         "offset": "character offset",
         "max_chars": "100-12000 characters; default 6000",
+    },
+    "observation.read": {
+        "decision_id": "decision id from a prior durable tool observation",
+        "field": "content/output/diff/stdout/stderr/summary",
+        "offset": "character offset",
+        "max_chars": "1-12000 characters; default 6000",
     },
     "project.search": {
         "query": "text to find",
