@@ -7,8 +7,10 @@ import unittest
 from myth.platform.observability import TraceProjection
 
 
-# Execution Graph 只读投影回归集合；固定输入验证映射覆盖，不代表真实模型或外部工具执行。\nclass ExecutionGraphProjectionTests(unittest.TestCase):
-    # 回归断言：父模型、Tool 与隔离 Child 只由已有 durable facts 投影，不能新增执行真相。\n    def test_projects_parent_tool_and_isolated_subagent_without_new_truth(self):
+# Execution Graph 只读投影回归集合；固定输入验证映射覆盖，不代表真实模型或外部工具执行。
+class ExecutionGraphProjectionTests(unittest.TestCase):
+    # 回归断言：父模型、Tool 与隔离 Child 只由已有 durable facts 投影，不能新增执行真相。
+    def test_projects_parent_tool_and_isolated_subagent_without_new_truth(self):
         graph = TraceProjection().execution_graph(
             run_id="run-1",
             status="COMPLETED",
@@ -82,7 +84,8 @@ from myth.platform.observability import TraceProjection
         self.assertEqual(child["role_id"], "isolated_worker")
         self.assertEqual(child["parent_decision_id"], "decision-1")
 
-    # 回归断言：无法归类的模型调用保持 unmapped，观测层不得凭猜测补齐 Execution Graph。\n    def test_unclassified_model_calls_remain_explicitly_unmapped(self):
+    # 回归断言：无法归类的模型调用保持 unmapped，观测层不得凭猜测补齐 Execution Graph。
+    def test_unclassified_model_calls_remain_explicitly_unmapped(self):
         graph = TraceProjection().execution_graph(
             run_id="run-2",
             status="RUNNING",
