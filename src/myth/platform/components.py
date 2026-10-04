@@ -195,6 +195,13 @@ ADAPTERS: tuple[ArchitectureItem, ...] = (
         "Scoped UTF-8/project/output execution adapter.",
     ),
     ArchitectureItem(
+        "milvus",
+        "Milvus Vector DB",
+        "adapter",
+        Maturity.CONNECTED,
+        "Optional derived vector-index adapter; SQLite/object storage stays authoritative and lexical retrieval remains the safe fallback.",
+    ),
+    ArchitectureItem(
         "ollama", "Ollama", "adapter", Maturity.USABLE, "Local model provider adapter."
     ),
     ArchitectureItem(
@@ -276,7 +283,7 @@ class MythComponents:
 
     # 装配默认组件/目录；明确可用项和计划项，不启动业务工作或外部执行。
     @classmethod
-    def default(cls) -> "MythComponents":
+    def default(cls, *, milvus_ready: bool = False) -> "MythComponents":
         return cls(
             control=ControlService(),
             capabilities=default_capabilities(),
@@ -285,8 +292,8 @@ class MythComponents:
             retrieval=RetrievalRouter(
                 (
                     RetrievalBackend("local-lexical", RetrievalMode.KEYWORD, True),
-                    RetrievalBackend("vector", RetrievalMode.VECTOR, False),
-                    RetrievalBackend("hybrid", RetrievalMode.HYBRID, False),
+                    RetrievalBackend("milvus", RetrievalMode.VECTOR, bool(milvus_ready)),
+                    RetrievalBackend("lexical+milvus", RetrievalMode.HYBRID, bool(milvus_ready)),
                     RetrievalBackend("graph", RetrievalMode.GRAPH, False),
                 )
             ),
