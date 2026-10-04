@@ -502,6 +502,57 @@ class DecisionRuntime:
                     attempt_id,
                 ),
             )
+            # 把本次真实 Provider 用量与之前已持久化的 Context 投影绑定；只记录公开计量，不从缺失缓存字段猜债务。
+            context_report = None
+            for event_row in db.execute(
+                "SELECT payload_json FROM events WHERE run_id=? AND kind='ConversationContextCompiled' ORDER BY sequence DESC",
+                (row["run_id"],),
+            ).fetchall():
+                payload = json.loads(event_row["payload_json"])
+                if payload.get("model_attempt_id") == attempt_id:
+                    context_report = payload
+                    break
+            if isinstance(context_report, dict):
+                input_tokens = usage.get("input_tokens")
+                cached_tokens = usage.get("cached_input_tokens")
+                cache_write_tokens = usage.get("cache_write_input_tokens")
+                cache_miss_tokens = usage.get("cache_miss_input_tokens")
+                cache_ratio = (
+                    cached_tokens / input_tokens
+                    if type(input_tokens) is int
+                    and input_tokens > 0
+                    and type(cached_tokens) is int
+                    else None
+                )
+                self._event(
+                    db,
+                    row["run_id"],
+                    "ConversationContextCostObserved",
+                    {
+                        "model_attempt_id": attempt_id,
+                        "context_mode": context_report.get("context_mode"),
+                        "previous_context_mode": context_report.get("previous_context_mode"),
+                        "provider_visible_bytes": context_report.get("bytes_used"),
+                        "input_tokens": input_tokens if type(input_tokens) is int else None,
+                        "cached_input_tokens": cached_tokens if type(cached_tokens) is int else None,
+                        "cache_write_input_tokens": (
+                            cache_write_tokens
+                            if type(cache_write_tokens) is int
+                            else None
+                        ),
+                        "cache_miss_input_tokens": (
+                            cache_miss_tokens
+                            if type(cache_miss_tokens) is int
+                            else None
+                        ),
+                        "cache_reuse_ratio": cache_ratio,
+                        "mode_changed": (
+                            context_report.get("previous_context_mode") is not None
+                            and context_report.get("previous_context_mode")
+                            != context_report.get("context_mode")
+                        ),
+                    },
+                )
             self._event(
                 db,
                 row["run_id"],
