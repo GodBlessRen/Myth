@@ -261,6 +261,55 @@ class MentalModelRefreshScheduler:
             raise KeyError(run_id)
         return dict(row)
 
+    # reconcile_unknown：只核对本地 durable model Receipt；没有收据就保持 UNKNOWN，绝不调用 Provider。
+    def reconcile_unknown(self, *, limit: int = 16) -> list[dict[str, Any]]:
+        rows = self.store.db.execute(
+            "SELECT run_id,model_id FROM mental_model_refresh_occurrences "
+            "WHERE state='UNKNOWN' ORDER BY updated_at LIMIT ?",
+            (max(1, min(int(limit), 128)),),
+        ).fetchall()
+        results = []
+        for row in rows:
+            run_id = str(row["run_id"])
+            recovered = self.decisions.recover(run_id)
+            invocation = self.store.db.execute(
+                "SELECT state,outcome,last_error FROM model_invocations "
+                "WHERE run_id=? ORDER BY rowid DESC LIMIT 1",
+                (run_id,),
+            ).fetchone()
+            if invocation is None or invocation["state"] != "RESOLVED":
+                results.append(
+                    {"run_id": run_id, "state": "UNKNOWN", "recovered": recovered}
+                )
+                continue
+            if invocation["outcome"] == "SUCCEEDED":
+                decision = self.store.db.execute(
+                    "SELECT 1 FROM step_decisions WHERE run_id=? LIMIT 1",
+                    (run_id,),
+                ).fetchone()
+                if decision is None:
+                    self.fail(
+                        run_id,
+                        "late model receipt resolved without a valid refresh decision",
+                    )
+                    results.append({"run_id": run_id, "state": "FAILED"})
+                    continue
+                # 只重新开放本地 commit 阶段；request_key 已绑定旧 Attempt，后续 run() 不会新派发 Provider。
+                with self.store.tx() as db:
+                    db.execute(
+                        "UPDATE mental_model_refresh_occurrences SET state='ADMITTED',"
+                        "owner_id=NULL,lease_until=NULL,updated_at=?,error=NULL WHERE run_id=?",
+                        (time.time(), run_id),
+                    )
+                results.append({"run_id": run_id, "state": "ADMITTED"})
+                continue
+            self.fail(
+                run_id,
+                str(invocation["last_error"] or "late model receipt confirmed failure"),
+            )
+            results.append({"run_id": run_id, "state": "FAILED"})
+        return results
+
     # dispatchable_runs：只返回策略退避已到且 occurrence lease 空闲/过期的工作；UNKNOWN 永不自动重放。
     def dispatchable_runs(
         self, *, now: float | None = None, limit: int = 16
