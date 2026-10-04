@@ -145,10 +145,13 @@ class MentalModelRefreshScheduler:
     # due：只选 stale/unmaterialized、超过最小间隔且没有未决 occurrence 的模型；同一变化水位只会形成一个机会。
     def due(self, *, now: float | None = None, limit: int = 8) -> list[dict[str, Any]]:
         now = time.time() if now is None else float(now)
+        if type(limit) is not int or not 1 <= limit <= 64:
+            raise ValueError("limit must be 1-64")
+        # freshness 依赖每个 Mental Model 自身 scope，不能先 SQL LIMIT 再过滤，否则前排 fresh policy 会饿死后排 stale policy。
         rows = self.store.db.execute(
             "SELECT model_id FROM mental_model_refresh_policies "
-            "WHERE enabled=1 AND retry_at<=? ORDER BY updated_at,model_id LIMIT ?",
-            (now, max(1, min(int(limit), 64))),
+            "WHERE enabled=1 AND retry_at<=? ORDER BY updated_at,model_id",
+            (now,),
         ).fetchall()
         due = []
         for row in rows:
@@ -168,6 +171,8 @@ class MentalModelRefreshScheduler:
             if last and now - float(last["created_at"]) < int(policy["min_interval_seconds"]):
                 continue
             due.append({"model": model, "policy": policy})
+            if len(due) >= limit:
+                break
         return due
 
     # admit：固定 prepare 快照、水位与模型预算，先创建 Core Run，再登记唯一 occurrence；同水位竞争只成功一次。
