@@ -278,7 +278,9 @@ class OpenAIResponsesProvider:
                 # 明确 JSON 响应兼容固定测试/网关；OAuth 仍强制流式完成合同。
                 content_type = getattr(response, "headers", {}).get("Content-Type", "")
                 if self.chatgpt_plan or "text/event-stream" in content_type:
-                    value, streamed_text, first_token_ms = self._read_stream(response, started, self.timeout)
+                    value, streamed_text, first_token_ms = self._read_stream(
+                        response, started, self.timeout, self.provider_name
+                    )
                 else:
                     raw = read_bounded(response)
                     value = json.loads(raw.decode("utf-8"))
@@ -343,7 +345,8 @@ class OpenAIResponsesProvider:
         )
 
     # 逐 SSE data 消费文本增量，只有 response.completed 才返回；失败/中断不能伪造完整响应。
-    def _read_stream(self, response, started=None, timeout=180.0):
+    @staticmethod
+    def _read_stream(response, started=None, timeout=180.0, provider_name="OpenAI"):
         completed = None
         text_chunks = []
         first_token_ms = None
@@ -352,10 +355,10 @@ class OpenAIResponsesProvider:
         # 每事件/整次流都有字节上限；只保留数据字段，不信任服务端自定义错误描述。
         for data, size in _sse_events(response, deadline=started + timeout):
             if time.monotonic() - started > timeout:
-                raise RuntimeError(f"{self.provider_name} Responses stream exceeded its deadline")
+                raise RuntimeError(f"{provider_name} Responses stream exceeded its deadline")
             total_bytes += size
             if total_bytes > MAX_RESPONSE_BYTES:
-                raise RuntimeError(f"{self.provider_name} Responses stream exceeds the byte limit")
+                raise RuntimeError(f"{provider_name} Responses stream exceeds the byte limit")
             if not data or data == "[DONE]":
                 continue
             event_value = json.loads(data)
@@ -385,13 +388,13 @@ class OpenAIResponsesProvider:
                     else {}
                 )
                 code = public_error_code(error_value.get("code"), event_type)
-                raise ProviderKnownFailure(f"{self.provider_name} Responses stream failed: {code}",
+                raise ProviderKnownFailure(f"{provider_name} Responses stream failed: {code}",
                     usage=_usage(response_value), raw={"status": event_type, "error": {"code": code}})
             elif event_type == "error":
-                raise RuntimeError(f"{self.provider_name} Responses stream reported an error")
+                raise RuntimeError(f"{provider_name} Responses stream reported an error")
         if completed is None:
             raise RuntimeError(
-                f"{self.provider_name} Responses stream ended without response.completed"
+                f"{provider_name} Responses stream ended without response.completed"
             )
         return completed, "".join(text_chunks), first_token_ms
 
