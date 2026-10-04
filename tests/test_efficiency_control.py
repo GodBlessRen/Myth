@@ -154,7 +154,8 @@ class EvaluationEvolutionEfficiencyTests(unittest.TestCase):
                     policy_id="b-candidate",
                     mechanism_events=("context_compaction:APPLIED",),
                 ),
-            )
+            ),
+            baseline_policy_id="a-base",
         )
         self.assertFalse(value["causal_attribution"])
         self.assertEqual(len(value["outcome_flips"]), 1)
