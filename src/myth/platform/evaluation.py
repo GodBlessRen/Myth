@@ -453,6 +453,25 @@ class HarnessVariant:
             raise ValueError("harness mechanisms must be unique non-empty strings")
 
 
+# 为 full / one-mechanism / leave-one-out 生成去重后的 Harness 变体；只生成实验身份，不执行任务。
+def controlled_harness_variants(
+    mechanisms: Iterable[str], *, prefix: str = "harness"
+) -> tuple[HarnessVariant, ...]:
+    values = tuple(sorted({str(item).strip() for item in mechanisms if str(item).strip()}))
+    if not values:
+        raise ValueError("controlled harness experiment requires mechanisms")
+    enabled_sets = {frozenset(), frozenset(values)}
+    full = frozenset(values)
+    for mechanism in values:
+        enabled_sets.add(frozenset({mechanism}))
+        enabled_sets.add(full - {mechanism})
+    ordered = sorted(enabled_sets, key=lambda item: (len(item), tuple(sorted(item))))
+    result = []
+    for enabled in ordered:
+        suffix = "none" if not enabled else "+".join(sorted(enabled))
+        result.append(HarnessVariant(f"{prefix}:{suffix}", tuple(sorted(enabled))))
+    return tuple(result)
+
 # 受控归因只接受同题不同 Harness 变体的真实观测；没有对应消融 Run 时保持 insufficient，不靠总分猜原因。
 def controlled_attribution(
     observations: Iterable[EvalObservation],
