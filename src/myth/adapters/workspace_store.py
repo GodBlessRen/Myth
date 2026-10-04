@@ -100,6 +100,7 @@ class SqliteWorkspaceRepository:
         resolution_controller=None,
         resolution_policy_id=None,
         vector_index=None,
+        evaluation_harness_mechanisms=None,
     ):
         # runtime：共享 Runtime 装配对象；其 SQLite 连接只在所属线程使用。
         self.runtime = runtime
@@ -117,6 +118,12 @@ class SqliteWorkspaceRepository:
         self.resolution_policy_id = str(resolution_policy_id or "injected/default")
         # vector_index：可选派生检索适配器；SQLite 文档/chunk 仍是来源、权限和版本真相。
         self.vector_index = vector_index
+        # evaluation_harness_mechanisms：仅固定评测注入；None 表示生产默认全部现有机制，显式集合用于受控消融。
+        self.evaluation_harness_mechanisms = (
+            None
+            if evaluation_harness_mechanisms is None
+            else tuple(str(item).strip() for item in evaluation_harness_mechanisms if str(item).strip())
+        )
         # sota_route：由 Workspace 装配后注入；仓储缺省仍可独立工作，避免隐藏硬依赖。
         self.sota_route = None
         self.store.db.executescript(SCHEMA)
@@ -691,6 +698,7 @@ class SqliteWorkspaceRepository:
                 "settings": settings,
                 "documents": document_ids,
                 "goal_id": goal_id,
+                "evaluation_harness_mechanisms": self.evaluation_harness_mechanisms,
             }
         )
         with self.store.tx() if _db is None else nullcontext(_db) as db:
@@ -880,6 +888,10 @@ class SqliteWorkspaceRepository:
                 + [{"role": "user", "content": text}],
                 "goal": dict(goal_context or {}),
             }
+            if self.evaluation_harness_mechanisms is not None:
+                snapshot["evaluation_harness_mechanisms"] = list(
+                    self.evaluation_harness_mechanisms
+                )
             if self.sota_route is not None:
                 # 冻结项目/上下文环境摘要，使“SOTA Route”只在可证明同条件时比较。
                 snapshot["sota_route_environment"] = self.sota_route.freeze_environment(snapshot)
