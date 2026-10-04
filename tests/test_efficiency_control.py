@@ -14,6 +14,7 @@ from myth.platform.efficiency import (
     assess_reachability,
     decide_optimization,
     next_recovery_action,
+    semantic_boundary,
 )
 from myth.platform.evaluation import (
     EvalObservation,
@@ -99,6 +100,33 @@ class EfficiencyControlTests(unittest.TestCase):
         )
         self.assertFalse(value.reachable)
         self.assertEqual(value.reason_code, "surface_not_exposed")
+
+    # 回归断言：Compact 的语义边界只来自已结算 Artifact/Verification/Delegation，不从普通聊天文本猜进度。
+    def test_semantic_boundaries_require_durable_settlement(self):
+        self.assertEqual(
+            semantic_boundary(
+                {
+                    "capability": "test.run",
+                    "result": {"status": "PASSED", "evidence_ref": "test:x"},
+                }
+            ),
+            "verification_settled",
+        )
+        self.assertEqual(
+            semantic_boundary(
+                {
+                    "capability": "artifact.write",
+                    "result": {
+                        "artifact": {"digest": "abc"},
+                        "evidence_ref": "artifact:x",
+                    },
+                }
+            ),
+            "artifact_settled",
+        )
+        self.assertIsNone(
+            semantic_boundary({"result": {"summary": "I think the task is done"}})
+        )
 
     # 回归断言：UNKNOWN 外部效果永远先 reconcile；表达层错误可在有界预算内走廉价修复。
     def test_recovery_ladder_keeps_unknown_and_representation_distinct(self):
