@@ -224,6 +224,12 @@ class SqliteKnowledgeViews:
             "source_query": str(model["source_query"]),
             "scope_type": str(model["scope_type"]),
             "scope_id": model.get("scope_id"),
+            # previous_content：仅作为“待演进文档基线”；不能自动进入 evidence_refs 或获得事实权重。
+            "previous_content": (
+                str((model.get("content") or {}).get("text") or "")
+                if model.get("content")
+                else ""
+            ),
             "observed_change_seq": self.memory.current_change_seq(),
             "sources": sources,
             "retrieval": report["retrieval"],
