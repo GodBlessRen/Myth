@@ -42,6 +42,19 @@ Intent / Retrieval / Resolution
 
 Flow 是对 durable facts 的投影，不创建新的执行真相。
 
+#### Execution Graph（实验性投影）
+
+当一次 Run 出现 Tool / Sub-Agent 等非单线执行关系时，第三栏可以额外展示 `Execution Graph`。第一版遵循“吸收而不改骨架”：
+
+- Graph 只从已有 `model_invocations / decisions / operations` 等持久事实派生；
+- 不新增 Core 对象、状态机、授权路径或数据库真相；
+- Parent model、`agent.delegate` 与 isolated Sub-Agent 调用可以显式形成父子边；
+- 无法可靠归类的调用必须记为 `unmapped`，不得由 UI 猜测补边；
+- Trajectory 仍是完整事件事实入口，Execution Graph 只是更适合阅读分支关系的 projection；
+- 后续只有真实任务证明 branch / retry / resume 需要更丰富关系时，才扩展图语义。
+
+因此目前不把 Execution Graph 升格为新的 Runtime Layer，也不要求所有 Run 都表现成复杂 DAG。
+
 ### Recovery
 
 必须显示：
@@ -238,6 +251,7 @@ Observatory 不拥有状态，不写业务真相。
 7. 当前 Control / Budget 是什么？
 8. Driver 如果此刻消失，应该 RESUME 还是 RECONCILE？
 9. “完成”基于什么 Artifact / Receipt / Verification？
+10. 若发生 Sub-Agent / Tool 分支，Execution Graph 能否指出父子关系；无法映射的调用是否明确标成 unmapped？
 
 答不上来，就不是合格的 Runtime Observatory。
 
