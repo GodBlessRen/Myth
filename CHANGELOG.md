@@ -1,5 +1,12 @@
 # Changelog
 
+## 未发布 — Historical Replay World
+
+- 新增实验性 Replay World：把同一 SOTA Route `comparison_key` 下的 eligible PASSED Action Path 合并成共享前缀树，让历史从日志升级为可计算的“已实现搜索空间”。
+- 候选策略只能沿历史真实出现过的边离线重放；越出历史覆盖时明确返回 `UNOBSERVED`，不调用模型/工具、不补造 counterfactual outcome。
+- Replay 终点直接引用真实历史 Run 的已测量 metrics；`ReplayLab` 只汇总覆盖与命中历史，不定义神秘总分、`ELIGIBLE` 或自动 Promote。
+- 固定 EvalSuite、paired calibration 与显式 Promote 继续作为策略发布链；本次不新增数据库表、不修改线上执行路径、不保存或反推隐藏 CoT。
+
 ## 未发布 — Mental Model / Knowledge Page
 
 - 新增 Mental Model：作为 Memory Domain 内的 materialized view，保存 source query / scope / backing Memory / refresh watermark；正文继续复用 Semantic Memory，不新建第二套内容真相。
