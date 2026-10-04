@@ -8,6 +8,7 @@ from .deepseek import DeepSeekApiKeyProvider
 from .ollama import OllamaProvider
 from .openai import ChatGPTPlanProvider, OpenAIApiKeyProvider
 from .scripted import ScriptedPatchProvider
+from ..auth.provider_keys import ProviderApiKeyVault
 
 
 # 按明确 provider_id 在装配边界创建具体供应商；配置不携带其他应用认证文件或扩大工具权限。
@@ -26,10 +27,16 @@ def create_provider(
         raise ValueError(
             "legacy pi-openai authentication was removed; sign in with Myth OAuth and use provider=chatgpt"
         )
-    if name == "openai":
-        return OpenAIApiKeyProvider()
-    if name == "deepseek":
-        return DeepSeekApiKeyProvider()
+    if name in {"openai", "deepseek"}:
+        if runtime_root is None:
+            raise ValueError(f"{name} provider requires runtime_root")
+        vault = ProviderApiKeyVault()
+        token = lambda: vault.resolve(name)[0]
+        return (
+            OpenAIApiKeyProvider(token_supplier=token)
+            if name == "openai"
+            else DeepSeekApiKeyProvider(token_supplier=token)
+        )
     raise ValueError(f"unknown provider: {name}")
 
 
