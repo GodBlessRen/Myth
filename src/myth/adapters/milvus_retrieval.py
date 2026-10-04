@@ -34,6 +34,7 @@ def _safe_prefix(value: str) -> str:
 class MilvusVectorIndex:
     """进程内共享的 Milvus derived-index 适配器；正文不写入 Milvus，命中必须回权威仓储 hydration。"""
 
+    # backend_id：稳定适配器身份；用于观测/路由，不代表连接健康。
     backend_id = "milvus"
 
     def __init__(
@@ -47,19 +48,33 @@ class MilvusVectorIndex:
         client: Any | None = None,
         embedder: Any | None = None,
     ) -> None:
+        # uri：Milvus Lite 文件或远端 endpoint；只由配置提供，不写入业务 SQLite。
         self.uri = str(uri)
+        # token：远端认证材料；仅保存在当前 Adapter 实例内，status 不回显。
         self.token = token
+        # collection_prefix：限制后的命名空间；避免不同 Myth 实例误用同名 collection。
         self.collection_prefix = _safe_prefix(collection_prefix)
+        # model_name：embedding 模型身份；改变模型必须使用不同索引语义/重建数据。
         self.model_name = str(model_name or _DEFAULT_MODEL)
+        # device：embedding 计算设备；只是 Adapter 配置，不进入 Core。
         self.device = str(device or "cpu")
+        # knowledge_collection：知识 chunk 派生向量集合，不保存权威正文。
         self.knowledge_collection = f"{self.collection_prefix}_knowledge_v1"
+        # memory_collection：Memory revision 派生向量集合，不拥有 active/scope 真相。
         self.memory_collection = f"{self.collection_prefix}_memory_v1"
+        # _client：延迟创建的 PyMilvus 客户端；测试可显式注入替身。
         self._client = client
+        # _embedder：延迟创建的文本向量器；测试可注入确定性替身。
         self._embedder = embedder
+        # _lock：保护同进程首次初始化与 collection 创建，不能替代跨进程数据库一致性。
         self._lock = threading.RLock()
+        # _collections_ready：当前实例已确认 collection 存在的缓存，不是持久事实。
         self._collections_ready = False
+        # _healthy：最近一次真实 Adapter 操作是否成功；只用于观测，不授予业务成功。
         self._healthy = bool(client is not None and embedder is not None)
+        # _last_error：脱敏错误类别；不保存 endpoint token 或第三方异常正文。
         self._last_error: str | None = None
+        # _synced_versions：进程内重复 embedding 优化；丢失后重新 upsert 仍保持正确。
         self._synced_versions: dict[tuple[str, str], str] = {}
 
     @property
