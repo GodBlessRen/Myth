@@ -42,6 +42,8 @@ class FakeResponse:
 class FakeStreamResponse:
     # 保存可控测试条件；这些字段属于替身，不模拟远端真实保证。
     def __init__(self, events):
+        # headers：声明与真实 Responses 流一致的媒体类型，确保传输实现走 SSE 解析分支。
+        self.headers = {"Content-Type": "text/event-stream"}
         self.lines = [
             ("data: " + json.dumps(event) + "\n\n").encode() for event in events
         ]
