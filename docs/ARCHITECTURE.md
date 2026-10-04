@@ -227,6 +227,10 @@ Memory：
 - revision / provenance / revoke；
 - global / project / session scope；
 - `fact_level=context` 不自动升级为 verified fact；
+- 每个当前 revision 可绑定显式 Evidence；Memory-linked Evidence 固定 source revision，外部 provenance 没有版本水位时保持 `untracked`，不伪造 fresh；
+- 每次更新/撤销都保存 immutable revision snapshot；历史证据不会指向可变当前表；
+- L0/L1 只投影 `proof_count / freshness / is_stale`，L2 才展开完整 Evidence，避免“证据化”反而撑爆 Context；
+- `apply_delta(expected_revision, ops)` 只接受受约束 Delta，Runtime 原子校验后应用；空 Delta 是机械 no-op，非法操作整批失败；
 - `memory.search → memory.timeline → memory.resolve` progressive disclosure，初始召回只进入 L0 compact view。
 
 Milvus 是**可重建的派生 Vector Adapter**，不是新的事实数据库：

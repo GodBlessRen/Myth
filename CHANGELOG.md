@@ -1,5 +1,13 @@
 # Changelog
 
+## 未发布 — Evidence-backed Memory Lifecycle
+
+- Memory 当前 revision 支持显式 Evidence；Memory-linked Evidence 在提交时固定 source revision，来源更新/撤销后确定性标记 stale，外部 provenance 无版本水位时保持 untracked。
+- 更新、撤销都会留下 immutable revision snapshot；旧 revision 的正文与 Evidence 不再借用可变当前表。
+- 新增受约束 Memory Delta：只允许 replace_text / add_evidence / remove_evidence，expected_revision 不匹配或任一操作非法时整批失败；空 Delta 不制造 revision。
+- Progressive Disclosure 保持不变：L0/L1 只暴露 proof_count/freshness，L2 才展开完整 Evidence；Memory 仍不授予权限、不等同 Verification。
+- 现有 SQLite 继续作为权威源，Milvus 继续只是可重建派生索引；本次不新增 Runtime Layer、不替换 MemoryStore。
+
 ## 未发布 — Harness Engineering Deepening
 
 - 已知参数/权限/合同/Information Control 失败统一保存为 **Structured Failure Observation**：稳定 `category/code/capability/retryable/expected/hint` 与兼容 `error` 文本并存，已知拒绝不制造 Tool Receipt 或 UNKNOWN。
