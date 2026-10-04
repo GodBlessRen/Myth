@@ -15,6 +15,20 @@ from myth.platform.efficiency import (
     decide_optimization,
     next_recovery_action,
 )
+from myth.platform.evaluation import (
+    EvalObservation,
+    EvalReport,
+    EvalVerdict,
+    HeldOutEvalBoundary,
+    attribution_matrix,
+    capability_efficiency_gate,
+    compare_observations,
+)
+from myth.platform.evolution import (
+    ExperimentCandidate,
+    ExperimentPhase,
+    experiment_frontier,
+)
 from myth.platform.evidence import (
     EvidenceKind,
     EvidenceQuote,
@@ -95,6 +109,97 @@ class EfficiencyControlTests(unittest.TestCase):
         self.assertEqual(
             RecoveryAction.REPAIR,
             next_recovery_action(RecoveryFailure.REPRESENTATION, RecoveryBudget()),
+        )
+
+
+class EvaluationEvolutionEfficiencyTests(unittest.TestCase):
+    # 回归断言：候选只有在 capability floor 不退化且共同测量成本 Pareto 改善时才获得效率资格。
+    def test_capability_floor_precedes_efficiency_gain(self):
+        baseline_obs = EvalObservation(
+            "case-1",
+            EvalVerdict.PASS,
+            "baseline",
+            {"input_tokens": 100, "tool_calls": 3},
+            policy_id="base",
+            comparison_key="same",
+        )
+        candidate_obs = EvalObservation(
+            "case-1",
+            EvalVerdict.PASS,
+            "candidate",
+            {"input_tokens": 70, "tool_calls": 3},
+            policy_id="candidate",
+            comparison_key="same",
+            mechanism_events=("observation_projection:APPLIED",),
+        )
+        comparison = compare_observations(baseline_obs, candidate_obs)
+        report = EvalReport("suite", 1, 0, 0, 0)
+        ok, reason, aggregate = capability_efficiency_gate(
+            report, report, (comparison,)
+        )
+        self.assertTrue(ok, reason)
+        self.assertEqual(aggregate["input_tokens"], -30.0)
+
+    # 回归断言：逐题矩阵只提供 flip/机制线索，不把相关性直接写成因果归因。
+    def test_attribution_matrix_keeps_causality_explicitly_false(self):
+        value = attribution_matrix(
+            (
+                EvalObservation(
+                    "case-1", EvalVerdict.PASS, "base", policy_id="a-base"
+                ),
+                EvalObservation(
+                    "case-1",
+                    EvalVerdict.FAIL,
+                    "candidate",
+                    policy_id="b-candidate",
+                    mechanism_events=("context_compaction:APPLIED",),
+                ),
+            )
+        )
+        self.assertFalse(value["causal_attribution"])
+        self.assertEqual(len(value["outcome_flips"]), 1)
+        self.assertEqual(
+            value["outcome_flips"][0]["candidate_mechanisms"],
+            ["context_compaction:APPLIED"],
+        )
+
+    # 回归断言：held-out final case identity 不能进入 discovery feedback 集。
+    def test_held_out_eval_boundary_rejects_overlap(self):
+        boundary = HeldOutEvalBoundary(("search-1",), ("final-1",))
+        self.assertTrue(boundary.may_feed_back("search-1"))
+        self.assertFalse(boundary.may_feed_back("final-1"))
+        with self.assertRaises(ValueError):
+            HeldOutEvalBoundary(("same",), ("same",))
+
+    # 回归断言：实验广度阶段按不同 hypothesis 保留，Harden 必须属于已有 lineage，workspace 固定 disposable。
+    def test_disposable_experiment_frontier_separates_discover_and_harden(self):
+        discover = ExperimentCandidate(
+            "exp-a",
+            "fold observations",
+            ExperimentPhase.DISCOVER,
+            ("observation_projection",),
+        )
+        duplicate = ExperimentCandidate(
+            "exp-a2",
+            "fold observations",
+            ExperimentPhase.DISCOVER,
+            ("observation_projection",),
+        )
+        harden = ExperimentCandidate(
+            "exp-b",
+            "harden exact recall",
+            ExperimentPhase.HARDEN,
+            ("exact_recall",),
+            parent_experiment_id="exp-a",
+            frozen_suite_ref="heldout-v1",
+        )
+        self.assertEqual(
+            experiment_frontier((discover, duplicate, harden), phase=ExperimentPhase.DISCOVER),
+            (discover,),
+        )
+        self.assertEqual(
+            experiment_frontier((discover, harden), phase=ExperimentPhase.HARDEN),
+            (harden,),
         )
 
 
