@@ -10,7 +10,14 @@ import unittest
 
 from myth.decision_runtime import DecisionRuntime
 from myth.acceptance import ContextBudgetError
-from myth.models import ContextTruncated, ModelResult, ProviderStatus
+from myth.models import (
+    ContextTruncated,
+    ModelMessage,
+    ModelRequest,
+    ModelResult,
+    ProviderStatus,
+    STEP_DECISION_SCHEMA,
+)
 from myth.runtime import MythRuntime
 
 
@@ -141,6 +148,71 @@ class DecisionRuntimeTests(unittest.TestCase):
                     evidence["evidence"]["provider_only_metric"], {"lane": "fast"}
                 )
                 self.assertEqual(evidence["summary"]["response_id"], "fake-response")
+
+    # 回归断言：Conversation Context 投影与真实 Provider cache 用量绑定成持久观测；缺测字段不补零。
+    def test_context_cost_observation_binds_provider_usage_to_projection(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with MythRuntime(root) as base:
+                decisions = DecisionRuntime(base)
+                run_id = decisions.create_goal_run(
+                    goal="observe context cost",
+                    provider_id="fake",
+                    model_id="fake-model",
+                    max_output_tokens=100,
+                )
+                provider = FakeProvider()
+                original_invoke = provider.invoke
+
+                # 只扩充固定夹具的公开 usage；模型决定正文仍复用同一合法 wire。
+                def invoke(request):
+                    value = original_invoke(request)
+                    return ModelResult(
+                        value.text,
+                        {
+                            **value.usage,
+                            "cached_input_tokens": 8,
+                            "cache_write_input_tokens": 4,
+                        },
+                        value.raw,
+                        value.response_id,
+                    )
+
+                provider.invoke = invoke
+                request = ModelRequest(
+                    model="fake-model",
+                    messages=(
+                        ModelMessage("system", "system"),
+                        ModelMessage("user", "goal"),
+                    ),
+                    response_schema=STEP_DECISION_SCHEMA,
+                    max_output_tokens=100,
+                    context_report={
+                        "context_mode": "compact",
+                        "previous_context_mode": "normal",
+                        "bytes_used": 1200,
+                    },
+                )
+                decisions.request_decision(
+                    run_id=run_id,
+                    provider=provider,
+                    model="fake-model",
+                    max_output_tokens=100,
+                    model_request_override=request,
+                )
+                events = decisions.status(run_id)["events"]
+                observed = next(
+                    item["payload"]
+                    for item in events
+                    if item["kind"] == "ConversationContextCostObserved"
+                )
+                self.assertEqual(observed["context_mode"], "compact")
+                self.assertTrue(observed["mode_changed"])
+                self.assertEqual(observed["provider_visible_bytes"], 1200)
+                self.assertEqual(observed["input_tokens"], 20)
+                self.assertEqual(observed["cached_input_tokens"], 8)
+                self.assertEqual(observed["cache_write_input_tokens"], 4)
+                self.assertAlmostEqual(observed["cache_reuse_ratio"], 0.4)
 
     # 回归断言：Ticket 后传输异常保持未知，不把超时当作已知未执行。
     def test_provider_exception_after_ticket_becomes_unknown(self) -> None:
