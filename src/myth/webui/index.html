@@ -483,8 +483,10 @@
                   </button>
                 </div>
               </div>
-              <label for="ollamaUrl">Ollama 服务地址</label
-              ><input id="ollamaUrl" value="http://127.0.0.1:11434" />
+              <div id="ollamaEndpointField">
+                <label for="ollamaUrl">Ollama 服务地址</label
+                ><input id="ollamaUrl" value="http://127.0.0.1:11434" />
+              </div>
               <div class="field-with-action">
                 <div>
                   <label for="model">模型名称</label
@@ -514,13 +516,13 @@
                     id="maxTokens"
                     type="number"
                     min="128"
-                    max="8192"
+                    max="393216"
                     value="2048"
                   />
                 </div>
               </div>
               <div class="two-fields">
-                <div>
+                <div id="ollamaContextField">
                   <label for="numCtx">Ollama 上下文 Token</label
                   ><input
                     id="numCtx"
@@ -542,12 +544,12 @@
                   />
                 </div>
               </div>
-              <label class="check-label"
-                ><input
-                  id="thinking"
-                  type="checkbox"
-                />启用模型思考（需模型支持）</label
-              >
+              <div id="reasoningField" class="adaptive-field hidden">
+                <label for="reasoningSetting">Thinking</label>
+                <select id="reasoningSetting"></select>
+                <small id="reasoningMeta" class="field-meta"></small>
+              </div>
+              <div id="modelCapabilityMeta" class="model-capability-meta hidden"></div>
               <div class="settings-foot">
                 <button id="saveSettings" class="primary">保存设置</button
                 ><span id="settingsSaved" class="muted"></span>
@@ -938,17 +940,14 @@
           placeholder="模型名称"
         /><button id="applyModelSwitch" type="button" class="secondary">
           切换模型</button
-        ><label for="turnThinkingInput">Thinking</label
-        ><select id="turnThinkingInput">
-          <option value="default">default</option>
-          <option value="on">on</option>
-          <option value="off">off</option>
-          <option value="low">low</option>
-          <option value="medium">medium</option>
-          <option value="high">high</option></select
-        ><button id="applyThinkingSwitch" type="button" class="secondary">
-          切换 Thinking
-        </button>
+        ><div id="turnThinkingField">
+          <label for="turnThinkingInput">Thinking</label
+          ><select id="turnThinkingInput"></select
+          ><small id="turnThinkingMeta" class="field-meta"></small
+          ><button id="applyThinkingSwitch" type="button" class="secondary">
+            切换 Thinking
+          </button>
+        </div>
         <div class="dialog-foot">
           <span id="controlRevision" class="muted"></span
           ><button type="button" data-close="controlDialog" class="primary">
