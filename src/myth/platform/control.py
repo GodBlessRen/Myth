@@ -7,6 +7,8 @@ from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import Any
 
+from ..providers.capabilities import normalize_thinking
+
 
 # 用户显式控制词汇；STOP 停止未来调度，ABORT 仅兼容旧已保存命令。
 class ControlCommand(StrEnum):
@@ -85,22 +87,8 @@ class ControlService:
                 raise ValueError("model must be non-empty")
             update["model"] = value
         elif command is ControlCommand.SWITCH_THINKING:
-            if payload is None:
-                update["thinking"] = None
-            elif isinstance(payload, bool):
-                update["thinking"] = payload
-            else:
-                value = str(payload).strip().lower()
-                if value in {"true", "on"}:
-                    update["thinking"] = True
-                elif value in {"false", "off"}:
-                    update["thinking"] = False
-                elif value in {"low", "medium", "high"}:
-                    update["thinking"] = value
-                elif not value or value == "default":
-                    update["thinking"] = None
-                else:
-                    raise ValueError("thinking must be default/on/off/low/medium/high")
+            # Control 只保存用户显式 Provider 原生值；允许未来模型增加档位而无需修改控制状态机。
+            update["thinking"] = normalize_thinking(payload)
         elif command is ControlCommand.STEER:
             value = str(payload or "").strip()
             if not value:
