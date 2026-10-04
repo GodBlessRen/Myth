@@ -18,7 +18,7 @@ from ..domain import RecoveryRequired, canonical_json, exact_patch, sha256_bytes
 from ..platform.capabilities import CapabilityState, default_capabilities
 from ..models import ModelMessage, ModelRequest, StepDecision
 from ..platform.subagents import SUBAGENT_RESULT_SCHEMA, default_subagents
-from ..strategies import RuleIntentPicker
+from ..strategies import LiveInformationController, RuleIntentPicker
 from ..verification import SqliteVerificationProfiles
 
 # EXCLUDED：项目读取/检索排除项；避免把秘钥、版本库和生成缓存纳入上下文。
@@ -70,7 +70,12 @@ TEXT_SUFFIXES = {
 class LocalConversationExecution:
     # 连接固定项目范围、工具仓储和收据目录；取锁只依赖独立 driver_lock，不实例化 Exact 用例。
     def __init__(
-        self, runtime, repository, capability_registry=None, subagent_registry=None
+        self,
+        runtime,
+        repository,
+        capability_registry=None,
+        subagent_registry=None,
+        information_controller=None,
     ):
         # runtime：共享 Runtime 装配对象；其 SQLite 连接只在所属线程使用。
         # repository：用例仓储端口/实现；持久状态写入归此协作对象所有。
@@ -81,6 +86,8 @@ class LocalConversationExecution:
         self.subagents = subagent_registry or default_subagents()
         # intent_picker：纯路径选择策略；输出是提案，不改变能力范围。
         self.intent_picker = RuleIntentPicker()
+        # information_controller：实时信息准入策略；只控制已有读取/检索工具，不执行 I/O 或持有新状态。
+        self.information_controller = information_controller or LiveInformationController()
         # verification：显式受信项目的固定 Python unittest profile；不提供任意 shell。
         self.verification = SqliteVerificationProfiles(runtime, repository)
         # receipts：持久效果日志协作对象；不存在日志不自动证明调用未发出。
@@ -758,6 +765,15 @@ class LocalConversationExecution:
         if spec.state is not CapabilityState.EXECUTABLE:
             raise PermissionError(f"capability is not executable: {capability}")
 
+        # 信息读取在 Tool Ticket 前先过纯控制策略；拒绝属于已知准入失败，不产生工具调用/UNKNOWN。
+        information_decision = self.information_controller.admit(
+            turn, capability, args
+        )
+        if information_decision is not None and not information_decision.admitted:
+            raise ValueError(
+                "information control denied: " + information_decision.reason
+            )
+
         # test.run 的结果必须在 Ticket 后产生；无收据时保持 UNKNOWN，绝不自动重跑项目代码。
         if capability == "test.run":
             intent = self.verification.intent(turn, args)
@@ -850,6 +866,11 @@ class LocalConversationExecution:
                 {"write_bytes": len(data), "target": str(target), "digest": digest}
             )
 
+        if information_decision is not None:
+            # 控制投影只保存身份/预算/返回规模，不复制正文；后续步骤据 durable activity 重建同样状态。
+            result["information_control"] = self.information_controller.record_result(
+                information_decision, result
+            )
         intent["result"] = result
         op = self.repository.start_operation(
             turn["run_id"], decision_id, capability, intent
