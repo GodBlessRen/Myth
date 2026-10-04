@@ -1353,6 +1353,23 @@ dialog textarea {
 .connection-result.bad {
   color: var(--danger);
 }
+.adaptive-field {
+  margin-top: 13px;
+}
+.field-meta,
+.model-capability-meta {
+  display: block;
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.55;
+}
+.model-capability-meta {
+  padding: 9px 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: var(--raised-2);
+}
 .quiet-panel {
   align-self: start;
 }
