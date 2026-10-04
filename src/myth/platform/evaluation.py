@@ -80,12 +80,12 @@ class EvalObservation:
     safety_regression: bool = False
     # policy_id：受测策略的固定身份，供配对和发布核对。
     policy_id: str | None = None
-    # harness_id：本次受控评测的完整 Harness 变体身份；普通评测可为空。
-    harness_id: str | None = None
     # comparison_key：包含同题/同版本身份的配对键，防止跨条件刷分。
     comparison_key: str | None = None
     # mechanism_events：本题实际触发/应用/回退的优化机制身份；只做归因线索，不自动证明因果。
     mechanism_events: tuple[str, ...] = ()
+    # harness_id：本次受控评测的完整 Harness 变体身份；普通评测可为空，放末尾保持旧位置参数兼容。
+    harness_id: str | None = None
 
 
 # 同题同版本身份下的策略配对结果；未测量质量保留 None，成本差异保持向量。
