@@ -132,6 +132,18 @@ def default_capabilities() -> CapabilityRegistry:
             "compute",
         ),
         (
+            "tool.search",
+            "tooling",
+            "Search the executable conversation tool catalog without executing a tool.",
+            "read",
+        ),
+        (
+            "tool.describe",
+            "tooling",
+            "Describe one discovered conversation tool so it can be exposed on the next step.",
+            "read",
+        ),
+        (
             "file.read",
             "file",
             "Read fixed managed bytes in exact verification mode.",
