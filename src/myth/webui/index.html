@@ -459,8 +459,8 @@
               <label for="provider">模型提供方</label
               ><select id="provider">
                 <option value="ollama">Ollama · 本地模型</option>
-                <option value="openai">OpenAI · 环境变量 API Key</option>
-                <option value="deepseek">DeepSeek · 环境变量 API Key</option>
+                <option value="openai">OpenAI · Myth 安全连接</option>
+                <option value="deepseek">DeepSeek · Myth 安全连接</option>
                 <option value="chatgpt">ChatGPT · Myth OAuth</option>
               </select>
               <div id="chatgptAuthPanel" class="auth-panel hidden">
@@ -480,6 +480,30 @@
                     class="text-button hidden"
                   >
                     退出 ChatGPT
+                  </button>
+                </div>
+              </div>
+              <div id="providerKeyPanel" class="auth-panel hidden">
+                <div>
+                  <strong id="providerKeyState">尚未连接 API Key</strong>
+                  <small id="providerKeyMeta"
+                    >API Key 只保存到操作系统安全凭据库，不进入项目、Runtime 数据库或日志。</small
+                  >
+                </div>
+                <label for="providerApiKey">API Key</label>
+                <input
+                  id="providerApiKey"
+                  type="password"
+                  autocomplete="off"
+                  spellcheck="false"
+                  placeholder="粘贴一次即可，以后直接使用"
+                />
+                <div class="button-row">
+                  <button id="providerKeyConnect" type="button" class="secondary">
+                    连接
+                  </button>
+                  <button id="providerKeyDisconnect" type="button" class="text-button hidden">
+                    断开
                   </button>
                 </div>
               </div>
@@ -661,6 +685,18 @@
             <div id="inspectorTokens" class="context-facts">
               <div class="inspector-empty">暂无 Token 使用</div>
             </div>
+          </section>
+          <section class="inspector-section">
+            <div class="inspector-label">Model</div>
+            <div id="inspectorModel" class="context-facts">
+              <div class="inspector-empty">暂无模型证据</div>
+            </div>
+            <details id="providerEvidenceDetails" class="provider-evidence hidden">
+              <summary>Provider details</summary>
+              <div id="providerEvidenceBody" class="provider-evidence-body">
+                <div class="inspector-empty">展开后读取完整脱敏元数据</div>
+              </div>
+            </details>
           </section>
           <section class="inspector-section">
             <div class="inspector-label">Context window</div>
