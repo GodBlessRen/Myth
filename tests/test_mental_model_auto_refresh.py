@@ -178,6 +178,39 @@ class MentalModelAutoRefreshTests(unittest.TestCase):
         self.assertEqual(self.refresh.due(), [])
         self.assertEqual(provider.calls, 1)
 
+    # 旧 worker 在模型返回后失去 lease 时只能留下 Receipt；新 owner 消费同一 Receipt 完成发布。
+    def test_lost_owner_cannot_publish_but_new_owner_reuses_receipt(self):
+        self.refresh.configure(self.model["model_id"], enabled=True, min_interval_seconds=60)
+        run_id = self.refresh.admit(self.model["model_id"])
+        self.assertTrue(self.refresh.claim(run_id, "worker-a", ttl_seconds=30))
+
+        refresh = self.refresh
+
+        class LeaseLostProvider(RefreshProvider):
+            # 模型返回前模拟新 owner 已接管；真实系统中这是旧 lease 过期后的 takeover。
+            def invoke(self, request):
+                result = super().invoke(request)
+                with refresh.store.tx() as db:
+                    db.execute(
+                        "UPDATE mental_model_refresh_occurrences SET owner_id='worker-b',"
+                        "lease_until=?,heartbeat_at=? WHERE run_id=?",
+                        (time.time() + 60, time.time(), run_id),
+                    )
+                return result
+
+        old = LeaseLostProvider()
+        first = self.refresh.run(run_id, old, owner_id="worker-a")
+        self.assertEqual(first["state"], "RUNNING")
+        self.assertIsNone(
+            self.workspace.mental_models.model(self.model["model_id"])["content"]
+        )
+
+        new = RefreshProvider()
+        second = self.refresh.run(run_id, new, owner_id="worker-b")
+        self.assertEqual(second["state"], "SUCCEEDED")
+        self.assertEqual(old.calls, 1)
+        self.assertEqual(new.calls, 0)
+
     # UNKNOWN 后迟到 Receipt 只恢复同一模型 Attempt；后续 commit 不得再次调用 Provider。
     def test_late_receipt_reconciles_same_run_without_provider_replay(self):
         self.refresh.configure(self.model["model_id"], enabled=True, min_interval_seconds=60)
