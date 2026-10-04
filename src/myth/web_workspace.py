@@ -377,6 +377,13 @@ class ConversationWebService:
                 model_state = workspace.repository.decisions.status(turn["run_id"])
                 model_invocations.extend(model_state["model_invocations"])
                 tool_operations.extend(turn["operations"])
+                # Execution Graph 只是现有 durable facts 的观测投影，不新增执行状态或授权。
+                turn["execution_graph"] = workspace.components.observability.execution_graph(
+                    run_id=turn["run_id"],
+                    status=turn["status"],
+                    model_state=model_state,
+                    operations=turn["operations"],
+                )
                 turn["model_usage"] = self._model_usage_summary(
                     model_state["model_invocations"]
                 )
