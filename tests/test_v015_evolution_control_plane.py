@@ -240,30 +240,53 @@ class EvolutionControlPlaneTests(unittest.TestCase):
                 changes=["exercise held-out isolation"],
             )
             ledger = SqliteEvaluationLedger(runtime)
-            base_result = FoundationEvalRunner.from_path(
-                self.suite,
-                policy_id=candidate["baseline_policy_id"],
-                policy_config=evolution.policy(candidate["baseline_policy_id"])["config"],
-            ).run()
-            discovery_result = FoundationEvalRunner.from_path(
-                self.suite,
-                policy_id=candidate["candidate_id"],
-                policy_config=candidate["config"],
-            ).run()
-            discovery_result["evaluation_partition"] = "discovery"
-            final_result = FoundationEvalRunner.from_path(
-                self.suite,
-                policy_id=candidate["candidate_id"],
-                policy_config=candidate["config"],
-            ).run()
+
+            # 构造最小固定单题评测，避免用完整 Foundation suite 测试纯账本隔离规则。
+            def result(policy_id, partition):
+                return {
+                    "suite_id": "heldout-v1",
+                    "version": 1,
+                    "policy_id": policy_id,
+                    "evaluation_partition": partition,
+                    "suite_case_count": 1,
+                    "selected_case_count": 1,
+                    "complete_suite": True,
+                    "report": {
+                        "suite_id": "heldout-v1",
+                        "pass_count": 1,
+                        "fail_count": 0,
+                        "inconclusive_count": 0,
+                        "safety_regressions": 0,
+                        "measured_cost": 0,
+                        "unsupported_count": 0,
+                    },
+                    "release_gate": {
+                        "passed": True,
+                        "reason": "quality gate passed",
+                    },
+                    "observations": [
+                        {
+                            "case_id": "case-1",
+                            "verdict": "PASS",
+                            "reason": "fixed pass",
+                            "metrics": {"input_tokens": 10},
+                            "evidence_refs": ["eval:case-1"],
+                            "comparison_key": "case-1",
+                        }
+                    ],
+                }
+
             before = ledger.record(
-                base_result, policy_id=candidate["baseline_policy_id"]
+                result(candidate["baseline_policy_id"], "final"),
+                policy_id=candidate["baseline_policy_id"],
             )
             ledger.record(
-                discovery_result, policy_id=candidate["candidate_id"]
+                result(candidate["candidate_id"], "discovery"),
+                policy_id=candidate["candidate_id"],
             )
             after = ledger.record(
-                final_result, policy_id=candidate["candidate_id"]
+                result(candidate["candidate_id"], "final"),
+                policy_id=candidate["candidate_id"],
             )
             with self.assertRaisesRegex(ValueError, "held-out final"):
                 evolution.attach_evaluation(
