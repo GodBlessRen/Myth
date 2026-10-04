@@ -977,27 +977,40 @@ class LocalConversationExecution:
             )
             if capability == "project.patch_exact":
                 # Action Fusion：精确 patch 的确定性后继是 diff 生成，不需要再花一次 LLM 决策。
-                # 这里只读取同一次已冻结 before/data；不执行 shell、不改项目源文件，也不把 diff 当语义验收。
+                # 后继失败不能抹掉已生成候选；因此把 mutation 与 successor 状态分开表达。
                 root, source = self.project_path(turn, args.get("path"))
-                before_text = before.decode("utf-8")
-                after_text = data.decode("utf-8")
-                diff = "".join(
-                    difflib.unified_diff(
-                        before_text.splitlines(keepends=True),
-                        after_text.splitlines(keepends=True),
-                        fromfile=f"a/{source.relative_to(root).as_posix()}",
-                        tofile=f"b/{source.relative_to(root).as_posix()}",
+                intent["source_path"] = str(source)
+                intent["precondition_digest"] = before_digest
+                try:
+                    before_text = before.decode("utf-8")
+                    after_text = data.decode("utf-8")
+                    diff = "".join(
+                        difflib.unified_diff(
+                            before_text.splitlines(keepends=True),
+                            after_text.splitlines(keepends=True),
+                            fromfile=f"a/{source.relative_to(root).as_posix()}",
+                            tofile=f"b/{source.relative_to(root).as_posix()}",
+                        )
                     )
-                )
-                result["fused_successor"] = {
-                    "kind": "deterministic_diff",
-                    "status": "SUCCEEDED",
-                    "precondition_digest": before_digest,
-                    "candidate_digest": digest,
-                    "diff": diff[:24000],
-                    "truncated": len(diff) > 24000,
-                    "semantic_verification": False,
-                }
+                    result["fused_successor"] = {
+                        "kind": "deterministic_diff",
+                        "status": "SUCCEEDED",
+                        "precondition_digest": before_digest,
+                        "candidate_digest": digest,
+                        "diff": diff[:24000],
+                        "truncated": len(diff) > 24000,
+                        "semantic_verification": False,
+                    }
+                except (UnicodeDecodeError, ValueError) as exc:
+                    result["fused_successor"] = {
+                        "kind": "deterministic_diff",
+                        "status": "FAILED",
+                        "reason_code": "projection_failed",
+                        "error": str(exc),
+                        "precondition_digest": before_digest,
+                        "candidate_digest": digest,
+                        "semantic_verification": False,
+                    }
             intent.update(
                 {"write_bytes": len(data), "target": str(target), "digest": digest}
             )
@@ -1012,6 +1025,21 @@ class LocalConversationExecution:
             turn["run_id"], decision_id, capability, intent
         )
         if intent.get("target"):
+            # Fused successor 在真正发布受管副本前重查源身份；源已变化时只跳过该后继，
+            # mutation 候选仍按先前明确输入保存，避免把部分成功错误折叠成“什么都没发生”。
+            if intent.get("source_path") and intent.get("precondition_digest"):
+                current = Path(intent["source_path"]).read_bytes()
+                if sha256_bytes(current) != intent["precondition_digest"]:
+                    fused = result.get("fused_successor")
+                    if isinstance(fused, dict):
+                        fused.update(
+                            {
+                                "status": "SKIPPED",
+                                "reason_code": "precondition_changed",
+                                "diff": "",
+                                "truncated": False,
+                            }
+                        )
             atomic_write(
                 Path(intent["target"]), self.runtime.objects.get(intent["digest"])
             )
