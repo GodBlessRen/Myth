@@ -8,7 +8,14 @@ import uuid
 from typing import Any
 
 from ..domain import canonical_json
-from .evaluation import EvalObservation, EvalVerdict, attribution_matrix, compare_observations
+from .evaluation import (
+    EvalObservation,
+    EvalVerdict,
+    HarnessVariant,
+    attribution_matrix,
+    compare_observations,
+    controlled_attribution,
+)
 
 
 # SCHEMA：本仓储拥有的表、索引与约束；升级补齐旧字段，删除列须有迁移证据。
@@ -25,6 +32,8 @@ CREATE TABLE IF NOT EXISTS evaluation_runs(
     selected_case_count INTEGER,
     complete_suite INTEGER NOT NULL DEFAULT 0,
     evaluation_partition TEXT NOT NULL DEFAULT 'final',
+    harness_id TEXT,
+    harness_mechanisms_json TEXT NOT NULL DEFAULT '[]',
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE IF NOT EXISTS evaluation_observations(
@@ -60,6 +69,8 @@ class SqliteEvaluationLedger:
             ("selected_case_count", "INTEGER"),
             ("complete_suite", "INTEGER NOT NULL DEFAULT 0"),
             ("evaluation_partition", "TEXT NOT NULL DEFAULT 'final'"),
+            ("harness_id", "TEXT"),
+            ("harness_mechanisms_json", "TEXT NOT NULL DEFAULT '[]'"),
         ):
             if name not in columns:
                 self.store.db.execute(
@@ -93,6 +104,14 @@ class SqliteEvaluationLedger:
             raise ValueError("evaluation result requires suite id/version")
         observations = result.get("observations") or []
         partition = str(result.get("evaluation_partition") or "final").strip().lower()
+        harness_id = str(result.get("harness_id") or "").strip() or None
+        harness_mechanisms = tuple(
+            str(item).strip()
+            for item in (result.get("harness_mechanisms") or ())
+            if str(item).strip()
+        )
+        if harness_id is not None:
+            HarnessVariant(harness_id, harness_mechanisms)
         if partition not in {"discovery", "final"}:
             raise ValueError("evaluation_partition must be discovery or final")
         if not isinstance(observations, list):
@@ -102,7 +121,8 @@ class SqliteEvaluationLedger:
         with self.store.tx() as db:
             db.execute(
                 "INSERT INTO evaluation_runs(eval_run_id,suite_id,suite_version,policy_id,report_json,release_gate_json,elapsed_ms,"
-                "suite_case_count,selected_case_count,complete_suite,evaluation_partition) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                "suite_case_count,selected_case_count,complete_suite,evaluation_partition,harness_id,harness_mechanisms_json) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     eval_run_id,
                     suite_id,
@@ -115,6 +135,8 @@ class SqliteEvaluationLedger:
                     int(result.get("selected_case_count") or len(observations)),
                     int(bool(result.get("complete_suite", False))),
                     partition,
+                    harness_id,
+                    canonical_json(harness_mechanisms),
                 ),
             )
             for item in observations:
@@ -177,6 +199,7 @@ class SqliteEvaluationLedger:
             **dict(row),
             "report": json.loads(row["report_json"]),
             "release_gate": json.loads(row["release_gate_json"]),
+            "harness_mechanisms": json.loads(row["harness_mechanisms_json"]),
             "observations": observations,
         }
 
@@ -191,6 +214,7 @@ class SqliteEvaluationLedger:
             evidence_refs=tuple(row.get("evidence_refs") or ()),
             safety_regression=bool(row.get("safety_regression")),
             policy_id=policy_id,
+            harness_id=row.get("harness_id"),
             comparison_key=row.get("comparison_key") or row["case_id"],
             mechanism_events=tuple(row.get("mechanism_events") or ()),
         )
@@ -275,13 +299,61 @@ class SqliteEvaluationLedger:
         ):
             raise ValueError("policy attribution requires the same suite id/version")
         observations = tuple(
-            self._observation(item, baseline["policy_id"])
+            self._observation({**item, "harness_id": baseline.get("harness_id")}, baseline["policy_id"])
             for item in baseline["observations"]
         ) + tuple(
-            self._observation(item, candidate["policy_id"])
+            self._observation({**item, "harness_id": candidate.get("harness_id")}, candidate["policy_id"])
             for item in candidate["observations"]
         )
         return attribution_matrix(
             observations,
             baseline_policy_id=baseline["policy_id"],
+        )
+
+
+    # 用已持久化的 baseline/full/one-mechanism/leave-one-out Run 做受控归因；这里只分析证据，不自动运行新实验。
+    def controlled_attribution(
+        self,
+        *,
+        baseline_eval_run_id: str,
+        full_eval_run_id: str,
+        variant_eval_run_ids: tuple[str, ...] = (),
+    ) -> dict[str, object]:
+        runs = [
+            self.run(baseline_eval_run_id),
+            self.run(full_eval_run_id),
+            *(self.run(run_id) for run_id in variant_eval_run_ids),
+        ]
+        suite_identity = {
+            (run["suite_id"], run["suite_version"]) for run in runs
+        }
+        if len(suite_identity) != 1:
+            raise ValueError("controlled attribution requires the same suite id/version")
+        variants = []
+        observations = []
+        seen_harnesses = set()
+        for run in runs:
+            harness_id = run.get("harness_id")
+            if not harness_id:
+                raise ValueError("controlled attribution requires harness_id on every run")
+            if harness_id in seen_harnesses:
+                raise ValueError("controlled attribution requires one run per harness variant")
+            seen_harnesses.add(harness_id)
+            variant = HarnessVariant(
+                harness_id,
+                tuple(run.get("harness_mechanisms") or ()),
+            )
+            variants.append(variant)
+            observations.extend(
+                self._observation(
+                    {**item, "harness_id": harness_id},
+                    run["policy_id"],
+                )
+                for item in run["observations"]
+            )
+        return controlled_attribution(
+            tuple(observations),
+            tuple(variants),
+            baseline_harness_id=str(runs[0]["harness_id"]),
+            full_harness_id=str(runs[1]["harness_id"]),
         )
