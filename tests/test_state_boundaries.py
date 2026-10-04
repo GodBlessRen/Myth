@@ -86,6 +86,25 @@ class StateBoundaryTests(unittest.TestCase):
             with self.assertRaises(PermissionError):
                 objects.put(b"expected bytes")
 
+    # 回归断言：内容寻址对象即使 symlink 目标字节完全一致也不能当作可信对象复用或读取。
+    @unittest.skipIf(not hasattr(Path, "symlink_to"), "symlink is unavailable")
+    def test_object_store_rejects_symlink_substitution(self):
+        objects = ObjectStore(Path(self.temp.name) / "object-symlink")
+        data = b"bound evidence"
+        digest = objects.put(data)
+        path = objects._path(digest)
+        target = Path(self.temp.name) / "same-bytes.txt"
+        target.write_bytes(data)
+        path.unlink()
+        try:
+            path.symlink_to(target)
+        except (OSError, NotImplementedError):
+            self.skipTest("symlink creation is not permitted on this platform")
+        with self.assertRaises(IOError):
+            objects.get(digest)
+        with self.assertRaises(IOError):
+            objects.put(data)
+
     # 故障在数据库准入之前：私有副本准备失败不能残留 Run，同 request_id 修复后可完整准入。
     def test_patch_baseline_failure_has_no_run_and_same_request_can_retry(self):
         source = self.patch_source()
