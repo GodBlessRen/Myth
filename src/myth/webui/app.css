@@ -1392,6 +1392,28 @@ dialog textarea {
 .provider-evidence-raw {
   margin-top: 8px;
 }
+.model-provider-details {
+  margin-top: 7px;
+}
+.model-provider-details > summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 9px;
+  user-select: none;
+}
+.model-provider-details pre {
+  max-height: 220px;
+  overflow: auto;
+  margin: 7px 0 0;
+  padding: 8px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: var(--raised);
+  color: var(--ink-2);
+  font: 9px/1.5 var(--mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 .provider-evidence-raw pre {
   max-height: 320px;
   overflow: auto;
