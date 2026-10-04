@@ -40,10 +40,16 @@ def visible_tool_ids(
     visible = {tool_id for tool_id in DEFAULT_VISIBLE_TOOL_IDS if tool_id in catalog}
     for activity in activities or ():
         decision = activity.get("decision") or {}
-        capability = decision.get("capability_id")
-        if capability in catalog:
-            visible.add(capability)
         result = activity.get("result") or {}
+        capability = decision.get("capability_id")
+        # 只有真正成功观察到的能力才因“已使用”保持可见；请求隐藏能力后被拒绝不能绕过 discovery。
+        if (
+            capability in catalog
+            and result
+            and not result.get("error")
+            and not result.get("failure")
+        ):
+            visible.add(capability)
         for match in result.get("matches") or []:
             if isinstance(match, dict) and match.get("capability_id") in catalog:
                 visible.add(match["capability_id"])
