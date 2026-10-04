@@ -371,8 +371,24 @@ function renderAdaptiveModelSettings() {
     $("maxTokens").max = "393216";
   }
   if (profile?.input_modalities?.length) facts.push(`Input ${profile.input_modalities.join(" + ")}`);
-  $("modelCapabilityMeta").textContent = facts.join(" · ");
-  show("modelCapabilityMeta", facts.length > 0);
+  const capabilityMeta = $("modelCapabilityMeta");
+  capabilityMeta.replaceChildren();
+  if (facts.length) capabilityMeta.append(document.createTextNode(facts.join(" · ")));
+  const providerMetadata = profile?.provider_metadata;
+  if (providerMetadata && Object.keys(providerMetadata).length) {
+    const details = document.createElement("details");
+    details.className = "model-provider-details";
+    const summary = document.createElement("summary");
+    summary.textContent = "Provider model details";
+    const pre = document.createElement("pre");
+    pre.textContent = JSON.stringify(providerMetadata, null, 2);
+    details.append(summary, pre);
+    capabilityMeta.append(details);
+  }
+  show(
+    "modelCapabilityMeta",
+    facts.length > 0 || !!(providerMetadata && Object.keys(providerMetadata).length),
+  );
 }
 // Control 面板复用同一 capability 目录，但保持当前 Run 已保存的原生值可见。
 function renderTurnReasoning(turn, current) {
