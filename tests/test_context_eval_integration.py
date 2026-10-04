@@ -30,6 +30,7 @@ from myth.platform.evaluation import (
     capability_efficiency_gate,
     compare_observations,
     controlled_attribution,
+    controlled_harness_variants,
 )
 from myth.platform.evolution import (
     ExperimentCandidate,
@@ -209,6 +210,20 @@ class EvaluationEvolutionTests(unittest.TestCase):
         self.assertEqual(
             value["outcome_flips"][0]["candidate_mechanisms"],
             ["context_compaction:APPLIED"],
+        )
+
+    # 回归断言：两机制实验只需四个唯一 Harness 变体；one-mechanism 与另一机制的 leave-one-out 复用同一次真实 Run。
+    def test_controlled_harness_variant_plan_deduplicates_equivalent_ablations(self):
+        variants = controlled_harness_variants(("compact", "recall"), prefix="exp")
+        self.assertEqual(len(variants), 4)
+        self.assertEqual(
+            {frozenset(item.mechanisms) for item in variants},
+            {
+                frozenset(),
+                frozenset({"compact"}),
+                frozenset({"recall"}),
+                frozenset({"compact", "recall"}),
+            },
         )
 
     # 回归断言：真正的机制归因要求 full、one-mechanism 与 leave-one-out 同题对照；完整组合失败而去掉 compact 后恢复，标记受控负贡献。
