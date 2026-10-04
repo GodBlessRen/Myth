@@ -1,5 +1,17 @@
 # Changelog
 
+## 未发布 — Durable Mental Model Auto Refresh
+
+- Mental Model 新增显式 opt-in 自动刷新 policy；冻结 Provider/Model/Thinking/Context/Output 设置，未来全局设置不倒写已配置 policy。
+- 新增 durable refresh occurrence：以 `model_id + source_change_seq` 去重，最小刷新间隔合并突发 Memory 变化。
+- 自动刷新复用 Core Run、模型预算与 DecisionRuntime 的 Intent/Ticket/Receipt/UNKNOWN，不创建第二套模型调用协议。
+- 每个 occurrence 新增 owner/heartbeat/lease，与 Durable Executor 全局 lease 形成两级租约；过期可接管同一 Run，不能新建替代机会。
+- Provider Ticket 后结果不明时 occurrence=UNKNOWN、Core Run=RECOVERING，并阻断该 Mental Model 后续自动派发。
+- synthesis 期间来源发生变化时旧结果标记 SUPERSEDED/CANCELLED，不发布过期 materialized view。
+- 上一版 Mental Model 正文只作为演进 baseline，Evidence 仍必须引用本轮 admitted 的底层 Memory。
+- Durable Executor 复用同一 worker/并发上限驱动 Refresh 与 Goal/Conversation 工作，不增加隐藏 daemon。
+
+
 ## 未发布 — Controlled Evaluation 深化
 
 - Evaluation 新增持久 `harness_id + harness_mechanisms`，同一固定 Task 可比较 baseline / full / one-mechanism / leave-one-out。
