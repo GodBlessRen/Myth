@@ -33,9 +33,9 @@ Long-term Goal
 
 候选包括更好的原文分页、Artifact verification、Memory conflict/supersede、项目观察与检索对照。只有固定任务或连续自用证明需要时才增加能力；先解决已经发生的问题，不先造更多 Layer。
 
-## Next 3.5 — Harness efficiency 实测
+## Next 3.5 — Context / Runtime 效率实测
 
-现有骨架已接入 Observation exact recall、grounded Compact seed、deterministic successor fusion、Evidence Receipt verifier、optimization economics/reachability 与 capability-floor eval 合同。下一步不是继续堆机制，而是用真实长轨迹回答：
+现有骨架已接入 Observation exact recall、grounded Compact seed、deterministic successor、来源绑定验证、Context 真实投影选择、Capability 可达性与 capability-floor Eval gate。下一步不是继续堆概念，而是用真实长轨迹回答：
 
 - provider-visible projection 实际减少多少 input token；
 - exact recall 增加了多少额外 Tool round-trip；
@@ -66,16 +66,16 @@ Workflow、Routing/Parallel、Multi-Agent、MCP/A2A 和更复杂 Evolution 暂�
 - 旧 Turn/Receipt/Artifact 不被未来策略倒写。
 - Core 不感知模型厂商、MCP/A2A 等协议名。
 
-## 长期研究 — Harness pretraining / recursive efficiency
+## 长期研究 — 基于运行轨迹的 Runtime 改进
 
-当真实长轨迹、Disposable Experiment、固定 capability floor 与 held-out final eval 都形成稳定证据后，可以研究 Harness 自身的数据飞轮：
+当真实长轨迹、可丢弃实验、固定 capability floor 与 held-out final eval 都形成稳定证据后，可以研究 Runtime 的数据飞轮：
 
 ```text
 durable observable trajectories
   -> repeated waste / failure hypotheses
   -> broad disposable experiments
   -> fixed capability + efficiency validation
-  -> explicitly released harness improvement
+  -> explicitly released runtime improvement
   -> lower experiment cost / more evidence
 ```
 
