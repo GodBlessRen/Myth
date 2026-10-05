@@ -24,8 +24,9 @@ def pricing(value):
     """价格以每百万 Token 的指定币种计；留空为未配置，禁止 NaN/负数。"""
     if value is None or value == {}:
         return None
-    if not isinstance(value, dict) or set(value) - {"currency", "input", "output"}:
-        raise ValueError("价格只允许 currency/input/output")
+    metadata = {"source", "provider", "model", "checked_at", "stale"}
+    if not isinstance(value, dict) or set(value) - {"currency", "input", "output"} - metadata:
+        raise ValueError("价格字段无效")
     currency = value.get("currency", "USD")
     if currency not in {"USD", "CNY"}:
         raise ValueError("价格币种必须为 USD 或 CNY")
@@ -35,6 +36,30 @@ def pricing(value):
         if type(rate) not in {int, float} or not math.isfinite(rate) or not 0 <= rate <= 100000:
             raise ValueError("输入与输出单价必须同时填写有限非负数")
         result[key] = float(rate)
+    if value.get("source") is not None:
+        if value["source"] != "models.dev" or value.get("provider") not in PROVIDERS:
+            raise ValueError("自动价格来源无效")
+        for key in ("model", "checked_at"):
+            if not isinstance(value.get(key), str) or not 1 <= len(value[key]) <= 200:
+                raise ValueError("自动价格来源缺少模型或查询时间")
+        if type(value.get("stale")) is not bool:
+            raise ValueError("自动价格须标明缓存是否过期")
+        result.update({key: value[key] for key in metadata})
+    elif set(value) & metadata:
+        raise ValueError("手动价格不能混入自动来源字段")
+    return result
+
+
+def pricing_identity(settings):
+    """入口去重不绑定公共标价的刷新时间；显式合同费率仍属于用户配置身份。"""
+    import copy
+    result = copy.deepcopy(settings)
+    pool = result.get("model_pool")
+    if isinstance(pool, dict):
+        for owner, key in [(pool, "main_pricing"), *((child, "pricing") for child in pool.get("children", []))]:
+            rates = owner.get(key)
+            if rates and rates.get("source") == "models.dev":
+                owner[key] = None
     return result
 
 
@@ -84,8 +109,9 @@ def clean_pool(value):
         if type(window) is not int or not 2048 <= window <= 262144 or (provider == "ollama" and window <= tokens + 512):
             raise ValueError("子模型上下文不足")
         temperature = item.get("temperature", 0.0)
-        if type(temperature) not in {int, float} or not 0 <= temperature <= 2:
-            raise ValueError("invalid child temperature")
+        ceiling = 1 if provider == "anthropic" else 2
+        if type(temperature) not in {int, float} or not 0 <= temperature <= ceiling:
+            raise ValueError(f"子模型采样温度须为 0–{ceiling}")
         steps = item.get("max_steps", 4)
         if type(steps) is not int or not 1 <= steps <= 8:
             raise ValueError("子任务步骤上限须为 1–8")

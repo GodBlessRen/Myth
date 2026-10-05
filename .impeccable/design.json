@@ -1,7 +1,7 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-10-05T16:51:59Z",
-  "title": "Design System: Myth · 黑白太极工作台",
+  "generatedAt": "2026-10-05T18:14:11Z",
+  "title": "Design System: Myth · 水墨太极工作台",
   "extensions": {
     "colorMeta": {
       "paper": {
@@ -356,7 +356,7 @@
       },
       "taiji-outline": {
         "role": "neutral",
-        "displayName": "太极外圈",
+        "displayName": "微型等待太极轮廓",
         "source": "src/myth/webui/taiji.svg",
         "cssVariable": null,
         "theme": "asset"
@@ -398,6 +398,11 @@
       "code": {
         "displayName": "code",
         "purpose": "代码块正文"
+      },
+      "choice-option": {
+        "displayName": "选择菜单行",
+        "purpose": "共享 Listbox 的选项文字，活动/禁用状态遵循既有主题。",
+        "source": "src/myth/webui/app.css .choice-menu"
       }
     },
     "themeBindings": {
@@ -571,58 +576,274 @@
       "composer": "源码 textarea 无独立 outline，由容器赭色边界与 1px 底线表达。"
     },
     "overlay": {
-      "backdrop": "rgb(16 18 20 / 38%)"
+      "backdrop": "rgb(16 18 20 / 38%)",
+      "choiceMenu": {
+        "mechanism": "native manual Popover top layer",
+        "owner": "source.closest(dialog) or document.body",
+        "surface": "var(--paper)",
+        "border": "1px solid var(--line)",
+        "shadow": "none",
+        "viewportInset": "12px",
+        "maxHeight": "min(320px, available space), at least 80px",
+        "openingGap": "6px"
+      }
     },
-    "snippetScope": "片段独立 HTML/CSS，无框架、Tailwind、外部图标或图片依赖；所有 class 使用 ds- 前缀。CSS 变量附最终浅色规范值作为 fallback，继承应用主题。示例文案和等待预览不构成 Runtime 事实。",
+    "snippetScope": "片段独立 HTML/CSS，无框架、Tailwind、外部图标或图片依赖；所有 class 使用 ds- 前缀。CSS 变量附浅色规范值作为 fallback，继承应用主题。选择菜单和等待片段仅示意外观，不模拟配置持久或 Runtime 事实。真实水墨 PNG 单独在 identity 中登记，不改绘为 SVG，也不内嵌重复的 1MB 资源。",
     "paletteScope": "No synthesized tonal ramps: this extraction records only source palette bindings and existing values.",
     "sourceEvidence": {
       "hashAlgorithm": "SHA-256",
-      "hashNormalization": "Decode UTF-8, normalize CRLF and lone CR to LF, encode UTF-8 without BOM; preserve final newline.",
-      "designMdSha256": "a9b93ccb7eb391d49c68e6ac25cfec07b07ce3d4ebf5e66f130c8d8019e1e9d3",
+      "hashNormalization": "Text: decode UTF-8, normalize CRLF and lone CR to LF, encode UTF-8 without BOM; preserve final newline. Binary PNG: hash raw bytes.",
+      "designMdSha256": "ab35285c1f0227a00e2466491b1e687991533e1302bcf9dbd565e46165556b91",
+      "surfaceSha256": "a19801c60c39b019f1c641e15e16e38808b7d976b39daf9ecb66c7aa6f4c8041",
       "sources": [
         {
           "path": "src/myth/webui/index.html",
-          "sha256": "762617cef80957feb40735f519e96003f5d532a286bc4edcd00f32246d6ecc09"
+          "sha256": "fca9b069a8031e7fe152be9a95044b2152c3f0ccafc0c6e06f379de0730f78cf",
+          "normalization": "UTF-8 text with LF"
         },
         {
           "path": "src/myth/webui/app.css",
-          "sha256": "5e06b32bc8ba0a32693286a68de033cbc6191c31c0c4e42b40957a0b5f0b6a01"
+          "sha256": "be6dd4a31d5838270b8a7f64137922465d452473455035f1edab9397de48625f",
+          "normalization": "UTF-8 text with LF"
         },
         {
           "path": "src/myth/webui/studio.js",
-          "sha256": "ef902456426eef1d7c4a7dcc09e12f18ec1cbabfe7cf2893da1e3e62a13aac7a"
+          "sha256": "ef902456426eef1d7c4a7dcc09e12f18ec1cbabfe7cf2893da1e3e62a13aac7a",
+          "normalization": "UTF-8 text with LF"
         },
         {
           "path": "src/myth/webui/model-pool.js",
-          "sha256": "7cd18576a780311d4c3fba72ba6c833529e16907dee77f43652063fed2776423"
+          "sha256": "cb7e529d8f238492a65a20e3071de4255398818043b482f14a2bc125a09355c4",
+          "normalization": "UTF-8 text with LF"
+        },
+        {
+          "path": "src/myth/webui/choices.js",
+          "sha256": "cda82c75243292317b5ca3d15db2b6d3afa8ea763d4e1769edf0e45fdde96343",
+          "normalization": "UTF-8 text with LF"
         },
         {
           "path": "src/myth/webui/taiji.svg",
-          "sha256": "7125a116dfe52d69de443b15a2b03cc36a5ed4779ee7e351bbcc85094f7347c3"
+          "sha256": "7125a116dfe52d69de443b15a2b03cc36a5ed4779ee7e351bbcc85094f7347c3",
+          "normalization": "UTF-8 text with LF"
         },
         {
           "path": "src/myth/webui/app.js",
-          "sha256": "9bf0577fb78c926aa0d4b131fd1ffc7b1862b380eaa8489fe220e7a9f2b052e7"
+          "sha256": "ee9f118a681d38663184de12588157306566e7c4668af5e807bb648fbd460927",
+          "normalization": "UTF-8 text with LF"
+        },
+        {
+          "path": "src/myth/webui/ink-taiji.png",
+          "sha256": "4e78ca8faf9f4ab8e969cd049d488bdf9f08da95b2a4bd0856359301659622a9",
+          "normalization": "binary bytes"
+        },
+        {
+          "path": "src/myth/webui/ink-taiji.png.json",
+          "sha256": "004835002161f513b194009c617bd2f1ec1b2801d417bb34251c62ff8711df1b",
+          "normalization": "UTF-8 text with LF"
         },
         {
           "path": "src/myth/webui/fonts/README.md",
-          "sha256": "b1f27dffaabb59d19a88266b672ecff4000bd1a65f8ce5918a5b6c1e876643c1"
+          "sha256": "b1f27dffaabb59d19a88266b672ecff4000bd1a65f8ce5918a5b6c1e876643c1",
+          "normalization": "UTF-8 text with LF"
+        },
+        {
+          "path": "src/myth/adapters/model_catalog.py",
+          "sha256": "e86d995492e9c1a4fa56384159cd2960dcfa773957efa2adce30f87db085183b",
+          "normalization": "UTF-8 text with LF"
+        },
+        {
+          "path": "src/myth/model_capabilities.py",
+          "sha256": "c8f19a82808bbcee3cb2d1838b5569ee7be4792058864c68666523c9452964b6",
+          "normalization": "UTF-8 text with LF"
+        },
+        {
+          "path": "src/myth/providers/openai.py",
+          "sha256": "7ea62f69ca6e99b7f13a319dece00ccce11fa38934263ba830baee78d75ab9d7",
+          "normalization": "UTF-8 text with LF"
+        },
+        {
+          "path": "src/myth/providers/messages.py",
+          "sha256": "1b54c9276183ab3dd883aed8f48ef33e69e8ed7fbae76eb1ea2e4ee355373e7b",
+          "normalization": "UTF-8 text with LF"
+        },
+        {
+          "path": "src/myth/web_workspace.py",
+          "sha256": "54863cb630bf800fbccef156d2688a4cf3883a3f74c1d5608f6cf9c8d84109aa",
+          "normalization": "UTF-8 text with LF"
+        },
+        {
+          "path": "src/myth/adapters/workspace_store.py",
+          "sha256": "dda6896ce3aae856616ec8eb21dee8b624e7d4f0e2385acf410ab5df6360c2dc",
+          "normalization": "UTF-8 text with LF"
+        },
+        {
+          "path": "src/myth/platform/model_pool.py",
+          "sha256": "6b78703ea9e02c393695ef6d9328b1228abcfc87b6bc54cb098353b7699be813",
+          "normalization": "UTF-8 text with LF"
         }
       ],
       "surface": ".impeccable/surfaces/workbench.md",
-      "review": "output/playwright/taiji-design-review.md",
+      "baseRevision": "origin/main 78487c2831cee3b4ba95d09bff9de0ef8405183e",
+      "review": "output/playwright/ink-design-review.md",
       "reviewDisposition": "ship",
-      "materialFindings": "resolved",
-      "screenshots": [
-        ".impeccable/review/home-light.png",
-        ".impeccable/review/home-dark.png",
-        ".impeccable/review/taiji-chat-1440-light.png",
-        ".impeccable/review/taiji-chat-1440-dark.png",
-        ".impeccable/review/studio-focus-dark.png",
-        ".impeccable/review/taiji-provider-fields-dark.png",
-        ".impeccable/review/taiji-waiting-dark.png"
+      "materialFindings": [
+        {
+          "finding": "56/36px alpha identity contrast in both themes",
+          "status": "resolved"
+        },
+        {
+          "finding": "inactive temperature reset after provider change",
+          "status": "resolved"
+        }
       ],
-      "scope": "Only DESIGN.md and .impeccable/design.json were written. Source and specified screenshots were read; no additional UI edit or QA run."
+      "screenshots": [
+        ".impeccable/review/ink-home-light.png",
+        ".impeccable/review/ink-home-dark.png",
+        ".impeccable/review/ink-settings-1440-light.png",
+        ".impeccable/review/ink-settings-1440-dark.png",
+        ".impeccable/review/ink-settings-390-light.png",
+        ".impeccable/review/ink-settings-390-dark.png",
+        ".impeccable/review/ink-pricing-1440-light.png",
+        ".impeccable/review/ink-pricing-1440-dark.png",
+        ".impeccable/review/ink-pricing-390-light.png",
+        ".impeccable/review/ink-pricing-390-dark.png",
+        ".impeccable/review/ink-collapsed-light.png",
+        ".impeccable/review/ink-collapsed-dark.png"
+      ],
+      "browserReport": "output/playwright/ink-settings-browser-report.json",
+      "browserChecks": 7,
+      "browserScreenshots": 10,
+      "separateCollapsedScreenshots": 2,
+      "browserErrors": [],
+      "mainBrowserReport": "output/playwright/qa-browser-report.json",
+      "mainBrowserSteps": 21,
+      "pythonLog": ".runtime/python-ink-reviewed.log",
+      "pythonResult": "Ran 486 tests; OK (skipped=1), therefore 485 passed",
+      "nodeLog": ".runtime/node-ink-reviewed.log",
+      "nodeResult": "36 passed",
+      "catalogProbe": {
+        "observedBy": "root agent during this authorized task",
+        "checkedAt": "2026-10-05T17:56:42Z",
+        "provider": "openai",
+        "model": "gpt-4.1",
+        "input": 2,
+        "output": 8,
+        "currency": "USD",
+        "unit": "per million tokens",
+        "boundary": "single recorded public catalog response, not current pricing guidance or a screenshot fixture price"
+      },
+      "scope": "Only root DESIGN.md, .impeccable/design.json and .impeccable/surfaces/workbench.md were written. Current source, asset and existing review/report evidence were read; no UI/backend edit or QA rerun. Fixed browser/model transport and screenshot prices are fixtures, not remote-model quality, OAuth, billing or production proof.",
+      "reviewLimitations": "Error/stale price states, expanded child parameters and Thinking popup have code/automatic-check evidence, without dedicated final screenshots in this review."
+    },
+    "identity": {
+      "asset": "src/myth/webui/ink-taiji.png",
+      "format": "PNG",
+      "pixelSize": [
+        1918,
+        820
+      ],
+      "mode": "RGBA",
+      "alphaRange": [
+        0,
+        255
+      ],
+      "origin": "Built-in image_gen edit, user-directed 180-degree orientation, horizontal fish eyes and ink seam extensions, 2026-10-06",
+      "promptSidecar": "src/myth/webui/ink-taiji.png.json",
+      "embeddedPromptKey": "impeccable:prompt",
+      "embeddedPromptLength": 1628,
+      "promptVerified": "Pillow image.load() completed, embedded text equals JSON prompt.",
+      "visibleContract": "左黑、右奶油白；恰好两只相反颜色的鱼眼水平对齐；中央分界向左右延展为连续水墨波浪 M。180度旋转是用户编辑意图，当前像素形态以实际资产为准。",
+      "brand": "{components.ink-brand}",
+      "workspace": "{components.ink-workspace}",
+      "collapsed": "{components.ink-collapsed}",
+      "alphaContour": "drop-shadow(.3px 0 0 var(--ink-2)) drop-shadow(-.3px 0 0 var(--ink-2)) drop-shadow(0 .3px 0 var(--ink-2)) drop-shadow(0 -.3px 0 var(--ink-2))",
+      "contourPurpose": "实际 alpha 的主题细轮廓，使56/36px的黑白两侧均可辨；零模糊，没有衬底或装饰光晕。",
+      "motion": "static",
+      "waitingAsset": "src/myth/webui/taiji.svg",
+      "waitingToken": "{components.taiji-waiting}",
+      "waitingMotion": "2.6s linear infinite; prefers-reduced-motion: reduce => none",
+      "authority": "用户明确的水墨替换和旋转/中缝延伸修订覆盖旧刚性几何品牌规范；微型等待保留原几何。"
+    },
+    "modelSettings": {
+      "sourceFieldsOwnValues": true,
+      "choicesSource": "src/myth/webui/choices.js",
+      "choices": {
+        "roles": [
+          "combobox",
+          "listbox",
+          "option"
+        ],
+        "keyboard": [
+          "ArrowUp",
+          "ArrowDown",
+          "Home",
+          "End",
+          "Enter",
+          "Tab",
+          "Escape",
+          "prefix typeahead"
+        ],
+        "editableModelSuggestions": true,
+        "dynamicSync": "select, input[list] and existing provider/model options; remove popup when source is disconnected",
+        "escape": "dismiss open menu before owning dialog"
+      },
+      "bounds": {
+        "mainSteps": [
+          2,
+          32
+        ],
+        "childSteps": [
+          1,
+          8
+        ],
+        "mainOutputTokens": [
+          128,
+          393216
+        ],
+        "childOutputTokens": [
+          128,
+          32768
+        ],
+        "ollamaContextTokens": [
+          2048,
+          262144
+        ],
+        "temperature": [
+          0,
+          2
+        ],
+        "claudeTemperature": [
+          0,
+          1
+        ],
+        "customPricePerMillionTokens": [
+          0,
+          100000
+        ],
+        "outputLimit": "model capability/catalog ceiling may narrow the configured output maximum"
+      },
+      "reasoning": "具体模型声明/实时发现的原生档位；未知能力保持默认或已保存值，不制造通用数值强度。",
+      "temperature": "普通OpenAI API模型传递temperature；推理/OAuth使用模型默认；新Claude模型省略不支持的采样参数。主/子停用控件重置0，避免切换后被不可编辑的超界值阻挡。",
+      "pricing": {
+        "source": "models.dev",
+        "match": "provider channel and exact model ID",
+        "unit": "USD per million input/output tokens; optional contract override supports USD/CNY",
+        "automaticMainAndChild": true,
+        "states": [
+          "unselected",
+          "priced",
+          "unknown",
+          "unavailable",
+          "unpublished",
+          "subscription",
+          "local_or_hosted"
+        ],
+        "freshness": "show checked_at and stale state; explicit update action",
+        "unknown": "absence, all-zero catalog placeholders, subscription/local channels are not assumed free",
+        "override": "folded explicit contract-rate checkbox; absent price remains null",
+        "estimate": "not a bill; cache discounts are not included",
+        "ownership": "lookup outside Runtime transactions; new Run freezes resolved settings; automatic price/time excluded from user request identity; custom contract price included; existing/recovery Runs retain snapshots"
+      }
     }
   },
   "components": [
@@ -654,13 +875,13 @@
       "source": "src/myth/webui/app.css .text-button; src/myth/webui/model-pool.js"
     },
     {
-      "name": "设置字段",
+      "name": "设置字段与选择菜单",
       "kind": "input",
       "refersTo": "input-field",
-      "description": "独立标签与完整输入边界；hover 保持源码原边界。",
-      "html": "<label class=\"ds-field\"><span class=\"ds-field-label\">模型名称</span><input class=\"ds-field-input\" placeholder=\"检查连接后选择模型\"/></label>",
-      "css": ".ds-field { display:block; font:12px/1.65 var(--sans, \"Myth Latin\", \"Myth Sans\", \"PingFang SC\", \"Microsoft YaHei\", sans-serif); color:var(--ink-2, #454d46); } .ds-field-label { display:block; font-weight:550; margin:18px 0 7px; } .ds-field-input { width:100%; min-height:38px; padding:8px 11px; border:1px solid var(--line, #c9c8bc); border-radius:7px; background:var(--paper, #F8F4ED); color:var(--ink, #0E100F); font:12px/1.65 var(--sans, \"Myth Latin\", \"Myth Sans\", \"PingFang SC\", \"Microsoft YaHei\", sans-serif); caret-color:var(--focus, #a44732); } .ds-field-input:hover { border-color:var(--line, #c9c8bc); } .ds-field-input::placeholder { color:var(--muted, #646d64); opacity:1; } .ds-field-input:focus-visible { outline:2px solid var(--focus, #a44732); outline-offset:2px; }",
-      "source": "src/myth/webui/app.css .settings-panel; src/myth/webui/index.html #model"
+      "description": "原字段保留值来源；以下并排示意可编辑字段与主题 Listbox 外观，完整键盘/Popover行为由 choices.js 提供。",
+      "html": "<label class=\"ds-field\"><span class=\"ds-field-label\">模型名称</span><input class=\"ds-field-input\" placeholder=\"检查连接后选择模型\"/></label><div class=\"ds-choice\"><span class=\"ds-choice-label\">模型提供方 · 样式示例</span><button class=\"ds-choice-trigger\" type=\"button\" role=\"combobox\" aria-label=\"模型提供方样式示例：OpenAI\" aria-haspopup=\"listbox\" aria-expanded=\"true\" aria-controls=\"ds-choice-listbox\"><span>OpenAI · Myth 安全连接</span><svg aria-hidden=\"true\" class=\"ds-choice-chevron\" viewBox=\"0 0 16 16\"><path d=\"m4 6 4 4 4-4\"/></svg></button><div class=\"ds-choice-listbox\" id=\"ds-choice-listbox\" role=\"listbox\" aria-label=\"模型提供方样式示例\"><div class=\"ds-choice-option\" role=\"option\" aria-selected=\"false\">Ollama · 本地模型</div><div class=\"ds-choice-option ds-choice-active\" role=\"option\" aria-selected=\"true\">OpenAI · Myth 安全连接</div><div class=\"ds-choice-option\" role=\"option\" aria-selected=\"false\">Claude · API Key</div></div></div>",
+      "css": ".ds-field { display:block; font:12px/1.65 var(--sans, \"Myth Latin\", \"Myth Sans\", \"PingFang SC\", \"Microsoft YaHei\", sans-serif); color:var(--ink-2, #454d46); } .ds-field-label { display:block; font-weight:550; margin:18px 0 7px; } .ds-field-input { width:100%; min-height:38px; padding:8px 11px; border:1px solid var(--line, #c9c8bc); border-radius:7px; background:var(--paper, #F8F4ED); color:var(--ink, #0E100F); font:12px/1.65 var(--sans, \"Myth Latin\", \"Myth Sans\", \"PingFang SC\", \"Microsoft YaHei\", sans-serif); caret-color:var(--focus, #a44732); } .ds-field-input:hover { border-color:var(--line, #c9c8bc); } .ds-field-input::placeholder { color:var(--muted, #646d64); opacity:1; } .ds-field-input:focus-visible { outline:2px solid var(--focus, #a44732); outline-offset:2px; } .ds-choice { margin-top:20px; font:14px/1.65 var(--sans, \"Myth Latin\", \"Myth Sans\", sans-serif); color:var(--ink, #0E100F); } .ds-choice-label { display:block; margin:18px 0 7px; font-size:12px; font-weight:550; color:var(--ink-2, #454d46); } .ds-choice-trigger { position:relative; display:flex; align-items:center; width:100%; min-width:0; min-height:42px; padding:9px 34px 9px 12px; border:1px solid var(--line, #c9c8bc); border-radius:6px; background:var(--paper, #F8F4ED); text-align:left; font:inherit; color:inherit; cursor:pointer; } .ds-choice-trigger > span { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; } .ds-choice-trigger:hover:not(:disabled) { background:var(--surface-2, #f0ece4); border-color:var(--ink-2, #454d46); } .ds-choice-trigger[aria-expanded=\"true\"] { border-color:var(--focus, #a44732); } .ds-choice-trigger:focus-visible { outline:2px solid var(--focus, #a44732); outline-offset:3px; } .ds-choice-trigger:active { transform:translateY(1px); } .ds-choice-chevron { position:absolute; right:11px; top:50%; transform:translateY(-50%); width:16px; height:16px; fill:none; stroke:var(--muted, #646d64); stroke-width:1.4; stroke-linecap:round; stroke-linejoin:round; } .ds-choice-listbox { margin-top:6px; padding:5px; border:1px solid var(--line, #c9c8bc); border-radius:8px; background:var(--paper, #F8F4ED); color:var(--ink, #0E100F); font:13px/1.5 var(--sans, \"Myth Latin\", \"Myth Sans\", sans-serif); max-height:320px; overflow-y:auto; overscroll-behavior:contain; } .ds-choice-option { position:relative; min-height:38px; padding:10px 28px 10px 10px; border-radius:4px; overflow-wrap:anywhere; cursor:pointer; } .ds-choice-option:hover, .ds-choice-active { background:var(--selected, #e5e4d9); color:var(--selected-ink, #303b31); } .ds-choice-option[aria-selected=\"true\"]::after { content:\"\"; position:absolute; right:10px; top:16px; width:7px; height:4px; border-bottom:1.5px solid currentColor; border-left:1.5px solid currentColor; transform:rotate(-45deg); } @media (max-width:800px) { .ds-choice-trigger, .ds-choice-option { min-height:44px; } }",
+      "source": "src/myth/webui/app.css .settings-panel / .choice-*; src/myth/webui/index.html #provider / #model; src/myth/webui/choices.js Choice"
     },
     {
       "name": "工作导航",
@@ -708,23 +929,23 @@
       "source": "src/myth/webui/app.css .inspector-section-heading / .session-statistics; src/myth/webui/index.html .session-statistics"
     },
     {
-      "name": "太极身份与等待",
+      "name": "微型等待太极",
       "kind": "custom",
-      "refersTo": "taiji-brand",
-      "description": "同一 SVG 的 32/24/14px 三种用途；等待动画只在本片段示意。",
-      "html": "<div class=\"ds-taiji-samples\"><a class=\"ds-brand\" href=\"#ds-workspace\" aria-label=\"Myth 工作空间示例\"><svg class=\"ds-taiji ds-taiji-brand\" aria-hidden=\"true\" xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 32 32\" fill=\"none\">\n  <g transform=\"rotate(180 16 16)\">\n    <circle cx=\"16\" cy=\"16\" r=\"14.5\" fill=\"#0E100F\"/>\n    <path d=\"M16 1.5a14.5 14.5 0 0 0 0 29Z\" fill=\"#F8F4ED\"/>\n    <circle cx=\"16\" cy=\"8.75\" r=\"7.25\" fill=\"#0E100F\"/>\n    <circle cx=\"16\" cy=\"23.25\" r=\"7.25\" fill=\"#F8F4ED\"/>\n    <circle cx=\"16\" cy=\"8.75\" r=\"1.85\" fill=\"#F8F4ED\"/>\n    <circle cx=\"16\" cy=\"23.25\" r=\"1.85\" fill=\"#0E100F\"/>\n  </g>\n  <circle cx=\"16\" cy=\"16\" r=\"14.5\" stroke=\"#74786F\" stroke-width=\".5\"/>\n</svg><span class=\"ds-brand-word\">Myth</span></a><div class=\"ds-workspace\"><svg class=\"ds-taiji ds-taiji-workspace\" aria-hidden=\"true\" xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 32 32\" fill=\"none\">\n  <g transform=\"rotate(180 16 16)\">\n    <circle cx=\"16\" cy=\"16\" r=\"14.5\" fill=\"#0E100F\"/>\n    <path d=\"M16 1.5a14.5 14.5 0 0 0 0 29Z\" fill=\"#F8F4ED\"/>\n    <circle cx=\"16\" cy=\"8.75\" r=\"7.25\" fill=\"#0E100F\"/>\n    <circle cx=\"16\" cy=\"23.25\" r=\"7.25\" fill=\"#F8F4ED\"/>\n    <circle cx=\"16\" cy=\"8.75\" r=\"1.85\" fill=\"#F8F4ED\"/>\n    <circle cx=\"16\" cy=\"23.25\" r=\"1.85\" fill=\"#0E100F\"/>\n  </g>\n  <circle cx=\"16\" cy=\"16\" r=\"14.5\" stroke=\"#74786F\" stroke-width=\".5\"/>\n</svg><span>个人工作空间</span></div><div class=\"ds-waiting\"><svg class=\"ds-taiji ds-taiji-wait\" aria-hidden=\"true\" xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 32 32\" fill=\"none\">\n  <g transform=\"rotate(180 16 16)\">\n    <circle cx=\"16\" cy=\"16\" r=\"14.5\" fill=\"#0E100F\"/>\n    <path d=\"M16 1.5a14.5 14.5 0 0 0 0 29Z\" fill=\"#F8F4ED\"/>\n    <circle cx=\"16\" cy=\"8.75\" r=\"7.25\" fill=\"#0E100F\"/>\n    <circle cx=\"16\" cy=\"23.25\" r=\"7.25\" fill=\"#F8F4ED\"/>\n    <circle cx=\"16\" cy=\"8.75\" r=\"1.85\" fill=\"#F8F4ED\"/>\n    <circle cx=\"16\" cy=\"23.25\" r=\"1.85\" fill=\"#0E100F\"/>\n  </g>\n  <circle cx=\"16\" cy=\"16\" r=\"14.5\" stroke=\"#74786F\" stroke-width=\".5\"/>\n</svg><span>等待样式示例</span></div></div>",
-      "css": ".ds-taiji-samples { display:flex; flex-direction:column; gap:20px; color:var(--ink, #0E100F); font:12px/1.65 var(--sans, \"Myth Latin\", \"Myth Sans\", \"PingFang SC\", \"Microsoft YaHei\", sans-serif); } .ds-brand { display:inline-flex; align-items:center; gap:10px; color:inherit; text-decoration:none; } .ds-brand:hover { color:inherit; } .ds-brand-word { font:400 33px/1 var(--serif, \"Myth Serif\", \"Myth Sans\", serif); letter-spacing:-.03em; } .ds-taiji { display:block; flex:0 0 auto; } .ds-taiji-brand { width:32px; height:32px; } .ds-workspace { display:flex; align-items:center; gap:10px; } .ds-taiji-workspace { width:24px; height:24px; } .ds-waiting { display:flex; align-items:center; gap:9px; color:var(--muted, #646d64); padding:10px 0; } .ds-taiji-wait { width:14px; height:14px; animation:ds-taiji-orbit 2.6s linear infinite; } @keyframes ds-taiji-orbit { to { transform:rotate(360deg); } } .ds-brand:focus-visible { outline:2px solid var(--focus, #a44732); outline-offset:3px; } @media (prefers-reduced-motion:reduce) { .ds-taiji-wait { animation:none; } }",
-      "source": "src/myth/webui/taiji.svg; src/myth/webui/app.css .taiji-mark / .taiji-wait; src/myth/webui/app.js taijiMark"
+      "refersTo": "taiji-waiting",
+      "description": "真实等待保留原14px几何；静态水墨品牌资产及其轮廓在 extensions.identity 登记，片段只示意等待外观。",
+      "html": "<div class=\"ds-waiting\"><!-- Myth 太极印：两条等面积双鱼、相反阴阳眼；整体旋转180度，保持小尺寸轮廓。 -->\n<svg class=\"ds-taiji-wait\" aria-hidden=\"true\" xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 32 32\" fill=\"none\">\n  <g transform=\"rotate(180 16 16)\">\n    <circle cx=\"16\" cy=\"16\" r=\"14.5\" fill=\"#0E100F\"/>\n    <path d=\"M16 1.5a14.5 14.5 0 0 0 0 29Z\" fill=\"#F8F4ED\"/>\n    <circle cx=\"16\" cy=\"8.75\" r=\"7.25\" fill=\"#0E100F\"/>\n    <circle cx=\"16\" cy=\"23.25\" r=\"7.25\" fill=\"#F8F4ED\"/>\n    <circle cx=\"16\" cy=\"8.75\" r=\"1.85\" fill=\"#F8F4ED\"/>\n    <circle cx=\"16\" cy=\"23.25\" r=\"1.85\" fill=\"#0E100F\"/>\n  </g>\n  <circle cx=\"16\" cy=\"16\" r=\"14.5\" stroke=\"#74786F\" stroke-width=\".5\"/>\n</svg><span>等待样式示例</span></div>",
+      "css": ".ds-waiting { display:flex; align-items:center; gap:9px; padding:10px 0; color:var(--muted, #646d64); font:12px/1.65 var(--sans, \"Myth Latin\", \"Myth Sans\", sans-serif); } .ds-taiji-wait { display:block; width:14px; height:14px; flex:0 0 auto; animation:ds-taiji-orbit 2.6s linear infinite; } @keyframes ds-taiji-orbit { to { transform:rotate(360deg); } } @media (prefers-reduced-motion:reduce) { .ds-taiji-wait { animation:none; } }",
+      "source": "src/myth/webui/taiji.svg; src/myth/webui/app.css .taiji-wait; src/myth/webui/app.js taijiMark; static identity: src/myth/webui/ink-taiji.png"
     }
   ],
   "narrative": {
     "northStar": "艺术机构的工作空间",
-    "overview": "安静、精确、有辨识度。界面用真实中文字体、宽松的工作面与清楚的细线组织内容；标题承担身份，控件承担操作，状态文字承担事实。奶油白与星空黑是固定的两种地色，原纸构首屏已移除。\n\n空间如可展开的装帧：导航、会话、观测具有不同阅读密度，用户可显式折叠或进入专注。太极是同一份原生 SVG 身份资产；品牌静止，真实等待才转动。主题与布局只拥有浏览器偏好，Runtime 的执行和验收事实继续由后端投影。",
+    "overview": "安静、精确、有辨识度。界面用真实中文字体、宽松的工作面与清楚的细线组织内容；标题承担身份，控件承担操作，状态文字承担事实。奶油白与星空黑是固定的两种地色，原纸构首屏已移除。\n\n空间如可展开的装帧：导航、会话、观测具有不同阅读密度，用户可显式折叠或进入专注。静态身份是一笔连贯的水墨太极波浪 M；微型几何太极只表达真实等待。主题与布局只拥有浏览器偏好，Runtime 的执行和验收事实继续由后端投影。",
     "keyCharacteristics": [
       "黑白地色、轻边界、克制的赭色动作与焦点。",
       "本地中文字体，标题与操作文字有明确角色。",
       "三栏可展开，正文与输入区共用阅读边线。",
-      "太极身份统一，运动严格对应真实等待。"
+      "水墨身份保持黑白与透明边缘，运动严格对应真实等待。"
     ],
     "rules": [],
     "dos": [
@@ -733,15 +954,18 @@
       "**Do** 让正文、目录与输入区共用阅读宽度及双侧边距。",
       "**Do** 保留可撤销的专注布局、草稿与折叠入口。",
       "**Do** 用真实状态文字区分执行、UNKNOWN、交付与独立验收。",
-      "**Do** 仅让真实等待太极转动，并遵守 reduced motion。"
+      "**Do** 仅让真实等待太极转动，并遵守 reduced motion。",
+      "**Do** 使用实际水墨 PNG、水平双眼和 alpha 细轮廓；生成来源随资产保留。",
+      "**Do** 保留模型原生选项、有效数值边界和有来源及时间的价格状态。"
     ],
     "donts": [
       "**Don't** 重新引入已移除的纸构首屏或旧墨紫地色。",
       "**Don't** 给静态列表补装饰图片、口号墙或新阴影体系。",
-      "**Don't** 随意改动当前太极的双鱼比例与180°朝向，或让静止品牌持续旋转。",
+      "**Don't** 把水墨品牌替换回旧几何徽章、添加衬底，或让静止品牌持续旋转。",
       "**Don't** 用主题、动画或浏览器偏好创建 Run、扩大授权、补造指标。",
       "**Don't** 翻译未知后端内容；已知标签可中文化，未知值原样保留。",
-      "**Don't** 向远端子模型显示 Ollama 专用地址与上下文窗口字段。"
+      "**Don't** 向远端子模型显示 Ollama 专用地址与上下文窗口字段。",
+      "**Don't** 把未知价格或目录零占位表达为免费，也不要用公共标价改写历史 Run。"
     ]
   }
 }

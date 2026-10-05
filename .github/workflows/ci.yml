@@ -44,6 +44,7 @@ jobs:
           node --check src/myth/webui/statistics.js
           node --check src/myth/webui/theme.js
           node --check src/myth/webui/studio.js
+          node --check src/myth/webui/choices.js
       - name: Browser observability, reconnect and session statistics tests
         run: node --test tests/test_observatory_ui.cjs tests/test_reconnect_ui.cjs tests/test_statistics_ui.cjs tests/test_workspace_interactions_ui.cjs
       - name: Unit and crash-recovery tests

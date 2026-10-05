@@ -280,6 +280,9 @@ class OpenAIResponsesProvider:
 
     # 注入供应商专属但非秘钥的请求参数；默认保持现有 OpenAI Responses 合同。
     def _extra_payload(self, model_request: ModelRequest) -> dict:
+        # 普通 OpenAI API 模型使用采样参数；推理模型与订阅协议保持各自默认，避免发送不支持的字段。
+        if self.provider_id == "openai" and not _openai_model_capability(model_request.model).get("reasoning"):
+            return {"temperature": model_request.temperature}
         return {}
 
     # 观察供应商认证/服务是否可用；返回状态而不签发模型 Ticket。

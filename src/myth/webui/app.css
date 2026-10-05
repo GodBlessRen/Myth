@@ -768,3 +768,42 @@ details[open] > summary > .fold-chevron { transform: rotate(90deg); }
   .welcome h1 { font-size: 29px; }
 }
 @media (prefers-reduced-motion: reduce) { .taiji-wait { animation: none; } }
+
+/* 选择菜单属于同一纸/墨表面；Popover 在原生 dialog 上层保留焦点所有权。 */
+.choice-control { position: relative; display: inline-flex; min-width: 0; width: 100%; align-items: center; }
+.choice-control > input { width: 100%; padding-right: 32px; }
+.choice-source { position: absolute !important; width: 1px !important; height: 1px !important; padding: 0 !important; margin: 0 !important; opacity: 0; pointer-events: none; }
+.choice-trigger { display: flex; align-items: center; width: 100%; min-width: 0; min-height: 42px; padding: 9px 34px 9px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--paper); text-align: left; font: inherit; color: var(--ink); }
+.choice-trigger > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.choice-trigger:hover:not(:disabled) { background: var(--surface-2); border-color: var(--ink-2); }
+.choice-trigger[aria-expanded="true"] { border-color: var(--focus); }
+.choice-chevron { position: absolute; right: 11px; top: 50%; transform: translateY(-50%); width: 16px; height: 16px; fill: none; stroke: var(--muted); stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
+.choice-menu { position: fixed; inset: auto; margin: 0; padding: 5px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); color: var(--ink); font: 13px/1.5 var(--sans); overflow-y: auto; overscroll-behavior: contain; }
+.choice-menu::backdrop { background: transparent; }
+.choice-option { position: relative; min-height: 38px; padding: 10px 28px 10px 10px; border-radius: 4px; overflow-wrap: anywhere; cursor: pointer; }
+.choice-option.is-active { background: var(--selected); color: var(--selected-ink); }
+.choice-option[aria-selected="true"]::after { content: ""; position: absolute; right: 10px; top: 16px; width: 7px; height: 4px; border-bottom: 1.5px solid currentColor; border-left: 1.5px solid currentColor; transform: rotate(-45deg); }
+.choice-option[aria-disabled="true"] { color: var(--muted); cursor: not-allowed; }
+.composer .choice-control, .composer-area .choice-control { width: auto; max-width: 200px; }
+.composer-area .choice-trigger { min-height: 36px; border-color: transparent; padding: 5px 26px 5px 5px; background: transparent; font-size: 12px; color: var(--muted); }
+.composer-area .choice-chevron { right: 5px; width: 12px; }
+.model-pricing { margin: 24px 0; padding: 18px 0; border-block: 1px solid var(--line-soft); }
+.price-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.price-heading h4 { margin: 0; font-size: 13px; font-weight: 600; }
+.price-heading button { padding: 5px 0; font-size: 12px; }
+.price-quote { margin: 8px 0 0; font-size: 13px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.model-pricing .field-meta { margin: 6px 0 0; font-size: 11px; color: var(--muted); overflow-wrap: anywhere; }
+.model-pricing a { text-decoration: underline; text-decoration-color: var(--line); }
+.price-override { margin-bottom: 0; }
+.price-override summary { font-size: 12px; }
+.pool-field > small { display: block; font-size: 11px; color: var(--muted); margin-top: 6px; line-height: 1.6; }
+.pool-child .choice-control { width: 100%; }
+.ink-mark { display: block; width: 56px; height: 24px; object-fit: contain; filter: drop-shadow(.3px 0 0 var(--ink-2)) drop-shadow(-.3px 0 0 var(--ink-2)) drop-shadow(0 .3px 0 var(--ink-2)) drop-shadow(0 -.3px 0 var(--ink-2)); }
+.brand-symbol { width: 56px; height: 24px; flex: 0 0 auto; }
+.workspace-avatar { width: 56px; background: transparent; }
+.sidebar-collapsed .brand-symbol, .sidebar-collapsed .ink-mark { width: 36px; }
+@media (max-width: 800px) {
+  .choice-trigger, .choice-option { min-height: 44px; }
+  .composer-area .choice-trigger { min-height: 44px; }
+  .composer-area .choice-control { max-width: 150px; }
+}

@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import re
 from urllib import request, error
 
 from ..auth.transport import open_credential_request, read_bounded, redact_response
@@ -14,6 +15,11 @@ from ..model_capabilities import model_capability, reasoning_capability
 from ..models import ModelResult, ProviderStatus, ProviderKnownFailure, ProviderUnavailable
 from ..network_recovery import is_pre_dispatch_disconnect
 from ..platform.handoff import public_metadata
+
+
+def _claude_temperature_supported(model):
+    """仅旧模型保留温度控制；官方 Messages 合同已废弃新模型的该参数，未知 ID 使用默认。"""
+    return bool(re.match(r"^claude-(?:3(?:-|\.)|(?:opus|sonnet|haiku)-4(?:-(?:1|5)(?:-|$)|$)|opus-4-6(?:-|$))", model))
 
 
 class MessagesProvider:
@@ -80,7 +86,9 @@ class MessagesProvider:
                 raise ValueError("empty catalog")
             reasoning = reasoning_capability(kind="toggle", off=False) if self.provider_id == "kimi" else None
             return ProviderStatus(self.provider_id, True, "api_key", {
-                "models": models, "model_capabilities": {m: model_capability(m, reasoning=reasoning) for m in models}})
+                "models": models, "model_capabilities": {m: {**model_capability(m, reasoning=reasoning),
+                    "temperature": {"supported": _claude_temperature_supported(m) if self.provider_id == "anthropic" else True,
+                                    "min": 0, "max": 1 if self.provider_id == "anthropic" else 2}} for m in models}})
         except Exception:
             return ProviderStatus(self.provider_id, False, "api_key", {"error": "模型目录检查失败，请检查连接与凭据。"})
 
@@ -93,12 +101,13 @@ class MessagesProvider:
                 raise ProviderKnownFailure("Claude adapter currently supports default/disabled thinking only",
                     usage={"model_calls": 0, "input_tokens": 0, "output_tokens": 0})
             payload = {"model": model_request.model, "max_tokens": model_request.max_output_tokens,
-                "temperature": model_request.temperature,
                 "system": "\n".join(m["content"] for m in messages if m["role"] in {"system", "developer"}),
                 "messages": [m for m in messages if m["role"] not in {"system", "developer"}],
                 "tools": [{"name": "myth_decision", "description": "Return the required Myth decision.",
                            "input_schema": model_request.response_schema}],
                 "tool_choice": {"type": "tool", "name": "myth_decision", "disable_parallel_tool_use": True}}
+            if _claude_temperature_supported(model_request.model):
+                payload["temperature"] = model_request.temperature
             value = self._request("/messages", payload)
             usage = self._usage(value.get("usage") or {})
             blocks = [x for x in value.get("content", []) if x.get("type") == "tool_use" and x.get("name") == "myth_decision"]

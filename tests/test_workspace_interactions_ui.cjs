@@ -94,6 +94,8 @@ function boot(storage = {}) {
     crypto: { randomUUID: () => "request-" + ++uuid },
     navigator: { clipboard: { writeText: async () => {} } },
     createReadReconnector: () => ({ start() {} }),
+    // 本单元固定对话交互；模型目录与菜单的真实行为另由浏览器回归覆盖。
+    poolRefreshPrices: () => {},
     setTimeout: () => 1, clearTimeout() {}, AbortController, TextDecoder,
     fetch: async () => { throw new Error("unexpected network request"); }, console,
   });

@@ -441,6 +441,7 @@ function fillReasoningSelect(select, profile, current, metaNode = null) {
     reasoning.default ? `默认 · ${reasoning.default}` : "默认 · Provider 决定",
   );
   const seen = new Set();
+  if (reasoning.kind === "toggle") { add("__on__", "开启推理"); seen.add("__on__"); }
   if (reasoning.off !== undefined && reasoning.off !== null) {
     const raw = typeof reasoning.off === "boolean"
       ? (reasoning.off ? "__on__" : "__off__")
@@ -464,11 +465,12 @@ function fillReasoningSelect(select, profile, current, metaNode = null) {
           : String(current);
   if (![...select.options].some((option) => option.value === currentRaw)) {
     add(currentRaw, `${currentRaw} · 已保存`);
+    select.lastElementChild.disabled = true;
   }
   select.value = currentRaw;
   if (metaNode) {
     const source = profile.source === "remote" ? "Provider 实时发现" : "Provider 能力声明";
-    metaNode.textContent = `${source} · ${reasoning.kind || "reasoning"}`;
+    metaNode.textContent = `${source} · 增加推理通常需要更多时间与输出 Token；档位按该模型定义。`;
   }
   return true;
 }
@@ -493,13 +495,19 @@ function renderAdaptiveModelSettings(options = {}) {
     $("reasoningMeta"),
   );
   show("reasoningField", reasoningVisible);
+  const temperature = $("temperature");
+  temperature.max = provider === "anthropic" ? "1" : "2";
+  temperature.disabled = provider === "chatgpt" || provider === "openai" && (!profile || !!profile.reasoning) || provider === "anthropic" && profile?.temperature?.supported !== true;
+  // 停用采样控制时恢复可持久化的默认值；供应商切换不会遗留无法编辑的超界配置。
+  if (temperature.disabled) temperature.value = "0";
+  $("temperatureMeta").textContent = temperature.disabled ? "当前适配器使用模型默认采样。" : `0–${temperature.max} · 越低越稳定，越高越多样。`;
   const facts = [];
   if (profile?.context_window) facts.push(`Context ${Number(profile.context_window).toLocaleString()} tokens`);
   if (profile?.max_output_tokens) {
     facts.push(`Max output ${Number(profile.max_output_tokens).toLocaleString()}`);
-    $("maxTokens").max = String(profile.max_output_tokens);
+    $("maxTokens").max = String(Math.min(393216, profile.max_output_tokens, Number($("maxTokens").dataset.catalogMax) || 393216));
   } else {
-    $("maxTokens").max = "393216";
+    $("maxTokens").max = String(Math.min(393216, Number($("maxTokens").dataset.catalogMax) || 393216));
   }
   if (profile?.input_modalities?.length) facts.push(`Input ${profile.input_modalities.join(" + ")}`);
   const capabilityMeta = $("modelCapabilityMeta");
@@ -520,6 +528,7 @@ function renderAdaptiveModelSettings(options = {}) {
     "modelCapabilityMeta",
     facts.length > 0 || !!(providerMetadata && Object.keys(providerMetadata).length),
   );
+  window.MythChoices?.sync();
 }
 // Control 面板复用同一 capability 目录，但保持当前 Run 已保存的原生值可见。
 function renderTurnReasoning(turn, current) {
@@ -551,7 +560,6 @@ function settingsPayload() {
 // 回填保存设置及认证展示；不会改变在途请求的配置。
 function loadSettings() {
   const s = state.data.settings;
-  if (typeof loadModelPool === "function") loadModelPool(s.model_pool);
   $("provider").value = s.provider;
   $("model").value = s.model;
   $("ollamaUrl").value = s.ollama_url;
@@ -559,9 +567,12 @@ function loadSettings() {
   $("maxTokens").value = s.max_output_tokens;
   $("numCtx").value = s.num_ctx ?? 8192;
   $("temperature").value = s.temperature ?? 0;
+  if (typeof loadModelPool === "function") loadModelPool(s.model_pool);
   renderChatGPTAuth();
   renderProviderKeyAuth();
   renderAdaptiveModelSettings({thinking: s.thinking});
+  poolRefreshPrices();
+  window.MythChoices?.sync();
 }
 // 仅展示公开账号/scope 状态；身份已连接与 plan usage 已授权分开。
 function renderChatGPTAuth() {
@@ -2462,11 +2473,13 @@ $("chatFiles").onchange = async () => {
 $("provider").onchange = () => {
   invalidateConnection();
   $("model").value = "";
+  delete $("maxTokens").dataset.catalogMax;
   $("providerApiKey").value = "";
   renderChatGPTAuth();
   renderProviderKeyAuth();
   renderConnection();
   renderAdaptiveModelSettings();
+  poolRefreshPrices();
 };
 $("ollamaUrl").addEventListener("input", invalidateConnection);
 $("chatgptLogin").onclick = beginChatGPTLogin;
@@ -2518,6 +2531,9 @@ $("chatgptLogout").onclick = async () => {
 };
 $("model").addEventListener("change", renderAdaptiveModelSettings);
 $("model").addEventListener("input", renderAdaptiveModelSettings);
+let modelPriceTimer;
+$("model").addEventListener("input", () => { delete $("maxTokens").dataset.catalogMax; clearTimeout(modelPriceTimer); modelPriceTimer = setTimeout(poolRefreshPrices, 350); });
+$("model").addEventListener("change", poolRefreshPrices);
 $("turnModelInput").addEventListener("change", () => {
   const turn = state.session?.turns.at(-1);
   if (turn) renderTurnReasoning(turn, turn.control?.thinking ?? turn.settings?.thinking);
@@ -2525,6 +2541,9 @@ $("turnModelInput").addEventListener("change", () => {
 $("checkConnection").onclick = () => checkConnection(false);
 $("saveSettings").onclick = async () => {
   if ($("saveSettings").disabled) return;
+  // 浏览器先定位越界/缺失字段，服务端仍独立验证；隐藏且无效的供应商字段不参与验证。
+  const invalid = Array.from($("settingsPage").querySelectorAll("input, select")).find(input => !input.disabled && input.getClientRects().length && !input.checkValidity());
+  if (invalid) { invalid.reportValidity(); return; }
   const payload = settingsPayload();
   $("saveSettings").disabled = true;
   $("saveSettings").textContent = "正在保存…";
