@@ -11,6 +11,7 @@ from unittest.mock import patch
 from myth.acceptance import ContextBudgetError
 from myth.conversation import conversation_request
 from myth.domain import canonical_json
+from myth.platform.context_anchor import build_context_anchor
 from myth.runtime import MythRuntime
 from myth.workspace import Workspace
 from test_workspace import ChatProvider, decision
@@ -298,6 +299,21 @@ class ConversationContextTests(unittest.TestCase):
                 ).serializable(),
             )
 
+    # Anchor 的增量复用必须重新证明 covered prefix；历史正文变化后从真实来源重建。
+    def test_context_anchor_rebuilds_when_covered_history_changes(self):
+        messages = [
+            {"role": "user" if i % 2 == 0 else "assistant", "content": f"m{i}"}
+            for i in range(16)
+        ]
+        first = build_context_anchor(None, messages, cover_count=12)
+        changed = copy.deepcopy(messages)
+        changed[0]["content"] = "tampered-history"
+        rebuilt = build_context_anchor(first, changed, cover_count=12)
+        self.assertEqual(first["version"], "extractive-anchor-v2")
+        self.assertNotEqual(first["source_digest"], rebuilt["source_digest"])
+        self.assertNotEqual(first["digest"], rebuilt["digest"])
+        self.assertIn("tampered-history", rebuilt["summary"])
+
 
 # 有界上下文与 Compact revision 消费的固定测试集合/替身；临时资源由本用例拥有，生产状态必须从实际仓储核对。
 class ConversationContinuityTests(unittest.TestCase):
@@ -436,6 +452,88 @@ class ConversationContinuityTests(unittest.TestCase):
             )
         )
 
+
+    # 首轮建立 epoch；直接延续只复用已证明的 continuity，并进入模型 Context report。
+    def test_direct_continuation_resumes_same_epoch(self):
+        self.workspace.run(self.rid, ChatProvider())
+        first = self.repo.turn(self.rid)["snapshot"]["continuity"]
+        self.assertEqual(first["action"], "new")
+        second = self.repo.create_turn(self.sid, "next task", "continuity-second")
+        current = second["snapshot"]["continuity"]
+        self.assertEqual(current["action"], "resume")
+        self.assertEqual(current["reason"], "direct_continuation")
+        self.assertEqual(current["epoch"], first["epoch"])
+        provider = ChatProvider()
+        self.workspace.run(second["run_id"], provider)
+        self.assertEqual(
+            provider.calls[0].context_report["continuity"]["action"], "resume"
+        )
+
+    # 模型语义环境变化不继续沿用旧 epoch；rebuild 只重建派生 Context，不删除历史。
+    def test_model_change_rebuilds_continuity_epoch(self):
+        self.workspace.run(self.rid, ChatProvider())
+        first = self.repo.turn(self.rid)["snapshot"]["continuity"]
+        self.repo.save_settings({**SETTINGS, "num_ctx": 32768, "model": "test-next"})
+        second = self.repo.create_turn(self.sid, "next task", "continuity-model")
+        current = second["snapshot"]["continuity"]
+        self.assertEqual(current["action"], "rebuild")
+        self.assertEqual(current["reason"], "model_changed")
+        self.assertEqual(current["epoch"], first["epoch"] + 1)
+        self.assertGreater(len(self.repo.session(self.sid)["messages"]), 0)
+
+    # Current Facts 版本独立于 query ranking；权威事实变化会让旧 continuity 失效。
+    def test_current_fact_revision_rebuilds_continuity(self):
+        self.workspace.run(self.rid, ChatProvider())
+        self.workspace.memory.remember(
+            kind="semantic",
+            text="User now prefers compact answers.",
+            source_ref="user:preference",
+            fact_level="user_asserted",
+        )
+        second = self.repo.create_turn(self.sid, "next task", "continuity-facts")
+        current = second["snapshot"]["continuity"]
+        self.assertEqual(current["action"], "rebuild")
+        self.assertEqual(current["reason"], "current_facts_changed")
+        self.assertEqual(current["current_facts"]["count"], 1)
+
+    # 消息正文与写入时 digest 不一致时 fail closed；不能把篡改历史当 direct continuation。
+    def test_message_body_change_breaks_continuity(self):
+        self.workspace.run(self.rid, ChatProvider())
+        with self.runtime.store.tx() as db:
+            db.execute(
+                "UPDATE workspace_messages SET content='tampered' "
+                "WHERE run_id=? AND role='user'",
+                (self.rid,),
+            )
+        second = self.repo.create_turn(self.sid, "next task", "continuity-tamper")
+        current = second["snapshot"]["continuity"]
+        self.assertEqual(current["action"], "rebuild")
+        self.assertEqual(current["reason"], "history_message_changed")
+        self.assertFalse(current["anchor_reuse"])
+
+    # 旧基线仍在同一分支但漏看额外消息时使用 catchup，不把已证明的 Anchor 无谓丢弃。
+    def test_intervening_message_uses_catchup(self):
+        self.workspace.run(self.rid, ChatProvider())
+        with self.runtime.store.tx() as db:
+            self.repo._message(
+                db,
+                self.sid,
+                None,
+                "assistant",
+                "out-of-band durable note",
+                {"kind": "external"},
+            )
+        second = self.repo.create_turn(self.sid, "next task", "continuity-catchup")
+        current = second["snapshot"]["continuity"]
+        self.assertEqual(current["action"], "catchup")
+        self.assertEqual(current["reason"], "intervening_messages")
+        self.assertTrue(current["anchor_reuse"])
+        events = [
+            event
+            for event in self.repo.events(second["run_id"])
+            if event["kind"] == "ConversationContinuityPlanned"
+        ]
+        self.assertEqual(events[-1]["payload"]["action"], "catchup")
 
 
 if __name__ == "__main__":
