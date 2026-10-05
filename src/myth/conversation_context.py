@@ -138,19 +138,20 @@ def compile_conversation_context(
     compact_requested = bool(control.get("compact_requested"))
     compact = compact_requested if compact_mode is None else bool(compact_mode)
     project = snapshot.get("project") or {}
-    system += (
+    system += ("\n隔离子任务只可展开本次明确传入的输入；没有父对话、Memory、项目或写权限。" if snapshot.get("is_subagent") else (
         "\n项目："
         + project.get("name", "")
         + "\n项目指令："
         + project.get("instructions", "")
-    )
+    ))
     if control.get("steering_note"):
         system += "\n用户当前 Steering（只影响后续计划）：\n" + control["steering_note"]
-    system += (
-        "\n本项目已关联本地目录。你可以直接调用 project.list/project.read 读取用户给出的相对路径，不需要让用户粘贴文件。"
-        if project.get("root")
-        else "\n本会话没有本地项目目录。可聊天、检索资料、计算和生成文件；读取本地项目文件需要先关联目录。"
-    )
+    if not snapshot.get("is_subagent"):
+        system += (
+            "\n本项目已关联本地目录。你可以直接调用 project.list/project.read 读取用户给出的相对路径，不需要让用户粘贴文件。"
+            if project.get("root")
+            else "\n本会话没有本地项目目录。可聊天、检索资料、计算和生成文件；读取本地项目文件需要先关联目录。"
+        )
     goal = snapshot.get("goal") or {}
     if goal.get("goal_id"):
         work = goal.get("work") or {}
@@ -257,6 +258,12 @@ def compile_conversation_context(
         items.append(ContextItem(source_ref, encoded, priority, required))
 
     add("instructions", "system", system, required=True)
+    feedback = snapshot.get("model_pool_feedback") or []
+    if feedback:
+        # 经验是可裁剪的意见投影；不膨胀必留指令，也不替代路由时查询的权威评分。
+        add("model-pool-feedback", "user", "近期主模型判断（意见，不是独立验收）：" + canonical_json([
+            {k: r.get(k) for k in ("profile_id", "task_type", "difficulty", "score", "accepted", "capability_tier", "failure_kind")}
+            for r in feedback[:8]]), priority=18_000)
     anchor = snapshot.get("context_anchor")
     if anchor:
         add(

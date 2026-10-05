@@ -148,6 +148,7 @@ _PROVIDER_EVIDENCE_DENY = {
     "id_token",
     "encrypted_content",
     "reasoning_text",
+    "reasoning_content",
 }
 
 

@@ -133,6 +133,8 @@ class WorkspaceTests(unittest.TestCase):
                 child_id = self.repo.operations(rid)[0]["decision_id"]
                 provider.outputs.insert(2, decision("tool_call", "agent.evaluate", {
                     "delegation_id": child_id, "correctness": 90, "completeness": 90, "usefulness": 90,
+                    "capability_tier": 2, "metadata_verdict": "incomplete",
+                    "metadata_digest": self.repo.operations(rid)[0]["result"]["telemetry"]["report_digest"],
                     "accepted": True, "failure_kind": "none", "reason": "固定事实复核通过"}))
             return original_invoke(request)
         with patch.object(provider, "invoke", side_effect=invoke_with_review):
@@ -146,7 +148,7 @@ class WorkspaceTests(unittest.TestCase):
         self.assertNotIn("PARENT-ONLY-SECRET", child_text)
         self.assertEqual(
             child_request.response_schema["properties"]["decision_type"]["enum"],
-            ["request_completion"],
+            ["tool_call", "request_completion"],
         )
         result = self.repo.turn(rid)["activities"][0]["result"]
         self.assertTrue(result["subagent"]["context_isolated"])
@@ -183,12 +185,10 @@ class WorkspaceTests(unittest.TestCase):
         self.workspace.run(rid, provider)
 
         turn = self.repo.turn(rid)
-        self.assertEqual(turn["status"], "COMPLETED")
-        self.assertEqual(len(provider.calls), 3)
-        self.assertIn(
-            "sub-agent may only return request_completion",
-            turn["activities"][0]["result"]["error"],
-        )
+        self.assertNotEqual(turn["status"], "UNKNOWN")
+        child = self.repo.delegation_state(turn["activities"][0]["decision_id"])
+        self.assertIn("child capability is outside the isolated contract", child["steps"][0]["result"]["error"])
+        self.assertEqual(sum(op["capability"] == "agent.delegate" for op in self.repo.operations(rid)), 1)
 
     # 回归断言：重复 SEEK 在 Tool Ticket 前被拒绝，不消耗第二次 tool_calls，模型仍可基于已有观察继续回答。
     def test_live_information_control_rejects_duplicate_seek_before_tool_ticket(self):

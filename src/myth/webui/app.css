@@ -36,7 +36,6 @@
 * { box-sizing: border-box; scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
 /* 子模型沿用设置表单的间距与颜色；长模型名可换行，窄屏保留完整可编辑字段。 */
 .pool-child { min-width: 0; margin: 24px 0; padding: 16px 0; border: 0; border-top: 1px solid var(--line); }
-.pool-child legend { padding-right: 12px; font-weight: 650; overflow-wrap: anywhere; }
 .pool-child .button-row { margin-top: 16px; }
 .pool-advanced { margin: 16px 0; }
 .pool-advanced summary { cursor: pointer; color: var(--ink-2); padding: 8px 0; }

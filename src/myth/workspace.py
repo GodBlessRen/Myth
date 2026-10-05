@@ -82,6 +82,7 @@ class Workspace:
             subagent_registry=self.components.subagents,
             memory_store=self.memory,
             provider_factory=child_provider_factory or self._child_provider,
+            parent_control=self.control,
         )
         # verification：与 execution 共用同一 profile 状态所有者，避免双写真相。
         self.verification = self.execution.verification

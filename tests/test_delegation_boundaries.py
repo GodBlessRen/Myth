@@ -90,14 +90,16 @@ class DelegationBoundaryTests(unittest.TestCase):
         ).fetchone()
         self.assertEqual(tuple(account), (0, 1, 0))
 
-    def test_crash_before_child_ticket_recovers_as_known_unstarted(self):
-        """父 Ticket 后、子模型准入前退出：没有子 Ticket 可证明未派发，不执行补跑。"""
+    def test_crash_before_child_ticket_preserves_cursor_without_dispatch_in_recovery(self):
+        """父 Ticket 后、子准入前退出：核对不派发；正常驱动继续原合同，不能换模型。"""
         with patch.object(self.repo.decisions, "request_decision", side_effect=SimulatedCrash()):
             with self.assertRaises(SimulatedCrash):
                 self.execute()
         self.assertTrue(self.workspace.execution.recover(self.rid))
         self.assertEqual(self.child.calls, [])
-        self.assertIn("not started", self.repo.operation(self.did)["result"]["error"])
+        self.assertIsNone(self.repo.operation(self.did)["result"])
+        self.assertEqual(self.execute()["summary"], "已核对")
+        self.assertEqual(len(self.child.calls), 1)
 
     def test_transport_value_error_is_unknown_and_never_replayed(self):
         """供应商在 Ticket 后抛 ValueError 也可能效果未知，不能当作参数拒绝闭合父收据。"""

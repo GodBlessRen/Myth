@@ -46,7 +46,7 @@ function poolReadChild(root) {
   return {id: root.dataset.poolId, label: poolValue(root, "label"), provider: poolValue(root, "provider"),
     model: poolValue(root, "model").trim(), enabled: poolValue(root, "enabled") === "true", tier: Number(poolValue(root, "tier")),
     task_types: Array.from(root.querySelectorAll("[data-task-type]:checked")).map(x => x.value),
-    max_output_tokens: Number(poolValue(root, "max_output_tokens")), num_ctx: Number(poolValue(root, "num_ctx")),
+    max_steps: Number(poolValue(root, "max_steps")), max_output_tokens: Number(poolValue(root, "max_output_tokens")), num_ctx: Number(poolValue(root, "num_ctx")),
     ollama_url: poolValue(root, "ollama_url"), temperature: Number(poolValue(root, "temperature")),
     thinking: thinking === "true" ? true : thinking === "false" ? false : thinking || null, pricing: poolReadPrice(root)};
 }
@@ -57,22 +57,23 @@ function poolAddChild(profile = {}) {
   if (!list || list.children.length >= 3) return;
   const root = document.createElement("fieldset"); root.className = "pool-child";
   root.dataset.poolId = profile.id || "child-" + crypto.randomUUID().slice(0, 8);
-  const legend = document.createElement("legend"); legend.textContent = profile.label || "子模型"; root.append(legend);
+  root.setAttribute("aria-label", "子模型配置");
   list.append(root);
   const basic = document.createElement("div"); basic.className = "two-fields"; root.append(basic);
-  poolField(basic, "名称", "label", profile.label || "子模型").addEventListener("input", event => { legend.textContent = event.target.value || "子模型"; });
   poolField(basic, "状态", "enabled", String(profile.enabled ?? true), {true: "启用", false: "停用"});
   const provider = poolField(basic, "提供方", "provider", profile.provider || "ollama", poolProviders);
   const model = poolField(basic, "模型名称", "model", profile.model || "");
   const catalog = document.createElement("datalist"); catalog.id = root.dataset.poolId + "-models"; model.setAttribute("list", catalog.id); root.append(catalog);
-  poolField(basic, "能力档位", "tier", profile.tier || 1, {1: "轻量 · 简单任务", 2: "标准 · 中等任务", 3: "高能力 · 复杂任务"});
+  poolField(basic, "初始能力", "tier", profile.tier || 1, {1: "基础", 2: "较强", 3: "很强"});
   const actions = document.createElement("div"); actions.className = "button-row"; root.append(actions);
   const check = document.createElement("button"); check.type = "button"; check.className = "secondary"; check.textContent = "检查连接"; actions.append(check);
   const remove = document.createElement("button"); remove.type = "button"; remove.className = "text-button"; remove.textContent = "移除"; actions.append(remove);
   const status = document.createElement("p"); status.className = "field-meta"; status.setAttribute("role", "status"); root.append(status);
   const advanced = document.createElement("details"); advanced.className = "pool-advanced";
-  const summary = document.createElement("summary"); summary.textContent = "生成参数与价格"; advanced.append(summary); root.append(advanced);
+  const summary = document.createElement("summary"); summary.textContent = "更多设置"; advanced.append(summary); root.append(advanced);
   const options = document.createElement("div"); options.className = "two-fields"; advanced.append(options);
+  poolField(options, "备注名称（可选）", "label", profile.label || "");
+  poolField(options, "子任务步骤上限", "max_steps", profile.max_steps ?? 4, null, "number");
   const tasks = document.createElement("fieldset"); tasks.className = "pool-task-types";
   const tasksLegend = document.createElement("legend"); tasksLegend.textContent = "适用任务（不选则适用全部）"; tasks.append(tasksLegend); advanced.append(tasks);
   Object.entries({general:"通用", extract:"信息提取", summarize:"摘要", code:"编程", reason:"推理", review:"复核"}).forEach(([value, text]) => {

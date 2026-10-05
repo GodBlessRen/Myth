@@ -14,6 +14,7 @@ Myth 是共享 SQLite 的单机模块化应用。纯合同、策略和应用用�
 | `application/agent.py`、`application/conversation_agent.py` | Exact / Conversation 有界用例 | 安全点、已有决定消费、收据恢复和固定验收；不得取得 SQL/具体供应商 |
 | `store.py`、`adapters/*_store.py`、`platform/*_store.py` | 持久状态所有者 | 哪些表同事务提交、版本如何分配、迟到结果是否覆盖新状态 |
 | `decision_runtime.py`、`artifacts.py`、`adapters/*_execution.py` | 固定请求、外部效果、收据与核对 | Ticket 前拒绝、派发后 UNKNOWN、摘要核对、效果与用量分别结算 |
+| `adapters/delegation.py`、`adapters/subagent_runtime.py`、`platform/handoff.py` | 委派合同、共享子引擎视图、交接投影 | 父 Ticket 先于子效果；完整正文/元数据与默认摘要分开；拒收费用与替代义务均保留 |
 | `runtime.py`、`agent_runtime.py`、`workspace.py` | 装配与入口准入 | 依赖装配顺序、明确范围、初始业务事实是否完整提交 |
 | `goal_scheduler.py`、`web_workspace.py` | 计划机会与本机 Driver 生命周期 | opportunity 去重、租约、物理锁、线程独立连接和停止后的晚到收据 |
 | `providers/`、`auth/` | 供应商传输、独立 OAuth 和安全凭据 | 凭据不进 Runtime、网络超时不证明未执行、认证存储不是跨系统事务 |

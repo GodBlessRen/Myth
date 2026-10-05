@@ -61,16 +61,6 @@ def observe_failure(
             capability_id,
             hint="Use the already observed evidence, or advance with the returned continuation cursor instead of repeating the same information request.",
         )
-    if "sub-agent may only return request_completion" in lowered:
-        return FailureObservation(
-            "delegation",
-            "subagent_contract_rejected",
-            message,
-            True,
-            capability_id,
-            expected="request_completion",
-            hint="Treat the child as a read-only observation and continue the parent loop without recursive delegation.",
-        )
     if "tool is deferred" in lowered:
         return FailureObservation(
             "capability",

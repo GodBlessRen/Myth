@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from ..failures import FailureObservation, failure_result
-from .model_pool import pending_reviews
+from .model_pool import pending_reviews, pending_resolutions
 
 
 # CompletionVerdict：停止准入结果；拒绝只要求下一步修正，不把已知拒绝升级成 UNKNOWN。
@@ -54,6 +54,11 @@ class CompletionGuard:
                 "verification", "subagent_review_pending", "子任务尚未由主模型评分", True,
                 hint="先调用 agent.evaluate，delegation_id: " + ", ".join(pending),
             ))
+        unresolved = pending_resolutions(turn.get("activities") or [])
+        if unresolved:
+            return CompletionVerdict(False, FailureObservation("verification", "subagent_rejection_unresolved",
+                "拒收的子任务尚无替代结果", True,
+                hint="用 agent.resolve 自行补做，或用 replaces 重新委派并评分通过：" + ", ".join(unresolved)))
         remaining = tuple(getattr(decision, "remaining", ()) or ())
         if remaining:
             return CompletionVerdict(

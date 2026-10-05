@@ -107,8 +107,8 @@ class PlatformSkeletonTests(unittest.TestCase):
             components.strategies.get("multi_agent").state, StrategyState.CONNECTED
         )
         worker = components.subagents.get("isolated_worker")
-        self.assertEqual(worker.max_steps, 1)
-        self.assertEqual(worker.capability_allowlist, ())
+        self.assertEqual(worker.max_steps, 8)
+        self.assertEqual(worker.capability_allowlist, ("input.read",))
         self.assertEqual(RouteTarget.REMOTE_AGENT.value, "remote_agent")
 
     # 停止后不再接纳 Resume；控制协议只保留当前 Stop 词汇。

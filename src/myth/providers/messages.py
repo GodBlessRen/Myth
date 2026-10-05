@@ -13,6 +13,7 @@ from ..auth.transport import open_credential_request, read_bounded, redact_respo
 from ..model_capabilities import model_capability, reasoning_capability
 from ..models import ModelResult, ProviderStatus, ProviderKnownFailure, ProviderUnavailable
 from ..network_recovery import is_pre_dispatch_disconnect
+from ..platform.handoff import public_metadata
 
 
 class MessagesProvider:
@@ -102,7 +103,7 @@ class MessagesProvider:
             usage = self._usage(value.get("usage") or {})
             blocks = [x for x in value.get("content", []) if x.get("type") == "tool_use" and x.get("name") == "myth_decision"]
             if len(blocks) != 1 or value.get("stop_reason") != "tool_use":
-                raise ProviderKnownFailure("Claude did not return a complete decision", usage=usage)
+                raise ProviderKnownFailure("Claude did not return a complete decision", usage=usage, raw=public_metadata(value))
             text = json.dumps(blocks[0].get("input"), ensure_ascii=False)
         else:
             messages.insert(0, {"role": "system", "content": "Return only JSON matching this schema: " + json.dumps(model_request.response_schema)})
@@ -117,11 +118,12 @@ class MessagesProvider:
             usage = self._usage(value.get("usage") or {})
             choices = value.get("choices") or []
             if len(choices) != 1 or choices[0].get("finish_reason") != "stop":
-                raise ProviderKnownFailure("Kimi did not return a complete decision", usage=usage)
+                raise ProviderKnownFailure("Kimi did not return a complete decision", usage=usage, raw=public_metadata(value))
             text = (choices[0].get("message") or {}).get("content")
             if not isinstance(text, str):
-                raise ProviderKnownFailure("Kimi returned no decision text", usage=usage)
-        return ModelResult(text, usage, {"id": value.get("id"), "usage": usage, "text": text}, value.get("id"))
+                raise ProviderKnownFailure("Kimi returned no decision text", usage=usage, raw=public_metadata(value))
+        # 原始公开 Usage/时间/缓存扩展留存，不把规范化字段当作供应商完整报告；私有正文不进入计量对象。
+        return ModelResult(text, usage, {**public_metadata(value), "text": text}, value.get("id"))
 
     def _usage(self, raw):
         """统一各家输入/输出与缓存口径；缺字段留空，Claude 输入包含缓存读写。"""
