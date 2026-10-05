@@ -33,9 +33,9 @@ def project_handoffs(activities):
     """拒收正文从默认上下文移除，保留身份、评分与花销；显式回读仍可检查原结果。"""
     reviews = {(x.get("result") or {}).get("review", {}).get("delegation_id"):
                (x.get("result") or {}).get("review") for x in activities}
-    projected = []
-    for activity in activities:
-        result = dict(activity.get("result") or {})
+    def project(result):
+        """拒收只改变默认投影，批次中每一项保持原 identity/ordinal/费用。"""
+        result = dict(result)
         review = reviews.get(result.get("delegation_id"))
         if result.get("handoff"):
             result["adoption"] = "accepted" if review and review["accepted"] else "rejected" if review else "pending_review"
@@ -44,8 +44,35 @@ def project_handoffs(activities):
                 result["coverage"] = ""
                 result["evidence_refs"] = []
                 result["remaining"] = []
+        return result
+    projected = []
+    for activity in activities:
+        result = project(activity.get("result") or {})
+        if "results" in result:
+            result["results"] = [parallel_brief(project(child)) for child in result["results"]]
         projected.append({**activity, "result": result})
     return projected
+
+
+def parallel_brief(result):
+    """批次默认导航有界；完整摘要/正文/元数据留在原子收据与对象，裁剪明确标注。"""
+    if not result.get("handoff"):
+        return result
+    brief = {k: result[k] for k in ("delegation_id", "ordinal", "adoption", "review_required", "fallback_to_parent") if k in result}
+    brief.update({"summary": result.get("summary", "")[:300], "summary_kind": result.get("summary_kind"),
+        "summary_truncated": len(result.get("summary", "")) > 300,
+        "status": (result.get("subagent") or {}).get("status"),
+        "coverage": result.get("coverage", "")[:200], "remaining": result.get("remaining", [])[:3],
+        "evidence_refs": result.get("evidence_refs", [])[:3],
+        "details_truncated": len(result.get("remaining", [])) > 3 or len(result.get("evidence_refs", [])) > 3,
+        "handoff": {k: result["handoff"].get(k) for k in ("content_ref", "content_chars", "metadata_digest", "depends_on", "replaces")},
+        "usage": {k: v for k, v in (result.get("telemetry", {}).get("usage") or {}).items()
+                  if k in {"model_calls", "input_tokens", "output_tokens", "provider_wall_ms", "cached_tokens", "reasoning_tokens"}},
+        "cost": {k: v for k, v in (result.get("telemetry", {}).get("cost") or {}).items()
+                 if k in {"amount", "currency", "basis"}},
+        "profile_id": (result.get("routing", {}).get("profile") or {}).get("id"),
+        "read_capability": "agent.result"})
+    return brief
 
 
 class SubagentCompletionGuard:

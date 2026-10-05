@@ -131,6 +131,10 @@ class SubagentControl:
     def gate(self, run_id):
         """每个安全点读取父意图；执行在途的真实收据仍由 Runtime 记录。"""
         status = self.parent_control.gate(self.repository.contract["run_id"])
+        if status is None:
+            # 父 Turn 已终止时通用 gate 不再修改它；子游标仍须看到持久 Stop。
+            view = self.parent_control.view(self.repository.contract["run_id"])
+            status = "CANCELLED" if view.get("stopped") else "PAUSED" if view.get("paused") else None
         if status:
             self.repository.block(run_id, status, "Parent control stops future child work")
         return status
@@ -169,13 +173,13 @@ class SubagentExecution:
         return local_run_lock(self.repository.parent.runtime.runtime_dir, "run_" + sha256_bytes(("child:" + run_id).encode()))
 
     def recover(self, run_id):
-        """核对共同账本；任一未决模型效果阻止新子调用，不用重试绕过 UNKNOWN。"""
+        """仅核对当前子合同；自身未决效果阻止新调用，兄弟在途 Ticket 不属于此恢复范围。"""
         parent = self.repository.parent
-        parent.decisions.recover(self.repository.contract["run_id"])
         prefix = self.repository.contract["request_key"]
+        parent.decisions.recover(self.repository.contract["run_id"], request_key_prefix=prefix)
         return not any(x["state"] in {"TICKETED", "UNKNOWN"} for x in
             parent.decisions.status(self.repository.contract["run_id"])["model_invocations"]
-            if str(x.get("request_key") or "").startswith(prefix))
+            if x.get("request_key") == prefix or str(x.get("request_key") or "").startswith(prefix + ":"))
 
     def decide(self, turn, step, provider):
         """固定子步骤身份；先回读模型事实，再用主模型同一预算/Compact 规则准备请求。"""

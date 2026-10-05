@@ -18,7 +18,7 @@
 | 评测/演进 | `evaluation_runner.py`、`platform/evaluation*`、`platform/evolution*` | 固定集、Ledger、候选、显式 Promote/Rollback |
 | 入站 | `cli.py`、`web.py`、`web_workspace.py` | CLI、本机 HTTP 和工作台 |
 
-实际策略包括 conservative Intent Pick、Direct、Agent Loop、Information Resolution、离线 Information Gain、Personal Agent 与 `agent.delegate` 单层只读委派。调用发生时仍经过原有准入、预算和证据边界。
+实际策略包括 conservative Intent Pick、Direct、Agent Loop、Information Resolution、离线 Information Gain、Personal Agent 与 `agent.delegate` / `agent.parallel` 单层只读委派。独立子任务最多三路并发，调用仍经过原有准入、预算和证据边界。
 
 已移除无调用者的 Workflow/MCP/Skills 占位类、内存 MemoryCatalog、Kernel/ControlPlane 旧别名和虚假的 planned adapter 登记。当前没有任意 Shell、A2A、浏览器执行或通用远程 Managed Agent；后续需求见 [ROADMAP](ROADMAP.md)，不在快照中冒充连接。
 
