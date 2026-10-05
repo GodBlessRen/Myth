@@ -1,0 +1,48 @@
+# 浏览器基线在隔离运行器访问真实 loopback HTTP；固定 Provider 不代表真实模型验收。
+name: Browser
+on:
+  push:
+    branches: ["evolve/**"]
+  pull_request:
+permissions:
+  contents: read
+concurrency:
+  group: browser-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install project and isolated browser test dependency
+        run: |
+          python -m pip install -e . playwright
+          python -m playwright install --with-deps chromium
+      - name: Capture current UI baseline against real HTTP
+        run: |
+          mkdir -p .work
+          PYTHONPATH=src:tests python tests/browser_fixture.py > .work/browser-fixture.log 2>&1 &
+          FIXTURE_PID=$!
+          trap 'kill "$FIXTURE_PID" 2>/dev/null || true' EXIT
+          for i in $(seq 1 40); do
+            if test -f .work/browser-fixture.json; then break; fi
+            sleep 0.25
+          done
+          test -f .work/browser-fixture.json
+          python tests/check_browser_matrix.py --baseline
+      # 只上传合成测试截图和检测结果；不上传 Runtime、浏览器用户数据或认证存储。
+      - name: Retain exact-revision browser evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: myth-browser-${{ github.sha }}
+          path: .work/browser-evidence/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
