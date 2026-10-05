@@ -10,6 +10,7 @@ from ..domain import canonical_json, digest_json, IdentityConflict, BudgetExceed
 from ..decision_runtime import DecisionRuntime
 from ..strategies import RuleIntentPicker, RuleResolutionController
 from ..platform.context_anchor import build_context_anchor
+from ..platform.continuity import message_digest, plan_conversation_continuity
 from ..platform.control import ControlCommand, ControlSnapshot
 from ..network_recovery import reconnect_delay
 from ..session_statistics import measured_integer
@@ -93,6 +94,7 @@ class SqliteWorkspaceRepository:
         resolution_policy_id=None,
         vector_index=None,
         evaluation_harness_mechanisms=None,
+        memory_state=None,
     ):
         # runtime：共享 Runtime 装配对象；其 SQLite 连接只在所属线程使用。
         self.runtime = runtime
@@ -100,6 +102,8 @@ class SqliteWorkspaceRepository:
         self.store = runtime.store
         # personal：长期意图及进度的状态所有者；对话准入通过显式事务协作加入。
         self.personal = personal
+        # memory_state：只读协作者提供 Current Facts 版本摘要；Memory 正文和 revision 仍由 Memory 仓储独占写入。
+        self.memory_state = memory_state
         # decisions：模型请求/收据协调器；提供固定身份，不授予模型直接执行权。
         self.decisions = DecisionRuntime(runtime)
         # intent_picker：纯路径选择策略；输出是提案，不改变能力范围。
@@ -472,6 +476,18 @@ class SqliteWorkspaceRepository:
             project = (
                 self.project(session["project_id"]) if session["project_id"] else None
             )
+            # Current Facts 与 query-based Recall 分开：版本绑定来自权威 Memory 状态，不由相似度排名决定。
+            current_facts = (
+                self.memory_state.continuity_facts(
+                    project_id=session["project_id"], session_id=sid
+                )
+                if self.memory_state is not None
+                else {
+                    "policy": "current-facts-unbound",
+                    "count": 0,
+                    "digest": None,
+                }
+            )
             retrieval = self.knowledge.search_report(text, session["project_id"])
             knowledge = list(retrieval["sources"])
             for did in document_ids:
@@ -560,20 +576,36 @@ class SqliteWorkspaceRepository:
                     item["resolution_offset"] = start
                 item["resolution"] = plan.resolution.value
                 projected_knowledge.append(item)
-            # 长会话在 Turn 准入时增量推进 Context Anchor；原始消息仍保存在 workspace_messages。
+            # Continuity 在 Turn 准入事务内核对完整持久消息；Context Anchor 只在证明可复用后增量推进。
+            history_records = list(session["messages"])
             history_messages = [
                 {"role": m["role"], "content": m["content"]}
-                for m in session["messages"]
+                for m in history_records
             ]
-            previous_anchor = None
+            previous_turn = None
             previous_row = db.execute(
-                "SELECT snapshot_json FROM workspace_turns WHERE session_id=? ORDER BY rowid DESC LIMIT 1",
+                "SELECT run_id,status,snapshot_json FROM workspace_turns "
+                "WHERE session_id=? ORDER BY rowid DESC LIMIT 1",
                 (sid,),
             ).fetchone()
             if previous_row:
-                previous_anchor = json.loads(previous_row["snapshot_json"]).get(
-                    "context_anchor"
-                )
+                previous_turn = {
+                    "run_id": previous_row["run_id"],
+                    "status": previous_row["status"],
+                    "snapshot": json.loads(previous_row["snapshot_json"]),
+                }
+            continuity = plan_conversation_continuity(
+                previous_turn=previous_turn,
+                history=history_records,
+                settings=settings,
+                project=project,
+                current_facts=current_facts,
+            )
+            previous_anchor = (
+                previous_turn["snapshot"].get("context_anchor")
+                if previous_turn and continuity["anchor_reuse"]
+                else None
+            )
             context_anchor = (
                 build_context_anchor(
                     previous_anchor,
@@ -603,6 +635,7 @@ class SqliteWorkspaceRepository:
                 },
                 "attached_document_ids": list(document_ids),
                 "context_anchor": context_anchor,
+                "continuity": continuity,
                 "turn_message_start": len(recent_history),
                 "memory": [
                     {
@@ -684,15 +717,32 @@ class SqliteWorkspaceRepository:
                     "retrieval_scanned": retrieval["retrieval"]["scanned"],
                     "retrieval_matched": retrieval["retrieval"]["matched"],
                     "goal_id": goal_id,
+                    "continuity_action": continuity["action"],
+                    "continuity_epoch": continuity["epoch"],
+                },
+            )
+            self.store._event(
+                db,
+                rid,
+                "ConversationContinuityPlanned",
+                {
+                    "action": continuity["action"],
+                    "reason": continuity["reason"],
+                    "epoch": continuity["epoch"],
+                    "anchor_reuse": continuity["anchor_reuse"],
+                    "current_facts_digest": continuity["current_facts"]["digest"],
                 },
             )
         return self.turn(rid)
 
     # 在调用方事务内写入消息事实及来源元数据；消息与步骤状态不能分开提交。
     def _message(self, db, sid, rid, role, text, metadata):
+        # content_digest 随消息原子落库；以后正文若被改写，Continuity 可在复用前确定性拒绝旧历史。
+        value = dict(metadata or {})
+        value["content_digest"] = message_digest(role, text)
         db.execute(
             "INSERT INTO workspace_messages(id,session_id,run_id,role,content,metadata_json) VALUES(?,?,?,?,?,?)",
-            (new_id("msg"), sid, rid, role, text, canonical_json(metadata)),
+            (new_id("msg"), sid, rid, role, text, canonical_json(value)),
         )
 
     # 在已有事务中保存游标；checkpoint_step 是已消费步骤，纯连接恢复用 record_progress=False 保留进度时间。
