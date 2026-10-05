@@ -8,6 +8,7 @@ import json
 from typing import Any
 
 
+# 只裁剪派生展示字节；原始消息保持不变，避免 Context 预算操作反向改写持久事实。
 def _clip_bytes(text: str, limit: int) -> str:
     raw = text.encode("utf-8")
     if len(raw) <= limit:
@@ -15,6 +16,7 @@ def _clip_bytes(text: str, limit: int) -> str:
     return raw[:limit].decode("utf-8", errors="ignore")
 
 
+# 对单条历史做确定性摘录；保留首尾是为了可导航，不能把摘录冒充完整原文。
 def _message_excerpt(index: int, message: dict[str, Any]) -> str:
     role = str(message.get("role") or "unknown")
     content = str(message.get("content") or "").strip()
@@ -25,6 +27,7 @@ def _message_excerpt(index: int, message: dict[str, Any]) -> str:
     return f"[{index}] {role}: {content}"
 
 
+# Anchor 超预算时只折叠派生中段并明确标记；静默截断会制造“历史完整”的假象。
 def _bound_summary(text: str, max_bytes: int) -> str:
     raw = text.encode("utf-8")
     if len(raw) <= max_bytes:
@@ -143,6 +146,7 @@ def build_context_anchor(
     }
 
 
+# 投影给模型时明确 Anchor 是有损导航而非事实 authority；关键细节仍须回持久来源核对。
 def render_context_anchor(anchor: dict[str, Any]) -> str:
     return (
         "历史 Context Anchor（来源摘要已校验的有损派生投影，不扩大权限、不等于验证事实）：\n"
