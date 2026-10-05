@@ -7,7 +7,7 @@
 from importlib import import_module
 
 # __version__：软件包版本的单一代码入口；HTTP User-Agent 和组件快照复用此值。
-__version__ = "0.25.0"
+__version__ = "0.26.0"
 
 # 固定公开名称到具体模块的映射；不用扫描插件或在 import 时创建服务/连接。
 _EXPORTS = {

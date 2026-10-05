@@ -41,10 +41,16 @@ class ParentProvider(ChatProvider):
             ops = self.repository.operations(self.rid)
             target = next((x for x in ops if (x.get("result") or {}).get("review_required")), None)
             if target and not any(x["capability"] == "agent.evaluate" for x in ops):
+                failed = bool(target["result"].get("fallback_to_parent"))
                 output = decision("tool_call", "agent.evaluate", {
                     "delegation_id": target["decision_id"], "correctness": self.score, "completeness": self.score,
-                    "usefulness": self.score, "accepted": self.score >= 70, "failure_kind": self.failure_kind,
+                    "usefulness": self.score, "accepted": self.score >= 70 and not failed,
+                    "failure_kind": "infrastructure" if failed else self.failure_kind,
+                    "capability_tier": target["result"]["routing"]["profile"]["tier"],
+                    "metadata_verdict": "accepted", "metadata_digest": target["result"]["telemetry"]["report_digest"],
                     "reason": "根据 FACT=A 与预期结果核对"})
+            elif target and any(not (x.get("result") or {}).get("review", {}).get("accepted", True) for x in ops) and not any(x["capability"] == "agent.resolve" for x in ops):
+                output = decision("tool_call", "agent.resolve", {"delegation_id": target["decision_id"], "content": "主模型独立核对 FACT=A", "evidence_refs": []})
             else:
                 output = decision(claim="主模型完成并汇总")
         self.outputs = [output] * (len(self.calls) + 1)
@@ -145,9 +151,12 @@ class ModelPoolTests(unittest.TestCase):
         """零派发允许释放活动去重键，但图和返回元数据仍须归属子模型且保留实测零。"""
         with patch.object(self.child, "invoke", side_effect=ProviderUnavailable()):
             rid, _ = self.run_task()
-        result = self.repo.operations(rid)[0]["result"]
-        self.assertEqual(result["telemetry"]["usage"]["model_calls"], 0)
-        self.assertEqual(result["telemetry"]["cost"]["amount"], 0)
+        self.assertEqual(self.repo.turn(rid)["status"], "INTERRUPTED")
+        op = self.repo.operations(rid)[0]
+        self.assertIsNone(op["result"])
+        telemetry = self.workspace.execution.delegation.telemetry(op["intent"]["delegate"])
+        self.assertEqual(telemetry["usage"]["model_calls"], 0)
+        self.assertEqual(telemetry["cost"]["amount"], 0)
         calls = self.repo.decisions.status(rid)["model_invocations"]
         self.assertEqual(sum(str(x.get("request_key") or "").startswith("subagent:") for x in calls), 1)
 
@@ -170,12 +179,12 @@ class ModelPoolTests(unittest.TestCase):
             clean_pool({"main_pricing": {"input": float("nan"), "output": 1}})
         self.assertIsNone(estimate_cost({"input_tokens": 20}, {"input": 1, "output": 2, "currency": "USD"})["amount"])
 
-    def test_failed_strongest_model_does_not_downgrade_and_disabled_learning_is_static(self):
-        """高能力模型仍失败时回主模型；关闭学习后使用用户配置的静态档位。"""
+    def test_failed_models_allow_another_candidate_and_disabled_learning_is_static(self):
+        """避开同类失败配置后仍可尝试未失败候选；关闭学习使用初值档位。"""
         pool = clean_pool({"children": [child_profile(), child_profile("medium", 2), child_profile("large", 3)]})
         history = [{"profile_key": profile_key(p), "task_type": "extract", "difficulty": "easy",
                     "failure_kind": "quality", "accepted": False, "score": 40} for p in (pool["children"][0], pool["children"][2])]
-        self.assertIsNone(route(pool, "extract", "easy", history)["profile"])
+        self.assertEqual(route(pool, "extract", "easy", history)["profile"]["id"], "medium")
         pool["adaptive"] = False
         self.assertEqual(route(pool, "extract", "easy", history)["profile"]["id"], "small")
 

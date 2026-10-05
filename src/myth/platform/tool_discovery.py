@@ -26,6 +26,8 @@ DEFAULT_VISIBLE_TOOL_IDS = (
     "math.calculate",
     "agent.delegate",
     "agent.evaluate",
+    "agent.result",
+    "agent.resolve",
     "tool.search",
     "tool.describe",
 )

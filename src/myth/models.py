@@ -163,6 +163,8 @@ class StepDecision:
     evidence_refs: tuple[str, ...] = ()
     # remaining：模型仍列出的未完成项；非空时不能宣称完整 Exact 验收。
     remaining: tuple[str, ...] = ()
+    # summary：子任务的有界语义摘要；正文留在 claim，不用摘要替换原始结果。
+    summary: str | None = None
 
     # 生成 JSON 可保存的数据投影；保留身份、版本和单位，不在此授予执行或发布权限。
     def serializable(self) -> dict[str, Any]:
@@ -177,6 +179,7 @@ class StepDecision:
             "goal_coverage": self.goal_coverage,
             "evidence_refs": list(self.evidence_refs),
             "remaining": list(self.remaining),
+            **({"summary": self.summary} if self.summary is not None else {}),
         }
 
 
@@ -314,4 +317,5 @@ def parse_step_decision(text: str) -> StepDecision:
         goal_coverage=goal_coverage,
         evidence_refs=evidence_refs,
         remaining=remaining,
+        summary=_text(value.get("summary", ""), "summary") or None,
     )

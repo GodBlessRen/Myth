@@ -746,7 +746,8 @@ class DecisionRuntime:
                 attempt_id,
                 f"provider call raised after Ticket: {type(exc).__name__}: {exc}",
             )
-            raise
+            # 供应商边界内的 ValueError 等也属于未知效果；应用不得把它消费为参数拒绝后继续派发。
+            raise RecoveryRequired("Provider call has no conclusive receipt") from exc
 
         provider_wall_ms = max(
             0, int((time.monotonic() - provider_started) * 1000)

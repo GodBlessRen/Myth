@@ -48,7 +48,8 @@ class MessagesProviderTests(unittest.TestCase):
         provider = MessagesProvider("kimi", lambda: "fixture-secret")
         value = {"id": "chat-1", "choices": [{"finish_reason": "stop", "message": {
             "content": decision(), "reasoning_content": "private-thought"}}],
-            "usage": {"prompt_tokens": 12, "completion_tokens": 34}}
+            "usage": {"prompt_tokens": 12, "completion_tokens": 34,
+                "completion_tokens_details": {"reasoning_tokens": 9}, "future_provider_stat": [1, 2, 3]}, "created": 123}
         with patch("myth.providers.messages.open_credential_request", return_value=self.response(value)) as send:
             result = provider.invoke(self.request())
         payload = json.loads(send.call_args.args[0].data)
@@ -56,6 +57,9 @@ class MessagesProviderTests(unittest.TestCase):
         self.assertEqual(payload["response_format"], {"type": "json_object"})
         self.assertEqual(result.usage, {"model_calls": 1, "input_tokens": 12, "output_tokens": 34})
         self.assertNotIn("private-thought", str(result))
+        self.assertEqual(result.raw["usage"]["completion_tokens_details"]["reasoning_tokens"], 9)
+        self.assertEqual(result.raw["usage"]["future_provider_stat"], [1, 2, 3])
+        self.assertEqual(result.raw["created"], 123)
 
     def test_missing_usage_and_incomplete_response(self):
         """缺测保持空；截断不是可交付子结果，仍保留已经测得的费用。"""

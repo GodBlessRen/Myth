@@ -212,6 +212,35 @@ class SqliteWorkspaceRepository:
         ).fetchall()
         return [json.loads(row[0])["review"] for row in rows if json.loads(row[0]).get("review")]
 
+    def delegation_state(self, decision_id):
+        """子流程以不可变对象和有序事件保存检查点；已有工具合同负责限定父 Run 身份。"""
+        op = self.operation(decision_id)
+        if not op or not op["intent"].get("delegate"):
+            return None
+        row = self.store.db.execute(
+            "SELECT payload_json FROM events WHERE run_id=? AND kind='SubagentCheckpoint' "
+            "AND json_extract(payload_json,'$.delegation_id')=? ORDER BY sequence DESC LIMIT 1",
+            (op["run_id"], decision_id),
+        ).fetchone()
+        return json.loads(self.runtime.objects.get(json.loads(row[0])["state_ref"])) if row else None
+
+    def checkpoint_delegation(self, decision_id, state, *, expected_revision):
+        """对象先发布，事件 CAS 后提交；崩溃只可能留下未引用对象，不部分更新子游标。"""
+        value = {**state, "revision": expected_revision + 1}
+        state_ref = self.runtime.objects.put(canonical_json(value).encode())
+        with self.store.tx() as db:
+            op = self.operation(decision_id)
+            if not op or not op["intent"].get("delegate") or op["state"] == "RESOLVED":
+                raise ValueError("delegation is not accepting checkpoints")
+            current = self.delegation_state(decision_id)
+            if (current or {}).get("revision", 0) != expected_revision:
+                raise IdentityConflict("sub-agent checkpoint revision changed")
+            self.store._event(db, op["run_id"], "SubagentCheckpoint", {
+                "delegation_id": decision_id, "state_ref": state_ref, "revision": value["revision"],
+                "status": value["status"], "step": value["current_step"],
+            })
+        return value
+
     # 投影未归档项目及会话/知识数量；统计不授予文件范围。
     def projects(self):
         return [
@@ -833,6 +862,10 @@ class SqliteWorkspaceRepository:
         return any(
             item["state"] in {"TICKETED", "UNKNOWN"}
             for item in self.pending_operations(rid)
+            # 子工具 Ticket 是流程授权；已知游标可继续，不等于存在未决网络效果。
+            if not (item["intent"].get("delegate", {}).get("protocol_version") == "handoff-v2"
+                    and (self.delegation_state(item["decision_id"]) or {}).get("status")
+                    in {None, "RUNNING", "INTERRUPTED", "PAUSED", "COMPLETED", "FAILED", "BUDGET_EXHAUSTED", "CANCELLED"})
         )
 
     # 根据持久未决效果选择 INTERRUPTED 或 UNKNOWN，保存恢复游标；安全中断才可继续规划。
@@ -1406,6 +1439,13 @@ class SqliteWorkspaceRepository:
                     "AND json_extract(intent_json,'$.result.review.delegation_id')=?", (rid, target)
                 ).fetchone():
                     raise ValueError("子任务已经评分，不可重复记录")
+            if capability == "agent.resolve":
+                target = intent["result"]["resolution"]["delegation_id"]
+                if db.execute(
+                    "SELECT 1 FROM workspace_operations WHERE run_id=? AND capability='agent.resolve' "
+                    "AND json_extract(intent_json,'$.result.resolution.delegation_id')=?", (rid, target)
+                ).fetchone():
+                    raise ValueError("子任务已有主模型替代内容，不可重复补做记录")
             owner = db.execute(
                 "SELECT run_id FROM step_decisions WHERE decision_id=?", (decision_id,)
             ).fetchone()

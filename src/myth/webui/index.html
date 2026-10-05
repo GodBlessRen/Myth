@@ -333,10 +333,10 @@
 </div>
 <div class="model-capability-meta hidden" id="modelCapabilityMeta"></div>
 <details class="pool-advanced"><summary>主模型价格（可选）</summary><div id="poolMainPricing"></div></details>
-<div class="settings-divider"><h3>子模型池</h3><p>最多 3 个子模型。按任务逐个派发；没有合适模型时由主模型接手。</p></div>
+<div class="settings-divider"><h3>子模型池</h3><p>最多配置 3 个模型。初始能力作为起点，主模型会根据任务表现调整选择。</p></div>
 <label class="pool-toggle"><input id="poolEnabled" type="checkbox" checked/>允许委派子任务</label>
 <label class="pool-toggle"><input id="poolAdaptive" type="checkbox" checked/>根据主模型评分调整后续选择</label>
-<p class="field-meta">能力档位由你配置。费用按输入、输出标价估算，未计缓存折扣；留空显示未计价。API Key 按提供方共用，ChatGPT 使用上方 OAuth 连接。</p>
+<p class="field-meta">费用按输入、输出标价估算，未计缓存折扣；留空显示未计价。API Key 按提供方共用，ChatGPT 使用上方 OAuth 连接。</p>
 <div id="poolChildren"></div>
 <button class="secondary" id="poolAdd" type="button">添加子模型</button>
 <div class="settings-foot">

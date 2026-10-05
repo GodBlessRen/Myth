@@ -62,11 +62,6 @@ class TraceProjection:
             for item in operations
             if item.get("decision_id")
         }
-        invocation_by_key = {
-            str(item.get("request_key")): item
-            for item in invocations
-            if item.get("request_key")
-        }
 
         nodes: list[dict[str, Any]] = [
             {
@@ -155,41 +150,34 @@ class TraceProjection:
             child_request_key = str(child.get("request_key") or "")
             if not child_request_key and capability == "agent.delegate" and decision_id:
                 prefix = f"{subagent_prefix}{decision_id}:"
-                child_request_key = next(
-                    (key for key in invocation_by_key if key.startswith(prefix)),
-                    "",
-                )
-            child_invocation = invocation_by_key.get(child_request_key)
-            if not child_invocation:
-                continue
-
-            child_attempt_id = str(child_invocation.get("model_attempt_id") or "")
-            if child_attempt_id:
-                mapped_attempts.add(child_attempt_id)
-            role_id = str(child.get("role_id") or "")
-            if not role_id and child_request_key.startswith(subagent_prefix):
-                remainder = child_request_key[len(subagent_prefix) :]
-                if ":" in remainder:
-                    _, role_id = remainder.rsplit(":", 1)
-            child_id = f"subagent:{child_attempt_id or decision_id}"
-            nodes.append(
-                {
-                    "id": child_id,
-                    "kind": "subagent",
-                    "label": f"Sub-Agent · {role_id or 'worker'}",
-                    "detail": "isolated delegated model call",
-                    "state": child_invocation.get("state")
-                    or child_invocation.get("outcome")
-                    or "UNKNOWN",
-                    "depth": 2,
-                    "request_key": child_request_key,
-                    "attempt_id": child_invocation.get("model_attempt_id"),
-                    "parent_decision_id": decision_id,
-                    "role_id": role_id or None,
-                }
-            )
-            edges.append({"source": tool_id, "target": child_id, "kind": "delegate"})
-            cursor = child_id
+                child_request_key = (operation.get("intent") or {}).get("delegate", {}).get("request_key") or prefix
+            # 一个子合同可有多步及零派发重试；按账本顺序逐个映射，不能用 key 字典覆盖早先 Attempt。
+            child_calls = [x for x in invocations if child_request_key and
+                (x.get("request_key") == child_request_key or str(x.get("request_key") or "").startswith(child_request_key + ":"))]
+            for ordinal, child_invocation in enumerate(child_calls, 1):
+                child_attempt_id = str(child_invocation.get("model_attempt_id") or "")
+                if child_attempt_id:
+                    mapped_attempts.add(child_attempt_id)
+                child_id = f"subagent:{child_attempt_id or decision_id}"
+                nodes.append({"id": child_id, "kind": "subagent", "label": f"子模型 · 调用 {ordinal}",
+                    "detail": "隔离子流程", "state": child_invocation.get("state") or "UNKNOWN", "depth": 2,
+                    "request_key": child_invocation.get("request_key"), "attempt_id": child_attempt_id,
+                    "parent_decision_id": decision_id, "role_id": child.get("role_id") or "isolated_worker"})
+                edges.append({"source": tool_id if ordinal == 1 else cursor, "target": child_id, "kind": "delegate" if ordinal == 1 else "child_next"})
+                cursor = child_id
+                child_decision = decision_by_attempt.get(child_attempt_id) or {}
+                child_op = operation_by_decision.get(child_decision.get("decision_id"))
+                if child_op:
+                    input_id = f"tool:{child_op['decision_id']}"
+                    nodes.append({"id": input_id, "kind": "tool", "label": child_op["capability"], "detail": "子任务输入回读",
+                        "state": child_op["state"], "depth": 3, "decision_id": child_op["decision_id"], "ticket_id": child_op.get("ticket_id")})
+                    edges.append({"source": child_id, "target": input_id, "kind": "tool"})
+                    cursor = input_id
+            contract = (operation.get("intent") or {}).get("delegate") or {}
+            for dependency in contract.get("depends_on", []):
+                edges.append({"source": f"tool:{dependency}", "target": tool_id, "kind": "dependency"})
+            if contract.get("replaces"):
+                edges.append({"source": f"tool:{contract['replaces']}", "target": tool_id, "kind": "replacement"})
 
         terminal_id = f"state:{run_id}"
         nodes.append(
@@ -210,17 +198,30 @@ class TraceProjection:
         reviews = {(op.get("result") or {}).get("review", {}).get("delegation_id"):
                    (op.get("result") or {}).get("review") for op in operations if (op.get("result") or {}).get("review")}
         invocation_by_id = {i.get("model_attempt_id"): i for i in invocations}
+        # 子 key 包含步骤后缀；精确前缀分隔避免把其他委派算到当前合同。
+        contracts_by_attempt = {i.get("model_attempt_id"): next((c for key, c in child_contracts.items()
+            if key and (i.get("request_key") == key or str(i.get("request_key") or "").startswith(key + ":"))), {}) for i in invocations}
         costs = []
+        review_buckets = {"reviewed": {}, "pending": {}, "disputed": {}}
+        unknown_by_review = {"reviewed": 0, "pending": 0, "disputed": 0}
         for invocation in invocations:
-            contract = child_contracts.get(invocation.get("request_key")) or {}
+            contract = contracts_by_attempt[invocation.get("model_attempt_id")]
             profile = (contract.get("routing") or {}).get("profile") or {}
             rates = profile.get("pricing") if contract else (main_pricing if main_model is None or invocation.get("model_id") == main_model else None)
-            costs.append(estimate_cost(invocation.get("usage") or {}, rates))
+            cost = estimate_cost(invocation.get("usage") or {}, rates)
+            costs.append(cost)
+            verdict = (reviews.get(contract.get("delegation_id")) or {}).get("metadata_verdict")
+            bucket = "reviewed" if not contract or verdict == "accepted" else "disputed" if verdict == "disputed" else "pending"
+            if cost["amount"] is None:
+                unknown_by_review[bucket] += 1
+            else:
+                totals = review_buckets[bucket]
+                totals[cost["currency"]] = round(totals.get(cost["currency"], 0) + cost["amount"], 9)
         for node in nodes:
             invocation = invocation_by_id.get(node.get("attempt_id"))
             if not invocation:
                 continue
-            contract = child_contracts.get(invocation.get("request_key")) or {}
+            contract = contracts_by_attempt[invocation.get("model_attempt_id")]
             profile = (contract.get("routing") or {}).get("profile") or {}
             node.update({"provider": invocation.get("provider_id"), "model": invocation.get("model_id"),
                          "usage": invocation.get("usage") or {}, "routing": contract.get("routing"),
@@ -247,7 +248,9 @@ class TraceProjection:
             "nodes": nodes,
             "edges": edges,
             "cost_summary": {"estimated_by_currency": totals, "unknown_calls": sum(c["amount"] is None for c in costs),
-                             "model_calls": len(invocations), "basis": "configured_list_price"},
+                             "model_calls": len(invocations), "basis": "configured_list_price",
+                             "reviewed_by_currency": review_buckets["reviewed"], "pending_by_currency": review_buckets["pending"],
+                             "disputed_by_currency": review_buckets["disputed"], "unknown_by_review": unknown_by_review},
             "coverage": {
                 "model_calls": len(total_attempts),
                 "mapped_model_calls": len(mapped_attempts),
