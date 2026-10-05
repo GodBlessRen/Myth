@@ -78,6 +78,13 @@ jobs:
         run: |
           python -m pip install dist/*.whl --target .runtime/wheel-installed
           python scripts/validate_package.py --package-dir .runtime/wheel-installed
+      - name: Verify a fresh environment using only downloaded wheels
+        run: |
+          python -m pip download --dest dist/offline-wheels dist/*.whl build "setuptools>=68"
+          python -m venv .runtime/offline-check
+          .runtime/offline-check/bin/python -m pip install --no-index --find-links dist/offline-wheels dist/*.whl build setuptools
+          PACKAGE_DIR=$(.runtime/offline-check/bin/python -c "import sysconfig; print(sysconfig.get_paths()['purelib'])")
+          .runtime/offline-check/bin/python scripts/validate_package.py --package-dir "$PACKAGE_DIR"
       # 仅留存已通过校验的发布物，不上传 checkout、.git、运行库或凭据；名称绑定精确提交。
       - name: Retain validated distributions for reproducible review
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -87,6 +94,7 @@ jobs:
             dist/*.whl
             dist/*.tar.gz
             dist/myth-source.zip
+            dist/offline-wheels/*.whl
           if-no-files-found: error
           retention-days: 7
           compression-level: 0
