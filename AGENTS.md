@@ -38,6 +38,7 @@ python scripts/check_annotations.py
 python scripts/audit_secret_patterns.py
 python -m unittest discover -s tests -v
 node --check src/myth/webui/app.js
+node --check src/myth/webui/model-pool.js
 node --check src/myth/webui/inspector.js
 node --check src/myth/webui/goals.js
 node --check src/myth/webui/reconnect.js

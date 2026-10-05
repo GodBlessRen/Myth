@@ -36,6 +36,7 @@ jobs:
       - name: Check Web JavaScript
         run: |
           node --check src/myth/webui/app.js
+          node --check src/myth/webui/model-pool.js
           node --check src/myth/webui/inspector.js
           node --check src/myth/webui/goals.js
           node --check src/myth/webui/reconnect.js
