@@ -14,6 +14,7 @@ from ..auth.transport import open_credential_request, read_bounded, redact_respo
 from ..model_capabilities import model_capability, reasoning_capability
 from ..models import ModelResult, ProviderStatus, ProviderKnownFailure, ProviderUnavailable
 from ..network_recovery import is_pre_dispatch_disconnect
+from ..auth.claude import OAUTH_BETA
 from ..platform.handoff import public_metadata
 
 
@@ -27,7 +28,7 @@ class MessagesProvider:
 
     def __init__(self, provider_id, token_supplier, timeout=180.0):
         """供应商 ID 来自装配白名单；凭据延迟读取，不进入实例公开状态。"""
-        if provider_id not in {"anthropic", "kimi"}:
+        if provider_id not in {"anthropic", "claude_oauth", "kimi"}:
             raise ValueError("unsupported messages provider")
         # provider_id：Runtime 固定的供应商身份。
         self.provider_id = provider_id
@@ -36,7 +37,7 @@ class MessagesProvider:
         # timeout：网络等待秒数，不代表取消远端生成。
         self.timeout = timeout
         # base_url：固定接收端，不能用用户文本替换以转发凭据。
-        self.base_url = "https://api.anthropic.com/v1" if provider_id == "anthropic" else "https://api.moonshot.ai/v1"
+        self.base_url = "https://api.anthropic.com/v1" if provider_id in {"anthropic", "claude_oauth"} else "https://api.moonshot.ai/v1"
 
     def _request(self, path, payload=None):
         """只在明确连接前故障报告零派发；响应正文与异常不得泄露密钥。"""
@@ -50,6 +51,12 @@ class MessagesProvider:
         headers = {"Content-Type": "application/json"}
         if self.provider_id == "anthropic":
             headers.update({"x-api-key": token, "anthropic-version": "2023-06-01"})
+        elif self.provider_id == "claude_oauth":
+            headers.update({
+                "Authorization": "Bearer " + token,
+                "anthropic-version": "2023-06-01",
+                "anthropic-beta": OAUTH_BETA,
+            })
         else:
             headers["Authorization"] = "Bearer " + token
         req = request.Request(self.base_url + path, headers=headers,
@@ -85,18 +92,18 @@ class MessagesProvider:
             if not models:
                 raise ValueError("empty catalog")
             reasoning = reasoning_capability(kind="toggle", off=False) if self.provider_id == "kimi" else None
-            return ProviderStatus(self.provider_id, True, "api_key", {
+            return ProviderStatus(self.provider_id, True, "oauth" if self.provider_id == "claude_oauth" else "api_key", {
                 "models": models, "model_capabilities": {m: {**model_capability(m, reasoning=reasoning),
-                    "temperature": {"supported": _claude_temperature_supported(m) if self.provider_id == "anthropic" else True,
-                                    "min": 0, "max": 1 if self.provider_id == "anthropic" else 2}} for m in models}})
+                    "temperature": {"supported": _claude_temperature_supported(m) if self.provider_id in {"anthropic", "claude_oauth"} else True,
+                                    "min": 0, "max": 1 if self.provider_id in {"anthropic", "claude_oauth"} else 2}} for m in models}})
         except Exception:
-            return ProviderStatus(self.provider_id, False, "api_key", {"error": "模型目录检查失败，请检查连接与凭据。"})
+            return ProviderStatus(self.provider_id, False, "oauth" if self.provider_id == "claude_oauth" else "api_key", {"error": "模型目录检查失败，请检查连接与凭据。"})
 
     def invoke(self, model_request):
         """把统一结构化决定映射为厂商协议；只返回结果文本和计量，不保存隐藏推理。"""
         messages = [{"role": m.role, "content": m.content} for m in model_request.messages]
-        if self.provider_id == "anthropic":
-            # 首版使用强制单工具产出 JSON；与扩展 Thinking 不混用，避免隐式改变配置。
+        if self.provider_id in {"anthropic", "claude_oauth"}:
+            # Claude API Key / OAuth 共用 Messages wire；认证差异只留在传输头。
             if model_request.thinking not in (None, False, "none"):
                 raise ProviderKnownFailure("Claude adapter currently supports default/disabled thinking only",
                     usage={"model_calls": 0, "input_tokens": 0, "output_tokens": 0})
@@ -144,6 +151,6 @@ class MessagesProvider:
         for source, target in fields.items():
             if type(raw.get(source)) is int and raw[source] >= 0:
                 usage[target] = raw[source]
-        if self.provider_id == "anthropic" and "input_tokens" in usage:
+        if self.provider_id in {"anthropic", "claude_oauth"} and "input_tokens" in usage:
             usage["input_tokens"] += usage.get("cached_input_tokens", 0) + usage.get("cache_write_input_tokens", 0)
         return usage

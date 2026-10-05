@@ -18,6 +18,7 @@ from .mental_model_refresh import MentalModelRefreshScheduler
 from .providers import create_provider
 from .runtime import MythRuntime
 from .workspace import Workspace
+from .domains.conversation_state import is_executor_candidate
 
 
 # EXECUTOR_SCHEMA：仅保存执行器自身租约/心跳/诊断；业务 Run 真相仍归 Runtime/Workspace。
@@ -367,7 +368,7 @@ class DurableExecutor:
         with MythRuntime(self.root) as runtime:
             workspace = Workspace(runtime)
             turn = workspace.repository.turn(run_id)
-            if turn["status"] not in {"RUNNING", "INTERRUPTED"}:
+            if not is_executor_candidate(turn["status"]):
                 return False
             retry = workspace.repository.network_retry(run_id)
             if retry and retry["retry_at"] > time.time():

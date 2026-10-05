@@ -15,7 +15,7 @@ from urllib.parse import urlparse
 from ..model_capabilities import normalize_thinking
 
 # 提供方、类别和等级是配置合同；品牌名称不构成能力排名。
-PROVIDERS = ("ollama", "openai", "chatgpt", "deepseek", "anthropic", "kimi")
+PROVIDERS = ("ollama", "openai", "chatgpt", "deepseek", "anthropic", "claude_oauth", "kimi")
 TASK_TYPES = ("general", "extract", "summarize", "code", "reason", "review")
 DIFFICULTIES = {"easy": 1, "medium": 2, "hard": 3}
 
@@ -109,7 +109,7 @@ def clean_pool(value):
         if type(window) is not int or not 2048 <= window <= 262144 or (provider == "ollama" and window <= tokens + 512):
             raise ValueError("子模型上下文不足")
         temperature = item.get("temperature", 0.0)
-        ceiling = 1 if provider == "anthropic" else 2
+        ceiling = 1 if provider in {"anthropic", "claude_oauth"} else 2
         if type(temperature) not in {int, float} or not 0 <= temperature <= ceiling:
             raise ValueError(f"子模型采样温度须为 0–{ceiling}")
         steps = item.get("max_steps", 4)

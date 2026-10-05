@@ -263,6 +263,7 @@
 <option value="openai">OpenAI · Myth 安全连接</option>
 <option value="deepseek">DeepSeek · Myth 安全连接</option>
 <option value="anthropic">Claude · API Key</option>
+<option value="claude_oauth">Claude · Myth OAuth</option>
 <option value="kimi">Kimi · API Key</option>
 <option value="chatgpt">ChatGPT · Myth OAuth</option>
 </select>
@@ -275,6 +276,19 @@
 <button class="secondary" id="chatgptLogin" type="button">连接 ChatGPT</button><button class="text-button hidden" id="chatgptLogout" type="button">
                     退出 ChatGPT
                   </button>
+</div>
+</div>
+<div class="auth-panel hidden" id="claudeAuthPanel">
+<div>
+<strong id="claudeAuthState">未连接 Claude</strong>
+<small id="claudeAuthMeta">OAuth token 只保存到操作系统安全凭据库；client_id 是 Myth 自己的公开客户端配置。</small>
+</div>
+<label for="claudeClientId">OAuth Client ID</label>
+<input autocomplete="off" id="claudeClientId" placeholder="配置 Myth 的 Claude OAuth client_id" spellcheck="false" type="text"/>
+<div class="button-row">
+<button class="secondary" id="claudeConfigure" type="button">保存 Client ID</button>
+<button class="secondary" id="claudeLogin" type="button">连接 Claude</button>
+<button class="text-button hidden" id="claudeLogout" type="button">退出 Claude</button>
 </div>
 </div>
 <div class="auth-panel hidden" id="providerKeyPanel">
