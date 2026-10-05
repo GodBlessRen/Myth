@@ -31,6 +31,20 @@ Evidence 只回答“这条 Memory 基于什么”，不等同 Verification，�
 
 Myth 不把相似度、proof_count 或 freshness 直接升级成 `verified`。
 
+## Current Facts 与历史
+
+Historical Truth 和 Current Facts 是两个维度。历史消息/Anchor 保留当时发生过的内容，不因后来状态变化而被重写；当前 Memory 中 `user_asserted / verified` 的可见记录则形成独立 metadata-only 版本摘要：
+
+```text
+visible user_asserted / verified Memory
+        ↓ revision + scope + content digest
+Current Facts digest
+        ↓
+Turn Continuity binding
+```
+
+这个摘要不包含 Memory 正文，也不使用 query score。它只回答“当前权威 Memory 状态有没有变化”，不制造客观真相。版本变化会使旧 continuity epoch fail closed 到 Context rebuild；普通 `context` Memory 和本轮 top-k recall 变化不会无谓击穿连续性。
+
 ## Immutable revision
 
 `workspace_memories` 保存当前可见状态；`workspace_memory_revisions` 保存每个已经提交 revision 的不可变快照：
