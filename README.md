@@ -15,7 +15,7 @@ Long-term Goal
   -> continue the same Goal
 ```
 
-当前版本：**v0.24.1**
+当前版本：**v0.25.0**
 
 登录、密钥边界、逐模块审查和本地性能对照见 [沉淀期审查](docs/REFINEMENT_REVIEW.md)。
 
@@ -27,6 +27,7 @@ Long-term Goal
 - 固定日常任务基线与逐次证据报告，支持真实 provider 和简单 Loop 路由对照；
 - Steer / Pause / Resume / Stop / Compact；
 - Ollama，本地上下文窗口与 `num_ctx` 对齐；
+- [模型池](docs/MODEL_POOL.md)：1 主模型 + 最多 3 个子配置，跨提供方分级委派、主模型评分、后续升级与费用投影；首版子任务串行、只读、不可递归；
 - Knowledge / Memory 检索与 provenance；
 - 增量 Context Anchor + recent verbatim tail；长会话压缩不删除 durable history；
 - State / Context 分离：旧 Tool Observation 可折叠但通过 `observation.read` 精确回读；Compact 使用 durable evidence seed，不把表示变化冒充任务进度；

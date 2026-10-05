@@ -206,12 +206,25 @@ function renderExecutionGraph(turn) {
       el("strong", "", node.label || node.kind || "node"),
       el("small", "", node.detail || ""),
     );
+    if (node.model) {
+      copy.append(el("small", "", `${node.provider || ""} · ${node.model}`));
+      const usage = node.usage || {}, cost = node.cost || {};
+      copy.append(el("small", "", `输入 ${usage.input_tokens ?? "未报告"} / 输出 ${usage.output_tokens ?? "未报告"} Token · ${usage.provider_wall_ms == null ? "耗时未报告" : usage.provider_wall_ms + " ms"}`));
+      copy.append(el("small", "", cost.amount == null ? "费用未计价" : `估算 ${cost.currency} ${cost.amount.toFixed(6)}`));
+    }
+    if (node.routing) copy.append(el("small", "", `任务 ${node.routing.task_type} · 难度 ${node.routing.difficulty} · ${node.routing.excluded?.length || 0} 个配置未入选`));
+    if (node.review) copy.append(el("small", "", `主模型评分 ${node.review.score}/100 · ${node.review.accepted ? "通过" : "需改进"} · ${node.review.reason}`));
     const [, stateClass] = inspectorStatus(node.state || "");
     const state = el("span", "execution-graph-state " + stateClass, inspectorStateText(node.state || "UNKNOWN"));
     row.append(lead, copy, state);
     box.append(row);
   });
   const coverage = graph.coverage || {};
+  const costs = graph.cost_summary;
+  if (costs) {
+    const amounts = Object.entries(costs.estimated_by_currency || {}).map(([unit, amount]) => `${unit} ${amount.toFixed(6)}`).join(" · ");
+    box.append(el("div", "execution-graph-note", `总费用估算：${amounts || "未计价"}；${costs.unknown_calls} 次调用费用未知。含主模型、子模型及评分调用，未计缓存折扣。`));
+  }
   if (coverage.unmapped_model_calls) {
     box.append(
       el(

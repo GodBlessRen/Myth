@@ -534,11 +534,13 @@ function settingsPayload() {
     num_ctx: Number($("numCtx").value),
     temperature: Number($("temperature").value),
     thinking: reasoningSelectionValue(),
+    model_pool: typeof modelPoolPayload === "function" ? modelPoolPayload() : {children: []},
   };
 }
 // 回填保存设置及认证展示；不会改变在途请求的配置。
 function loadSettings() {
   const s = state.data.settings;
+  if (typeof loadModelPool === "function") loadModelPool(s.model_pool);
   $("provider").value = s.provider;
   $("model").value = s.model;
   $("ollamaUrl").value = s.ollama_url;
@@ -587,13 +589,13 @@ function renderChatGPTAuth() {
 // 渲染 OpenAI / DeepSeek 的应用内 API Key 连接；Provider 特有认证不污染通用模型表单。
 function renderProviderKeyAuth() {
   const provider = $("provider").value;
-  const enabled = ["openai", "deepseek"].includes(provider);
+  const enabled = ["openai", "deepseek", "anthropic", "kimi"].includes(provider);
   show("providerKeyPanel", enabled);
   if (!enabled) return;
   const status = (state.providerKeys?.providers || []).find(
     (item) => item.provider === provider,
   );
-  const label = status?.label || (provider === "openai" ? "OpenAI" : "DeepSeek");
+  const label = status?.label || ({openai: "OpenAI", deepseek: "DeepSeek", anthropic: "Claude", kimi: "Kimi"}[provider] || provider);
   if (status?.configured) {
     $("providerKeyState").textContent = `${label} 已连接`;
     $("providerKeyMeta").textContent =

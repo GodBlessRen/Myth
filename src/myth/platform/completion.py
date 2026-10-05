@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from ..failures import FailureObservation, failure_result
+from .model_pool import pending_reviews
 
 
 # CompletionVerdict：停止准入结果；拒绝只要求下一步修正，不把已知拒绝升级成 UNKNOWN。
@@ -47,6 +48,12 @@ def _observed_refs(value: Any) -> set[str]:
 class CompletionGuard:
     # 核对未完成项、证据引用和已经运行过的 verifier；没有 verifier 时不凭空要求一个。
     def evaluate(self, turn: dict[str, Any], decision: Any) -> CompletionVerdict:
+        pending = pending_reviews(turn.get("activities") or [])
+        if pending:
+            return CompletionVerdict(False, FailureObservation(
+                "verification", "subagent_review_pending", "子任务尚未由主模型评分", True,
+                hint="先调用 agent.evaluate，delegation_id: " + ", ".join(pending),
+            ))
         remaining = tuple(getattr(decision, "remaining", ()) or ())
         if remaining:
             return CompletionVerdict(

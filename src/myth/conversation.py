@@ -109,6 +109,8 @@ _TOOL_ARGUMENTS = {
     "math.calculate": object_schema({"expression": _TEXT}),
     "agent.delegate": object_schema(
         {
+            "task_type": {"type": "string", "enum": ["general", "extract", "summarize", "code", "reason", "review"]},
+            "difficulty": {"type": "string", "enum": ["easy", "medium", "hard"]},
             "task": {"type": "string", "minLength": 1, "maxLength": 4000},
             "context": {"type": "string", "maxLength": 12000},
             "expected_output": {"type": "string", "maxLength": 2000},
@@ -120,6 +122,13 @@ _TOOL_ARGUMENTS = {
         },
         ["task"],
     ),
+    "agent.evaluate": object_schema({
+        "delegation_id": _TEXT, "correctness": {"type": "integer", "minimum": 0, "maximum": 100},
+        "completeness": {"type": "integer", "minimum": 0, "maximum": 100},
+        "usefulness": {"type": "integer", "minimum": 0, "maximum": 100},
+        "accepted": {"type": "boolean"}, "reason": _TEXT,
+        "failure_kind": {"type": "string", "enum": ["none", "quality", "context", "infrastructure"]},
+    }),
     "tool.search": object_schema(
         {
             "query": {"type": "string", "minLength": 1, "maxLength": 200},
@@ -258,10 +267,21 @@ TOOL_CATALOG = {
     },
     "math.calculate": {"expression": "arithmetic expression, no code"},
     "agent.delegate": {
+        "task_type": "general/extract/summarize/code/reason/review; stable task category",
+        "difficulty": "easy/medium/hard; required capability, not provider brand",
         "task": "one independent subtask for an isolated read-only worker",
         "context": "minimal context needed by the child; parent history is not inherited",
         "expected_output": "optional concise result contract",
         "source_refs": "0-20 source/evidence refs already observed by the parent",
+    },
+    "agent.evaluate": {
+        "delegation_id": "exact delegation_id of a completed child in this Run",
+        "correctness": "0-100: correctness against the delegated task and evidence",
+        "completeness": "0-100: coverage of expected_output and missing items",
+        "usefulness": "0-100: usable result without parent rework",
+        "accepted": "boolean; false if incomplete or failed",
+        "failure_kind": "none/quality/context/infrastructure; only quality affects future capability routing",
+        "reason": "brief evidence-backed justification; model judgment is not verification",
     },
     "tool.search": {
         "query": "words describing a capability you need",
@@ -352,6 +372,12 @@ def calculate(expression):
 # 根据统一工具合同和冻结事实编译有界消息；Ollama 窗口与输出预留对齐，远端保持本地投影上限。
 def conversation_request(settings, snapshot, messages, activities, control=None):
     visible_ids = visible_tool_ids(TOOL_CATALOG, activities)
+    from .platform.model_pool import pending_reviews
+    pool = settings.get("model_pool") or {}
+    if not pool.get("enabled", True) or not any(p.get("enabled", True) for p in pool.get("children", [])):
+        visible_ids = tuple(x for x in visible_ids if x != "agent.delegate")
+    if not pending_reviews(activities):
+        visible_ids = tuple(x for x in visible_ids if x != "agent.evaluate")
     eval_mechanisms = snapshot.get("evaluation_harness_mechanisms")
     if isinstance(eval_mechanisms, list):
         enabled = set(str(item) for item in eval_mechanisms)
@@ -381,6 +407,11 @@ def conversation_request(settings, snapshot, messages, activities, control=None)
         "Runtime 会在 Tool Ticket 前拒绝重复、停滞或超出本轮信息预算的请求；不要通过改写同义参数绕过预算。\n"
         "可用工具参数：" + canonical_json(visible_catalog)
     )
+    if pool.get("children"):
+        system += "\n委派声明 task_type/difficulty；fallback_to_parent 时自行完成。review_required 子结果须先 agent.evaluate 评分。根据任务合同区分质量/上下文问题，子模型自评不可信。模型池：" + canonical_json({
+            "enabled": pool.get("enabled", True), "children": [
+                {k: p.get(k) for k in ("id", "provider", "model", "tier", "enabled", "task_types")}
+                for p in pool.get("children", [])]})
     if deferred_ids:
         system += (
             "\n工具目录采用渐进披露：当前只暴露常用/已发现能力。"

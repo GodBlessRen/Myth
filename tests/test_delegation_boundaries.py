@@ -25,7 +25,8 @@ class DelegationBoundaryTests(unittest.TestCase):
         self.runtime = MythRuntime(self.root)
         self.workspace = Workspace(self.runtime)
         self.repo = self.workspace.repository
-        self.repo.save_settings({"provider": "ollama", "model": "fixture"})
+        self.repo.save_settings({"provider": "ollama", "model": "fixture", "model_pool": {"children": [
+            {"id": "fixture", "provider": "ollama", "model": "fixture", "tier": 2}]}})
         sid = self.repo.create_session()["id"]
         self.rid = self.repo.create_turn(sid, "review a bounded task", "delegate-boundary")["run_id"]
         step = self.repo.begin_step(self.rid)["step"]

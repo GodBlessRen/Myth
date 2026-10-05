@@ -457,6 +457,8 @@ class ConversationWebService:
                     status=turn["status"],
                     model_state=model_state,
                     operations=turn["operations"],
+                    main_pricing=(turn["settings"].get("model_pool") or {}).get("main_pricing"),
+                    main_model=turn["settings"]["model"],
                 )
                 # Live Information Control 从已持久 activity 重建只读摘要；页面读取不新增策略状态。
                 turn["information_control"] = (
