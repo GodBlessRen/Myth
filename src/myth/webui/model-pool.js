@@ -61,7 +61,7 @@ function poolAddChild(profile = {}) {
   list.append(root);
   const basic = document.createElement("div"); basic.className = "two-fields"; root.append(basic);
   poolField(basic, "状态", "enabled", String(profile.enabled ?? true), {true: "启用", false: "停用"});
-  const provider = poolField(basic, "提供方", "provider", profile.provider || "ollama", poolProviders);
+  const provider = poolField(basic, "提供方", "provider", profile.provider || document.getElementById("provider")?.value || "ollama", poolProviders);
   const model = poolField(basic, "模型名称", "model", profile.model || "");
   const catalog = document.createElement("datalist"); catalog.id = root.dataset.poolId + "-models"; model.setAttribute("list", catalog.id); root.append(catalog);
   poolField(basic, "初始能力", "tier", profile.tier || 1, {1: "基础", 2: "较强", 3: "很强"});
@@ -82,8 +82,8 @@ function poolAddChild(profile = {}) {
     label.append(box, document.createTextNode(text)); tasks.append(label);
   });
   poolField(options, "输出 Token 上限", "max_output_tokens", profile.max_output_tokens ?? 2048, null, "number");
-  poolField(options, "Ollama 上下文 Token", "num_ctx", profile.num_ctx ?? 8192, null, "number");
-  poolField(options, "Ollama 地址", "ollama_url", profile.ollama_url || "http://127.0.0.1:11434");
+  const contextWindow = poolField(options, "上下文窗口 / Token", "num_ctx", profile.num_ctx ?? 8192, null, "number");
+  const serverAddress = poolField(options, "服务地址", "ollama_url", profile.ollama_url || "http://127.0.0.1:11434");
   poolField(options, "Thinking（默认留空）", "thinking", profile.thinking == null ? "" : String(profile.thinking));
   poolField(options, "采样温度", "temperature", profile.temperature ?? 0, null, "number");
   poolPriceFields(advanced, profile.pricing);
@@ -94,11 +94,17 @@ function poolAddChild(profile = {}) {
   key.id = root.dataset.poolId + "-credential"; keyLabel.htmlFor = key.id; auth.append(keyLabel, key);
   const connect = document.createElement("button"); connect.type = "button"; connect.className = "secondary"; connect.textContent = "验证并保存凭据"; auth.append(connect);
   // 配置变更使旧检查失效；异步响应只能更新发起时对应的槽位。
-  const changed = () => { key.value = ""; status.textContent = ""; auth.hidden = ["ollama", "chatgpt"].includes(provider.value); };
+  // num_ctx/本地地址是 Ollama 的可调参数；远端模型使用能力报告，不显示无效配置。
+  const changed = () => {
+    key.value = ""; status.textContent = ""; auth.hidden = ["ollama", "chatgpt"].includes(provider.value);
+    contextWindow.parentElement.hidden = provider.value !== "ollama";
+    serverAddress.parentElement.hidden = provider.value !== "ollama";
+  };
   provider.addEventListener("change", changed); changed();
   remove.onclick = () => { root.remove(); document.getElementById("poolAdd").disabled = false; };
   check.onclick = async () => {
     const config = poolReadChild(root), signature = JSON.stringify(config); check.disabled = true; status.textContent = "正在检查…";
+    check.replaceChildren(taijiMark(true), document.createTextNode("检查中"));
     try {
       const result = await api("/connection", config);
       if (!root.isConnected || signature !== JSON.stringify(poolReadChild(root))) return;
@@ -106,13 +112,14 @@ function poolAddChild(profile = {}) {
       catalog.replaceChildren();
       (result.details?.models || []).forEach(name => { const option = document.createElement("option"); option.value = name; catalog.append(option); });
     } catch (error) { if (root.isConnected) status.textContent = error.message; }
-    finally { check.disabled = false; }
+    finally { check.disabled = false; check.textContent = "检查连接"; }
   };
   connect.onclick = async () => {
     const selected = provider.value; connect.disabled = true;
+    connect.replaceChildren(taijiMark(true), document.createTextNode("验证中"));
     try { await providerAuthApi("/connect", {provider: selected, api_key: key.value}); if (root.isConnected && provider.value === selected) status.textContent = "凭据已验证并保存，同提供方的槽位共用此连接"; }
     catch (error) { if (root.isConnected) status.textContent = error.message; }
-    finally { key.value = ""; connect.disabled = false; }
+    finally { key.value = ""; connect.disabled = false; connect.textContent = "验证并保存凭据"; }
   };
   document.getElementById("poolAdd").disabled = list.children.length >= 3;
 }

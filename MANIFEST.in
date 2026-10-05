@@ -1,11 +1,14 @@
 # sdist 是可复现的当前源码；淘汰内容和本机生成物永不进入发布包。
-include AGENTS.md CHANGELOG.md PRODUCT.md README.md SECURITY.md start-myth.ps1
-recursive-include docs *.md *.json
+include AGENTS.md CHANGELOG.md PRODUCT.md README.md DESIGN.md SECURITY.md start-myth.ps1
+include .impeccable/design.json
+recursive-include .impeccable/surfaces *.md
+recursive-include docs *.md *.json *.png
 recursive-include evals *.json
 recursive-include examples *.json *.txt
 recursive-include scripts *.py
 recursive-include tests *.py *.cjs
 recursive-include src *.py *.html *.css *.js *.svg
+include src/myth/webui/fonts/README.md
 prune .trash
 prune output
 prune .runtime

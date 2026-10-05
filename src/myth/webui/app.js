@@ -107,6 +107,16 @@ function icon(name) {
   svg.append(p);
   return svg;
 }
+// 同一太极矢量用于品牌与真实等待；图片无业务语义，状态继续由相邻文字说明。
+function taijiMark(waiting = false) {
+  const mark = el("img", "taiji-mark" + (waiting ? " taiji-wait" : ""));
+  mark.src = "/taiji.svg";
+  mark.alt = "";
+  mark.setAttribute("aria-hidden", "true");
+  mark.width = 16;
+  mark.height = 16;
+  return mark;
+}
 document
   .querySelectorAll("[data-icon]")
   .forEach((e) => e.replaceWith(icon(e.dataset.icon)));
@@ -129,7 +139,7 @@ function applyTheme(theme, persist = false) {
   document.documentElement.dataset.theme = next;
   document.documentElement.style.colorScheme = next;
   const themeColor = document.querySelector('meta[name="theme-color"]');
-  if (themeColor) themeColor.content = next === "dark" ? "#101216" : "#f8f6f0";
+  if (themeColor) themeColor.content = next === "dark" ? "#0E100F" : "#F8F4ED";
   const button = $("themeToggle");
   if (button) {
     button.replaceChildren(icon(next === "dark" ? "sun" : "moon"));
@@ -395,6 +405,7 @@ function renderSidebar() {
       if (active) a.setAttribute("aria-current", "page");
       else a.removeAttribute("aria-current");
     });
+  window.MythStudio?.sync(state.session, state.page, state.id);
 }
 // 刷新共享产品投影；并发页面请求通过各自 generation 防止迟到覆写。
 async function refresh() {
@@ -1158,6 +1169,7 @@ function renderThread(session) {
       }
     }
     const row = el("article", "message " + message.role);
+    row.dataset.messageId = message.id;
     if (message.role === "assistant") {
       const avatar = el("div", "message-avatar");
       avatar.append(icon("spark"));
@@ -1230,7 +1242,7 @@ function renderThread(session) {
     }
     const typing = el("div", "typing");
     // 动态点仅对应在线 Driver；断连保持静态说明，不伪装任务继续推进。
-    if (last.driver_active) for (let i = 0; i < 3; i++) typing.append(el("span", "typing-dot"));
+    if (last.driver_active) typing.append(taijiMark(true));
     const label = el("span", "", liveTurnLabel(last));
     label.dataset.liveRun = last.run_id;
     typing.append(label);
@@ -1266,6 +1278,9 @@ function renderChat(session) {
   if ($("chatGoal")) $("chatGoal").disabled = !!active;
   renderAttachments();
   if (session) renderThread(session);
+  window.MythStudio?.sync(session, state.page, state.id);
+  // 同一次已读取投影同步中央与观测栏，避免新 Run 已在等待而右栏仍显示上轮空闲。
+  if (typeof renderRuntimeInspector === "function") renderRuntimeInspector(session);
 
   const control = turn?.control || {};
   show(
@@ -1918,6 +1933,50 @@ async function searchKnowledge() {
   }
 }
 
+// 固定产品说明的中文投影：只匹配完整原文；新版本未识别的事实保留原文，避免旧译文覆盖新边界。
+const architectureCopy = Object.freeze({
+  __proto__: null,
+  "Long-lived intent owns durable work state across Runs/Sessions. Explicit local timers and intervals admit bounded work while the Web service runs.": "跨 Run 和会话保存长期目标及工作状态。Web 服务运行期间，按明确的本地时间与间隔准入有界工作。",
+  "Durable execution lifetime with execution cursor, checkpoint recovery and driver lease boundary.": "持久执行生命周期，包含执行游标、检查点恢复与 Driver 租约边界。",
+  "Stable intent for one atomic effect or read.": "一次原子效果或读取的稳定意图。",
+  "One actual execution opportunity for an Action.": "一次 Action 的实际执行机会。",
+  "Durable authority to start one Attempt; not success proof.": "启动一次 Attempt 的持久授权；不代表操作成功。",
+  "Durable fact about what an issued Attempt actually produced.": "记录已发起 Attempt 实际产生的结果。",
+  "Content-addressed immutable output/evidence.": "按内容寻址的不可变产物与证据。",
+  "Independent acceptance bound to fixed artifacts/evidence.": "绑定固定产物与证据的独立验收。",
+  "Choose how work is organized; conservative Intent Pick supports deterministic arithmetic and local-retrieval routing, while unmatched work falls back safely.": "组织工作方式。保守的 Intent Pick 支持确定性计算和本地检索路由，未匹配任务安全回退。",
+  "Steer, pause, resume, stop, model/thinking switch and context compact at safe points.": "在安全点调整、暂停、继续、停止，切换模型与 Thinking，或压缩上下文。",
+  "Dispatch admitted work to model/tool/file/git executors and reconcile outcomes.": "把已准入工作分派给模型、工具、文件与 Git 执行器，并核对结果。",
+  "Discover/version/admit capabilities without turning discovery into authority.": "发现、版本化和准入能力；发现能力不代表获得执行授权。",
+  "Own durable Runs, budgets, commands, events and product records.": "管理持久 Run、预算、命令、事件与产品记录。",
+  "Build bounded provenance-aware projections. Knowledge resolves one fixed source/digest across L0 metadata, L1 chunk navigation and L2 detailed evidence.": "构建有界、保留来源的上下文。知识在 L0 元信息、L1 片段导航和 L2 详细证据中绑定同一来源与摘要。",
+  "Versioned working/episodic/semantic/procedural records with provenance/revoke. Recall scans the full visible active candidate set with project/session scope and fact level; Information Delta is not yet a lifecycle engine.": "管理可追溯、可撤销的工作、经历、语义与过程记忆。召回扫描项目与会话范围内的全部可见候选，保留事实层级；Information Delta 尚不是生命周期引擎。",
+  "Explicit Goals, Triggers, preferences and permissions for long-lived personal agents.": "用明确的 Goal、触发条件、偏好与权限支撑长期个人任务。",
+  "Persistent third-column observatory projects Goal, execution flow, recovery cursor/driver lease, trajectory, token/context windows, tool calls, control and budgets without owning truth.": "常驻第三栏投影 Goal、执行流程、恢复游标与 Driver 租约、轨迹、Token 与上下文、工具、控制和预算；不拥有业务事实。",
+  "Versioned executable suites plus a durable local Eval Ledger, paired policy comparisons and release gate; no automatic policy promotion.": "版本化可执行评测集、本地持久评测账本、配对策略比较与发布门槛；不自动提升策略。",
+  "Durable candidate registry, full-suite release evidence, explicit promote/rollback and future-Turn active policy pointer; never auto-publishes into a live Turn.": "持久候选登记、完整评测发布证据、明确提升与回滚，以及后续 Turn 的活动策略指针；不自动发布到正在执行的 Turn。",
+  "Model chooses the next StepDecision and may repeat tool/model steps.": "模型选择下一步 StepDecision，可继续执行工具或模型步骤。",
+  "Answer or complete without delegating through a workflow.": "直接回答或完成任务，无需通过工作流委派。",
+  "Bounded live SEEK/EXPAND admission rejects exact repeats, stalled pagination and runaway information acquisition before Tool Ticket; KEEP is implicit when the model continues without another information tool.": "有界 SEEK / EXPAND 在签发工具 Ticket 前拒绝重复请求、停滞分页和失控的信息获取。模型不再调用信息工具而继续时，隐式采用 KEEP。",
+  "Paired fixed-case eval plus cross-case calibration can estimate observed quality delta and explicit-cost gain-per-cost; evidence gates policy release but never auto-promotes.": "固定用例配对评测与跨用例校准估计质量变化及明确成本下的收益；证据约束策略发布，不自动提升策略。",
+  "Turn admission resolves a durable active rule/fixed policy into L0/L1/L2 and freezes the policy identity; explicit promotion/rollback affects future Turns only.": "Turn 准入时，将持久活动规则或固定策略解析为 L0 / L1 / L2 并冻结身份；明确提升与回滚只影响后续 Turn。",
+  "Conservative cascade routes strict arithmetic locally and explicit/strong admitted knowledge through local retrieval; unmatched input falls back to the Agent Loop.": "保守级联将严格算术交给本地计算，将明确或强匹配且已准入的知识交给本地检索；未匹配输入回退 Agent Loop。",
+  "Parent LLM may use agent.delegate or up to three concurrent isolated workers via agent.parallel; children only read fixed inputs, cannot write or recursively delegate, and return reviewed handoffs.": "父模型可使用 agent.delegate，或通过 agent.parallel 同时委派最多三个隔离 Worker。子任务只读取固定输入，不能写入或递归委派，交接结果由主模型审核。",
+  "Explicit Goal schedules admit durable Runs across sessions; the background executor drives the same admitted work.": "明确的 Goal 计划跨会话准入持久 Run，由后台执行器继续同一项已准入工作。",
+  "Conversation is an inbound product/channel adapter, not the Runtime core.": "对话是产品与渠道的入站适配器，与 Runtime 核心分离。",
+  "Local durable state adapter.": "本地持久状态适配器。",
+  "Scoped UTF-8/project/output execution adapter.": "在明确范围内读取 UTF-8、项目内容和执行输出操作。",
+  "Optional derived vector-index adapter; SQLite/object storage stays authoritative and lexical retrieval remains the safe fallback.": "可选的派生向量索引。SQLite 与对象存储保留事实权威，词面检索作为安全回退。",
+  "Local model provider adapter.": "本地模型提供方适配器。",
+  "Remote Responses provider; API key uses secure OS credentials or explicit environment configuration.": "远端 Responses 提供方。API Key 使用系统安全凭据库或明确的环境配置。",
+  "Myth-owned OSS OAuth with PKCE/OIDC, secure OS credential storage, refresh rotation and revoke/logout.": "Myth 自有开源 OAuth：PKCE / OIDC、系统安全凭据库、刷新轮换及撤销与退出。",
+  "Explicit one-shot/interval schedules commit wakeup and Turn together. Webhook/email remain planned.": "明确的一次性或间隔计划，原子提交唤醒与 Turn。Webhook 与邮件仍处于规划阶段。",
+  "Chat / Web UI": "对话界面", "Local Files": "本地文件", "Milvus Vector DB": "Milvus 向量索引",
+  "Sign in with ChatGPT": "ChatGPT OAuth", "Local Goal Timer": "本地 Goal 计划",
+});
+// 状态原值仍用于 CSS/API 身份；固定中文只负责读者可见标签，未知枚举保持原文。
+const platformLabels = Object.freeze({ __proto__: null, hardened: "已强化", usable: "可使用", connected: "已接通", exists: "已存在", planned: "仅规划", executable: "可执行", compute: "计算", read: "读取", write: "写入", execute: "执行", agent: "代理", evidence: "证据", execution: "执行", file: "文件", knowledge: "知识", memory: "记忆", tooling: "工具" });
+
 // 展示服务端成熟度目录；planned 项保持规划状态，不造可执行按钮。
 function renderArchitectureItems(parent, items) {
   parent.replaceChildren();
@@ -1927,12 +1986,12 @@ function renderArchitectureItems(parent, items) {
     const head = el("div", "platform-card-head");
     head.append(
       el("span", "platform-phase", item.kind || "component"),
-      el("span", "platform-state " + maturity, maturity),
+      el("span", "platform-state " + maturity, platformLabels[maturity] || maturity),
     );
     card.append(
       head,
-      el("h2", "", item.label),
-      el("p", "", item.responsibility),
+      el("h2", "", architectureCopy[item.label] || item.label),
+      el("p", "", architectureCopy[item.responsibility] || item.responsibility),
     );
     if (item.depends_on?.length)
       card.append(el("small", "", "依赖 · " + item.depends_on.join(" / ")));
@@ -1969,9 +2028,9 @@ function renderRuntime() {
     const left = el("div");
     left.append(
       el("strong", "", cap.id),
-      el("small", "", cap.family + " · " + cap.risk),
+      el("small", "", (platformLabels[cap.family] || cap.family) + " · " + (platformLabels[cap.risk] || cap.risk)),
     );
-    row.append(left, el("span", "platform-state " + cap.state, cap.state));
+    row.append(left, el("span", "platform-state " + cap.state, platformLabels[cap.state] || cap.state));
     caps.append(row);
   });
   $("capabilityCount").textContent =
@@ -2028,7 +2087,9 @@ async function route() {
       if (state.id) {
         show("welcome", false);
         show("thread", true);
-        $("thread").replaceChildren(el("p", "thread-loading", "正在载入会话…"));
+        const loading = el("p", "thread-loading", "正在载入会话…");
+        loading.prepend(taijiMark(true));
+        $("thread").replaceChildren(loading);
         await openSession(state.id, generation);
       }
       else {

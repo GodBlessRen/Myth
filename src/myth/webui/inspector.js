@@ -60,7 +60,8 @@ function spineStep(label, detail, stateName, stateLabel) {
   const row = el("div", "spine-step " + (stateName || ""));
   row.append(el("span", "spine-node"));
   const copy = el("div", "spine-copy");
-  copy.append(el("strong", "", label), el("small", "", detail || ""));
+  const labels = { Decision: "决定", Ticket: "执行授权 · Ticket", Authority: "授权", Result: "结果", Completion: "回答与收尾" };
+  copy.append(el("strong", "", labels[label] || label), el("small", "", detail || ""));
   row.append(copy, el("span", "spine-state", stateLabel || ""));
   return row;
 }
@@ -202,9 +203,13 @@ function renderExecutionGraph(turn) {
     const edge = edgeByTarget.get(node.id);
     const lead = el("span", "execution-graph-lead", index === 0 ? "●" : edge?.kind === "delegate" ? "↳" : "↓");
     const copy = el("div", "execution-graph-copy");
+    // 仅翻译当前投影合同明确的标签；新增节点标签与详情原样保留以免掩盖事实。
+    const label = (node.label || node.kind || "node")
+      .replace(/^Parent model · step (\d+)$/, "主模型 · 步骤 $1")
+      .replace(/^Child model · step (\d+)$/, "子模型 · 步骤 $1");
     copy.append(
-      el("strong", "", node.label || node.kind || "node"),
-      el("small", "", node.detail || ""),
+      el("strong", "", label === "Run state" ? "运行状态" : label),
+      el("small", "", node.detail === "durable status projection" ? "持久状态投影" : node.detail || ""),
     );
     if (node.model) {
       copy.append(el("small", "", `${node.provider || ""} · ${node.model}`));

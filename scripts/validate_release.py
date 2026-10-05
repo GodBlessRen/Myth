@@ -35,7 +35,17 @@ def inspect_archive(path: Path) -> dict:
             raise ValueError(f"retired module leaked into {path.name}: {name}")
     required = {"myth/adapters/knowledge_store.py", "myth/model_capabilities.py"}
     source = Path(__file__).resolve().parents[1] / "src/myth/webui"
-    required.update("myth/webui/" + asset.name for asset in source.iterdir() if asset.is_file())
+    # 嵌套字体/图像同样是离线产品资源；来源说明 Markdown/JSON 不属于 HTTP 白名单。
+    asset_types = {".html", ".css", ".js", ".svg", ".woff2", ".txt", ".png"}
+    required.update("myth/webui/" + asset.relative_to(source).as_posix()
+                    for asset in source.rglob("*") if asset.is_file() and asset.suffix in asset_types)
+    # setuptools 可复用旧 build/lib；缺项检查之外还必须拒绝已删除静态资产残留。
+    current_assets = {item.removeprefix("myth/webui/") for item in required if item.startswith("myth/webui/")}
+    archived_assets = {name.split("myth/webui/", 1)[1] for name in names
+                       if "myth/webui/" in name and PurePosixPath(name).suffix in asset_types}
+    stale_assets = sorted(archived_assets - current_assets)
+    if stale_assets:
+        raise ValueError(f"stale static assets leaked into {path.name}: {stale_assets}")
     missing = sorted(item for item in required if not any(name.endswith(item) for name in names))
     if missing:
         raise ValueError(f"missing current files in {path.name}: {missing}")

@@ -64,6 +64,8 @@ async function navigate(page, route) {
 
 // 截图在主题与布局过渡结束后保存；画面证据与行为步骤分别记录。
 async function screenshot(page, name) {
+  // 截图必须等待本机字体完成加载；系统回退字体不能作为本次视觉验收证据。
+  await page.evaluate(() => document.fonts.ready);
   await page.waitForTimeout(350);
   // 代表性画面等待短暂成功提示自然消失；失败截图保留提示便于定位。
   if (!name.startsWith("failure-")) await page.locator("#toast").waitFor({ state: "hidden", timeout: 6500 });
@@ -168,7 +170,7 @@ async function drawers(page, viewport, sessionId) {
   }
   await navigate(page, chatRoute);
   if (sessionId) {
-    await visible(page, "#thread .assistant");
+  await page.locator("#thread .assistant").first().waitFor({ state: "visible" });
     await textContains(page, "#inspectorState", "已完成");
     await textContains(page, "#inspectorDelivery", "已保存");
   }
