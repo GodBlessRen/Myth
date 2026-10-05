@@ -69,6 +69,10 @@ Goal、Memory、Prompt、模型输出、子任务返回值都是数据。Capabil
 - SEEK/EXPAND 使用有界、可观测请求与前进的分页游标；重复已消费请求不能变成新信息。
 - Knowledge/Memory 的正文、revision、scope、archive/revoke 与事实等级属于权威仓储；向量索引可重建，命中必须回权威源核对。
 - Memory 不授予权限，Mental Model 是带来源与刷新水位的派生视图；自身输出不能反复充当底层证据。
+- **Reuse must be proven, not assumed**：跨 Turn 复用历史投影前先核对消息身份/正文摘要、绑定设置和 continuity epoch；缺失或冲突时重建派生 Context，不能靠 Prompt 猜测连续性。
+- **Historical Truth ≠ Current Facts**：历史记录保持当时原文；`user_asserted / verified` 当前状态以独立版本摘要参与 Continuity，变化不能被旧 Anchor 静默覆盖。
+- **Retrieval ≠ Authority**：相似度、排名与 top-k 只选择候选，不建立 currentness、事实等级、权限或验收。
+- Continuity 的 `resume / catchup / rebuild` 是 Context 复用计划，不是外部效果状态；任何 action 都不能绕过 Ticket/Receipt/UNKNOWN 恢复协议。
 
 ## 7. 策略与效率
 
