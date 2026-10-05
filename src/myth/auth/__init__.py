@@ -2,6 +2,7 @@
 包导出本身不启动业务工作；具体状态归属、I/O 和恢复合同见被导出模块。"""
 
 from .provider_keys import ProviderApiKeyVault, API_KEY_PROVIDERS
+from .claude import ClaudeOAuthManager, ClaudeAuthStatus, ClaudeOAuthError
 from .chatgpt import (
     ChatGPTAuthManager,
     ChatGPTAuthStatus,
@@ -17,6 +18,9 @@ __all__ = [
     "ChatGPTOAuthError",
     "CredentialStoreUnavailable",
     "run_loopback_login",
+    "ClaudeOAuthManager",
+    "ClaudeAuthStatus",
+    "ClaudeOAuthError",
     "ProviderApiKeyVault",
     "API_KEY_PROVIDERS",
 ]
