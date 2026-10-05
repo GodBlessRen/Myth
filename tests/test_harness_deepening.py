@@ -134,6 +134,130 @@ class HarnessDeepeningTests(unittest.TestCase):
             .allowed
         )
 
+    # 效果工具出现可恢复失败后，第一次 completion 必须先处理失败；模型不能靠一句“完成”跳过 Runtime Observation。
+    def test_completion_guard_requires_effect_followthrough_once(self):
+        failed = {
+            "decision": {"capability_id": "artifact.write"},
+            "result": {
+                "error": "content must be a string",
+                "observation_kind": "failure",
+                "failure": {
+                    "category": "validation",
+                    "code": "invalid_argument",
+                    "message": "content must be a string",
+                    "retryable": True,
+                    "capability_id": "artifact.write",
+                    "field": None,
+                    "expected": None,
+                    "hint": "Correct the arguments before requesting a new tool opportunity.",
+                },
+            },
+        }
+        first = CompletionGuard().evaluate(
+            {"activities": [failed], "snapshot": {}},
+            StepDecision(decision_type="request_completion", reason="fixture", claim="done"),
+        )
+        self.assertFalse(first.allowed)
+        self.assertEqual(first.observation.code, "completion_followthrough_required")
+        self.assertEqual(first.observation.capability_id, "artifact.write")
+
+        reminded = {
+            "decision": {"decision_type": "request_completion"},
+            "result": first.result(),
+        }
+        second = CompletionGuard().evaluate(
+            {"activities": [failed, reminded], "snapshot": {}},
+            StepDecision(
+                decision_type="request_completion",
+                reason="fixture",
+                claim="blocked by invalid output contract",
+            ),
+        )
+        self.assertTrue(second.allowed)
+
+    # 后续同能力真实成功会闭合旧失败，不需要额外 completion follow-through。
+    def test_completion_guard_effect_success_resolves_followthrough(self):
+        activities = [
+            {
+                "decision": {"capability_id": "project.patch_exact"},
+                "result": {
+                    "error": "expected one match",
+                    "observation_kind": "failure",
+                    "failure": {
+                        "category": "contract",
+                        "code": "patch_contract_mismatch",
+                        "message": "expected one match",
+                        "retryable": True,
+                        "capability_id": "project.patch_exact",
+                        "field": None,
+                        "expected": None,
+                        "hint": "Read the current source again and correct the patch.",
+                    },
+                },
+            },
+            {
+                "decision": {"capability_id": "project.patch_exact"},
+                "result": {
+                    "capability_id": "project.patch_exact",
+                    "artifact": {"name": "x.py", "digest": "abc", "bytes": 3},
+                    "evidence_ref": "artifact:patch-ok@abc",
+                },
+            },
+        ]
+        verdict = CompletionGuard().evaluate(
+            {"activities": activities, "snapshot": {}},
+            StepDecision(
+                decision_type="request_completion",
+                reason="fixture",
+                claim="done",
+                evidence_refs=("artifact:patch-ok@abc",),
+            ),
+        )
+        self.assertTrue(verdict.allowed)
+
+    # Conversation 集成：效果参数失败后，模型不能立刻用文字宣称完成；修正并真实结算后才可结束。
+    def test_workspace_effect_failure_requires_followthrough_before_completion(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with MythRuntime(Path(tmp)) as runtime:
+                workspace = Workspace(runtime)
+                repo = workspace.repository
+                repo.save_settings({"provider": "ollama", "model": "test"})
+                sid = repo.create_session()["id"]
+                rid = repo.create_turn(sid, "生成一个 plan.md 文件", "followthrough-1")["run_id"]
+                provider = Provider(
+                    [
+                        decision(
+                            "tool_call",
+                            "artifact.write",
+                            {"path": "plan.md", "content": 123},
+                        ),
+                        decision(claim="已经生成好了"),
+                        decision(
+                            "tool_call",
+                            "artifact.write",
+                            {"path": "plan.md", "content": "# Plan\\nready"},
+                        ),
+                        decision(claim="文件已生成"),
+                    ]
+                )
+                workspace.run(rid, provider)
+                turn = repo.turn(rid)
+                self.assertEqual(turn["status"], "COMPLETED")
+                self.assertEqual(len(provider.calls), 4)
+                self.assertEqual(
+                    turn["activities"][0]["result"]["failure"]["code"],
+                    "invalid_argument",
+                )
+                self.assertEqual(
+                    turn["activities"][1]["result"]["failure"]["code"],
+                    "completion_followthrough_required",
+                )
+                operations = repo.operations(rid)
+                self.assertEqual(len(operations), 1)
+                self.assertEqual(operations[0]["capability"], "artifact.write")
+                self.assertEqual(operations[0]["state"], "RESOLVED")
+                self.assertEqual(len(repo.artifacts(sid)), 1)
+
     # Context Anchor 只增量覆盖跨过阈值的旧消息并保持有界；原消息列表仍是 source of truth。
     def test_context_anchor_is_incremental_bounded_projection(self):
         messages = [

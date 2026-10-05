@@ -72,6 +72,7 @@ Long-term Goal
 6. **Completion needs evidence**
    - 模型说“完成”只是 proposal。
    - Artifact / test / receipt / external state 才能支撑完成声明。
+   - 可恢复的效果失败不能被下一句 completion 跳过；Runtime 至少要求一次基于失败 Observation 的 follow-through，后续成功事实才真正闭合该失败。
 
 ## Quick Start
 

@@ -2,6 +2,7 @@
 
 ## 未发布 — Runtime Continuity Guard
 
+- 吸收 Commerce Agents 的 Runtime follow-through 思路，但不引入平行框架：可恢复的效果工具失败后，模型首次 completion 会被 `CompletionGuard` 拒绝并收到结构化恢复 Observation；同能力后续真实成功自动闭合，若模型在提醒后明确重新判断阻塞则允许结束说明，避免死循环。
 - Turn 准入新增确定性 Continuity Guard：基于持久消息身份/正文 digest、模型设置、Project 配置和 Current Facts 版本输出 `new / resume / catchup / rebuild`、稳定 reason code 与 `continuity epoch`；证明不了复用安全时 fail closed 到派生 Context 重建，不删除历史、不重放外部效果。
 - Context Anchor 升级为 source-bound v2：每次增量复用先重新核对 covered raw-history digest；旧版/失配 Anchor 从真实消息重建，避免摘要自证。
 - Memory 的 `user_asserted / verified` 当前状态单独形成 metadata-only facts digest，不让 query 相似度或 top-k recall 冒充 current authority；正文仍由 Memory 仓储拥有。
