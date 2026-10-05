@@ -101,6 +101,7 @@ def _pending_review_rule(turn: dict[str, Any], decision: Any) -> CompletionVerdi
     ))
 
 
+# 先拒绝仍需主模型处理的子任务拒收，避免未解决结果被完成声明覆盖。
 def _pending_resolution_rule(turn: dict[str, Any], decision: Any) -> CompletionVerdict | None:
     unresolved = pending_resolutions(turn.get("activities") or [])
     if not unresolved:
@@ -111,6 +112,7 @@ def _pending_resolution_rule(turn: dict[str, Any], decision: Any) -> CompletionV
     ))
 
 
+# 模型自己声明 remaining 时必须继续工作；文字 completion 不能覆盖显式未完成项。
 def _remaining_work_rule(turn: dict[str, Any], decision: Any) -> CompletionVerdict | None:
     remaining = tuple(getattr(decision, "remaining", ()) or ())
     if not remaining:
@@ -127,6 +129,7 @@ def _remaining_work_rule(turn: dict[str, Any], decision: Any) -> CompletionVerdi
     )
 
 
+# 可恢复写效果失败必须至少经历一次后续处理；不在 Guard 内自动重试外部效果。
 def _effect_followthrough_rule(turn: dict[str, Any], decision: Any) -> CompletionVerdict | None:
     followthrough = _pending_effect_followthrough(turn.get("activities") or [])
     if followthrough is None:
@@ -149,6 +152,7 @@ def _effect_followthrough_rule(turn: dict[str, Any], decision: Any) -> Completio
     )
 
 
+# 完成声明引用的证据必须已存在于持久 Observation；禁止凭文本制造新 evidence ref。
 def _evidence_rule(turn: dict[str, Any], decision: Any) -> CompletionVerdict | None:
     cited = tuple(getattr(decision, "evidence_refs", ()) or ())
     if not cited:
@@ -173,6 +177,7 @@ def _evidence_rule(turn: dict[str, Any], decision: Any) -> CompletionVerdict | N
     )
 
 
+# 已实际运行 verifier 时只接受最新 PASS；未运行 verifier 不在此凭空新增验收要求。
 def _verification_rule(turn: dict[str, Any], decision: Any) -> CompletionVerdict | None:
     verification_results = []
     for activity in turn.get("activities") or []:
