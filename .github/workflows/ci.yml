@@ -78,3 +78,16 @@ jobs:
         run: |
           python -m pip install dist/*.whl --target .runtime/wheel-installed
           python scripts/validate_package.py --package-dir .runtime/wheel-installed
+      # 仅留存已通过校验的发布物，不上传 checkout、.git、运行库或凭据；名称绑定精确提交。
+      - name: Retain validated distributions for reproducible review
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: myth-distributions-${{ github.sha }}
+          path: |
+            dist/*.whl
+            dist/*.tar.gz
+            dist/myth-source.zip
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+          include-hidden-files: false
