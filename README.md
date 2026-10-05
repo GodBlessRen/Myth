@@ -97,7 +97,7 @@ Windows：
 http://127.0.0.1:8765/
 ```
 
-一般对话默认使用本机 Ollama；也可选择 OpenAI、DeepSeek 或 Myth 自己实现的 **Sign in with ChatGPT**。远端模型连接都在 Myth 设置页完成：OpenAI / DeepSeek 直接粘贴 API Key，验证成功后只保存到操作系统安全凭据库；ChatGPT 直接走 OAuth。正常用户不需要预先打开 PowerShell 设置环境变量。命令行自动化也可使用 `OPENAI_API_KEY` / `DEEPSEEK_API_KEY` 配置连接。
+一般对话默认使用本机 Ollama；也可选择 OpenAI、DeepSeek、Claude API Key、Myth 自己实现的 **Sign in with ChatGPT**，或独立的 **Claude OAuth**。远端模型连接都在 Myth 设置页完成：API Key 验证成功后只保存到操作系统安全凭据库；ChatGPT 直接走 OAuth；Claude OAuth 使用 Myth 自己配置的公开 `client_id` + PKCE，不复用 Claude Code / Anthropic CLI 的客户端身份。正常用户不需要预先打开 PowerShell 设置环境变量。命令行自动化仍可使用相应环境变量配置 API Key；Claude OAuth 也可由部署者显式提供 `MYTH_CLAUDE_OAUTH_CLIENT_ID`。
 
 页面可配置：
 
@@ -109,7 +109,7 @@ http://127.0.0.1:8765/
 - max output tokens；
 - thinking。
 
-Myth 不自动下载本地模型。OpenAI / DeepSeek API Key 与 ChatGPT OAuth 凭据都通过 Myth 应用内连接，并保存在系统安全凭据库，不写入 Runtime 数据库、事件、Artifact 或日志。API Key 候选值先验证成功再替换旧凭据，粘贴错误不会破坏原有可用连接。
+Myth 不自动下载本地模型。API Key、ChatGPT OAuth 与 Claude OAuth 凭据都通过 Myth 应用内连接，并保存在系统安全凭据库，不写入 Runtime 数据库、事件、Artifact 或日志；Claude 的公开 `client_id` 与账号显示元数据单独保存，不包含 access/refresh token。API Key 候选值先验证成功再替换旧凭据，粘贴错误不会破坏原有可用连接。
 
 ## 工作台
 
