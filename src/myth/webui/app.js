@@ -751,6 +751,7 @@ function renderClaudeAuth() {
   }
 }
 
+// 刷新 Claude OAuth 脱敏状态；失败只影响设置提示，不伪造已连接。
 async function refreshClaudeAuth() {
   try {
     state.claudeAuth = await claudeAuthApi("/status");
@@ -760,6 +761,7 @@ async function refreshClaudeAuth() {
   renderClaudeAuth();
 }
 
+// 由用户点击发起 Claude PKCE 登录；轮询只等待本次 login_revision，不接触 token。
 async function beginClaudeLogin() {
   let popup = null;
   try {
