@@ -24,6 +24,8 @@ const state = {
   connectionGeneration: 0,
   // 脱敏账号投影；凭据保存在系统库。
   chatgptAuth: null,
+  // Claude OAuth 的脱敏状态；浏览器不保存 token。
+  claudeAuth: null,
   // API Key Provider 的脱敏连接状态；浏览器从不保存 secret。
   providerKeys: null,
   // 会话列表的归档筛选。
@@ -210,6 +212,24 @@ async function authApi(path, value) {
   const timer = setTimeout(() => controller.abort(), 20000);
   try {
     const r = await fetch("/api/auth/chatgpt" + path, {
+      method: value === undefined ? "GET" : "POST",
+      headers: { "Content-Type": "application/json" },
+      body: value === undefined ? undefined : JSON.stringify(value),
+      signal: controller.signal,
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+    return data;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+// Claude OAuth 的独立认证接口；与 ChatGPT OAuth 使用不同 namespace/callback，避免跨提供方 state 混用。
+async function claudeAuthApi(path, value) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 20000);
+  try {
+    const r = await fetch("/api/auth/claude" + path, {
       method: value === undefined ? "GET" : "POST",
       headers: { "Content-Type": "application/json" },
       body: value === undefined ? undefined : JSON.stringify(value),
@@ -496,8 +516,8 @@ function renderAdaptiveModelSettings(options = {}) {
   );
   show("reasoningField", reasoningVisible);
   const temperature = $("temperature");
-  temperature.max = provider === "anthropic" ? "1" : "2";
-  temperature.disabled = provider === "chatgpt" || provider === "openai" && (!profile || !!profile.reasoning) || provider === "anthropic" && profile?.temperature?.supported !== true;
+  temperature.max = ["anthropic", "claude_oauth"].includes(provider) ? "1" : "2";
+  temperature.disabled = provider === "chatgpt" || provider === "openai" && (!profile || !!profile.reasoning) || ["anthropic", "claude_oauth"].includes(provider) && profile?.temperature?.supported !== true;
   // 停用采样控制时恢复可持久化的默认值；供应商切换不会遗留无法编辑的超界配置。
   if (temperature.disabled) temperature.value = "0";
   $("temperatureMeta").textContent = temperature.disabled ? "当前适配器使用模型默认采样。" : `0–${temperature.max} · 越低越稳定，越高越多样。`;
@@ -569,6 +589,7 @@ function loadSettings() {
   $("temperature").value = s.temperature ?? 0;
   if (typeof loadModelPool === "function") loadModelPool(s.model_pool);
   renderChatGPTAuth();
+  renderClaudeAuth();
   renderProviderKeyAuth();
   renderAdaptiveModelSettings({thinking: s.thinking});
   poolRefreshPrices();
@@ -696,6 +717,75 @@ async function beginChatGPTLogin() {
     toast(e.message);
   }
 }
+// Claude OAuth 只在独立 Provider 身份下显示；API Key 的 anthropic 路径保持原样。
+function renderClaudeAuth() {
+  const panel = $("claudeAuthPanel");
+  if (!panel) return;
+  const enabled = $("provider").value === "claude_oauth";
+  show("claudeAuthPanel", enabled);
+  if (!enabled) return;
+  const s = state.claudeAuth?.status;
+  if (!s) {
+    $("claudeAuthState").textContent = "检查 Claude OAuth…";
+    $("claudeAuthMeta").textContent = "OAuth token 只保存到系统安全凭据库。";
+    show("claudeLogout", false);
+    return;
+  }
+  if (s.connected) {
+    $("claudeAuthState").textContent = s.email || "Claude 已连接";
+    const scope = (s.scopes || []).join(" · ");
+    $("claudeAuthMeta").textContent =
+      [s.organization, s.workspace, scope].filter(Boolean).join(" · ") ||
+      "Claude OAuth 已连接 · token 不进入 Runtime 数据库";
+    show("claudeLogout", true);
+    $("claudeLogin").textContent = "重新授权";
+  } else {
+    $("claudeAuthState").textContent =
+      s.client_id_configured ? "Claude OAuth 未登录" : "先配置 Myth OAuth Client ID";
+    $("claudeAuthMeta").textContent =
+      s.client_id_configured
+        ? "使用 Claude/Anthropic 账号授权 user:inference。"
+        : "Client ID 是公开配置；不要粘贴 client secret 或其他应用的 token。";
+    show("claudeLogout", false);
+    $("claudeLogin").textContent = "连接 Claude";
+  }
+}
+
+async function refreshClaudeAuth() {
+  try {
+    state.claudeAuth = await claudeAuthApi("/status");
+  } catch (e) {
+    state.claudeAuth = {status: {connected: false, client_id_configured: false, reason: e.message}};
+  }
+  renderClaudeAuth();
+}
+
+async function beginClaudeLogin() {
+  let popup = null;
+  try {
+    popup = window.open("about:blank", "myth-claude-oauth", "width=640,height=760");
+    const attempt = await claudeAuthApi("/start", {});
+    if (!popup) throw new Error("浏览器阻止了登录窗口，请允许弹窗后重试。");
+    popup.opener = null;
+    popup.location = attempt.auth_url;
+    for (let i = 0; i < 180; i++) {
+      await new Promise((r) => setTimeout(r, 1000));
+      await refreshClaudeAuth();
+      if (state.claudeAuth?.status?.login_revision === attempt.login_id) {
+        try { popup.close(); } catch {}
+        await checkConnection(true);
+        toast("Claude OAuth 已连接。");
+        return;
+      }
+      if (popup.closed && i > 2) break;
+    }
+    throw new Error("Claude 登录未完成。");
+  } catch (e) {
+    try { popup?.close(); } catch {}
+    toast(e.message);
+  }
+}
+
 // 呈现当前检查报告；连接 ready 不能当作某个任务已完成。
 function renderConnection() {
   const c = state.connectionKey === connectionConfigKey(settingsPayload()) ? state.connection : null;
@@ -711,9 +801,11 @@ function renderConnection() {
       ? "连接 Ollama"
       : provider === "chatgpt"
         ? "连接 ChatGPT"
-        : provider === "deepseek"
-          ? "连接 DeepSeek"
-          : "连接模型");
+        : provider === "claude_oauth"
+          ? "连接 Claude"
+          : provider === "deepseek"
+            ? "连接 DeepSeek"
+            : "连接模型");
   $("modelPill").setAttribute("aria-label", $("modelLabel").textContent + "，打开模型设置或运行控制");
   $("modelPill").title = $("modelLabel").textContent;
   show("welcomeConnection", !state.data.settings.model || (savedConnection && !savedConnection.ready));
@@ -726,6 +818,8 @@ function renderConnection() {
         ? "未连接，请确认 Ollama 正在运行。"
         : $("provider").value === "chatgpt"
           ? "ChatGPT 尚未完成授权或当前计划不可用。"
+          : $("provider").value === "claude_oauth"
+            ? "Claude OAuth 尚未连接或 user:inference 不可用。"
           : $("provider").value === "deepseek"
             ? "DeepSeek 尚未就绪，请在 Myth 内连接 API Key。"
             : $("provider").value === "openai"
@@ -2133,6 +2227,7 @@ async function readWorkspace() {
     await refresh();
     loadSettings();
     await refreshChatGPTAuth();
+    await refreshClaudeAuth();
     await refreshProviderKeys();
     fillGoals($("chatGoal"), "");
     await route();
@@ -2476,6 +2571,7 @@ $("provider").onchange = () => {
   delete $("maxTokens").dataset.catalogMax;
   $("providerApiKey").value = "";
   renderChatGPTAuth();
+  renderClaudeAuth();
   renderProviderKeyAuth();
   renderConnection();
   renderAdaptiveModelSettings();
@@ -2483,6 +2579,26 @@ $("provider").onchange = () => {
 };
 $("ollamaUrl").addEventListener("input", invalidateConnection);
 $("chatgptLogin").onclick = beginChatGPTLogin;
+$("claudeLogin").onclick = beginClaudeLogin;
+$("claudeConfigure").onclick = async () => {
+  const clientId = $("claudeClientId").value.trim();
+  if (!clientId) return toast("请先填写 Myth 的 Claude OAuth Client ID。");
+  try {
+    state.claudeAuth = await claudeAuthApi("/configure", {client_id: clientId});
+    $("claudeClientId").value = "";
+    renderClaudeAuth();
+    toast("Claude OAuth Client ID 已保存。");
+  } catch (e) { toast(e.message); }
+};
+$("claudeLogout").onclick = async () => {
+  try {
+    await claudeAuthApi("/logout", {});
+    await refreshClaudeAuth();
+    state.connection = null;
+    renderConnection();
+    toast("Claude OAuth 本机凭据已清除。");
+  } catch (e) { toast(e.message); }
+};
 $("providerKeyConnect").onclick = async () => {
   const provider = $("provider").value;
   const secret = $("providerApiKey").value.trim();
