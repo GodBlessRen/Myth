@@ -12,6 +12,7 @@ from .openai import ChatGPTPlanProvider, OpenAIApiKeyProvider
 from .scripted import ScriptedPatchProvider
 from .messages import MessagesProvider
 from ..auth.provider_keys import ProviderApiKeyVault
+from ..auth.claude import ClaudeOAuthManager
 
 
 # 按明确 provider_id 在装配边界创建具体供应商；配置不携带其他应用认证文件或扩大工具权限。
@@ -30,6 +31,11 @@ def create_provider(
         if runtime_root is None:
             raise ValueError("chatgpt provider requires runtime_root")
         return ChatGPTPlanProvider(runtime_root)
+    if name == "claude_oauth":
+        if runtime_root is None:
+            raise ValueError("claude_oauth provider requires runtime_root")
+        auth = ClaudeOAuthManager(runtime_root)
+        return MessagesProvider("claude_oauth", auth.access_token)
     if name in {"openai", "deepseek", "anthropic", "kimi"}:
         if runtime_root is None:
             raise ValueError(f"{name} provider requires runtime_root")
