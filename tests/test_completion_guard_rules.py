@@ -12,7 +12,7 @@ class CompletionGuardRuleTests(unittest.TestCase):
             "snapshot": {},
             "activities": [{
                 "decision": {"capability_id": "agent.delegate"},
-                "result": {"delegation_id": "child-1"},
+                "result": {"delegation_id": "child-1", "review_required": True},
             }],
         }
         decision = StepDecision(
