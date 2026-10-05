@@ -95,7 +95,7 @@ class MessagesProvider:
             return ProviderStatus(self.provider_id, True, "oauth" if self.provider_id == "claude_oauth" else "api_key", {
                 "models": models, "model_capabilities": {m: {**model_capability(m, reasoning=reasoning),
                     "temperature": {"supported": _claude_temperature_supported(m) if self.provider_id in {"anthropic", "claude_oauth"} else True,
-                                    "min": 0, "max": 1 if self.provider_id == "anthropic" else 2}} for m in models}})
+                                    "min": 0, "max": 1 if self.provider_id in {"anthropic", "claude_oauth"} else 2}} for m in models}})
         except Exception:
             return ProviderStatus(self.provider_id, False, "oauth" if self.provider_id == "claude_oauth" else "api_key", {"error": "模型目录检查失败，请检查连接与凭据。"})
 
