@@ -48,9 +48,11 @@ class Workspace:
             resolution_policy_id = active["policy_id"]
         else:
             resolution_policy_id = resolution_policy_id or "injected"
-        # 先装配个人状态所有者，再将其事务协作接口交给工作区准入协调器。
+        # 先装配个人与 Memory 状态所有者，再把只读版本接口交给 Turn 准入协调器；写权限不因此转移。
         # personal：长期意图及进度的状态所有者；对话准入通过显式事务协作加入。
         self.personal = SqlitePersonalState(runtime)
+        # memory：有来源记忆协作对象；Current Facts 版本可供 Continuity 读取，但正文/revision 仍由 Memory 仓储拥有。
+        self.memory = SqliteMemoryStore(runtime, vector_index=self.vector_index)
         # repository：用例仓储端口/实现；持久状态写入归此协作对象所有。
         self.repository = SqliteWorkspaceRepository(
             runtime,
@@ -60,14 +62,13 @@ class Workspace:
             resolution_policy_id=resolution_policy_id,
             vector_index=self.vector_index,
             evaluation_harness_mechanisms=evaluation_harness_mechanisms,
+            memory_state=self.memory,
         )
         # sota_route：已验收成功路径的效率账本；只给未来 Run 提供冻结提示，不授予能力。
         self.sota_route = SotaRouteLedger(runtime)
         self.repository.sota_route = self.sota_route
         # control：控制服务协作对象；只在安全点影响未来规划。
         self.control = SqliteControlService(runtime, self.repository)
-        # memory：有来源记忆协作对象；不授予权限。
-        self.memory = SqliteMemoryStore(runtime, vector_index=self.vector_index)
         # knowledge_views：Memory Domain 的派生高阶视图；Mental Model 持有内容视图，Knowledge Page 只持有树结构。
         self.knowledge_views = SqliteKnowledgeViews(runtime, self.memory)
         # mental_model_refresh：只拥有自动刷新 policy/occurrence；模型效果仍走 Core Run + DecisionRuntime。
