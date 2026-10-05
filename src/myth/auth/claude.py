@@ -41,6 +41,7 @@ class ClaudeOAuthError(RuntimeError):
     """可公开的 Claude OAuth 错误；消息不得包含 code、verifier 或 token。"""
 
 
+# Claude OAuth 的公开只读连接投影；字段来自配置/授权元数据，不携带任何秘钥。
 @dataclass(frozen=True)
 class ClaudeAuthStatus:
     # connected：系统凭据库存在可用 access token；不证明具体模型请求成功。
