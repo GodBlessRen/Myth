@@ -155,13 +155,8 @@ def compile_conversation_context(
         + "\n项目指令："
         + project.get("instructions", "")
     ))
+    # Continuity 是 Runtime 复用事实；只进入报告/观测，不重复塞进 System Prompt 消耗预算。
     continuity = snapshot.get("continuity") or {}
-    if continuity:
-        system += (
-            "\nContinuity 已由 Runtime 基于持久消息、固定设置和 Current Facts 版本判定。"
-            "历史消息与 Context Anchor 只代表当时发生过的内容；相关度不能把旧历史升级为当前事实，"
-            "Memory 的 user_asserted/verified 当前状态与历史冲突时，应保留历史原文并以当前状态解释现在。"
-        )
     if control.get("steering_note"):
         system += "\n用户当前 Steering（只影响后续计划）：\n" + control["steering_note"]
     if not snapshot.get("is_subagent"):
