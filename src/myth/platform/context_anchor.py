@@ -8,7 +8,6 @@ import json
 from typing import Any
 
 
-# 把文本按 UTF-8 字节安全裁剪；裁剪只作用派生 Anchor，不改写原始消息。
 def _clip_bytes(text: str, limit: int) -> str:
     raw = text.encode("utf-8")
     if len(raw) <= limit:
@@ -16,19 +15,16 @@ def _clip_bytes(text: str, limit: int) -> str:
     return raw[:limit].decode("utf-8", errors="ignore")
 
 
-# 对单条历史消息做确定性抽取；保留开头与结尾，避免把整个长消息再次塞回 Context。
 def _message_excerpt(index: int, message: dict[str, Any]) -> str:
     role = str(message.get("role") or "unknown")
     content = str(message.get("content") or "").strip()
     if len(content.encode("utf-8")) > 700:
         head = _clip_bytes(content, 420)
-        tail_raw = content.encode("utf-8")[-220:]
-        tail = tail_raw.decode("utf-8", errors="ignore")
+        tail = content.encode("utf-8")[-220:].decode("utf-8", errors="ignore")
         content = head + " … " + tail
     return f"[{index}] {role}: {content}"
 
 
-# Anchor 超预算时保留最早约束与最近变化；中段折叠明确标记，不伪装完整历史。
 def _bound_summary(text: str, max_bytes: int) -> str:
     raw = text.encode("utf-8")
     if len(raw) <= max_bytes:
@@ -37,12 +33,50 @@ def _bound_summary(text: str, max_bytes: int) -> str:
     marker_bytes = len(marker.encode("utf-8"))
     head_limit = max(256, (max_bytes - marker_bytes) // 3)
     tail_limit = max(256, max_bytes - marker_bytes - head_limit)
-    head = _clip_bytes(text, head_limit)
-    tail = raw[-tail_limit:].decode("utf-8", errors="ignore")
-    return head + marker + tail
+    return (
+        _clip_bytes(text, head_limit)
+        + marker
+        + raw[-tail_limit:].decode("utf-8", errors="ignore")
+    )
 
 
-# 增量合并此前 Anchor 与新跨过阈值的消息；不会重新总结已有 Anchor，lineage_digest 绑定新增原文。
+def context_anchor_source_digest(
+    messages: list[dict[str, Any]], cover_count: int
+) -> str:
+    """重新摘要真实 covered prefix；派生 Anchor 不能只相信自己的旧摘要。"""
+    target = max(0, min(int(cover_count), len(messages)))
+    source = [
+        {
+            "role": str(message.get("role") or "unknown"),
+            "content": str(message.get("content") or ""),
+        }
+        for message in messages[:target]
+    ]
+    return hashlib.sha256(
+        json.dumps(
+            source,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+
+
+def context_anchor_reusable(
+    previous: dict[str, Any] | None, messages: list[dict[str, Any]]
+) -> bool:
+    """只有版本、覆盖范围、原始来源摘要都匹配时才允许增量复用。"""
+    if not isinstance(previous, dict) or previous.get("version") != "extractive-anchor-v2":
+        return False
+    covered = previous.get("covered_messages")
+    if type(covered) is not int or covered < 0 or covered > len(messages):
+        return False
+    source_digest = previous.get("source_digest")
+    return isinstance(source_digest, str) and source_digest == context_anchor_source_digest(
+        messages, covered
+    )
+
+
 def build_context_anchor(
     previous: dict[str, Any] | None,
     messages: list[dict[str, Any]],
@@ -50,47 +84,68 @@ def build_context_anchor(
     cover_count: int,
     max_bytes: int = 6000,
 ) -> dict[str, Any] | None:
+    """增量推进 Anchor；来源失配时从真实历史重建，不能延续陈旧摘要。"""
     previous = dict(previous or {})
+    if previous and not context_anchor_reusable(previous, messages):
+        previous = {}
+
     already = max(0, int(previous.get("covered_messages") or 0))
     target = max(already, min(int(cover_count), len(messages)))
     if target <= already:
         return previous or None
 
     additions = messages[already:target]
-    lines = [_message_excerpt(index, message) for index, message in enumerate(additions, start=already)]
+    lines = [
+        _message_excerpt(index, message)
+        for index, message in enumerate(additions, start=already)
+    ]
     old_summary = str(previous.get("summary") or "").strip()
-    merged = "\n".join(part for part in (old_summary, *lines) if part)
-    summary = _bound_summary(merged, max_bytes)
+    summary = _bound_summary(
+        "\n".join(part for part in (old_summary, *lines) if part),
+        max_bytes,
+    )
 
     lineage = hashlib.sha256()
-    prior_digest = str(previous.get("lineage_digest") or "")
-    lineage.update(prior_digest.encode("ascii", errors="ignore"))
     lineage.update(
-        json.dumps(additions, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        str(previous.get("lineage_digest") or "").encode("ascii", errors="ignore")
+    )
+    lineage.update(
+        json.dumps(
+            additions,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
     )
     lineage_digest = lineage.hexdigest()
+    source_digest = context_anchor_source_digest(messages, target)
     anchor_digest = hashlib.sha256(
         json.dumps(
-            {"covered_messages": target, "summary": summary, "lineage_digest": lineage_digest},
+            {
+                "covered_messages": target,
+                "summary": summary,
+                "lineage_digest": lineage_digest,
+                "source_digest": source_digest,
+            },
             ensure_ascii=False,
             sort_keys=True,
             separators=(",", ":"),
         ).encode("utf-8")
     ).hexdigest()
     return {
-        "version": "extractive-anchor-v1",
+        "version": "extractive-anchor-v2",
         "covered_messages": target,
         "summary": summary,
         "lineage_digest": lineage_digest,
+        "source_digest": source_digest,
         "digest": anchor_digest,
         "bytes": len(summary.encode("utf-8")),
     }
 
 
-# 将 Anchor 投影给模型；明确它是有损派生导航，关键事实仍须回到持久来源/工具证据核对。
 def render_context_anchor(anchor: dict[str, Any]) -> str:
     return (
-        "历史 Context Anchor（确定性抽取的有损派生投影，不扩大权限、不等于验证事实）：\n"
+        "历史 Context Anchor（来源摘要已校验的有损派生投影，不扩大权限、不等于验证事实）：\n"
         + str(anchor.get("summary") or "")
         + "\n需要关键细节时重新读取持久来源；最近消息仍以原文提供。"
     )
