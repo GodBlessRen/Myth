@@ -15,7 +15,7 @@ import webbrowser
 
 from . import __version__
 from .agent_runtime import AgentRuntime
-from .auth import ChatGPTAuthManager, ProviderApiKeyVault
+from .auth import ChatGPTAuthManager, ClaudeOAuthManager, ProviderApiKeyVault
 from .providers import create_provider
 from .runtime import MythRuntime
 from .web_workspace import ConversationWebService
@@ -39,6 +39,8 @@ class AgentWebService:
         self.workspace = ConversationWebService(self.root)
         # chatgpt_auth：Myth 独立账号认证管理器；只用本应用颁发的客户端身份。
         self.chatgpt_auth = ChatGPTAuthManager(self.root)
+        # claude_auth：Claude user OAuth 独立生命周期；client_id 属于 Myth 配置，不复用其他应用身份。
+        self.claude_auth = ClaudeOAuthManager(self.root)
         # provider_keys：OpenAI/DeepSeek 等 API Key 的系统安全凭据入口；浏览器永远只取得脱敏状态。
         self.provider_keys = ProviderApiKeyVault()
 
@@ -118,6 +120,29 @@ class AgentWebService:
         if not profile_id:
             raise ValueError("profile_id is required")
         return self.chatgpt_auth.select_profile(profile_id).serializable()
+
+    # 返回 Claude OAuth 的脱敏状态；client_id 可见但 token 永不进入 Web JSON。
+    def claude_status(self) -> dict[str, Any]:
+        return {"status": self.claude_auth.status().serializable()}
+
+    # 保存 Myth 自己的 Claude OAuth client_id；更换客户端时旧 refresh token 会被清除。
+    def claude_configure(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return {"status": self.claude_auth.configure(payload.get("client_id")).serializable()}
+
+    # 创建 Claude authorization-code + PKCE 登录挑战；只接受本机精确 callback。
+    def claude_begin(self, redirect_uri: str) -> dict[str, Any]:
+        return self.claude_auth.begin_login(redirect_uri)
+
+    # 校验 state/code 并把 token 存入系统安全凭据库；回调响应仅返回脱敏状态。
+    def claude_complete(self, query: str) -> dict[str, Any]:
+        status = self.claude_auth.complete_callback(
+            parse_qs(query, keep_blank_values=True, max_num_fields=20)
+        )
+        return status.serializable()
+
+    # Claude 当前公开流程未在这里宣称远端 revocation；退出只撤销 Myth 本机使用权。
+    def claude_logout(self) -> dict[str, Any]:
+        return self.claude_auth.logout()
 
     # 读取有界 Run 列表供产品/CLI 展示；这是历史投影，不重新驱动任何 Run。
     def list_runs(self) -> list[dict[str, Any]]:
@@ -382,9 +407,18 @@ def make_handler(service: AgentWebService):
                     body = b"Myth is connected to ChatGPT. You can close this window and return to Myth."
                     self._send(HTTPStatus.OK, body, "text/plain; charset=utf-8")
                     return
+                if path == "/auth/claude/callback":
+                    self._check_host()
+                    service.claude_complete(urlparse(self.path).query)
+                    body = b"Myth is connected to Claude. You can close this window and return to Myth."
+                    self._send(HTTPStatus.OK, body, "text/plain; charset=utf-8")
+                    return
                 self._check_origin()
                 if path == "/api/auth/chatgpt/status":
                     self._json(HTTPStatus.OK, service.chatgpt_status())
+                    return
+                if path == "/api/auth/claude/status":
+                    self._json(HTTPStatus.OK, service.claude_status())
                     return
                 if path == "/api/auth/providers/status":
                     self._json(HTTPStatus.OK, service.provider_key_status())
@@ -527,6 +561,18 @@ def make_handler(service: AgentWebService):
                     self._json(
                         HTTPStatus.OK, service.chatgpt_begin(redirect_uri, payload)
                     )
+                    return
+                if path == "/api/auth/claude/configure":
+                    self._json(HTTPStatus.OK, service.claude_configure(payload))
+                    return
+                if path == "/api/auth/claude/start":
+                    redirect_uri = (
+                        f"http://127.0.0.1:{self.server.server_port}/auth/claude/callback"
+                    )
+                    self._json(HTTPStatus.OK, service.claude_begin(redirect_uri))
+                    return
+                if path == "/api/auth/claude/logout":
+                    self._json(HTTPStatus.OK, service.claude_logout())
                     return
                 if path == "/api/auth/chatgpt/logout":
                     self._json(HTTPStatus.OK, service.chatgpt_logout(payload))
