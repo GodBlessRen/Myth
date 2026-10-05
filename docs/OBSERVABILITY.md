@@ -84,6 +84,7 @@ UNKNOWN     -> RECONCILE
 按顺序展示 durable events，例如：
 
 - ConversationTurnStarted；
+- ConversationContinuityPlanned；
 - ModelTicketGranted；
 - ConversationContextCompiled；
 - ModelAttemptSettled / Failed；
@@ -144,6 +145,18 @@ Runtime Observatory 直接展示现有 Context / Capability 事实，不另造�
 - Compact grounded seed 是否进入本次 Context；
 - Folded Observation 的 exact recall 入口；
 - Capability 的 enabled / available / exposed / reachable 与不可达 reason code。
+
+### Continuity
+
+第三栏直接读取 Turn snapshot / `ConversationContinuityPlanned`，显示：
+
+- action：`new / resume / catchup / rebuild`；
+- stable reason code；
+- continuity epoch；
+- Current Facts count + metadata digest；
+- Anchor 是否获准复用。
+
+`rebuild` 只表示派生 Context 不能沿用旧连续性，不等于删除 Session、清空 Memory 或重放工具/模型调用。UI 不能根据消息看起来相似自行改写 action。
 
 ### Context Window
 
