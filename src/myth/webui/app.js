@@ -107,6 +107,16 @@ function icon(name) {
   svg.append(p);
   return svg;
 }
+// 同一太极矢量用于品牌与真实等待；图片无业务语义，状态继续由相邻文字说明。
+function taijiMark(waiting = false) {
+  const mark = el("img", "taiji-mark" + (waiting ? " taiji-wait" : ""));
+  mark.src = "/taiji.svg";
+  mark.alt = "";
+  mark.setAttribute("aria-hidden", "true");
+  mark.width = 16;
+  mark.height = 16;
+  return mark;
+}
 document
   .querySelectorAll("[data-icon]")
   .forEach((e) => e.replaceWith(icon(e.dataset.icon)));
@@ -129,7 +139,7 @@ function applyTheme(theme, persist = false) {
   document.documentElement.dataset.theme = next;
   document.documentElement.style.colorScheme = next;
   const themeColor = document.querySelector('meta[name="theme-color"]');
-  if (themeColor) themeColor.content = next === "dark" ? "#101216" : "#f8f6f0";
+  if (themeColor) themeColor.content = next === "dark" ? "#0E100F" : "#F8F4ED";
   const button = $("themeToggle");
   if (button) {
     button.replaceChildren(icon(next === "dark" ? "sun" : "moon"));
@@ -395,6 +405,7 @@ function renderSidebar() {
       if (active) a.setAttribute("aria-current", "page");
       else a.removeAttribute("aria-current");
     });
+  window.MythStudio?.sync(state.session, state.page, state.id);
 }
 // 刷新共享产品投影；并发页面请求通过各自 generation 防止迟到覆写。
 async function refresh() {
@@ -1158,6 +1169,7 @@ function renderThread(session) {
       }
     }
     const row = el("article", "message " + message.role);
+    row.dataset.messageId = message.id;
     if (message.role === "assistant") {
       const avatar = el("div", "message-avatar");
       avatar.append(icon("spark"));
@@ -1230,7 +1242,7 @@ function renderThread(session) {
     }
     const typing = el("div", "typing");
     // 动态点仅对应在线 Driver；断连保持静态说明，不伪装任务继续推进。
-    if (last.driver_active) for (let i = 0; i < 3; i++) typing.append(el("span", "typing-dot"));
+    if (last.driver_active) typing.append(taijiMark(true));
     const label = el("span", "", liveTurnLabel(last));
     label.dataset.liveRun = last.run_id;
     typing.append(label);
@@ -1266,6 +1278,9 @@ function renderChat(session) {
   if ($("chatGoal")) $("chatGoal").disabled = !!active;
   renderAttachments();
   if (session) renderThread(session);
+  window.MythStudio?.sync(session, state.page, state.id);
+  // 同一次已读取投影同步中央与观测栏，避免新 Run 已在等待而右栏仍显示上轮空闲。
+  if (typeof renderRuntimeInspector === "function") renderRuntimeInspector(session);
 
   const control = turn?.control || {};
   show(
@@ -1946,7 +1961,7 @@ const architectureCopy = Object.freeze({
   "Paired fixed-case eval plus cross-case calibration can estimate observed quality delta and explicit-cost gain-per-cost; evidence gates policy release but never auto-promotes.": "固定用例配对评测与跨用例校准估计质量变化及明确成本下的收益；证据约束策略发布，不自动提升策略。",
   "Turn admission resolves a durable active rule/fixed policy into L0/L1/L2 and freezes the policy identity; explicit promotion/rollback affects future Turns only.": "Turn 准入时，将持久活动规则或固定策略解析为 L0 / L1 / L2 并冻结身份；明确提升与回滚只影响后续 Turn。",
   "Conservative cascade routes strict arithmetic locally and explicit/strong admitted knowledge through local retrieval; unmatched input falls back to the Agent Loop.": "保守级联将严格算术交给本地计算，将明确或强匹配且已准入的知识交给本地检索；未匹配输入回退 Agent Loop。",
-  "Parent LLM may choose a bounded isolated worker through agent.delegate; the child cannot write, use tools or recursively delegate and returns a contracted result.": "父模型可通过 agent.delegate 选择有界隔离 Worker。子任务不能写入、使用工具或递归委派，返回受合同约束的结果。",
+  "Parent LLM may use agent.delegate or up to three concurrent isolated workers via agent.parallel; children only read fixed inputs, cannot write or recursively delegate, and return reviewed handoffs.": "父模型可使用 agent.delegate，或通过 agent.parallel 同时委派最多三个隔离 Worker。子任务只读取固定输入，不能写入或递归委派，交接结果由主模型审核。",
   "Explicit Goal schedules admit durable Runs across sessions; the background executor drives the same admitted work.": "明确的 Goal 计划跨会话准入持久 Run，由后台执行器继续同一项已准入工作。",
   "Conversation is an inbound product/channel adapter, not the Runtime core.": "对话是产品与渠道的入站适配器，与 Runtime 核心分离。",
   "Local durable state adapter.": "本地持久状态适配器。",
@@ -2072,7 +2087,9 @@ async function route() {
       if (state.id) {
         show("welcome", false);
         show("thread", true);
-        $("thread").replaceChildren(el("p", "thread-loading", "正在载入会话…"));
+        const loading = el("p", "thread-loading", "正在载入会话…");
+        loading.prepend(taijiMark(true));
+        $("thread").replaceChildren(loading);
         await openSession(state.id, generation);
       }
       else {

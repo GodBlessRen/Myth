@@ -170,7 +170,7 @@ async function drawers(page, viewport, sessionId) {
   }
   await navigate(page, chatRoute);
   if (sessionId) {
-    await visible(page, "#thread .assistant");
+  await page.locator("#thread .assistant").first().waitFor({ state: "visible" });
     await textContains(page, "#inspectorState", "已完成");
     await textContains(page, "#inspectorDelivery", "已保存");
   }

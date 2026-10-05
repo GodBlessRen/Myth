@@ -7,7 +7,7 @@
 <meta charset="utf-8"/>
 <meta content="width=device-width,initial-scale=1" name="viewport"/>
 <meta content="light dark" name="color-scheme"/>
-<meta content="#f7f0e5" name="theme-color"/>
+<meta content="#F8F4ED" name="theme-color"/>
 <script src="/theme.js"></script>
 <title>Myth · 工作空间</title>
 <link href="/fonts/myth-sans.woff2" rel="preload" as="font" type="font/woff2" crossorigin="anonymous"/>
@@ -18,19 +18,11 @@
 <!-- 三栏布局：导航、当前工作区、常驻 Runtime Observatory；窄屏入口保留全部观测区域。 -->
 <div class="shell">
 <aside aria-label="主导航" class="sidebar" id="sidebar">
-<div class="sidebar-brand"><a aria-label="Myth 工作空间" class="brand" href="#chat"><span aria-hidden="true" class="brand-symbol"><svg viewBox="0 0 28 28"><path d="M4 22V6l10 12L24 6v16M4 6l10 5 10-5"></path></svg></span><span class="brand-word">Myth</span></a><button aria-expanded="true" aria-label="收起侧栏" class="icon-button" id="sidebarCollapse" title="收起侧栏"><svg aria-hidden="true" class="icon" viewBox="0 0 24 24"><path d="M4 4h16v16H4ZM9 4v16m7-12-4 4 4 4"></path></svg></button></div>
+<div class="sidebar-brand"><a aria-label="Myth 工作空间" class="brand" href="#chat"><span aria-hidden="true" class="brand-symbol"><img class="taiji-mark" src="/taiji.svg" alt="" width="32" height="32"/></span><span class="brand-word">Myth</span></a><button aria-expanded="true" aria-label="收起侧栏" class="icon-button" id="sidebarCollapse" title="收起侧栏"><svg aria-hidden="true" class="icon" viewBox="0 0 24 24"><path d="M4 4h16v16H4ZM9 4v16m7-12-4 4 4 4"></path></svg></button></div>
 <button class="new-chat" id="newChat" title="新建对话"><span data-icon="plus"></span><span class="nav-text">新建对话</span><kbd>⇧ O</kbd></button>
 <button class="command-trigger" id="commandToggle" title="搜索与快捷操作"><span data-icon="search"></span><span class="nav-text">搜索与快捷操作</span><kbd>Ctrl K</kbd></button>
-<nav aria-label="工作空间" class="navigation primary-nav">
-<a data-page="chat" href="#chat" title="对话"><span data-icon="chat"></span><span class="nav-text">对话</span></a>
-<a data-page="goals" href="#goals" title="目标与计划"><span data-icon="target"></span><span class="nav-text">目标与计划</span></a>
-<a data-page="projects" href="#projects" title="项目"><span data-icon="folder"></span><span class="nav-text">项目</span></a>
-<a data-page="knowledge" href="#knowledge" title="知识库"><span data-icon="book"></span><span class="nav-text">知识库</span></a>
-<a data-page="sessions" href="#sessions" title="会话"><span data-icon="history"></span><span class="nav-text">会话</span></a>
-</nav>
-<div class="recent-heading"><span>最近对话</span><a aria-label="查看全部会话" href="#sessions" title="查看全部会话"><span data-icon="more"></span></a></div>
-<div class="recent-sessions" id="recentSessions"></div>
-<div class="sidebar-bottom"><nav aria-label="系统" class="navigation secondary-nav"><a data-page="runtime" href="#runtime" title="Runtime"><span data-icon="activity"></span><span class="nav-text">Runtime</span></a><a data-page="settings" href="#settings" title="设置"><span data-icon="settings"></span><span class="nav-text">设置</span></a></nav><div class="local-profile"><span aria-hidden="true" class="workspace-avatar">M</span><div><strong>个人工作空间</strong><small>本地工作区</small></div></div></div>
+<div class="sidebar-library"><details class="nav-group" data-nav-group="work" open><summary>工作<svg aria-hidden="true" class="icon fold-chevron" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"></path></svg></summary><nav aria-label="工作" class="navigation primary-nav"><a data-page="chat" href="#chat" title="对话"><span data-icon="chat"></span><span class="nav-text">对话</span></a><a data-page="goals" href="#goals" title="目标与计划"><span data-icon="target"></span><span class="nav-text">目标与计划</span></a></nav></details><details class="nav-group" data-nav-group="library" open><summary>资料<svg aria-hidden="true" class="icon fold-chevron" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"></path></svg></summary><nav aria-label="资料" class="navigation primary-nav"><a data-page="projects" href="#projects" title="项目"><span data-icon="folder"></span><span class="nav-text">项目</span></a><a data-page="knowledge" href="#knowledge" title="知识库"><span data-icon="book"></span><span class="nav-text">知识库</span></a><a data-page="sessions" href="#sessions" title="会话"><span data-icon="history"></span><span class="nav-text">会话</span></a></nav></details><details class="nav-group recent-group" data-nav-group="recent" open><summary>最近对话<span class="nav-count" id="recentCount"></span><svg aria-hidden="true" class="icon fold-chevron" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"></path></svg></summary><div class="recent-sessions" id="recentSessions"></div><a class="all-sessions" href="#sessions">查看全部会话<span aria-hidden="true">↗</span></a></details></div>
+<div class="sidebar-bottom"><nav aria-label="系统" class="navigation secondary-nav"><a data-page="runtime" href="#runtime" title="Runtime"><span data-icon="activity"></span><span class="nav-text">Runtime</span></a><a data-page="settings" href="#settings" title="设置"><span data-icon="settings"></span><span class="nav-text">设置</span></a></nav><div class="local-profile"><span aria-hidden="true" class="workspace-avatar"><img class="taiji-mark" src="/taiji.svg" alt="" width="24" height="24"/></span><div><strong>个人工作空间</strong><small>本地工作区</small></div></div></div>
 </aside>
 <button aria-label="关闭导航" class="sidebar-shade hidden" id="sidebarShade"></button>
 <main class="main" id="mainContent" tabindex="-1">
@@ -41,7 +33,7 @@
 </button>
 <div class="workspace-crumb"><span>工作空间</span><span class="crumb-separator">/</span><strong id="pageTitle">对话</strong></div>
 </div>
-<div class="topbar-right">
+<div class="topbar-right"><button aria-pressed="false" class="studio-focus" id="focusMode" title="展开专注工作区" type="button"><svg aria-hidden="true" class="icon" viewBox="0 0 24 24"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5"></path></svg><span>专注</span></button>
 <button aria-label="切换到星空黑" aria-pressed="false" class="icon-button theme-toggle" id="themeToggle" title="切换主题" type="button">
 <span data-icon="moon"></span>
 </button>
@@ -55,10 +47,10 @@
 </button>
 </div>
 </header>
-<section class="chat-page page" id="chatPage">
+<section class="chat-page page" id="chatPage"><details class="conversation-index hidden" id="conversationIndex"><summary><span>会话目录</span><span class="directory-count" id="conversationCount"></span><svg aria-hidden="true" class="icon fold-chevron" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"></path></svg></summary><nav aria-label="定位到会话问题" id="conversationLinks"></nav></details>
 <div class="chat-scroll" id="chatScroll">
 <div class="welcome" id="welcome">
-<h1>有什么想推进的？</h1><p>写下一个问题，或一件需要完成的事。</p>
+<div class="welcome-copy"><h1>有什么想推进的？</h1><p>写下一个问题，或一件需要完成的事。</p></div>
 
 
 </div>
@@ -349,43 +341,43 @@
 </section>
 </main>
 <aside aria-label="Runtime Observatory" class="inspector" id="runtimeInspector">
-<div class="inspector-head"><span class="inspector-title">运行观测</span><div class="inspector-status"><span class="inspector-pulse" id="inspectorPulse"></span><div class="inspector-status-copy"><strong id="inspectorState">空闲</strong><span class="inspector-acceptance hidden" id="inspectorAcceptance"></span></div></div></div>
-<div class="inspector-scroll"><details class="observatory-group" open=""><summary><span>概览</span><svg aria-hidden="true" class="icon" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"></path></svg></summary><section class="inspector-section session-statistics"><h2 class="inspector-label">会话统计</h2><div aria-live="polite" class="context-facts" id="sessionStatistics">
+<div class="inspector-head"><span class="inspector-title">运行观测</span><button aria-expanded="true" aria-label="收起观测栏" class="icon-button inspector-dock" id="inspectorDock" title="收起观测栏" type="button"><svg aria-hidden="true" class="icon" viewBox="0 0 24 24"><path d="M4 4h16v16H4Zm11 0v16M8 8l4 4-4 4"></path></svg></button><div class="inspector-status"><span class="inspector-pulse" id="inspectorPulse"></span><div class="inspector-status-copy"><strong id="inspectorState">空闲</strong><span class="inspector-acceptance hidden" id="inspectorAcceptance"></span></div></div></div>
+<div aria-label="观测角度" class="inspector-lenses" id="inspectorLenses" role="tablist"><button aria-controls="lens-overview" aria-selected="false" id="lens-tab-overview" data-inspector-lens="overview" role="tab" type="button">概览</button><button aria-controls="lens-execution" aria-selected="false" id="lens-tab-execution" data-inspector-lens="execution" role="tab" type="button">执行</button><button aria-controls="lens-resources" aria-selected="false" id="lens-tab-resources" data-inspector-lens="resources" role="tab" type="button">资源</button></div><div class="inspector-scroll"><details class="observatory-group" id="lens-overview" data-lens-panel="overview" aria-labelledby="lens-tab-overview" open><summary><span>概览</span><svg aria-hidden="true" class="icon" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"></path></svg></summary><details class="inspector-section session-statistics" data-evidence-section="1" open><summary class="inspector-section-heading"><h2 class="inspector-label">会话统计</h2><svg aria-hidden="true" class="icon fold-chevron" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"></path></svg></summary><div class="inspector-section-body"><div aria-live="polite" class="context-facts" id="sessionStatistics">
 <div class="inspector-empty">选择会话后显示统计</div>
-</div><p class="statistics-note">端到端 TPS 包含首 Token 等待</p></section><section class="inspector-section"><h2 class="inspector-label">Goal</h2><div class="context-facts" id="inspectorGoal">
+</div><p class="statistics-note">端到端 TPS 包含首 Token 等待</p></div></details><details class="inspector-section" data-evidence-section="2" open><summary class="inspector-section-heading"><h2 class="inspector-label">Goal</h2><svg aria-hidden="true" class="icon fold-chevron" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"></path></svg></summary><div class="inspector-section-body"><div class="context-facts" id="inspectorGoal">
 <div class="inspector-empty">暂无长期 Goal</div>
-</div></section><section class="inspector-section"><h2 class="inspector-label">交付与验收</h2><div class="context-facts" id="inspectorDelivery">
+</div></div></details><details class="inspector-section" data-evidence-section="3" open><summary class="inspector-section-heading"><h2 class="inspector-label">交付与验收</h2><svg aria-hidden="true" class="icon fold-chevron" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"></path></svg></summary><div class="inspector-section-body"><div class="context-facts" id="inspectorDelivery">
 <div class="inspector-empty">暂无交付验收</div>
-</div></section></details><details class="observatory-group"><summary><span>执行</span><svg aria-hidden="true" class="icon" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"></path></svg></summary><section class="inspector-section"><h2 class="inspector-label">执行流程</h2><div class="execution-spine" id="executionSpine">
+</div></div></details></details><details class="observatory-group" id="lens-execution" data-lens-panel="execution" aria-labelledby="lens-tab-execution" open><summary><span>执行</span><svg aria-hidden="true" class="icon" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"></path></svg></summary><details class="inspector-section" data-evidence-section="4" open><summary class="inspector-section-heading"><h2 class="inspector-label">执行流程</h2><svg aria-hidden="true" class="icon fold-chevron" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"></path></svg></summary><div class="inspector-section-body"><div class="execution-spine" id="executionSpine">
 <div class="spine-empty">
                 开始一个任务后，这里显示决策与执行事实。
               </div>
-</div></section><section class="inspector-section"><h2 class="inspector-label">Execution Graph <span class="inspector-experimental">实验</span></h2><div class="execution-graph" id="inspectorExecutionGraph">
+</div></div></details><details class="inspector-section" data-evidence-section="5" open><summary class="inspector-section-heading"><h2 class="inspector-label">执行图 <span class="inspector-experimental">实验</span></h2><svg aria-hidden="true" class="icon fold-chevron" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"></path></svg></summary><div class="inspector-section-body"><div class="execution-graph" id="inspectorExecutionGraph">
 <div class="inspector-empty">出现 Sub-Agent / Tool 分支后，这里按已有持久事实投影执行图。</div>
-</div></section><section class="inspector-section"><h2 class="inspector-label">恢复状态</h2><div class="context-facts" id="inspectorRecovery">
+</div></div></details><details class="inspector-section" data-evidence-section="6" open><summary class="inspector-section-heading"><h2 class="inspector-label">恢复状态</h2><svg aria-hidden="true" class="icon fold-chevron" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"></path></svg></summary><div class="inspector-section-body"><div class="context-facts" id="inspectorRecovery">
 <div class="inspector-empty">暂无恢复状态</div>
-</div></section><section class="inspector-section"><h2 class="inspector-label">执行轨迹</h2><div class="trajectory-list" id="inspectorTrajectory">
+</div></div></details><details class="inspector-section" data-evidence-section="7"><summary class="inspector-section-heading"><h2 class="inspector-label">执行轨迹</h2><svg aria-hidden="true" class="icon fold-chevron" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"></path></svg></summary><div class="inspector-section-body"><div class="trajectory-list" id="inspectorTrajectory">
 <div class="inspector-empty">暂无轨迹</div>
-</div></section><section class="inspector-section"><h2 class="inspector-label">工具调用</h2><div class="tool-observatory" id="inspectorTools">
+</div></div></details><details class="inspector-section" data-evidence-section="8"><summary class="inspector-section-heading"><h2 class="inspector-label">工具调用</h2><svg aria-hidden="true" class="icon fold-chevron" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"></path></svg></summary><div class="inspector-section-body"><div class="tool-observatory" id="inspectorTools">
 <div class="inspector-empty">暂无工具调用</div>
-</div></section><section class="inspector-section"><h2 class="inspector-label">控制状态</h2><div class="context-facts" id="inspectorControl">
+</div></div></details><details class="inspector-section" data-evidence-section="9"><summary class="inspector-section-heading"><h2 class="inspector-label">控制状态</h2><svg aria-hidden="true" class="icon fold-chevron" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"></path></svg></summary><div class="inspector-section-body"><div class="context-facts" id="inspectorControl">
 <div class="inspector-empty">暂无 Control state</div>
-</div></section></details><details class="observatory-group"><summary><span>资源</span><svg aria-hidden="true" class="icon" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"></path></svg></summary><section class="inspector-section"><h2 class="inspector-label">模型调用</h2><div class="context-facts" id="inspectorModel">
+</div></div></details></details><details class="observatory-group" id="lens-resources" data-lens-panel="resources" aria-labelledby="lens-tab-resources" open><summary><span>资源</span><svg aria-hidden="true" class="icon" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"></path></svg></summary><details class="inspector-section" data-evidence-section="10" open><summary class="inspector-section-heading"><h2 class="inspector-label">模型调用</h2><svg aria-hidden="true" class="icon fold-chevron" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"></path></svg></summary><div class="inspector-section-body"><div class="context-facts" id="inspectorModel">
 <div class="inspector-empty">暂无模型证据</div>
 </div><details class="provider-evidence hidden" id="providerEvidenceDetails">
 <summary>Provider Evidence</summary>
 
 <div class="provider-evidence-body" id="providerEvidenceBody">
 <div class="inspector-empty">展开后读取完整脱敏元数据</div>
-</div></details></section><section class="inspector-section"><h2 class="inspector-label">Tokens</h2><div class="context-facts" id="inspectorTokens">
+</div></details></div></details><details class="inspector-section" data-evidence-section="11" open><summary class="inspector-section-heading"><h2 class="inspector-label">Tokens</h2><svg aria-hidden="true" class="icon fold-chevron" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"></path></svg></summary><div class="inspector-section-body"><div class="context-facts" id="inspectorTokens">
 <div class="inspector-empty">暂无 Token 使用</div>
-</div></section><section class="inspector-section"><h2 class="inspector-label">Context window</h2><div class="context-facts" id="inspectorContext">
+</div></div></details><details class="inspector-section" data-evidence-section="12" open><summary class="inspector-section-heading"><h2 class="inspector-label">上下文窗口</h2><svg aria-hidden="true" class="icon fold-chevron" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"></path></svg></summary><div class="inspector-section-body"><div class="context-facts" id="inspectorContext">
 <div class="inspector-empty">暂无活动上下文</div>
-</div></section><section class="inspector-section"><h2 class="inspector-label">运行预算</h2><div class="budget-list" id="inspectorBudgets">
+</div></div></details><details class="inspector-section" data-evidence-section="13"><summary class="inspector-section-heading"><h2 class="inspector-label">运行预算</h2><svg aria-hidden="true" class="icon fold-chevron" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"></path></svg></summary><div class="inspector-section-body"><div class="budget-list" id="inspectorBudgets">
 <div class="inspector-empty">暂无运行预算</div>
-</div></section><section class="inspector-section"><h2 class="inspector-label">SOTA Route</h2><div class="context-facts" id="inspectorSotaRoute">
+</div></div></details><details class="inspector-section" data-evidence-section="14"><summary class="inspector-section-heading"><h2 class="inspector-label">路径比较</h2><svg aria-hidden="true" class="icon fold-chevron" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"></path></svg></summary><div class="inspector-section-body"><div class="context-facts" id="inspectorSotaRoute">
 <div class="inspector-empty">还没有可比较的成功路径</div>
-</div></section><section class="inspector-section"><h2 class="inspector-label">架构状态</h2><div class="platform-mini" id="inspectorPlatform"></div></section></details></div>
+</div></div></details><details class="inspector-section" data-evidence-section="15"><summary class="inspector-section-heading"><h2 class="inspector-label">架构状态</h2><svg aria-hidden="true" class="icon fold-chevron" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"></path></svg></summary><div class="inspector-section-body"><div class="platform-mini" id="inspectorPlatform"></div></div></details></details></div>
 <div class="inspector-foot"><a href="#runtime"><span data-icon="activity"></span>查看完整 Runtime<span aria-hidden="true">↗</span></a><button class="secondary inspector-close" id="inspectorClose" type="button">关闭运行详情</button></div>
 </aside>
 </div>
@@ -508,5 +500,6 @@
 <script src="/statistics.js"></script>
 <script src="/inspector.js"></script>
 <script src="/goals.js"></script>
+<script src="/studio.js"></script>
 </body>
 </html>

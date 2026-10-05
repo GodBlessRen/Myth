@@ -58,6 +58,30 @@ async function measure(page, label) {
   assert.deepEqual(result.offenders, [], `${label}: clipped visible content`);
 }
 
+// 200% 等效重排：1440×960 物理画布映射到 720×480 CSS 视口。
+// 不用 body.zoom 冒充浏览器缩放；后者不会触发基于 CSS 视口的响应断点。
+async function zoomReflow(page) {
+  await page.setViewportSize({ width: 1440, height: 960 });
+  await page.evaluate(() => { location.hash = "settings"; });
+  const session = await page.context().newCDPSession(page);
+  await session.send("Emulation.setDeviceMetricsOverride", {
+    width: 720, height: 480, deviceScaleFactor: 2, mobile: false,
+    screenWidth: 1440, screenHeight: 960,
+  });
+  await settle(page);
+  assert.equal(await page.evaluate(() => innerWidth), 720);
+  assert.equal(await page.locator("#runtimeInspector").evaluate(node => getComputedStyle(node).position), "fixed");
+  assert.equal(await page.locator("#sidebar").evaluate(node => getComputedStyle(node).visibility), "hidden");
+  await measure(page, "settings/200-percent-equivalent-reflow");
+  // Playwright 的 fullPage 截图会恢复 context 的原 viewport；CDP 原生截图保留这次度量。
+  const { data } = await session.send("Page.captureScreenshot", { format: "png", fromSurface: true, captureBeyondViewport: false });
+  const file = path.join(output, "atelier-settings-zoom-200.png");
+  fs.writeFileSync(file, Buffer.from(data, "base64"));
+  fs.copyFileSync(file, path.join(review, "settings-zoom-200.png"));
+  report.screenshots.push(file);
+  await session.detach();
+}
+
 async function main() {
   const browser = await chromium.launch({ channel: "chrome", headless: true });
   const page = await browser.newPage({ viewport: { width: 1440, height: 960 } });
@@ -67,6 +91,13 @@ async function main() {
     if (!new URL(request.url()).hostname.match(/^(127\.0\.0\.1|localhost)$/)) report.externalRequests.push(request.url());
   });
   try {
+    if (process.argv.includes("--zoom-only")) {
+      await page.goto("http://127.0.0.1:8772/#settings", { waitUntil: "networkidle" });
+      await zoomReflow(page);
+      assert.deepEqual(report.errors, []);
+      console.log(JSON.stringify({ passed: true, zoomReflow: "720 CSS px / 1440 physical px" }));
+      return;
+    }
     await page.goto("http://127.0.0.1:8773", { waitUntil: "networkidle" });
     await settle(page);
     report.fonts = await page.evaluate(() => [...document.fonts].map(font => ({ family: font.family, status: font.status })));
@@ -75,7 +106,7 @@ async function main() {
       await theme(page, mode);
       await measure(page, `home/1440/${mode}`);
       const paper = await page.locator("body").evaluate(node => getComputedStyle(node).backgroundColor);
-      assert.equal(paper, mode === "light" ? "rgb(247, 240, 229)" : "rgb(25, 23, 29)");
+      assert.equal(paper, mode === "light" ? "rgb(248, 244, 237)" : "rgb(14, 16, 15)");
       await capture(page, `home-${mode}`);
     }
     for (const viewport of [{ width: 390, height: 844 }, { width: 320, height: 740 }]) {
@@ -129,17 +160,13 @@ async function main() {
         }
       }
     }
-    // 200% 缩放使用真实布局重排，页面响应断点仍以 CSS 视口为准。
-    await page.setViewportSize({ width: 1440, height: 960 });
-    await page.evaluate(() => { document.body.style.zoom = "2"; location.hash = "settings"; });
-    await settle(page);
-    await measure(page, "settings/200-percent");
-    await capture(page, "settings-zoom-200");
+    await zoomReflow(page);
     assert.deepEqual(report.errors, []);
     assert.deepEqual(report.externalRequests, []);
     console.log(JSON.stringify({ passed: true, checks: report.matrix.length, fonts: report.fonts, errors: report.errors }, null, 2));
   } finally {
-    fs.writeFileSync(path.join(output, process.argv.includes("--review-controls") ? "atelier-controls-report.json" : "atelier-visual-report.json"), JSON.stringify(report, null, 2));
+    const reportName = process.argv.includes("--zoom-only") ? "atelier-zoom-report.json" : process.argv.includes("--review-controls") ? "atelier-controls-report.json" : "atelier-visual-report.json";
+    fs.writeFileSync(path.join(output, reportName), JSON.stringify(report, null, 2));
     await browser.close();
   }
 }

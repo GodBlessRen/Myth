@@ -18,6 +18,8 @@ from myth.web_workspace import ConversationWebService
 
 # 只提供确定性传输边界；用户文本仍经真实上下文与 Runtime 准入。
 class BrowserFixtureProvider:
+    # 秒：仅验收服务延长真实等待窗口，便于截图在途反馈，不改变生产调用。
+    delay_seconds = 0.35
     # 保存目录所属 Provider 身份，避免混用品牌能力。
     def __init__(self, provider_id: str) -> None:
         # provider_id：固定回归目录身份，不代表真实远端连接。
@@ -36,7 +38,7 @@ class BrowserFixtureProvider:
 
     # 固定回答在真实 Driver 中保存收据；停顿仅用于观察在途输入禁用和运行状态。
     def invoke(self, request):
-        time.sleep(0.35)
+        time.sleep(self.delay_seconds)
         text = "已收到你的任务。\n\n可以先明确预期结果，再整理资料和执行步骤。当前对话会保留在工作区，你可以继续补充要求。"
         decision = json.dumps({
             "decision_type": "request_completion", "reason": "浏览器回归固定回答",
@@ -65,7 +67,9 @@ def main():
     parser = argparse.ArgumentParser(description="Myth deterministic browser regression server")
     parser.add_argument("--root", required=True)
     parser.add_argument("--port", type=int, default=8770)
+    parser.add_argument("--model-delay", type=float, default=0.35)
     args = parser.parse_args()
+    BrowserFixtureProvider.delay_seconds = args.model_delay
     service = AgentWebService(Path(args.root))
     service.workspace = BrowserFixtureWorkspace(service.root)
     server = ThreadingHTTPServer(("127.0.0.1", args.port), make_handler(service))

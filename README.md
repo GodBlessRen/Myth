@@ -188,6 +188,7 @@ node --check src/myth/webui/goals.js
 - [ARCHITECTURE_CONSTITUTION.md](docs/ARCHITECTURE_CONSTITUTION.md) — 稳定边界
 - [CODE_GUIDE.md](docs/CODE_GUIDE.md) — 中文源码阅读、状态所有权与原子性边界
 - [OBSERVABILITY.md](docs/OBSERVABILITY.md) — 第三栏观测合同
-- [DESIGN.md](docs/DESIGN.md) — 产品视觉与交互原则
+- [DESIGN.md](DESIGN.md) — 产品视觉与交互原则
+- [艺术机构工作台](docs/UI_ATELIER.md) — 可折叠三栏、专注模式、实际截图与验收范围
 - [ROADMAP.md](docs/ROADMAP.md) — 下一步
 - [SECURITY.md](SECURITY.md) — 安全边界

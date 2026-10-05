@@ -192,7 +192,7 @@ test("execution graph renders parent tool and sub-agent branch without inventing
     },
   });
   const box = nodes.get("inspectorExecutionGraph");
-  assert.match(box.textContent, /Parent model · step 1/);
+  assert.match(box.textContent, /主模型 · 步骤 1/);
   assert.match(box.textContent, /agent\.delegate/);
   assert.match(box.textContent, /Sub-Agent · isolated_worker/);
   assert.match(box.textContent, /投影未覆盖 1 次模型调用/);

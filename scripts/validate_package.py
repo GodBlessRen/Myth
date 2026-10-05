@@ -57,7 +57,7 @@ def main():
         try:
             for asset in ("/", "/app.css", "/app.js", "/inspector.js", "/goals.js",
                           "/theme.js", "/reconnect.js", "/statistics.js", "/favicon.svg",
-                          "/fonts/myth-sans.woff2", "/fonts/myth-serif.woff2", "/fonts/myth-latin.woff2", "/model-pool.js"):
+                          "/fonts/myth-sans.woff2", "/fonts/myth-serif.woff2", "/fonts/myth-latin.woff2", "/model-pool.js", "/studio.js", "/taiji.svg"):
                 with request.urlopen(base + asset, timeout=5) as response:
                     if response.status != 200 or not response.read():
                         raise RuntimeError(f"missing packaged asset: {asset}")
