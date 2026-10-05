@@ -155,6 +155,13 @@ def compile_conversation_context(
         + "\n项目指令："
         + project.get("instructions", "")
     ))
+    continuity = snapshot.get("continuity") or {}
+    if continuity:
+        system += (
+            "\nContinuity 已由 Runtime 基于持久消息、固定设置和 Current Facts 版本判定。"
+            "历史消息与 Context Anchor 只代表当时发生过的内容；相关度不能把旧历史升级为当前事实，"
+            "Memory 的 user_asserted/verified 当前状态与历史冲突时，应保留历史原文并以当前状态解释现在。"
+        )
     if control.get("steering_note"):
         system += "\n用户当前 Steering（只影响后续计划）：\n" + control["steering_note"]
     if not snapshot.get("is_subagent"):
@@ -413,6 +420,20 @@ def compile_conversation_context(
         "retrieval_report": snapshot.get("retrieval_report") or {},
         "goal_id": goal.get("goal_id"),
         "goal_revision": (goal.get("work") or {}).get("revision"),
+        "continuity": (
+            {
+                "policy": continuity.get("policy"),
+                "action": continuity.get("action"),
+                "reason": continuity.get("reason"),
+                "epoch": continuity.get("epoch"),
+                "binding_digest": continuity.get("binding_digest"),
+                "tail_count": continuity.get("tail_count"),
+                "anchor_reuse": continuity.get("anchor_reuse"),
+                "current_facts": continuity.get("current_facts") or {},
+            }
+            if continuity
+            else None
+        ),
         "compaction_seed": (
             {
                 "digest": sha256_bytes(compaction_seed_text.encode("utf-8")),
@@ -429,6 +450,7 @@ def compile_conversation_context(
                 "version": anchor.get("version"),
                 "covered_messages": anchor.get("covered_messages"),
                 "digest": anchor.get("digest"),
+                "source_digest": anchor.get("source_digest"),
                 "bytes": anchor.get("bytes"),
             }
             if anchor
