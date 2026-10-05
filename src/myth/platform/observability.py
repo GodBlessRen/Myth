@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
+from .model_pool import estimate_cost
 
 
 # 已发生事件的纯投影合同；sequence 表示本 Run 的持久事件顺序。
@@ -46,6 +47,8 @@ class TraceProjection:
         status: str,
         model_state: dict[str, Any],
         operations: list[dict[str, Any]],
+        main_pricing: dict | None = None,
+        main_model: str | None = None,
     ) -> dict[str, Any]:
         invocations = list(model_state.get("model_invocations") or [])
         decisions = list(model_state.get("decisions") or [])
@@ -145,6 +148,9 @@ class TraceProjection:
             cursor = tool_id
 
             result = operation.get("result") if isinstance(operation.get("result"), dict) else {}
+            if result.get("fallback_to_parent"):
+                nodes[-1].update({"detail": "主模型接手：" + str(result.get("summary") or "模型池不可用"),
+                                  "routing": result.get("routing"), "fallback_to_parent": True})
             child = result.get("subagent") if isinstance(result.get("subagent"), dict) else {}
             child_request_key = str(child.get("request_key") or "")
             if not child_request_key and capability == "agent.delegate" and decision_id:
@@ -198,6 +204,37 @@ class TraceProjection:
         )
         edges.append({"source": cursor, "target": terminal_id, "kind": "state"})
 
+        # 节点只展示收据与父评分；每个模型 Attempt 单独计一次，父工具收据不重复加费用。
+        child_contracts = {(op.get("intent") or {}).get("delegate", {}).get("request_key"):
+                           (op.get("intent") or {}).get("delegate", {}) for op in operations}
+        reviews = {(op.get("result") or {}).get("review", {}).get("delegation_id"):
+                   (op.get("result") or {}).get("review") for op in operations if (op.get("result") or {}).get("review")}
+        invocation_by_id = {i.get("model_attempt_id"): i for i in invocations}
+        costs = []
+        for invocation in invocations:
+            contract = child_contracts.get(invocation.get("request_key")) or {}
+            profile = (contract.get("routing") or {}).get("profile") or {}
+            rates = profile.get("pricing") if contract else (main_pricing if main_model is None or invocation.get("model_id") == main_model else None)
+            costs.append(estimate_cost(invocation.get("usage") or {}, rates))
+        for node in nodes:
+            invocation = invocation_by_id.get(node.get("attempt_id"))
+            if not invocation:
+                continue
+            contract = child_contracts.get(invocation.get("request_key")) or {}
+            profile = (contract.get("routing") or {}).get("profile") or {}
+            node.update({"provider": invocation.get("provider_id"), "model": invocation.get("model_id"),
+                         "usage": invocation.get("usage") or {}, "routing": contract.get("routing"),
+                         "review": reviews.get(contract.get("delegation_id")),
+                         "cost": estimate_cost(invocation.get("usage") or {}, profile.get("pricing") if contract else (main_pricing if main_model is None or invocation.get("model_id") == main_model else None))})
+            if node["review"]:
+                reviewer = next((op for op in operations if (op.get("result") or {}).get("review") == node["review"]), None)
+                if reviewer:
+                    edges.append({"source": node["id"], "target": f"tool:{reviewer['decision_id']}", "kind": "review"})
+        totals = {}
+        for cost in costs:
+            if cost["amount"] is not None:
+                totals[cost["currency"]] = round(totals.get(cost["currency"], 0) + cost["amount"], 9)
+
         total_attempts = {
             str(item.get("model_attempt_id"))
             for item in invocations
@@ -209,6 +246,8 @@ class TraceProjection:
             "experimental": True,
             "nodes": nodes,
             "edges": edges,
+            "cost_summary": {"estimated_by_currency": totals, "unknown_calls": sum(c["amount"] is None for c in costs),
+                             "model_calls": len(invocations), "basis": "configured_list_price"},
             "coverage": {
                 "model_calls": len(total_attempts),
                 "mapped_model_calls": len(mapped_attempts),

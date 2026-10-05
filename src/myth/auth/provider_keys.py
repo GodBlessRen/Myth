@@ -14,6 +14,8 @@ from .chatgpt import KeyringCredentialStore, CredentialStoreUnavailable
 API_KEY_PROVIDERS = {
     "openai": {"label": "OpenAI", "env_var": "OPENAI_API_KEY"},
     "deepseek": {"label": "DeepSeek", "env_var": "DEEPSEEK_API_KEY"},
+    "anthropic": {"label": "Claude", "env_var": "ANTHROPIC_API_KEY"},
+    "kimi": {"label": "Kimi", "env_var": "MOONSHOT_API_KEY"},
 }
 # API_KEY_SERVICE：与 ChatGPT OAuth 分开的系统凭据命名空间；API Key 不与 OAuth token 共用记录。
 API_KEY_SERVICE = "Myth Provider API Keys"

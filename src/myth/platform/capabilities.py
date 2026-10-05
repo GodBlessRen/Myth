@@ -147,6 +147,7 @@ def default_capabilities() -> CapabilityRegistry:
             "Run one bounded read-only isolated sub-agent and return a contracted result.",
             "compute",
         ),
+        ("agent.evaluate", "coordination", "Record a parent assessment of a settled child result.", "compute"),
         (
             "tool.search",
             "tooling",

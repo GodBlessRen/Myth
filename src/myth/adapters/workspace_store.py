@@ -140,8 +140,9 @@ class SqliteWorkspaceRepository:
 
     # 校验 endpoint、模型、窗口与输出/步骤上限后保存白名单字段；拒绝 token 等未声明持久字段。
     def save_settings(self, value):
+        from ..platform.model_pool import clean_pool, PROVIDERS
         provider = value.get("provider", "ollama")
-        if provider not in {"ollama", "openai", "chatgpt", "deepseek"}:
+        if provider not in PROVIDERS:
             raise ValueError("unsupported model provider")
         from urllib.parse import urlparse
 
@@ -193,6 +194,7 @@ class SqliteWorkspaceRepository:
             "thinking": thinking,
             "num_ctx": num_ctx,
             "temperature": float(temperature),
+            "model_pool": clean_pool(value.get("model_pool")),
         }
         # 本地事务边界：下列写入一起提交，异常整体回滚；文件/网络效果须在事务外另行核对。
         with self.store.tx() as db:
@@ -201,6 +203,14 @@ class SqliteWorkspaceRepository:
                 (canonical_json(clean),),
             )
         return clean
+
+    def model_feedback(self):
+        """经验是已结算主模型评分的投影；最多读取最近 200 条，不新建第二份可变真相。"""
+        rows = self.store.db.execute(
+            "SELECT result_json FROM workspace_operations WHERE capability='agent.evaluate' "
+            "AND state='RESOLVED' ORDER BY rowid DESC LIMIT 200"
+        ).fetchall()
+        return [json.loads(row[0])["review"] for row in rows if json.loads(row[0]).get("review")]
 
     # 投影未归档项目及会话/知识数量；统计不授予文件范围。
     def projects(self):
@@ -1388,6 +1398,14 @@ class SqliteWorkspaceRepository:
                 return old
             if self.turn(rid)["status"] != "RUNNING":
                 raise ValueError("turn stopped")
+            if capability == "agent.evaluate":
+                # 一个子任务只接受一次主评分；与 Ticket 同事务检查，重启/并发不能重复训练。
+                target = intent["result"]["review"]["delegation_id"]
+                if db.execute(
+                    "SELECT 1 FROM workspace_operations WHERE run_id=? AND capability='agent.evaluate' "
+                    "AND json_extract(intent_json,'$.result.review.delegation_id')=?", (rid, target)
+                ).fetchone():
+                    raise ValueError("子任务已经评分，不可重复记录")
             owner = db.execute(
                 "SELECT run_id FROM step_decisions WHERE decision_id=?", (decision_id,)
             ).fetchone()

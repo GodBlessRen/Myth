@@ -283,7 +283,7 @@ class DecisionRuntime:
                 db,
                 run_id,
                 "ModelIntentRecorded",
-                {"model_attempt_id": attempt_id, "provider": provider_id},
+                {"model_attempt_id": attempt_id, "provider": provider_id, "request_key": request_key},
             )
             db.execute(
                 "UPDATE model_invocations SET state=?,ticket_id=? WHERE model_attempt_id=?",
@@ -890,6 +890,13 @@ class DecisionRuntime:
 
     # 读取当前持久事实并生成状态投影；不得把模型 claim 当作已执行或已验收。
     def status(self, run_id: str) -> dict[str, Any]:
+        # 活动去重键可在零派发后解绑；历史归属从不可变意图事件读取，不能因此丢失失败调用的计量。
+        request_keys = {}
+        for event in self.store.db.execute(
+            "SELECT payload_json FROM events WHERE run_id=? AND kind='ModelIntentRecorded' ORDER BY sequence", (run_id,)
+        ):
+            payload = json.loads(event[0])
+            request_keys[payload.get("model_attempt_id")] = payload.get("request_key")
         invocations = []
         for row in self.store.db.execute(
             "SELECT m.*,k.request_key FROM model_invocations m "
@@ -898,6 +905,7 @@ class DecisionRuntime:
             (run_id,),
         ).fetchall():
             item = dict(row)
+            item["request_key"] = item.get("request_key") or request_keys.get(item["model_attempt_id"])
             try:
                 item["usage"] = json.loads(item.get("usage_json") or "{}")
             except json.JSONDecodeError:

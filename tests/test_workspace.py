@@ -103,6 +103,8 @@ class WorkspaceTests(unittest.TestCase):
 
     # 回归断言：父模型可自行选择隔离 worker，Child 只收到显式委派上下文并以普通工具结果返回。
     def test_llm_may_delegate_to_isolated_read_only_subagent(self):
+        self.repo.save_settings({**self.repo.settings(), "model_pool": {"children": [
+            {"id": "fixture", "provider": "ollama", "model": "test", "tier": 2}]}})
         sid = self.session()
         rid = self.turn(
             sid,
@@ -124,10 +126,20 @@ class WorkspaceTests(unittest.TestCase):
                 decision(claim="最终回答：已结合隔离复核结果。"),
             ]
         )
-        self.workspace.run(rid, provider)
+        original_invoke = provider.invoke
+        # 评分必须引用真实子任务身份；后续最终回答仍用固定断言文本。
+        def invoke_with_review(request):
+            if len(provider.calls) == 2:
+                child_id = self.repo.operations(rid)[0]["decision_id"]
+                provider.outputs.insert(2, decision("tool_call", "agent.evaluate", {
+                    "delegation_id": child_id, "correctness": 90, "completeness": 90, "usefulness": 90,
+                    "accepted": True, "failure_kind": "none", "reason": "固定事实复核通过"}))
+            return original_invoke(request)
+        with patch.object(provider, "invoke", side_effect=invoke_with_review):
+            self.workspace.run(rid, provider)
 
         self.assertEqual(self.repo.turn(rid)["status"], "COMPLETED")
-        self.assertEqual(len(provider.calls), 3)
+        self.assertEqual(len(provider.calls), 4)
         child_request = provider.calls[1]
         child_text = "\n".join(message.content for message in child_request.messages)
         self.assertIn("FACT=A", child_text)
@@ -150,6 +162,8 @@ class WorkspaceTests(unittest.TestCase):
 
     # 回归断言：Child 即使忽略输出 Schema 提议再次委派，本地边界也拒绝递归，不把它升级为执行权限。
     def test_subagent_cannot_recursively_delegate(self):
+        self.repo.save_settings({**self.repo.settings(), "model_pool": {"children": [
+            {"id": "fixture", "provider": "ollama", "model": "test", "tier": 2}]}})
         rid = self.turn(self.session())
         provider = ChatProvider(
             [
