@@ -263,6 +263,7 @@ function inspectorFact(box, key, value) {
     "Output settled": "输出 Tokens", "Cache hit": "Cache 命中", "Model wall": "模型用时",
     "First token": "首个 Token", "Model calls": "模型调用", "Unknown held": "UNKNOWN 占用",
     "Context window": "上下文窗口", "Token window": "Token 窗口",
+    Continuity: "连续性", "Current facts": "当前事实",
     Response: "Response ID", Status: "状态", Reasoning: "Reasoning Tokens",
     Created: "创建时间", "Output types": "输出类型", Incomplete: "未完成原因",
     "Reasoning summary": "Reasoning Summary", "Provider-only fields": "Provider 特有字段",
@@ -885,6 +886,23 @@ function renderInspectorContext(session, turn) {
   ].forEach(([k, v]) => {
     inspectorFact(box, k, v);
   });
+  const continuity = snapshot.continuity;
+  if (continuity) {
+    inspectorFact(
+      box,
+      "Continuity",
+      (continuity.action || "unknown") + " · " +
+        (continuity.reason || "unspecified") + " · epoch " +
+        inspectorNumber(continuity.epoch),
+    );
+    const facts = continuity.current_facts || {};
+    inspectorFact(
+      box,
+      "Current facts",
+      inspectorNumber(facts.count) + " 条" +
+        (facts.digest ? " · " + String(facts.digest).slice(0, 12) + "…" : " · 未绑定"),
+    );
+  }
   const compiled = (turn?.events || [])
     .filter((event) => event.kind === "ConversationContextCompiled")
     .at(-1)?.payload;

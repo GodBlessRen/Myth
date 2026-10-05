@@ -155,6 +155,8 @@ def compile_conversation_context(
         + "\n项目指令："
         + project.get("instructions", "")
     ))
+    # Continuity 是 Runtime 复用事实；只进入报告/观测，不重复塞进 System Prompt 消耗预算。
+    continuity = snapshot.get("continuity") or {}
     if control.get("steering_note"):
         system += "\n用户当前 Steering（只影响后续计划）：\n" + control["steering_note"]
     if not snapshot.get("is_subagent"):
@@ -413,6 +415,20 @@ def compile_conversation_context(
         "retrieval_report": snapshot.get("retrieval_report") or {},
         "goal_id": goal.get("goal_id"),
         "goal_revision": (goal.get("work") or {}).get("revision"),
+        "continuity": (
+            {
+                "policy": continuity.get("policy"),
+                "action": continuity.get("action"),
+                "reason": continuity.get("reason"),
+                "epoch": continuity.get("epoch"),
+                "binding_digest": continuity.get("binding_digest"),
+                "tail_count": continuity.get("tail_count"),
+                "anchor_reuse": continuity.get("anchor_reuse"),
+                "current_facts": continuity.get("current_facts") or {},
+            }
+            if continuity
+            else None
+        ),
         "compaction_seed": (
             {
                 "digest": sha256_bytes(compaction_seed_text.encode("utf-8")),
@@ -429,6 +445,7 @@ def compile_conversation_context(
                 "version": anchor.get("version"),
                 "covered_messages": anchor.get("covered_messages"),
                 "digest": anchor.get("digest"),
+                "source_digest": anchor.get("source_digest"),
                 "bytes": anchor.get("bytes"),
             }
             if anchor

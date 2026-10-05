@@ -9,6 +9,8 @@ import re
 import uuid
 from typing import Any, Iterable, Mapping
 
+from ..domain import digest_json
+from .continuity import CURRENT_FACTS_POLICY
 from .memory import MemoryKind
 from .memory_lifecycle import (
     MemoryDeltaError,
@@ -286,6 +288,39 @@ class SqliteMemoryStore:
             "SELECT COALESCE(MAX(change_seq),0) AS seq FROM workspace_memory_changes"
         ).fetchone()
         return int(row["seq"] if row else 0)
+
+    # continuity_facts：只对当前可见 user_asserted/verified 状态做版本摘要；检索分数和正文不进入 Turn 绑定。
+    def continuity_facts(
+        self,
+        *,
+        project_id: str | None = None,
+        session_id: str | None = None,
+    ) -> dict[str, Any]:
+        rows = self.store.db.execute(
+            "SELECT memory_id,revision,fact_level,scope_type,scope_id,text "
+            "FROM workspace_memories WHERE active=1 "
+            "AND fact_level IN ('user_asserted','verified') ORDER BY memory_id"
+        ).fetchall()
+        items = []
+        for row in rows:
+            item = dict(row)
+            if not self._visible(item, project_id, session_id):
+                continue
+            items.append(
+                {
+                    "memory_id": item["memory_id"],
+                    "revision": int(item["revision"]),
+                    "fact_level": item["fact_level"],
+                    "scope_type": item["scope_type"],
+                    "scope_id": item["scope_id"],
+                    "content_digest": digest_json(str(item["text"])),
+                }
+            )
+        return {
+            "policy": CURRENT_FACTS_POLICY,
+            "count": len(items),
+            "digest": digest_json(items),
+        }
 
     # changes_since：按可见作用域读取水位后的变化身份；只用于派生 freshness，不把 change log 当正文。
     def changes_since(
