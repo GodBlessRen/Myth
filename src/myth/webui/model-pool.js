@@ -1,5 +1,5 @@
 // 模型池设置只编辑公开配置；密钥单独提交凭据接口，执行与评分事实由后端返回。
-const poolProviders = {ollama: "Ollama", openai: "OpenAI", chatgpt: "ChatGPT OAuth", deepseek: "DeepSeek", anthropic: "Claude", kimi: "Kimi"};
+const poolProviders = {ollama: "Ollama", openai: "OpenAI", chatgpt: "ChatGPT OAuth", deepseek: "DeepSeek", anthropic: "Claude API Key", claude_oauth: "Claude OAuth", kimi: "Kimi"};
 
 // 使用 DOM/textContent 构建表单，模型名称和标签不会成为 HTML。
 function poolField(parent, labelText, key, value, options = null, type = "text") {
@@ -76,7 +76,7 @@ async function poolRefreshPrice(panel, force = false) {
     const info = await api("/model-info", {provider, model, force});
     if (!panel.isConnected || panel.generation !== generation) return;
     panel.rates = info.pricing;
-    const messages = {unknown: "目录尚未收录此模型的价格", unavailable: "目录暂时无法连接，费用保持未知", unpublished: "模型价格尚未公布", subscription: "ChatGPT 订阅渠道 · 不按 API 标价估算", local_or_hosted: "本地或自托管服务 · 不自动假定免费"};
+    const messages = {unknown: "目录尚未收录此模型的价格", unavailable: "目录暂时无法连接，费用保持未知", unpublished: "模型价格尚未公布", subscription: "订阅渠道 · 不按 API 标价估算", oauth_channel: "OAuth 用户渠道 · 费用保持供应商原生语义", local_or_hosted: "本地或自托管服务 · 不自动假定免费"};
     quote.textContent = info.pricing ? `输入 $${info.pricing.input} · 输出 $${info.pricing.output} / 百万 Token` : messages[info.status] || "价格保持未知";
     if (info.checked_at) {
       const source = document.createElement("a"); source.href = "https://models.dev/"; source.target = "_blank"; source.rel = "noopener noreferrer"; source.textContent = "models.dev";
@@ -108,8 +108,8 @@ function poolChildLimits(root, details = root.connectionDetails) {
   const tokens = root.querySelector('[data-pool-field="max_output_tokens"]');
   tokens.max = String(Math.min(32768, profile?.max_output_tokens || Number(tokens.dataset.catalogMax) || 32768));
   const temp = root.querySelector('[data-pool-field="temperature"]');
-  temp.max = provider === "anthropic" ? "1" : "2";
-  temp.disabled = provider === "chatgpt" || provider === "openai" && (!profile || !!profile.reasoning) || provider === "anthropic" && profile?.temperature?.supported !== true;
+  temp.max = ["anthropic", "claude_oauth"].includes(provider) ? "1" : "2";
+  temp.disabled = provider === "chatgpt" || provider === "openai" && (!profile || !!profile.reasoning) || ["anthropic", "claude_oauth"].includes(provider) && profile?.temperature?.supported !== true;
   if (temp.disabled) temp.value = "0";
   temp.closest(".pool-field").querySelector("small").textContent = temp.disabled ? "当前适配器使用模型默认采样。" : `0–${temp.max} · 越低越稳定，越高越多样。`;
   const select = root.querySelector('[data-pool-field="thinking"]');
@@ -200,7 +200,7 @@ function poolAddChild(profile = {}) {
   // 配置变更使旧检查失效；异步响应只能更新发起时对应的槽位。
   // num_ctx/本地地址是 Ollama 的可调参数；远端模型使用能力报告，不显示无效配置。
   const changed = () => {
-    key.value = ""; status.textContent = ""; auth.hidden = ["ollama", "chatgpt"].includes(provider.value);
+    key.value = ""; status.textContent = ""; auth.hidden = ["ollama", "chatgpt", "claude_oauth"].includes(provider.value);
     contextWindow.closest(".pool-field").hidden = provider.value !== "ollama";
     serverAddress.closest(".pool-field").hidden = provider.value !== "ollama";
     delete root.connectionDetails; delete root.querySelector('[data-pool-field="max_output_tokens"]').dataset.catalogMax;
