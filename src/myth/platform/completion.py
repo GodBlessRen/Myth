@@ -10,6 +10,11 @@ from ..failures import FailureObservation, failure_result
 from .model_pool import pending_reviews, pending_resolutions
 
 
+# 只有真正产生交付效果的 Conversation 工具进入 follow-through；读取/分析失败可由模型改走别的证据路径。
+# test.run 保持下面独立的严格 PASS 规则，不使用一次性提醒降级验收。
+_FOLLOWTHROUGH_CAPABILITIES = frozenset({"artifact.write", "project.patch_exact"})
+
+
 # CompletionVerdict：停止准入结果；拒绝只要求下一步修正，不把已知拒绝升级成 UNKNOWN。
 @dataclass(frozen=True)
 class CompletionVerdict:
@@ -44,6 +49,46 @@ def _observed_refs(value: Any) -> set[str]:
     return refs
 
 
+# 找到最近仍未被后续成功覆盖的“可恢复效果失败”。同一失败只强制一次 follow-through，避免错误恢复形成死循环。
+def _pending_effect_followthrough(activities: list[dict[str, Any]]) -> tuple[str, dict[str, Any]] | None:
+    unresolved: dict[str, tuple[int, dict[str, Any]]] = {}
+    reminded_at: dict[str, int] = {}
+    for index, activity in enumerate(activities):
+        result = activity.get("result") if isinstance(activity, dict) else None
+        result = result if isinstance(result, dict) else {}
+        failure = result.get("failure") if isinstance(result.get("failure"), dict) else None
+        if (
+            result.get("observation_kind") == "completion_guard"
+            and failure
+            and failure.get("code") == "completion_followthrough_required"
+        ):
+            capability = str(failure.get("capability_id") or "")
+            if capability:
+                reminded_at[capability] = index
+            continue
+
+        decision = activity.get("decision") if isinstance(activity, dict) else None
+        decision = decision if isinstance(decision, dict) else {}
+        capability = str(decision.get("capability_id") or "")
+        if capability not in _FOLLOWTHROUGH_CAPABILITIES:
+            continue
+        if failure and bool(failure.get("retryable")):
+            unresolved[capability] = (index, failure)
+        elif result:
+            # 后续同能力出现已知非失败结果，说明这次恢复机会已经真正闭合。
+            unresolved.pop(capability, None)
+
+    pending = [
+        (index, capability, failure)
+        for capability, (index, failure) in unresolved.items()
+        if reminded_at.get(capability, -1) < index
+    ]
+    if not pending:
+        return None
+    _index, capability, failure = max(pending, key=lambda item: item[0])
+    return capability, failure
+
+
 # CompletionGuard：只检查可确定的停止前置条件；不会自行执行测试、调用模型或修改 Acceptance。
 class CompletionGuard:
     # 核对未完成项、证据引用和已经运行过的 verifier；没有 verifier 时不凭空要求一个。
@@ -72,6 +117,25 @@ class CompletionGuard:
                 ),
             )
 
+        followthrough = _pending_effect_followthrough(turn.get("activities") or [])
+        if followthrough is not None:
+            capability, failure = followthrough
+            return CompletionVerdict(
+                False,
+                FailureObservation(
+                    "execution",
+                    "completion_followthrough_required",
+                    f"completion rejected: {capability} has a recoverable failure with no later successful result",
+                    True,
+                    capability,
+                    expected="correct the effect attempt or explicitly reassess the blocker before completing",
+                    hint=(
+                        str(failure.get("hint") or "").strip()
+                        or "Use the durable failure observation to correct the effect attempt before claiming completion."
+                    ),
+                ),
+            )
+
         cited = tuple(getattr(decision, "evidence_refs", ()) or ())
         if cited:
             available = _observed_refs(
@@ -90,7 +154,7 @@ class CompletionGuard:
                         "completion rejected: cited evidence is not present in durable observations",
                         True,
                         expected="evidence_refs must reference sources/receipts already observed in this Run",
-                        hint="Use durable evidence_refs returned by tools/retrieval, or omit unsupported references.",
+                        hint="Use only durable evidence_refs returned by tools/retrieval; unsupported references must be removed rather than invented.",
                     ),
                 )
 
