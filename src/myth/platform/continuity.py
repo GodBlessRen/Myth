@@ -38,6 +38,7 @@ def history_digest(
     return digest_json(rows)
 
 
+# 用写入时正文摘要复核尾部消息；缺失/不一致都不能证明是同一历史，必须 fail closed。
 def _message_integrity(message: Mapping[str, Any]) -> bool:
     metadata = message.get("metadata")
     expected = metadata.get("content_digest") if isinstance(metadata, Mapping) else None
@@ -46,6 +47,7 @@ def _message_integrity(message: Mapping[str, Any]) -> bool:
     )
 
 
+# Project 指令属于模型语义环境，只绑定摘要；目录/指令正文仍由 Project 状态所有者保存。
 def _project_digest(project: Mapping[str, Any] | None) -> str | None:
     if not project:
         return None
@@ -87,6 +89,7 @@ _BINDING_REASONS = (
 )
 
 
+# 按稳定优先级返回首个环境变化原因；顺序固定使日志、评测与恢复诊断可重复。
 def _binding_change_reason(
     previous: Mapping[str, Any], current: Mapping[str, Any]
 ) -> str | None:
@@ -98,6 +101,7 @@ def _binding_change_reason(
     return None
 
 
+# 统一构造 metadata-only 计划；计划描述 Context 复用，不携带执行回调或外部副作用。
 def _plan(
     *,
     action: str,
