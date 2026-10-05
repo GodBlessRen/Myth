@@ -58,6 +58,10 @@ Web / CLI / 到期计划
 
 State 是持久事实，Context 是有预算的投影。Observation 可折叠并精确回读；Compact seed 绑定持久证据。知识使用 `knowledge.search → knowledge.resolve` 的 L0/L1/L2；L1 分片、L2 字符游标各自有明确单位和限额。分页不改变来源 digest。
 
+Turn 准入同时运行纯 `Continuity Guard`。它不创建第二套 Session/Runtime，而是验证上一轮派生历史是否仍可复用：持久消息正文与身份、模型/窗口/Project 绑定、Memory 中 `user_asserted / verified` Current Facts 摘要共同决定 `new / resume / catchup / rebuild` 与单调 `continuity epoch`。其中 `rebuild` 只表示从 durable history 重新构造派生 Context/Anchor，不删除历史，也不赋予任何 replay 权。
+
+Context Anchor 是历史表示，不是当前事实。v2 Anchor 保存 covered raw-history `source_digest`；复用前重新计算，来源失配就从原始消息重建。Historical Truth 与 Current Facts 分开：相似度只决定候选相关性，不能把旧历史升级成当前 authority。
+
 Memory 与派生知识视图的版本/撤销/刷新协议见 [MEMORY_LIFECYCLE](MEMORY_LIFECYCLE.md)。可选 Milvus 只提供候选，必须回 SQLite 核对 scope、digest/revision 和 archive/revoke；失效时报告降级，见 [MILVUS_RETRIEVAL](MILVUS_RETRIEVAL.md)。工具发现只改变后续可见目录，不直接授权执行。
 
 ## 专题与验证
