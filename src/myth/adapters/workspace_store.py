@@ -7,6 +7,14 @@ import time
 import uuid
 from contextlib import nullcontext
 from ..domain import canonical_json, digest_json, IdentityConflict, BudgetExceeded, InvalidTransition
+from ..domains.conversation_state import (
+    ACTIVE_TURN_STATUSES,
+    is_active,
+    is_drivable,
+    is_executor_candidate,
+    is_pausable,
+    require_transition,
+)
 from ..decision_runtime import DecisionRuntime
 from ..strategies import RuleIntentPicker, RuleResolutionController
 from ..platform.context_anchor import build_context_anchor
@@ -77,8 +85,15 @@ def new_id(prefix):
     return f"{prefix}_{uuid.uuid4().hex}"
 
 
-# ACTIVE_TURN_STATUSES：仍占有会话的状态集合；Pause/UNKNOWN 不能通过新 Turn 绕开。
-ACTIVE_TURN_STATUSES = {"RUNNING", "INTERRUPTED", "UNKNOWN", "WAITING_USER", "PAUSED"}
+
+
+# _write_turn_status：Turn 状态只能由仓储在事务内落库；纯 FSM 先校验语义，SQL 仍是唯一持久事实。
+def _write_turn_status(db, rid: str, current: str, target: str, *, error=None, question_id=None) -> None:
+    require_transition(current, target)
+    db.execute(
+        "UPDATE workspace_turns SET status=?,error=?,question_id=? WHERE run_id=?",
+        (target, error, question_id, rid),
+    )
 
 
 # 拥有工作区与 Turn 状态的适配器；准入协调同连接个人仓储，冻结历史快照且维护恢复游标。
@@ -795,7 +810,7 @@ class SqliteWorkspaceRepository:
         # 本地事务边界：下列写入一起提交，异常整体回滚；文件/网络效果须在事务外另行核对。
         with self.store.tx() as db:
             turn = self.turn(rid)
-            if turn["status"] not in {"RUNNING", "INTERRUPTED", "UNKNOWN"}:
+            if not is_drivable(turn["status"]):
                 return False
             old = db.execute(
                 "SELECT * FROM workspace_driver_leases WHERE run_id=?", (rid,)
@@ -877,7 +892,7 @@ class SqliteWorkspaceRepository:
         now = time.time() if now is None else float(now)
         with self.store.tx() as db:
             turn = self.turn(rid)
-            if turn["status"] not in {"RUNNING", "INTERRUPTED"} or self._has_uncertain_effect(rid):
+            if not is_executor_candidate(turn["status"]) or self._has_uncertain_effect(rid):
                 return None
             previous = db.execute("SELECT * FROM workspace_network_retries WHERE run_id=?", (rid,)).fetchone()
             # 同一次等待到期前的重复回调不增加退避，也不缩短已提交的截止时间。
@@ -890,7 +905,7 @@ class SqliteWorkspaceRepository:
                 "ON CONFLICT(run_id) DO UPDATE SET failures=excluded.failures,last_checked_at=excluded.last_checked_at,"
                 "retry_at=excluded.retry_at,reason=excluded.reason",
                 (rid, failures, previous["offline_since"] if previous else now, now, now + delay, reason))
-            db.execute("UPDATE workspace_turns SET status='INTERRUPTED',error=? WHERE run_id=?", (reason, rid))
+            _write_turn_status(db, rid, turn["status"], "INTERRUPTED", error=reason)
             db.execute("UPDATE runs SET state='RECOVERING' WHERE run_id=?", (rid,))
             # 观察字段不更新 updated_at/checkpoint_step；重连心跳不能冒充真实任务进展。
             db.execute("UPDATE workspace_execution_cursors SET phase='WAITING_CONNECTION',recovery_state='RESUME',detail=? WHERE run_id=?",
@@ -926,7 +941,7 @@ class SqliteWorkspaceRepository:
         # 本地事务边界：下列写入一起提交，异常整体回滚；文件/网络效果须在事务外另行核对。
         with self.store.tx() as db:
             turn = self.turn(rid)
-            if turn["status"] not in {"RUNNING", "INTERRUPTED", "UNKNOWN"}:
+            if not is_drivable(turn["status"]):
                 return turn
             uncertain = self._has_uncertain_effect(rid)
             status = "UNKNOWN" if uncertain else "INTERRUPTED"
@@ -947,10 +962,7 @@ class SqliteWorkspaceRepository:
                         "UPDATE workspace_operations SET state='UNKNOWN' WHERE decision_id=?",
                         (op["decision_id"],),
                     )
-            db.execute(
-                "UPDATE workspace_turns SET status=?,error=? WHERE run_id=?",
-                (status, str(reason)[:2000], rid),
-            )
+            _write_turn_status(db, rid, turn["status"], status, error=str(reason)[:2000])
             db.execute(
                 "UPDATE runs SET state='RECOVERING',control_revision=control_revision+1 WHERE run_id=?",
                 (rid,),
@@ -1236,10 +1248,7 @@ class SqliteWorkspaceRepository:
                     "UPDATE workspace_turns SET snapshot_json=? WHERE run_id=?",
                     (canonical_json(snapshot), rid),
                 )
-            db.execute(
-                "UPDATE workspace_turns SET status=?,question_id=?,error=NULL WHERE run_id=?",
-                (status, question_id, rid),
-            )
+            _write_turn_status(db, rid, turn["status"], status, question_id=question_id)
             db.execute(
                 "UPDATE runs SET state=? WHERE run_id=?",
                 ("WAITING" if question_id else "SUCCEEDED", rid),
@@ -1294,8 +1303,9 @@ class SqliteWorkspaceRepository:
             self._message(db, turn["session_id"], rid, "user", text, {})
             snapshot = turn["snapshot"]
             snapshot["messages"].append({"role": "user", "content": text})
+            require_transition(turn["status"], "RUNNING")
             db.execute(
-                "UPDATE workspace_turns SET status='RUNNING',question_id=NULL,snapshot_json=? WHERE run_id=?",
+                "UPDATE workspace_turns SET status='RUNNING',question_id=NULL,error=NULL,snapshot_json=? WHERE run_id=?",
                 (canonical_json(snapshot), rid),
             )
             db.execute("UPDATE runs SET state='RUNNING' WHERE run_id=?", (rid,))
@@ -1330,7 +1340,7 @@ class SqliteWorkspaceRepository:
         WAITING_USER；Resume 不能替用户回答，也不能把未决效果当作可重放。
         """
         turn = self.control_target(db, rid)
-        if turn["status"] not in ACTIVE_TURN_STATUSES:
+        if not is_active(turn["status"]):
             return None
         if command in {ControlCommand.SWITCH_MODEL, ControlCommand.SWITCH_THINKING}:
             settings = turn["settings"]
@@ -1340,15 +1350,15 @@ class SqliteWorkspaceRepository:
         if control.stopped:
             self.block(rid, "CANCELLED", "用户已终止本轮。已获 Ticket 的调用仍会保留真实晚到结果。", _db=db)
             status = "CANCELLED"
-        elif control.paused and turn["status"] in {"RUNNING", "INTERRUPTED", "UNKNOWN"}:
-            db.execute("UPDATE workspace_turns SET status='PAUSED',error=NULL WHERE run_id=?", (rid,))
+        elif control.paused and is_pausable(turn["status"]):
+            _write_turn_status(db, rid, turn["status"], "PAUSED")
             self.store.project_control(db, rid, state="PAUSED")
             self.store._event(db, rid, "RunPaused", {"revision": control.revision, "safe_point": True})
             status = "PAUSED"
         elif command is ControlCommand.RESUME and turn["status"] == "PAUSED":
             # Resume 只重新允许驱动；ConversationAgent 在任何新派发前必须先 recover，未知效果仍不重发。
             status = "RUNNING"
-            db.execute("UPDATE workspace_turns SET status=?,error=NULL WHERE run_id=?", (status, rid))
+            _write_turn_status(db, rid, turn["status"], status)
             self.store.project_control(db, rid, state="RUNNING")
             self.store._event(db, rid, "RunResumed", {"revision": control.revision})
         else:
@@ -1370,13 +1380,7 @@ class SqliteWorkspaceRepository:
         # 本地事务边界：下列写入一起提交，异常整体回滚；文件/网络效果须在事务外另行核对。
         with self.store.transaction_scope(_db) as db:
             turn = self.turn(rid)
-            if turn["status"] not in {
-                "RUNNING",
-                "INTERRUPTED",
-                "UNKNOWN",
-                "WAITING_USER",
-                "PAUSED",
-            }:
+            if not is_active(turn["status"]):
                 return
             if status in {"UNKNOWN", "CANCELLED"}:
                 for op in self.pending_operations(rid):
@@ -1394,10 +1398,7 @@ class SqliteWorkspaceRepository:
                         "UPDATE workspace_operations SET state='UNKNOWN' WHERE decision_id=?",
                         (op["decision_id"],),
                     )
-            db.execute(
-                "UPDATE workspace_turns SET status=?,error=? WHERE run_id=?",
-                (status, reason, rid),
-            )
+            _write_turn_status(db, rid, turn["status"], status, error=reason)
             if status in {"FAILED", "CANCELLED", "BUDGET_EXHAUSTED", "COMPLETED"}:
                 db.execute("DELETE FROM workspace_network_retries WHERE run_id=?", (rid,))
             self.store.project_control(db, rid, state="RECOVERING" if status == "UNKNOWN" else status,
@@ -1428,12 +1429,9 @@ class SqliteWorkspaceRepository:
         # 本地事务边界：下列写入一起提交，异常整体回滚；文件/网络效果须在事务外另行核对。
         with self.store.tx() as db:
             turn = self.turn(rid)
-            if turn["status"] not in {"UNKNOWN", "INTERRUPTED", "RUNNING"}:
+            if not is_drivable(turn["status"]):
                 return
-            db.execute(
-                "UPDATE workspace_turns SET status='RUNNING',error=NULL WHERE run_id=?",
-                (rid,),
-            )
+            _write_turn_status(db, rid, turn["status"], "RUNNING")
             db.execute("UPDATE runs SET state='RUNNING' WHERE run_id=?", (rid,))
             self._checkpoint(
                 db,
