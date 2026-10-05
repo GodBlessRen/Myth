@@ -17,7 +17,7 @@ Myth 是共享 SQLite 的单机模块化应用。纯合同、策略和应用用�
 | `adapters/delegation.py`、`adapters/parallel_delegation.py`、`adapters/subagent_runtime.py`、`platform/handoff.py` | 委派合同、共享子引擎视图、交接投影 | 批次 Ticket 原子准入；私有线程连接、共享预算与作用域恢复；父 Ticket 先于子效果；完整正文/元数据与默认摘要分开；拒收费用与替代义务均保留 |
 | `runtime.py`、`agent_runtime.py`、`workspace.py` | 装配与入口准入 | 依赖装配顺序、明确范围、初始业务事实是否完整提交 |
 | `goal_scheduler.py`、`web_workspace.py` | 计划机会与本机 Driver 生命周期 | opportunity 去重、租约、物理锁、线程独立连接和停止后的晚到收据 |
-| `providers/`、`auth/` | 供应商传输、独立 OAuth 和安全凭据 | 凭据不进 Runtime、网络超时不证明未执行、认证存储不是跨系统事务 |
+| `providers/`、`auth/` | 供应商传输、独立 OAuth 和安全凭据 | ChatGPT/Claude OAuth 使用各自客户端身份与回调；凭据不进 Runtime、网络超时不证明未执行、认证存储不是跨系统事务 |
 | `web.py`、`webui/`、`cli.py` | 入站与产品投影 | Host/Origin、稳定请求身份、迟到响应 generation、第三栏事实完整性 |
 | `evaluation_runner.py`、`task_benchmark.py`、`platform/evaluation*`、`platform/evolution*` | 固定测量、配对、发布资格与显式切换 | 完整分母、固定版本、真实字节 Oracle、partial 不发布、资格不自动 Promote |
 
