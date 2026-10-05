@@ -56,18 +56,19 @@ class PublicModelCatalog:
 
     def info(self, provider, model, *, force=False):
         """返回精确匹配的标价和来源；零占位、未知模型、订阅/本地渠道均不伪造免费。"""
-        if provider not in (*PROVIDER_KEYS, "ollama", "chatgpt") or not isinstance(model, str) or len(model) > 200:
+        if provider not in (*PROVIDER_KEYS, "ollama", "chatgpt", "claude_oauth") or not isinstance(model, str) or len(model) > 200:
             raise ValueError("invalid model catalog selection")
         if type(force) is not bool:
             raise ValueError("force must be a boolean")
         model = model.strip()
         result = {"provider": provider, "model": model, "pricing": None, "status": "unknown",
                   "checked_at": None, "stale": False, "source_url": CATALOG_URL,
-                  "official_url": OFFICIAL_URLS.get(provider), "max_output_tokens": None}
+                  "official_url": OFFICIAL_URLS.get("anthropic" if provider == "claude_oauth" else provider), "max_output_tokens": None}
         if not model:
             return {**result, "status": "unselected"}
-        if provider in {"ollama", "chatgpt"}:
-            return {**result, "status": "subscription" if provider == "chatgpt" else "local_or_hosted"}
+        if provider in {"ollama", "chatgpt", "claude_oauth"}:
+            status = "local_or_hosted" if provider == "ollama" else "subscription" if provider == "chatgpt" else "oauth_channel"
+            return {**result, "status": status}
         with self.lock:
             now = time.monotonic()
             if (force or not self.data or now - self.refreshed >= 3600) and now - self.attempted >= 10:
