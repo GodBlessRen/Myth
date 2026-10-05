@@ -139,7 +139,7 @@ class SqliteWorkspaceRepository:
         }
 
     # 校验 endpoint、模型、窗口与输出/步骤上限后保存白名单字段；拒绝 token 等未声明持久字段。
-    def save_settings(self, value):
+    def save_settings(self, value, *, validate_only=False):
         from ..platform.model_pool import clean_pool, PROVIDERS
         provider = value.get("provider", "ollama")
         if provider not in PROVIDERS:
@@ -177,11 +177,9 @@ class SqliteWorkspaceRepository:
             raise ValueError(
                 "num_ctx must leave room for output tokens and context reserve"
             )
-        if (
-            not isinstance(temperature, (int, float))
-            or not 0 <= float(temperature) <= 2
-        ):
-            raise ValueError("temperature must be between 0 and 2")
+        ceiling = 1 if provider == "anthropic" else 2
+        if type(temperature) not in {int, float} or not 0 <= float(temperature) <= ceiling:
+            raise ValueError(f"采样温度须为 0–{ceiling}")
         # thinking 保存 Provider 原生选项；Core 只限制形状，不维护全局 effort 枚举。
         from ..model_capabilities import normalize_thinking
         thinking = normalize_thinking(value.get("thinking"))
@@ -196,6 +194,8 @@ class SqliteWorkspaceRepository:
             "temperature": float(temperature),
             "model_pool": clean_pool(value.get("model_pool")),
         }
+        if validate_only:
+            return clean
         # 本地事务边界：下列写入一起提交，异常整体回滚；文件/网络效果须在事务外另行核对。
         with self.store.tx() as db:
             db.execute(
@@ -426,11 +426,12 @@ class SqliteWorkspaceRepository:
         ):
             raise ValueError("attach at most four document ids")
         # 入口身份绑定用户意图、固定设置和显式附件；召回 Memory 是准入后投影，环境记忆变化不能破坏同 request_id 重试。
+        from ..platform.model_pool import pricing_identity
         identity = digest_json(
             {
                 "session_id": sid,
                 "text": text,
-                "settings": settings,
+                "settings": pricing_identity(settings),
                 "documents": document_ids,
                 "goal_id": goal_id,
                 "evaluation_harness_mechanisms": self.evaluation_harness_mechanisms,

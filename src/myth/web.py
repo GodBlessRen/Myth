@@ -448,8 +448,14 @@ def make_handler(service: AgentWebService):
                 if path == "/studio.js":
                     self._asset("studio.js", "text/javascript; charset=utf-8")
                     return
+                if path == "/choices.js":
+                    self._asset("choices.js", "text/javascript; charset=utf-8")
+                    return
                 if path == "/taiji.svg":
                     self._asset("taiji.svg", "image/svg+xml")
+                    return
+                if path == "/ink-taiji.png":
+                    self._asset("ink-taiji.png", "image/png")
                     return
                 # 主题引导只读取浏览器偏好；静态白名单保持封闭，CSP 不开放内联脚本。
                 if path == "/theme.js":

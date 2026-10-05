@@ -51,6 +51,14 @@ class BrowserFixtureProvider:
 
 # 回归服务只替换传输目录，其他产品与持久执行均继承真实门面。
 class BrowserFixtureWorkspace(ConversationWebService):
+    def __init__(self, root):
+        """固定公开价格目录替身，浏览器回归不访问真实模型或联网计费。"""
+        super().__init__(root)
+        from myth.adapters.model_catalog import PublicModelCatalog
+        self.model_catalog = PublicModelCatalog(loader=lambda: {key: {"models": {
+            model: {"cost": {"input": 1, "output": 2}, "limit": {"output": 8192}}
+            for model in ("review-model", "review-reasoning")
+        }} for key in ("openai", "anthropic", "deepseek", "moonshotai")})
     # 每次使用固定 Turn 设置选择替身目录身份。
     def provider(self, settings):
         return BrowserFixtureProvider(settings["provider"])

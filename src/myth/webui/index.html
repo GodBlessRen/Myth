@@ -18,11 +18,11 @@
 <!-- 三栏布局：导航、当前工作区、常驻 Runtime Observatory；窄屏入口保留全部观测区域。 -->
 <div class="shell">
 <aside aria-label="主导航" class="sidebar" id="sidebar">
-<div class="sidebar-brand"><a aria-label="Myth 工作空间" class="brand" href="#chat"><span aria-hidden="true" class="brand-symbol"><img class="taiji-mark" src="/taiji.svg" alt="" width="32" height="32"/></span><span class="brand-word">Myth</span></a><button aria-expanded="true" aria-label="收起侧栏" class="icon-button" id="sidebarCollapse" title="收起侧栏"><svg aria-hidden="true" class="icon" viewBox="0 0 24 24"><path d="M4 4h16v16H4ZM9 4v16m7-12-4 4 4 4"></path></svg></button></div>
+<div class="sidebar-brand"><a aria-label="Myth 工作空间" class="brand" href="#chat"><span aria-hidden="true" class="brand-symbol"><img class="ink-mark" src="/ink-taiji.png" alt="" width="56" height="24"/></span><span class="brand-word">Myth</span></a><button aria-expanded="true" aria-label="收起侧栏" class="icon-button" id="sidebarCollapse" title="收起侧栏"><svg aria-hidden="true" class="icon" viewBox="0 0 24 24"><path d="M4 4h16v16H4ZM9 4v16m7-12-4 4 4 4"></path></svg></button></div>
 <button class="new-chat" id="newChat" title="新建对话"><span data-icon="plus"></span><span class="nav-text">新建对话</span><kbd>⇧ O</kbd></button>
 <button class="command-trigger" id="commandToggle" title="搜索与快捷操作"><span data-icon="search"></span><span class="nav-text">搜索与快捷操作</span><kbd>Ctrl K</kbd></button>
 <div class="sidebar-library"><details class="nav-group" data-nav-group="work" open><summary>工作<svg aria-hidden="true" class="icon fold-chevron" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"></path></svg></summary><nav aria-label="工作" class="navigation primary-nav"><a data-page="chat" href="#chat" title="对话"><span data-icon="chat"></span><span class="nav-text">对话</span></a><a data-page="goals" href="#goals" title="目标与计划"><span data-icon="target"></span><span class="nav-text">目标与计划</span></a></nav></details><details class="nav-group" data-nav-group="library" open><summary>资料<svg aria-hidden="true" class="icon fold-chevron" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"></path></svg></summary><nav aria-label="资料" class="navigation primary-nav"><a data-page="projects" href="#projects" title="项目"><span data-icon="folder"></span><span class="nav-text">项目</span></a><a data-page="knowledge" href="#knowledge" title="知识库"><span data-icon="book"></span><span class="nav-text">知识库</span></a><a data-page="sessions" href="#sessions" title="会话"><span data-icon="history"></span><span class="nav-text">会话</span></a></nav></details><details class="nav-group recent-group" data-nav-group="recent" open><summary>最近对话<span class="nav-count" id="recentCount"></span><svg aria-hidden="true" class="icon fold-chevron" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"></path></svg></summary><div class="recent-sessions" id="recentSessions"></div><a class="all-sessions" href="#sessions">查看全部会话<span aria-hidden="true">↗</span></a></details></div>
-<div class="sidebar-bottom"><nav aria-label="系统" class="navigation secondary-nav"><a data-page="runtime" href="#runtime" title="Runtime"><span data-icon="activity"></span><span class="nav-text">Runtime</span></a><a data-page="settings" href="#settings" title="设置"><span data-icon="settings"></span><span class="nav-text">设置</span></a></nav><div class="local-profile"><span aria-hidden="true" class="workspace-avatar"><img class="taiji-mark" src="/taiji.svg" alt="" width="24" height="24"/></span><div><strong>个人工作空间</strong><small>本地工作区</small></div></div></div>
+<div class="sidebar-bottom"><nav aria-label="系统" class="navigation secondary-nav"><a data-page="runtime" href="#runtime" title="Runtime"><span data-icon="activity"></span><span class="nav-text">Runtime</span></a><a data-page="settings" href="#settings" title="设置"><span data-icon="settings"></span><span class="nav-text">设置</span></a></nav><div class="local-profile"><span aria-hidden="true" class="workspace-avatar"><img class="ink-mark" src="/ink-taiji.png" alt="" width="56" height="24"/></span><div><strong>个人工作空间</strong><small>本地工作区</small></div></div></div>
 </aside>
 <button aria-label="关闭导航" class="sidebar-shade hidden" id="sidebarShade"></button>
 <main class="main" id="mainContent" tabindex="-1">
@@ -305,31 +305,31 @@
 <div class="connection-result" id="connectionResult"></div>
 <div class="settings-divider"><h3>执行参数</h3><p>应用于后续发起的任务。</p></div><div class="two-fields">
 <div>
-<label for="maxSteps">每轮最多步骤</label><input id="maxSteps" max="32" min="2" type="number" value="12"/>
+<label for="maxSteps">每轮最多步骤</label><input id="maxSteps" max="32" min="2" type="number" value="12" required=""/>
 </div>
 <div>
-<label for="maxTokens">每步输出 Token</label><input id="maxTokens" max="393216" min="128" type="number" value="2048"/>
+<label for="maxTokens">每步输出 Token</label><input id="maxTokens" max="393216" min="128" type="number" value="2048" required=""/>
 </div>
 </div>
 <div class="two-fields">
 <div id="ollamaContextField">
-<label for="numCtx">Ollama 上下文 Token</label><input id="numCtx" max="262144" min="2048" type="number" value="8192"/>
+<label for="numCtx">Ollama 上下文 Token</label><input id="numCtx" max="262144" min="2048" type="number" value="8192" required=""/>
 </div>
 <div>
-<label for="temperature">采样温度</label><input id="temperature" max="2" min="0" step="0.1" type="number" value="0"/>
+<label for="temperature">采样温度</label><input id="temperature" max="2" min="0" step="0.1" type="number" value="0" aria-describedby="temperatureMeta" required=""/><small class="field-meta" id="temperatureMeta">越低越稳定，越高越多样。</small>
 </div>
 </div>
 <div class="adaptive-field hidden" id="reasoningField">
-<label for="reasoningSetting">Thinking</label>
+<label for="reasoningSetting">推理强度 · Thinking</label>
 <select id="reasoningSetting"></select>
 <small class="field-meta" id="reasoningMeta"></small>
 </div>
 <div class="model-capability-meta hidden" id="modelCapabilityMeta"></div>
-<details class="pool-advanced"><summary>主模型价格（可选）</summary><div id="poolMainPricing"></div></details>
+<div id="poolMainPricing"></div>
 <div class="settings-divider"><h3>子模型池</h3><p>最多配置 3 个模型。初始能力作为起点，主模型会根据任务表现调整选择。</p></div>
 <label class="pool-toggle"><input id="poolEnabled" type="checkbox" checked/>允许委派子任务</label>
 <label class="pool-toggle"><input id="poolAdaptive" type="checkbox" checked/>根据主模型评分调整后续选择</label>
-<p class="field-meta">费用按输入、输出标价估算，未计缓存折扣；留空显示未计价。API Key 按提供方共用，ChatGPT 使用上方 OAuth 连接。</p>
+<p class="field-meta">按所选模型自动查询标价；未公布或查询失败时保持未知。费用为估算，未计缓存折扣。API Key 按提供方共用，ChatGPT 使用上方 OAuth 连接。</p>
 <div id="poolChildren"></div>
 <button class="secondary" id="poolAdd" type="button">添加子模型</button>
 <div class="settings-foot">
@@ -501,5 +501,6 @@
 <script src="/inspector.js"></script>
 <script src="/goals.js"></script>
 <script src="/studio.js"></script>
+<script src="/choices.js"></script>
 </body>
 </html>

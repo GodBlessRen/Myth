@@ -9,7 +9,7 @@ from typing import Any
 
 
 # _SETTING_TOKEN：控制值只允许短标识，阻止自由文本借设置字段进入供应商请求。
-_SETTING_TOKEN = re.compile(r"^[a-z0-9][a-z0-9_.-]{0,31}$")
+_SETTING_TOKEN = re.compile(r"^[a-z][a-z0-9_.-]{0,31}$")
 
 
 # 构造 reasoning 能力投影；levels/off/default 保持 Provider 原生值，不做跨厂商语义映射。
@@ -96,6 +96,8 @@ def normalize_thinking(value: Any) -> str | bool | None:
         return None
     if isinstance(value, bool):
         return value
+    if not isinstance(value, str):
+        raise ValueError("Thinking 必须选择模型原生档位，不能填写数字")
     token = str(value).strip().lower()
     if not token or token == "default":
         return None
@@ -136,8 +138,12 @@ def validate_model_selection(
         if thinking is not None:
             raise ValueError("当前模型未声明可调 Thinking；请使用 Provider 默认行为。")
         return
-    if thinking is None or isinstance(thinking, bool):
+    if thinking is None:
         return
+    if isinstance(thinking, bool):
+        if reasoning.get("kind") in {"toggle", "boolean"} or thinking is reasoning.get("off") or (thinking is False and reasoning.get("off") is not None):
+            return
+        raise ValueError("当前模型使用推理档位；请选择其原生选项")
     allowed = {
         str(value)
         for value in (reasoning.get("levels") or [])

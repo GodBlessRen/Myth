@@ -18,6 +18,7 @@ from .strategies import RuleIntentPicker
 from .goal_scheduler import GoalScheduler
 from .durable_executor import executor_snapshot, run_liveness
 from .session_statistics import session_statistics
+from .adapters.model_catalog import PublicModelCatalog
 
 
 # HTTP 产品与后台线程门面；线程内独立连接，active 为本机缓存，Lease 与游标为持久恢复事实。
@@ -46,6 +47,8 @@ class ConversationWebService:
         self._connection_cache = {}
         # _connection_lock：目录检查串行化避免同时刷新；不与 Runtime 写事务组合。
         self._connection_lock = threading.Lock()
+        # model_catalog：固定公共目录缓存，价格网络查询只在业务事务之外进行。
+        self.model_catalog = PublicModelCatalog()
 
     # 逐次读取待恢复/到期机会，在事务外检查供应商，再准入并交正常 Driver；本机调度并发有上限。
     def scheduler_tick(self):
@@ -570,7 +573,7 @@ class ConversationWebService:
 
     # 校验明确用户消息与固定设置，读取作用域 Memory 后调用原子 Turn admission；提交后才启动 Driver。
     def send(self, sid, value):
-        settings = self._use("settings")
+        settings = self.model_catalog.quote_settings(self._use("settings"))
         text = value.get("text")
         goal_id = value.get("goal_id") or None
         pick = RuleIntentPicker().pick(str(text or ""), {})
@@ -602,6 +605,7 @@ class ConversationWebService:
                 memory_retrieval_report=memory_report["retrieval"],
                 goal_id=goal_id,
                 goal_context=goal_context,
+                _settings=settings,
             )
             workspace.control.ensure(turn["run_id"])
         if turn["status"] == "RUNNING":
@@ -986,7 +990,14 @@ class ConversationWebService:
     # 分派明确产品写入操作；参数、身份与权限规则由对应用例/仓储校验。
     def post(self, parts, value):
         if parts == ["settings"]:
-            return self._use("save_settings", value)
+            # 先验证公开输入，再在事务外查询；最后一次短事务保存已解析配置。
+            with MythRuntime(self.root) as runtime:
+                clean = Workspace(runtime).repository.save_settings(value, validate_only=True)
+            return self._use("save_settings", self.model_catalog.quote_settings(clean))
+        if parts == ["model-info"]:
+            if not isinstance(value, dict) or set(value) - {"provider", "model", "force"}:
+                raise ValueError("invalid model info fields")
+            return self.model_catalog.info(value.get("provider"), value.get("model", ""), force=value.get("force", False))
         if parts == ["connection"]:
             return self.connection(value, force=True)
         if parts == ["memories"]:

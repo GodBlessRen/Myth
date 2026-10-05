@@ -51,7 +51,7 @@ class WebSurfaceTests(unittest.TestCase):
                     self.assertIn("script-src 'self'", response.headers["Content-Security-Policy"])
                     self.assertLess(html.index('src="/theme.js"'), html.index('href="/app.css"'))
                     self.assertNotRegex(html, r"<script(?![^>]*src=)[^>]*>\s*\S")
-                for path, content_type in (("/theme.js", "text/javascript"), ("/studio.js", "text/javascript"), ("/taiji.svg", "image/svg+xml"), ("/favicon.svg", "image/svg+xml"), ("/fonts/myth-sans.woff2", "font/woff2"), ("/fonts/myth-serif.woff2", "font/woff2"), ("/fonts/myth-latin.woff2", "font/woff2")):
+                for path, content_type in (("/theme.js", "text/javascript"), ("/studio.js", "text/javascript"), ("/choices.js", "text/javascript"), ("/ink-taiji.png", "image/png"), ("/taiji.svg", "image/svg+xml"), ("/favicon.svg", "image/svg+xml"), ("/fonts/myth-sans.woff2", "font/woff2"), ("/fonts/myth-serif.woff2", "font/woff2"), ("/fonts/myth-latin.woff2", "font/woff2")):
                     with urlopen(base + path, timeout=3) as response:
                         self.assertEqual(response.status, 200)
                         self.assertIn(content_type, response.headers["Content-Type"])
