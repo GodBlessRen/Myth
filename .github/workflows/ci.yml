@@ -17,7 +17,8 @@ jobs:
         os: [ubuntu-latest, windows-latest]
         python: ["3.12", "3.13"]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 5
+    # Windows 慢速 runner 的安装与 444 项恢复回归可能超过五分钟；保留有界总时限。
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
         with:
