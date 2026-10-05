@@ -42,3 +42,5 @@ Conversation 回答结束不等于 Goal 完成或语义验收通过。Delivery �
 `.runtime/`、数据库、环境文件、私钥与用户项目不提交。垃圾站 `.trash/` 不参与运行，也不进入 wheel、sdist 和 Git 源码包。生产提示、私有文档、真实 token/trace 不能作为测试夹具。若秘钥进入历史，必须轮换；后续删文件不能撤销泄漏。
 
 当前验证入口见 [VALIDATION](docs/VALIDATION.md)，故障与证据见 [审查报告](docs/REFINEMENT_REVIEW.md)。
+
+- Claude OAuth uses a separate `claude_oauth` provider identity and dedicated loopback callback. Myth requires its own configurable public client ID and must not reuse Claude Code / Anthropic CLI client identity; PKCE/state are mandatory, OAuth tokens never enter Runtime SQLite, events, artifacts, logs, or Web JSON.
