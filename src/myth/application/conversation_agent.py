@@ -4,6 +4,7 @@
 from ..acceptance import ContextBudgetError
 from ..domain import BudgetExceeded, RecoveryRequired, PatchContractError, ExecutionDeferred
 from ..failures import failure_result, observe_failure
+from ..domains.conversation_state import is_drivable
 from ..models import StepDecision, DecisionValidationError, ProviderKnownFailure, ProviderUnavailable
 from ..platform.completion import CompletionGuard
 from ..conversation_ports import (
@@ -84,13 +85,13 @@ class ConversationAgent:
                     self.repository, self.memory, self.personal, run_id=run_id, limit=1
                 )
                 turn = self.repository.turn(run_id)
-                if turn["status"] in {"RUNNING", "INTERRUPTED", "UNKNOWN"}:
+                if is_drivable(turn["status"]):
                     self.delivery.ensure_root_work_item(turn)
             if turn["status"] == "PAUSED":
                 return
             if (turn.get("network_retry") or {}).get("remaining_seconds", 0) > 0:
                 return
-            if turn["status"] not in {"RUNNING", "INTERRUPTED", "UNKNOWN"}:
+            if not is_drivable(turn["status"]):
                 return
             if provider.provider_id != turn["settings"]["provider"]:
                 raise ValueError("provider differs from fixed turn")
