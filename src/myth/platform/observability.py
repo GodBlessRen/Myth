@@ -146,38 +146,62 @@ class TraceProjection:
             if result.get("fallback_to_parent"):
                 nodes[-1].update({"detail": "主模型接手：" + str(result.get("summary") or "模型池不可用"),
                                   "routing": result.get("routing"), "fallback_to_parent": True})
-            child = result.get("subagent") if isinstance(result.get("subagent"), dict) else {}
-            child_request_key = str(child.get("request_key") or "")
-            if not child_request_key and capability == "agent.delegate" and decision_id:
-                prefix = f"{subagent_prefix}{decision_id}:"
-                child_request_key = (operation.get("intent") or {}).get("delegate", {}).get("request_key") or prefix
-            # 一个子合同可有多步及零派发重试；按账本顺序逐个映射，不能用 key 字典覆盖早先 Attempt。
-            child_calls = [x for x in invocations if child_request_key and
-                (x.get("request_key") == child_request_key or str(x.get("request_key") or "").startswith(child_request_key + ":"))]
-            for ordinal, child_invocation in enumerate(child_calls, 1):
-                child_attempt_id = str(child_invocation.get("model_attempt_id") or "")
-                if child_attempt_id:
-                    mapped_attempts.add(child_attempt_id)
-                child_id = f"subagent:{child_attempt_id or decision_id}"
-                nodes.append({"id": child_id, "kind": "subagent", "label": f"子模型 · 调用 {ordinal}",
-                    "detail": "隔离子流程", "state": child_invocation.get("state") or "UNKNOWN", "depth": 2,
-                    "request_key": child_invocation.get("request_key"), "attempt_id": child_attempt_id,
-                    "parent_decision_id": decision_id, "role_id": child.get("role_id") or "isolated_worker"})
-                edges.append({"source": tool_id if ordinal == 1 else cursor, "target": child_id, "kind": "delegate" if ordinal == 1 else "child_next"})
-                cursor = child_id
-                child_decision = decision_by_attempt.get(child_attempt_id) or {}
-                child_op = operation_by_decision.get(child_decision.get("decision_id"))
-                if child_op:
-                    input_id = f"tool:{child_op['decision_id']}"
-                    nodes.append({"id": input_id, "kind": "tool", "label": child_op["capability"], "detail": "子任务输入回读",
-                        "state": child_op["state"], "depth": 3, "decision_id": child_op["decision_id"], "ticket_id": child_op.get("ticket_id")})
-                    edges.append({"source": child_id, "target": input_id, "kind": "tool"})
-                    cursor = input_id
-            contract = (operation.get("intent") or {}).get("delegate") or {}
-            for dependency in contract.get("depends_on", []):
-                edges.append({"source": f"tool:{dependency}", "target": tool_id, "kind": "dependency"})
-            if contract.get("replaces"):
-                edges.append({"source": f"tool:{contract['replaces']}", "target": tool_id, "kind": "replacement"})
+            branch_operations = ([operation_by_decision[c["delegation_id"]]
+                                  for c in (operation.get("intent") or {}).get("parallel", [])]
+                                 if "parallel" in (operation.get("intent") or {}) else [operation])
+            tails = []
+            for branch in branch_operations:
+                branch_id = branch["decision_id"]
+                branch_tool = tool_id
+                if branch is not operation:
+                    branch_tool = f"tool:{branch_id}"
+                    nodes.append({"id": branch_tool, "kind": "tool", "label": "agent.delegate",
+                        "detail": "并行子任务", "state": branch["state"], "depth": 2,
+                        "decision_id": branch_id, "ticket_id": branch.get("ticket_id")})
+                    edges.append({"source": tool_id, "target": branch_tool, "kind": "fork"})
+                branch_result = branch.get("result") or {}
+                child = branch_result.get("subagent") or {}
+                contract = (branch.get("intent") or {}).get("delegate") or {}
+                child_request_key = child.get("request_key") or contract.get("request_key") or (
+                    f"{subagent_prefix}{branch_id}:" if branch.get("capability") == "agent.delegate" else "")
+                branch_cursor = branch_tool
+                child_calls = [x for x in invocations if child_request_key and
+                    (x.get("request_key") == child_request_key or str(x.get("request_key") or "").startswith(child_request_key + ":"))]
+                for ordinal, child_invocation in enumerate(child_calls, 1):
+                    child_attempt_id = str(child_invocation.get("model_attempt_id") or "")
+                    if child_attempt_id:
+                        mapped_attempts.add(child_attempt_id)
+                    child_id = f"subagent:{child_attempt_id or branch_id}"
+                    nodes.append({"id": child_id, "kind": "subagent", "label": f"子模型 · 调用 {ordinal}",
+                        "detail": "隔离子流程", "state": child_invocation.get("state") or "UNKNOWN", "depth": 3 if branch is not operation else 2,
+                        "request_key": child_invocation.get("request_key"), "attempt_id": child_attempt_id,
+                        "parent_decision_id": branch_id, "role_id": child.get("role_id") or "isolated_worker",
+                        "batch_id": contract.get("batch_id"), "ordinal": contract.get("ordinal")})
+                    edges.append({"source": branch_cursor, "target": child_id, "kind": "delegate" if ordinal == 1 else "child_next"})
+                    branch_cursor = child_id
+                    child_decision = decision_by_attempt.get(child_attempt_id) or {}
+                    child_op = operation_by_decision.get(child_decision.get("decision_id"))
+                    if child_op:
+                        input_id = f"tool:{child_op['decision_id']}"
+                        nodes.append({"id": input_id, "kind": "tool", "label": child_op["capability"], "detail": "子任务输入回读",
+                            "state": child_op["state"], "depth": 3, "decision_id": child_op["decision_id"], "ticket_id": child_op.get("ticket_id")})
+                        edges.append({"source": child_id, "target": input_id, "kind": "tool"})
+                        branch_cursor = input_id
+                for dependency in contract.get("depends_on", []):
+                    edges.append({"source": f"tool:{dependency}", "target": branch_tool, "kind": "dependency"})
+                if contract.get("replaces"):
+                    edges.append({"source": f"tool:{contract['replaces']}", "target": branch_tool, "kind": "replacement"})
+                tails.append(branch_cursor)
+            if "parallel" in (operation.get("intent") or {}):
+                join_id = f"join:{decision_id}"
+                nodes.append({"id": join_id, "kind": "tool", "label": "并行汇合", "depth": 1,
+                    "detail": "按固定任务顺序交接", "state": operation["state"],
+                    "parallel": result.get("parallel")})
+                for tail in tails or [tool_id]:
+                    edges.append({"source": tail, "target": join_id, "kind": "join"})
+                cursor = join_id
+            elif tails:
+                cursor = tails[-1]
 
         terminal_id = f"state:{run_id}"
         nodes.append(

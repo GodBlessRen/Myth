@@ -645,7 +645,8 @@ class DecisionRuntime:
         if existing is not None:
             if existing["run_id"] != run_id:
                 raise ValueError("model request key belongs to another run")
-            self.recover(run_id)
+            # 去重只核对当前请求；并行兄弟可能尚在网络调用，不能扫描整 Run。
+            self.recover(run_id, request_key_prefix=request_key)
             saved = self.store.db.execute(
                 "SELECT * FROM step_decisions WHERE model_attempt_id=?",
                 (existing["model_attempt_id"],),
@@ -772,14 +773,18 @@ class DecisionRuntime:
         decision_id = self._save_decision(run_id, attempt_id, response_ref, decision)
         return decision_id, decision
 
-    def recover(self, run_id: str | None = None) -> list[dict[str, Any]]:
-        """用已有请求、Ticket、收据和对象核对执行状态；没有足够事实时保留 UNKNOWN，不盲目重发。"""
+    def recover(self, run_id: str | None = None, *, request_key_prefix: str | None = None) -> list[dict[str, Any]]:
+        """按作用域核对已有收据；并行子流程只核对自身，不将仍在调用的兄弟 Ticket 标为 UNKNOWN。"""
 
         sql = "SELECT * FROM model_invocations WHERE state IN (?,?)"
         args: list[Any] = [AttemptState.TICKETED.value, AttemptState.UNKNOWN.value]
         if run_id is not None:
             sql += " AND run_id=?"
             args.append(run_id)
+        if request_key_prefix is not None:
+            sql += (" AND model_attempt_id IN (SELECT model_attempt_id FROM model_request_keys "
+                    "WHERE request_key=? OR substr(request_key,1,?)=?)")
+            args.extend([request_key_prefix, len(request_key_prefix) + 1, request_key_prefix + ":"])
         recovered: list[dict[str, Any]] = []
         for row in self.store.db.execute(sql, args).fetchall():
             attempt_id = str(row["model_attempt_id"])

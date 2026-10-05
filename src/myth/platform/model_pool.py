@@ -151,9 +151,15 @@ def route(pool, task_type, difficulty, history, unavailable=(), preferred_profil
             "history_samples": len(history)}
 
 
+def delegated_results(activities):
+    """按父步骤与批次 ordinal 展开交接；单项与并行项共享审核、替代和上下文规则。"""
+    return [child for x in activities for child in
+            ((x.get("result") or {}).get("results") or [x.get("result") or {}])]
+
+
 def pending_resolutions(activities):
     """拒收结果必须由主模型提供替代内容，或被已接受的新委派取代；花销仍保留。"""
-    results = [(x.get("result") or {}) for x in activities]
+    results = delegated_results(activities)
     resolved = {r["resolution"]["delegation_id"] for r in results if r.get("resolution")}
     accepted = {r["review"]["delegation_id"] for r in results if r.get("review", {}).get("accepted")}
     resolved.update(r.get("handoff", {}).get("replaces") for r in results if r.get("delegation_id") in accepted)
@@ -173,6 +179,7 @@ def estimate_cost(usage, rates):
 
 def pending_reviews(activities):
     """从已消费工具事实计算尚未评分的子任务，避免凭模型文字宣称已评审。"""
-    reviews = {(x.get("result") or {}).get("review", {}).get("delegation_id") for x in activities}
-    return [x["decision_id"] for x in activities if (x.get("result") or {}).get("review_required")
-            and x.get("decision_id") not in reviews]
+    results = delegated_results(activities)
+    reviews = {x.get("review", {}).get("delegation_id") for x in results}
+    return [x["delegation_id"] for x in results if x.get("review_required")
+            and x["delegation_id"] not in reviews]

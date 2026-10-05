@@ -50,6 +50,17 @@ def _fold_activity(activity):
             result[key + "_count"] = len(result[key])
             result[key] = result[key][:3]
             folded.append(key)
+    if result.get("results"):
+        # 批次是三个交接导航；共享 Context 编译器限制每项预览，完整子摘要在 trace 中回读。
+        children = []
+        for child in result["results"]:
+            child = dict(child)
+            if isinstance(child.get("summary"), str) and len(child["summary"]) > 100:
+                child["summary"] = child["summary"][:100]
+                child["summary_truncated"] = True
+                folded.append("results.summary")
+            children.append(child)
+        result["results"] = children
     if folded:
         result["context_folded_fields"] = folded
         decision_id = activity.get("decision_id")
@@ -332,7 +343,8 @@ def compile_conversation_context(
     for index, activity in enumerate(activities):
         ref = f"activity:{activity['step']}"
         latest = index == len(activities) - 1
-        projected, shortened = (activity, False) if latest else _fold_activity(activity)
+        projected, shortened = ((activity, False) if latest and not (activity.get("result") or {}).get("results")
+                                else _fold_activity(activity))
         if shortened:
             folded.append(ref)
         add(

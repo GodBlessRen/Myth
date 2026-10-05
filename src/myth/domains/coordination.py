@@ -129,7 +129,7 @@ def default_strategies() -> StrategyRegistry:
                 "multi_agent",
                 "Multi-Agent",
                 StrategyState.CONNECTED,
-                "Parent LLM may choose a bounded isolated worker through agent.delegate; the child cannot write, use tools or recursively delegate and returns a contracted result.",
+                "Parent LLM may use agent.delegate or up to three concurrent isolated workers via agent.parallel; children only read fixed inputs, cannot write or recursively delegate, and return reviewed handoffs.",
             ),
             StrategySpec(
                 "personal_agent",

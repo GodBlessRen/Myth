@@ -38,9 +38,9 @@ class DelegationCoordinator:
             raise ValueError("模型池回退未产生子结果，无需评分或回读")
         return op
 
-    def delegate(self, turn, decision_id, args, provider):
+    def delegate(self, turn, decision_id, args, provider, *, force_factory=False):
         """固定输入/模型/依赖/顺序后派发；恢复使用原合同，不重新路由已经在途的任务。"""
-        if provider is None:
+        if provider is None and not force_factory:
             raise ValueError("agent.delegate requires the turn provider")
         old = self.repository.operation(decision_id)
         if old:
@@ -48,63 +48,15 @@ class DelegationCoordinator:
                 return old["result"]
             contract, op = old["intent"]["delegate"], old
         else:
-            spec = self.execution.subagents.get("isolated_worker")
-            task, context, expected = args.get("task"), args.get("context", ""), args.get("expected_output", "")
-            if not isinstance(task, str) or not task.strip() or len(task) > spec.max_task_chars:
-                raise ValueError("agent.delegate task must be non-empty and within the role limit")
-            if not isinstance(context, str) or len(context) > spec.max_context_chars:
-                raise ValueError("agent.delegate context exceeds the role limit")
-            if not isinstance(expected, str) or len(expected) > spec.max_expected_output_chars:
-                raise ValueError("agent.delegate expected_output exceeds the role limit")
-            refs = args.get("source_refs", [])
-            if not isinstance(refs, list) or any(not isinstance(x, str) or len(x) > 500 for x in refs) or len(refs) > spec.max_source_refs:
-                raise ValueError("invalid delegated source_refs")
-            refs = list(dict.fromkeys(x.strip() for x in refs if x.strip()))
-            if any(x not in self.execution._available_subagent_source_refs(turn) for x in refs):
-                raise ValueError("agent.delegate source_refs must come from admitted parent observations")
-            dependencies, replaces = args.get("depends_on", []), args.get("replaces")
-            if not isinstance(dependencies, list) or len(dependencies) > 3 or any(not isinstance(x, str) for x in dependencies):
-                raise ValueError("invalid delegation dependencies")
-            reviews = {((x.get("result") or {}).get("review") or {}).get("delegation_id"):
-                       (x.get("result") or {}).get("review") for x in self.repository.operations(turn["run_id"])}
-            for target in dependencies:
-                self._target(turn, target)
-                if not (reviews.get(target) or {}).get("accepted"):
-                    raise ValueError("依赖结果须先由主模型采用，不能依赖未评分或已拒收结果")
-            if replaces:
-                self._target(turn, replaces)
-                if not reviews.get(replaces) or reviews[replaces]["accepted"]:
-                    raise ValueError("重新派发只能取代已拒收的本轮子任务")
-            settings = turn["settings"]
-            if settings["max_steps"] - turn["current_step"] < 2:
-                return {"capability_id": "agent.delegate", "fallback_to_parent": True, "summary": "剩余步骤不足以评分与汇总，请主模型自行完成。"}
-            pool = clean_pool(settings.get("model_pool"))
-            for candidate in pool["children"]:
-                candidate["effective_output_tokens"] = min(candidate["max_output_tokens"], settings["max_output_tokens"],
-                    max(64, self.execution.subagents.child_budget(spec.role_id, {"output_tokens": settings["max_output_tokens"]})["output_tokens"]))
-            unavailable = [((x.get("result") or {}).get("routing") or {}).get("profile", {}).get("id")
-                           for x in self.repository.operations(turn["run_id"]) if (x.get("result") or {}).get("fallback_reason") == "provider_failure"]
-            routing = route(pool, args.get("task_type", "general"), args.get("difficulty", "medium"),
-                self.repository.model_feedback(), unavailable, args.get("profile_id"))
-            profile = routing["profile"]
-            if profile is None:
-                return {"capability_id": "agent.delegate", "routing": routing, "fallback_to_parent": True,
-                        "summary": "没有满足要求的可用子模型，请主模型自行完成。"}
-            context_digest = sha256_bytes(context.encode())
-            contract = {"protocol_version": "handoff-v2", "run_id": turn["run_id"], "delegation_id": decision_id,
-                "sequence": turn["current_step"], "depends_on": dependencies, "replaces": replaces,
-                "task": task.strip(), "context": context, "expected_output": expected,
-                "task_digest": digest_json({"task": task.strip(), "expected_output": expected}),
-                "context_digest": context_digest, "input_source_ref": f"delegation-input:{decision_id}@{context_digest}",
-                "source_refs": refs, "role_id": spec.role_id, "max_steps": profile["max_steps"],
-                "output_token_limit": profile["effective_output_tokens"], "routing": routing,
-                "request_key": f"subagent:{turn['run_id']}:{decision_id}:{spec.role_id}"}
+            contract = self.prepare(turn, decision_id, args)
+            if contract.get("fallback_to_parent"):
+                return contract
             # 父 Ticket 先于子上下文编译/模型派发；后续子模型及输入读取仍使用父预算。
             op = self.repository.start_operation(turn["run_id"], decision_id, "agent.delegate", {
                 "write_bytes": 0, "requires_receipt": True, "delegate": contract})
         profile = contract["routing"]["profile"]
         child_provider = provider
-        if profile["provider"] != turn["settings"]["provider"] or (profile["provider"] == "ollama" and profile["ollama_url"] != turn["settings"]["ollama_url"]):
+        if force_factory or profile["provider"] != turn["settings"]["provider"] or (profile["provider"] == "ollama" and profile["ollama_url"] != turn["settings"]["ollama_url"]):
             try:
                 child_provider = self.execution.provider_factory(profile)
             except (ValueError, OSError, RuntimeError):
@@ -122,10 +74,65 @@ class DelegationCoordinator:
             raise ExecutionDeferred("child execution is paused or needs continuation")
         return self.result(contract, state)
 
+    def prepare(self, turn, decision_id, args):
+        """纯准备固定输入、路由与依赖；返回合同或明确回退，不创建 Ticket、不访问 Provider。"""
+        spec = self.execution.subagents.get("isolated_worker")
+        task, context, expected = args.get("task"), args.get("context", ""), args.get("expected_output", "")
+        if not isinstance(task, str) or not task.strip() or len(task) > spec.max_task_chars:
+            raise ValueError("agent.delegate task must be non-empty and within the role limit")
+        if not isinstance(context, str) or len(context) > spec.max_context_chars:
+            raise ValueError("agent.delegate context exceeds the role limit")
+        if not isinstance(expected, str) or len(expected) > spec.max_expected_output_chars:
+            raise ValueError("agent.delegate expected_output exceeds the role limit")
+        refs = args.get("source_refs", [])
+        if not isinstance(refs, list) or any(not isinstance(x, str) or len(x) > 500 for x in refs) or len(refs) > spec.max_source_refs:
+            raise ValueError("invalid delegated source_refs")
+        refs = list(dict.fromkeys(x.strip() for x in refs if x.strip()))
+        if any(x not in self.execution._available_subagent_source_refs(turn) for x in refs):
+            raise ValueError("agent.delegate source_refs must come from admitted parent observations")
+        dependencies, replaces = args.get("depends_on", []), args.get("replaces")
+        if not isinstance(dependencies, list) or len(dependencies) > 3 or any(not isinstance(x, str) for x in dependencies):
+            raise ValueError("invalid delegation dependencies")
+        reviews = {((x.get("result") or {}).get("review") or {}).get("delegation_id"):
+                   (x.get("result") or {}).get("review") for x in self.repository.operations(turn["run_id"])}
+        for target in dependencies:
+            self._target(turn, target)
+            if not (reviews.get(target) or {}).get("accepted"):
+                raise ValueError("依赖结果须先由主模型采用，不能依赖未评分或已拒收结果")
+        if replaces:
+            self._target(turn, replaces)
+            if not reviews.get(replaces) or reviews[replaces]["accepted"]:
+                raise ValueError("重新派发只能取代已拒收的本轮子任务")
+        settings = turn["settings"]
+        if settings["max_steps"] - turn["current_step"] < 2:
+            return {"capability_id": "agent.delegate", "fallback_to_parent": True, "summary": "剩余步骤不足以评分与汇总，请主模型自行完成。"}
+        pool = clean_pool(settings.get("model_pool"))
+        for candidate in pool["children"]:
+            candidate["effective_output_tokens"] = min(candidate["max_output_tokens"], settings["max_output_tokens"],
+                max(64, self.execution.subagents.child_budget(spec.role_id, {"output_tokens": settings["max_output_tokens"]})["output_tokens"]))
+        unavailable = [((x.get("result") or {}).get("routing") or {}).get("profile", {}).get("id")
+                       for x in self.repository.operations(turn["run_id"]) if (x.get("result") or {}).get("fallback_reason") == "provider_failure"]
+        routing = route(pool, args.get("task_type", "general"), args.get("difficulty", "medium"),
+            self.repository.model_feedback(), unavailable, args.get("profile_id"))
+        profile = routing["profile"]
+        if profile is None:
+            return {"capability_id": "agent.delegate", "routing": routing, "fallback_to_parent": True,
+                    "summary": "没有满足要求的可用子模型，请主模型自行完成。"}
+        context_digest = sha256_bytes(context.encode())
+        contract = {"protocol_version": "handoff-v2", "run_id": turn["run_id"], "delegation_id": decision_id,
+            "sequence": turn["current_step"], "depends_on": dependencies, "replaces": replaces,
+            "task": task.strip(), "context": context, "expected_output": expected,
+            "task_digest": digest_json({"task": task.strip(), "expected_output": expected}),
+            "context_digest": context_digest, "input_source_ref": f"delegation-input:{decision_id}@{context_digest}",
+            "source_refs": refs, "role_id": spec.role_id, "max_steps": profile["max_steps"],
+            "output_token_limit": profile["effective_output_tokens"], "routing": routing,
+            "request_key": f"subagent:{turn['run_id']}:{decision_id}:{spec.role_id}"}
+        return contract
+
     def telemetry(self, contract):
         """附加全部子 Attempt 的公开计量；零派发重试、失败及拒收调用不会丢失或重复计价。"""
         calls = [x for x in self.repository.decisions.status(contract["run_id"])["model_invocations"]
-                 if str(x.get("request_key") or "").startswith(contract["request_key"])]
+                 if x.get("request_key") == contract["request_key"] or str(x.get("request_key") or "").startswith(contract["request_key"] + ":")]
         reports = []
         for call in calls:
             raw = json.loads(self.runtime.objects.get(call["response_ref"])) if call.get("response_ref") else {}
@@ -167,6 +174,7 @@ class DelegationCoordinator:
                 "recursive_delegation": False, "max_steps": contract["max_steps"], "steps_used": state["current_step"],
                 "output_token_limit": contract["output_token_limit"], "status": state["status"]},
             "handoff": {"version": "handoff-v2", "sequence": contract["sequence"], "depends_on": contract["depends_on"],
+                "batch_id": contract.get("batch_id"), "ordinal": contract.get("ordinal"),
                 "replaces": contract["replaces"], "task_digest": contract["task_digest"], "context_digest": contract["context_digest"],
                 "content_ref": content_ref, "content_digest": content_ref, "content_chars": len(content),
                 "summary_is_full_content": kind == "complete_text", "metadata_digest": telemetry["report_digest"],

@@ -23,6 +23,7 @@ from ..strategies import LiveInformationController, RuleIntentPicker
 from ..verification import SqliteVerificationProfiles
 from ..failures import failure_result, observe_failure
 from .delegation import DelegationCoordinator
+from .parallel_delegation import ParallelDelegation
 
 # EXCLUDED：项目读取/检索排除项；避免把秘钥、版本库和生成缓存纳入上下文。
 EXCLUDED = {
@@ -97,6 +98,8 @@ class LocalConversationExecution:
         self.parent_control = parent_control
         # delegation：拥有委派/交接/评审协调，避免在工具执行器重复 Agent 引擎。
         self.delegation = DelegationCoordinator(self)
+        # parallel：有界 fork/join；工作线程各自装配连接，父游标等待整批固定结果。
+        self.parallel = ParallelDelegation(self)
         # intent_picker：纯路径选择策略；输出是提案，不改变能力范围。
         self.intent_picker = RuleIntentPicker()
         # information_controller：实时信息准入策略；只控制已有读取/检索工具，不执行 I/O 或持有新状态。
@@ -670,6 +673,10 @@ class LocalConversationExecution:
                 raise PermissionError("operation belongs to another turn")
             if saved["state"] == "RESOLVED":
                 return saved["result"]
+            if "parallel" in saved["intent"]:
+                if not self.recover(turn["run_id"]):
+                    raise RecoveryRequired("parallel child receipt remains unresolved")
+                return self.parallel.execute(turn, decision_id, decision.arguments or {})
             if saved["capability"] == "agent.delegate" and saved["intent"].get("delegate", {}).get("protocol_version") == "handoff-v2":
                 if not self.recover(turn["run_id"]):
                     raise RecoveryRequired("delegated model receipt remains unresolved")
@@ -718,7 +725,9 @@ class LocalConversationExecution:
         tool_started = time.monotonic()
         result = {"capability_id": capability}
         intent = {"write_bytes": 0}
-        if capability == "agent.delegate":
+        if capability == "agent.parallel":
+            return self.parallel.execute(turn, decision_id, args)
+        elif capability == "agent.delegate":
             result.update(self._delegate(turn, decision_id, args, provider))
             # 已知子调用失败已经发布父工具收据，不能用另一份结果再次结算。
             settled = self.repository.operation(decision_id)
@@ -953,7 +962,13 @@ class LocalConversationExecution:
                 result = value["result"]
                 # 缺测保持未报告；坏观测字段由仓储忽略，不能改变工具效果核对/预算结算。
                 tool_wall_ms = value.get("tool_wall_ms")
+            elif "parallel" in op["intent"]:
+                self.parallel.reconcile(op)
+                continue
             elif op["intent"].get("delegate"):
+                # 批次核对可能已经补齐本条子收据；旧 pending 列表不能再次驱动已结算子游标。
+                if self.repository.operation(op["decision_id"])["state"] == "RESOLVED":
+                    continue
                 # 只驱动已记录子决定；需要新 Provider 的已知游标留给正常续跑，不自动重放。
                 from .subagent_runtime import run_subagent
                 contract = op["intent"]["delegate"]

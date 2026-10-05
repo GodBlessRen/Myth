@@ -25,6 +25,7 @@ DEFAULT_VISIBLE_TOOL_IDS = (
     "test.run",
     "math.calculate",
     "agent.delegate",
+    "agent.parallel",
     "agent.evaluate",
     "agent.result",
     "agent.resolve",

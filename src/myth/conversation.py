@@ -125,6 +125,8 @@ _TOOL_ARGUMENTS = {
         },
         ["task"],
     ),
+    "agent.parallel": object_schema({"tasks": {"type": "array", "minItems": 1, "maxItems": 3,
+        "items": {"type": "object"}}}, ["tasks"]),
     "agent.evaluate": object_schema({
         "delegation_id": _TEXT, "correctness": {"type": "integer", "minimum": 0, "maximum": 100},
         "completeness": {"type": "integer", "minimum": 0, "maximum": 100},
@@ -152,6 +154,8 @@ _TOOL_ARGUMENTS = {
         ["capability_id"],
     ),
 }
+# 批次每项复用同一单任务 schema；Runtime 仍逐项核对作用域与准入额度。
+_TOOL_ARGUMENTS["agent.parallel"]["properties"]["tasks"]["items"] = _TOOL_ARGUMENTS["agent.delegate"]
 # CONVERSATION_SCHEMA：Conversation 的统一决定传输合同；不能替代工具参数专用校验。
 CONVERSATION_SCHEMA = {
     "oneOf": [
@@ -278,32 +282,23 @@ TOOL_CATALOG = {
     },
     "math.calculate": {"expression": "arithmetic expression, no code"},
     "agent.delegate": {
-        "task_type": "general/extract/summarize/code/reason/review; stable task category",
-        "difficulty": "easy/medium/hard; required capability, not provider brand",
-        "task": "one independent subtask for an isolated read-only worker",
-        "context": "minimal context needed by the child; parent history is not inherited",
-        "expected_output": "optional concise result contract",
-        "source_refs": "0-20 source/evidence refs already observed by the parent",
-        "profile_id": "optional explicit model slot; configured capability is only an initial prior",
-        "depends_on": "0-3 accepted delegation ids; stable dependency order",
-        "replaces": "optional rejected delegation id that this fresh attempt replaces",
+        "task_type": "general/extract/summarize/code/reason/review",
+        "difficulty": "easy/medium/hard", "task": "one isolated read-only task",
+        "context": "explicit input; no inherited history", "expected_output": "result requirements",
+        "source_refs": "0-20 admitted source refs", "profile_id": "optional model slot",
+        "depends_on": "0-3 already accepted child ids", "replaces": "optional rejected child id",
     },
+    "agent.parallel": {"tasks": "1-3 independent agent.delegate argument objects; concurrent execution, ordinal join"},
     "agent.evaluate": {
-        "delegation_id": "exact delegation_id of a completed child in this Run",
-        "correctness": "0-100: correctness against the delegated task and evidence",
-        "completeness": "0-100: coverage of expected_output and missing items",
-        "usefulness": "0-100: usable result without parent rework",
-        "accepted": "boolean; false if incomplete or failed",
-        "capability_tier": "1-3: parent assessment for this task category, supersedes initial prior",
-        "metadata_verdict": "accepted/incomplete/disputed; judge metadata separately from content",
-        "metadata_digest": "immutable provider report digest from the handoff",
-        "failure_kind": "none/quality/context/infrastructure; only quality affects future capability routing",
-        "reason": "brief evidence-backed justification; model judgment is not verification",
+        "delegation_id": "settled child id", "correctness": "0-100", "completeness": "0-100",
+        "usefulness": "0-100", "accepted": "boolean", "capability_tier": "1-3; parent judgment",
+        "metadata_verdict": "accepted/incomplete/disputed", "metadata_digest": "handoff report digest",
+        "failure_kind": "none/quality/context/infrastructure", "reason": "evidence-backed assessment",
     },
-    "agent.result": {"delegation_id": "same-Run handoff id", "field": "content/metadata/trace",
-        "offset": "character offset", "max_chars": "1-6000", "expected_digest": "optional immutable object digest"},
-    "agent.resolve": {"delegation_id": "rejected same-Run handoff id", "content": "parent replacement result, 1-12000 characters",
-        "evidence_refs": "already observed source refs"},
+    "agent.result": {"delegation_id": "settled child id", "field": "content/metadata/trace",
+        "offset": "character offset", "max_chars": "1-6000", "expected_digest": "optional handoff digest"},
+    "agent.resolve": {"delegation_id": "rejected child id", "content": "parent replacement body",
+        "evidence_refs": "admitted sources"},
     "tool.search": {
         "query": "words describing a capability you need",
         "limit": "1-8 catalog matches; discovery only",
@@ -393,13 +388,16 @@ def calculate(expression):
 # 根据统一工具合同和冻结事实编译有界消息；Ollama 窗口与输出预留对齐，远端保持本地投影上限。
 def conversation_request(settings, snapshot, messages, activities, control=None):
     visible_ids = visible_tool_ids(TOOL_CATALOG, activities)
-    from .platform.model_pool import pending_reviews, pending_resolutions
+    from .platform.model_pool import pending_reviews, pending_resolutions, delegated_results
     pool = settings.get("model_pool") or {}
     if not pool.get("enabled", True) or not any(p.get("enabled", True) for p in pool.get("children", [])):
-        visible_ids = tuple(x for x in visible_ids if x != "agent.delegate")
+        visible_ids = tuple(x for x in visible_ids if x not in {"agent.delegate", "agent.parallel"})
     if not pending_reviews(activities):
         visible_ids = tuple(x for x in visible_ids if x != "agent.evaluate")
-    if not any((x.get("result") or {}).get("handoff") for x in activities):
+    else:
+        # 先消费并审核已有交接，再扩张新批次；节省小窗口目录预算及未采用结果积压。
+        visible_ids = tuple(x for x in visible_ids if x not in {"agent.delegate", "agent.parallel"})
+    if not any(x.get("handoff") for x in delegated_results(activities)):
         visible_ids = tuple(x for x in visible_ids if x != "agent.result")
     if not pending_resolutions(activities):
         visible_ids = tuple(x for x in visible_ids if x != "agent.resolve")
@@ -432,7 +430,7 @@ def conversation_request(settings, snapshot, messages, activities, control=None)
         "可用工具参数：" + canonical_json(visible_catalog)
     )
     if pool.get("children"):
-        system += "\n委派声明类别/难度，可用 profile_id 选槽位；tier 是初值。agent.result 回读原文/metadata，摘要不等于全文。agent.evaluate 评分、判断 capability_tier 并绑定 metadata_digest 审核元数据；缺测 incomplete、矛盾 disputed。拒收后用 replaces 重派或 agent.resolve 补做，花销仍记录。模型池：" + canonical_json({
+        system += "\n独立任务用 agent.parallel(tasks) 最多三项并发，按 ordinal 汇合、delegation_id 分别评分；依赖先审核再派发。\n委派声明类别/难度，可用 profile_id 选槽位；tier 是初值。agent.result 回读原文/metadata，摘要不等于全文。agent.evaluate 评分、判断 capability_tier 并绑定 metadata_digest 审核元数据；缺测 incomplete、矛盾 disputed。拒收后用 replaces 重派或 agent.resolve 补做，花销仍记录。模型池：" + canonical_json({
             "enabled": pool.get("enabled", True), "children": [
                 {k: p.get(k) for k in ("id", "provider", "model", "tier", "enabled", "task_types")}
                 for p in pool.get("children", [])]})
