@@ -103,6 +103,8 @@ class WorkspaceTests(unittest.TestCase):
 
     # 回归断言：父模型可自行选择隔离 worker，Child 只收到显式委派上下文并以普通工具结果返回。
     def test_llm_may_delegate_to_isolated_read_only_subagent(self):
+        self.repo.save_settings({**self.repo.settings(), "model_pool": {"children": [
+            {"id": "fixture", "provider": "ollama", "model": "test", "tier": 2}]}})
         sid = self.session()
         rid = self.turn(
             sid,
@@ -124,17 +126,29 @@ class WorkspaceTests(unittest.TestCase):
                 decision(claim="最终回答：已结合隔离复核结果。"),
             ]
         )
-        self.workspace.run(rid, provider)
+        original_invoke = provider.invoke
+        # 评分必须引用真实子任务身份；后续最终回答仍用固定断言文本。
+        def invoke_with_review(request):
+            if len(provider.calls) == 2:
+                child_id = self.repo.operations(rid)[0]["decision_id"]
+                provider.outputs.insert(2, decision("tool_call", "agent.evaluate", {
+                    "delegation_id": child_id, "correctness": 90, "completeness": 90, "usefulness": 90,
+                    "capability_tier": 2, "metadata_verdict": "incomplete",
+                    "metadata_digest": self.repo.operations(rid)[0]["result"]["telemetry"]["report_digest"],
+                    "accepted": True, "failure_kind": "none", "reason": "固定事实复核通过"}))
+            return original_invoke(request)
+        with patch.object(provider, "invoke", side_effect=invoke_with_review):
+            self.workspace.run(rid, provider)
 
         self.assertEqual(self.repo.turn(rid)["status"], "COMPLETED")
-        self.assertEqual(len(provider.calls), 3)
+        self.assertEqual(len(provider.calls), 4)
         child_request = provider.calls[1]
         child_text = "\n".join(message.content for message in child_request.messages)
         self.assertIn("FACT=A", child_text)
         self.assertNotIn("PARENT-ONLY-SECRET", child_text)
         self.assertEqual(
             child_request.response_schema["properties"]["decision_type"]["enum"],
-            ["request_completion"],
+            ["tool_call", "request_completion"],
         )
         result = self.repo.turn(rid)["activities"][0]["result"]
         self.assertTrue(result["subagent"]["context_isolated"])
@@ -150,6 +164,8 @@ class WorkspaceTests(unittest.TestCase):
 
     # 回归断言：Child 即使忽略输出 Schema 提议再次委派，本地边界也拒绝递归，不把它升级为执行权限。
     def test_subagent_cannot_recursively_delegate(self):
+        self.repo.save_settings({**self.repo.settings(), "model_pool": {"children": [
+            {"id": "fixture", "provider": "ollama", "model": "test", "tier": 2}]}})
         rid = self.turn(self.session())
         provider = ChatProvider(
             [
@@ -169,12 +185,10 @@ class WorkspaceTests(unittest.TestCase):
         self.workspace.run(rid, provider)
 
         turn = self.repo.turn(rid)
-        self.assertEqual(turn["status"], "COMPLETED")
-        self.assertEqual(len(provider.calls), 3)
-        self.assertIn(
-            "sub-agent may only return request_completion",
-            turn["activities"][0]["result"]["error"],
-        )
+        self.assertNotEqual(turn["status"], "UNKNOWN")
+        child = self.repo.delegation_state(turn["activities"][0]["decision_id"])
+        self.assertIn("child capability is outside the isolated contract", child["steps"][0]["result"]["error"])
+        self.assertEqual(sum(op["capability"] == "agent.delegate" for op in self.repo.operations(rid)), 1)
 
     # 回归断言：重复 SEEK 在 Tool Ticket 前被拒绝，不消耗第二次 tool_calls，模型仍可基于已有观察继续回答。
     def test_live_information_control_rejects_duplicate_seek_before_tool_ticket(self):

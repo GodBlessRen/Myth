@@ -109,9 +109,14 @@ _TOOL_ARGUMENTS = {
     "math.calculate": object_schema({"expression": _TEXT}),
     "agent.delegate": object_schema(
         {
+            "task_type": {"type": "string", "enum": ["general", "extract", "summarize", "code", "reason", "review"]},
+            "difficulty": {"type": "string", "enum": ["easy", "medium", "hard"]},
             "task": {"type": "string", "minLength": 1, "maxLength": 4000},
             "context": {"type": "string", "maxLength": 12000},
             "expected_output": {"type": "string", "maxLength": 2000},
+            "profile_id": _TEXT,
+            "replaces": _TEXT,
+            "depends_on": {"type": "array", "items": _TEXT, "maxItems": 3},
             "source_refs": {
                 "type": "array",
                 "items": {"type": "string"},
@@ -120,6 +125,23 @@ _TOOL_ARGUMENTS = {
         },
         ["task"],
     ),
+    "agent.parallel": object_schema({"tasks": {"type": "array", "minItems": 1, "maxItems": 3,
+        "items": {"type": "object"}}}, ["tasks"]),
+    "agent.evaluate": object_schema({
+        "delegation_id": _TEXT, "correctness": {"type": "integer", "minimum": 0, "maximum": 100},
+        "completeness": {"type": "integer", "minimum": 0, "maximum": 100},
+        "usefulness": {"type": "integer", "minimum": 0, "maximum": 100},
+        "accepted": {"type": "boolean"}, "reason": _TEXT,
+        "failure_kind": {"type": "string", "enum": ["none", "quality", "context", "infrastructure"]},
+        "capability_tier": {"type": "integer", "minimum": 1, "maximum": 3},
+        "metadata_verdict": {"type": "string", "enum": ["accepted", "incomplete", "disputed"]},
+        "metadata_digest": _TEXT,
+    }, ["delegation_id", "correctness", "completeness", "usefulness", "accepted", "reason", "failure_kind", "capability_tier", "metadata_verdict", "metadata_digest"]),
+    "agent.result": object_schema({"delegation_id": _TEXT, "field": {"type": "string", "enum": ["content", "metadata", "trace"]},
+        "offset": {"type": "integer", "minimum": 0}, "max_chars": {"type": "integer", "minimum": 1, "maximum": 6000},
+        "expected_digest": _TEXT}, ["delegation_id", "field"]),
+    "agent.resolve": object_schema({"delegation_id": _TEXT, "content": _TEXT,
+        "evidence_refs": {"type": "array", "items": _TEXT}}, ["delegation_id", "content"]),
     "tool.search": object_schema(
         {
             "query": {"type": "string", "minLength": 1, "maxLength": 200},
@@ -132,6 +154,8 @@ _TOOL_ARGUMENTS = {
         ["capability_id"],
     ),
 }
+# 批次每项复用同一单任务 schema；Runtime 仍逐项核对作用域与准入额度。
+_TOOL_ARGUMENTS["agent.parallel"]["properties"]["tasks"]["items"] = _TOOL_ARGUMENTS["agent.delegate"]
 # CONVERSATION_SCHEMA：Conversation 的统一决定传输合同；不能替代工具参数专用校验。
 CONVERSATION_SCHEMA = {
     "oneOf": [
@@ -258,11 +282,23 @@ TOOL_CATALOG = {
     },
     "math.calculate": {"expression": "arithmetic expression, no code"},
     "agent.delegate": {
-        "task": "one independent subtask for an isolated read-only worker",
-        "context": "minimal context needed by the child; parent history is not inherited",
-        "expected_output": "optional concise result contract",
-        "source_refs": "0-20 source/evidence refs already observed by the parent",
+        "task_type": "general/extract/summarize/code/reason/review",
+        "difficulty": "easy/medium/hard", "task": "one isolated read-only task",
+        "context": "explicit input; no inherited history", "expected_output": "result requirements",
+        "source_refs": "0-20 admitted source refs", "profile_id": "optional model slot",
+        "depends_on": "0-3 already accepted child ids", "replaces": "optional rejected child id",
     },
+    "agent.parallel": {"tasks": "1-3 independent agent.delegate argument objects; concurrent execution, ordinal join"},
+    "agent.evaluate": {
+        "delegation_id": "settled child id", "correctness": "0-100", "completeness": "0-100",
+        "usefulness": "0-100", "accepted": "boolean", "capability_tier": "1-3; parent judgment",
+        "metadata_verdict": "accepted/incomplete/disputed", "metadata_digest": "handoff report digest",
+        "failure_kind": "none/quality/context/infrastructure", "reason": "evidence-backed assessment",
+    },
+    "agent.result": {"delegation_id": "settled child id", "field": "content/metadata/trace",
+        "offset": "character offset", "max_chars": "1-6000", "expected_digest": "optional handoff digest"},
+    "agent.resolve": {"delegation_id": "rejected child id", "content": "parent replacement body",
+        "evidence_refs": "admitted sources"},
     "tool.search": {
         "query": "words describing a capability you need",
         "limit": "1-8 catalog matches; discovery only",
@@ -352,6 +388,19 @@ def calculate(expression):
 # 根据统一工具合同和冻结事实编译有界消息；Ollama 窗口与输出预留对齐，远端保持本地投影上限。
 def conversation_request(settings, snapshot, messages, activities, control=None):
     visible_ids = visible_tool_ids(TOOL_CATALOG, activities)
+    from .platform.model_pool import pending_reviews, pending_resolutions, delegated_results
+    pool = settings.get("model_pool") or {}
+    if not pool.get("enabled", True) or not any(p.get("enabled", True) for p in pool.get("children", [])):
+        visible_ids = tuple(x for x in visible_ids if x not in {"agent.delegate", "agent.parallel"})
+    if not pending_reviews(activities):
+        visible_ids = tuple(x for x in visible_ids if x != "agent.evaluate")
+    else:
+        # 先消费并审核已有交接，再扩张新批次；节省小窗口目录预算及未采用结果积压。
+        visible_ids = tuple(x for x in visible_ids if x not in {"agent.delegate", "agent.parallel"})
+    if not any(x.get("handoff") for x in delegated_results(activities)):
+        visible_ids = tuple(x for x in visible_ids if x != "agent.result")
+    if not pending_resolutions(activities):
+        visible_ids = tuple(x for x in visible_ids if x != "agent.resolve")
     eval_mechanisms = snapshot.get("evaluation_harness_mechanisms")
     if isinstance(eval_mechanisms, list):
         enabled = set(str(item) for item in eval_mechanisms)
@@ -374,13 +423,17 @@ def conversation_request(settings, snapshot, messages, activities, control=None)
         "Goal 中的 progress_note 是上一轮持久进度；需要延续工作时先检查这些已给出的事实。"
         "工具校验失败后，先读取相关文件核对真实内容，再纠正参数；不要声称失败的修改已经成功。\n"
         "你可以自行判断是否使用 agent.delegate。只有独立子任务、上下文隔离或独立复核明显有价值时才委派；简单任务直接完成。"
-        "Sub-Agent 是只读隔离 worker：只收到你显式传入的 task/context/source_refs，不继承完整父对话、Memory 或工具目录，不能写入、调用工具、再次委派或向用户提问。"
-        "子 Agent 返回的是观察/建议，不是验收；最终结论、工具执行与交付责任仍属于父 Agent。\n"
+        "子 Agent 仅见显式 task/context/source_refs，可分页读取输入；不继承父历史/Memory，不能写入、递归或提问。其结果是建议，验收与交付仍由你负责。\n"
         "信息获取遵循 bounded live control：knowledge.search/memory.search/project.search/project.list 属于 SEEK，knowledge.resolve/memory.timeline/memory.resolve/project.read 属于 EXPAND。"
         "只在当前任务确实缺信息时继续获取；相同请求不要重复，分页必须使用返回的 next_cursor/next_offset 前进，已有信息足够时直接继续任务或回答（KEEP）。"
         "Runtime 会在 Tool Ticket 前拒绝重复、停滞或超出本轮信息预算的请求；不要通过改写同义参数绕过预算。\n"
         "可用工具参数：" + canonical_json(visible_catalog)
     )
+    if pool.get("children"):
+        system += "\n独立任务用 agent.parallel(tasks) 最多三项并发，按 ordinal 汇合、delegation_id 分别评分；依赖先审核再派发。\n委派声明类别/难度，可用 profile_id 选槽位；tier 是初值。agent.result 回读原文/metadata，摘要不等于全文。agent.evaluate 评分、判断 capability_tier 并绑定 metadata_digest 审核元数据；缺测 incomplete、矛盾 disputed。拒收后用 replaces 重派或 agent.resolve 补做，花销仍记录。模型池：" + canonical_json({
+            "enabled": pool.get("enabled", True), "children": [
+                {k: p.get(k) for k in ("id", "provider", "model", "tier", "enabled", "task_types")}
+                for p in pool.get("children", [])]})
     if deferred_ids:
         system += (
             "\n工具目录采用渐进披露：当前只暴露常用/已发现能力。"
@@ -394,6 +447,14 @@ def conversation_request(settings, snapshot, messages, activities, control=None)
     )
     if settings["provider"] != "ollama":
         system += "\n当前传输改用 StepDecision：action=reply 对应 decision_type=request_completion 且 goal_coverage=answer，action=ask 对应 ask_user，工具 action 对应 decision_type=tool_call 和 capability_id。arguments 对象编码为 arguments_json 字符串，其他未使用字段按 schema 填空。"
+    return build_context_request(settings, snapshot, messages, activities, control,
+        system=system, schema=schema, visible_ids=visible_ids, deferred_ids=deferred_ids)
+
+
+def build_context_request(settings, snapshot, messages, activities, control=None, *, system, schema,
+                          visible_ids=(), deferred_ids=()):
+    """主子模型共用预算、Compact 滞回与来源投影；工具范围由各自固定合同传入。"""
+    eval_mechanisms = snapshot.get("evaluation_harness_mechanisms")
     max_output_tokens = settings.get("max_output_tokens", 2048)
     is_ollama = settings.get("provider") == "ollama"
     num_ctx = settings.get("num_ctx", 8192) if is_ollama else None
@@ -509,7 +570,7 @@ def conversation_request(settings, snapshot, messages, activities, control=None)
             registry,
             capability_id,
             enabled=True,
-            exposed=capability_id in visible_catalog,
+            exposed=capability_id in visible_ids,
         ).as_dict()
         for capability_id in ("project.patch_exact", "observation.read", "test.run")
     ]

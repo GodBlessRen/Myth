@@ -42,6 +42,8 @@ Web / CLI / 到期计划
 
 `agent.delegate` 先准入父工具，再准入子模型。子模型已完成而父工具尚未留收据时，恢复从固定子决定补收据；恢复入口不持有 Provider，不再次联网。无子模型 Ticket 可闭合为未启动；未决模型机会继续 UNKNOWN。
 
+模型池在 Turn 设置中冻结 1 主 + 最多 3 子配置。用户档位是初值，主模型可选槽位并给能力判断；`pool-v2` 从已结算意见校准同类路由，不训练模型或修改策略代码。`DelegationCoordinator` 固定交接合同，子 Repository/Execution/Control 视图复用同一 `ConversationAgent` 与 Context 编译器；子检查点由父仓储按 CAS 写入对象/事件，外部调用和输入工具仍记同一父 Run 账本。`ParallelDelegation` 在一次原子批次 Ticket 后用最多三个私有连接线程并行派发，按 ordinal 汇合；子恢复限定自身请求，依赖先审核再派发。正文、公开元数据不可变保存，默认摘要与回读页是投影。内容采用和元数据审核分别记录，拒收仍记费用并要求替代结果；模型意见不修改独立 Verification。单层只读约束仍保留，配置、计价和恢复边界见 [模型池](MODEL_POOL.md)。
+
 ## 控制的原子边界
 
 命令和安全点均在同一写事务读取当前状态。Control 只写自己的表，Turn/Core/Goal 由对应所有者加入；后半段 SQL 失败，命令、设置、投影与事件一起回滚。每条命令返回自己提交的 revision。

@@ -28,6 +28,7 @@ class Workspace:
         resolution_controller=None,
         resolution_policy_id=None,
         evaluation_harness_mechanisms=None,
+        child_provider_factory=None,
     ):
         # vector_index：可选 Milvus 派生索引；延迟连接/加载，缺失时词面检索保持完整可用。
         self.vector_index = create_milvus_vector_index(runtime)
@@ -80,6 +81,8 @@ class Workspace:
             capability_registry=self.components.capabilities,
             subagent_registry=self.components.subagents,
             memory_store=self.memory,
+            provider_factory=child_provider_factory or self._child_provider,
+            parent_control=self.control,
         )
         # verification：与 execution 共用同一 profile 状态所有者，避免双写真相。
         self.verification = self.execution.verification
@@ -100,3 +103,9 @@ class Workspace:
     # 驱动当前用例并依据持久事实推进；恢复、权限、预算与结束条件见本模块具体协作边界。
     def run(self, rid, provider):
         return self.agent.run(rid, provider)
+
+    def _child_provider(self, profile):
+        """装配根按冻结子配置创建供应商；凭据只由外圈凭据库读取。"""
+        from .providers import create_provider
+        return create_provider(profile["provider"], ollama_base_url=profile.get("ollama_url"),
+                               runtime_root=str(self.repository.runtime.root))

@@ -48,7 +48,7 @@ Flow 是对 durable facts 的投影，不创建新的执行真相。
 
 - Graph 只从已有 `model_invocations / decisions / operations` 等持久事实派生；
 - 不新增 Core 对象、状态机、授权路径或数据库真相；
-- Parent model、`agent.delegate` 与 isolated Sub-Agent 调用可以显式形成父子边；
+- Parent model、`agent.delegate` 与 isolated Sub-Agent 调用形成父子边；`agent.parallel` 显示独立 fork 分支与固定顺序 join，每项的评分和费用仍单独映射；
 - 无法可靠归类的调用必须记为 `unmapped`，不得由 UI 猜测补边；
 - Trajectory 仍是完整事件事实入口，Execution Graph 只是更适合阅读分支关系的 projection；
 - 后续只有真实任务证明 branch / retry / resume 需要更丰富关系时，才扩展图语义。

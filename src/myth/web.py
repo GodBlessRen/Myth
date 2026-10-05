@@ -454,6 +454,9 @@ def make_handler(service: AgentWebService):
                 if path == "/reconnect.js":
                     self._asset("reconnect.js", "text/javascript; charset=utf-8")
                     return
+                if path == "/model-pool.js":
+                    self._asset("model-pool.js", "text/javascript; charset=utf-8")
+                    return
                 if path == "/inspector.js":
                     self._asset("inspector.js", "text/javascript; charset=utf-8")
                     return

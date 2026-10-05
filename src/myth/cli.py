@@ -38,7 +38,7 @@ def _weights(values):
 # 给命令添加供应商/模型/预算参数；认证秘钥不作为持久命令字段。
 def _provider_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
-        "--provider", choices=["scripted", "ollama", "chatgpt", "openai", "deepseek"], required=True
+        "--provider", choices=["scripted", "ollama", "chatgpt", "openai", "deepseek", "anthropic", "kimi"], required=True
     )
     parser.add_argument("--model", required=True)
     parser.add_argument("--ollama-url", default="http://127.0.0.1:11434")
@@ -169,7 +169,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     tasks.add_argument(
         "--provider",
-        choices=["scripted", "ollama", "openai", "chatgpt", "deepseek"],
+        choices=["scripted", "ollama", "openai", "chatgpt", "deepseek", "anthropic", "kimi"],
         default="scripted",
     )
     tasks.add_argument("--model", default="fixture")

@@ -88,6 +88,10 @@ class RecoveryRequired(MythError):
     """执行事实需核对或有 Driver 竞争；不授权盲目重发。"""
 
 
+class ExecutionDeferred(MythError):
+    """工作已有固定身份，但当前只核对或控制暂停，不准入新的外部效果。"""
+
+
 class PatchContractError(MythError):
     """固定基线或精确参数不符合合同；发生于效果前时是已知拒绝，允许纠正参数。"""
 

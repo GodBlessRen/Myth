@@ -140,8 +140,9 @@ class SqliteWorkspaceRepository:
 
     # 校验 endpoint、模型、窗口与输出/步骤上限后保存白名单字段；拒绝 token 等未声明持久字段。
     def save_settings(self, value):
+        from ..platform.model_pool import clean_pool, PROVIDERS
         provider = value.get("provider", "ollama")
-        if provider not in {"ollama", "openai", "chatgpt", "deepseek"}:
+        if provider not in PROVIDERS:
             raise ValueError("unsupported model provider")
         from urllib.parse import urlparse
 
@@ -193,6 +194,7 @@ class SqliteWorkspaceRepository:
             "thinking": thinking,
             "num_ctx": num_ctx,
             "temperature": float(temperature),
+            "model_pool": clean_pool(value.get("model_pool")),
         }
         # 本地事务边界：下列写入一起提交，异常整体回滚；文件/网络效果须在事务外另行核对。
         with self.store.tx() as db:
@@ -201,6 +203,43 @@ class SqliteWorkspaceRepository:
                 (canonical_json(clean),),
             )
         return clean
+
+    def model_feedback(self):
+        """经验是已结算主模型评分的投影；最多读取最近 200 条，不新建第二份可变真相。"""
+        rows = self.store.db.execute(
+            "SELECT result_json FROM workspace_operations WHERE capability='agent.evaluate' "
+            "AND state='RESOLVED' ORDER BY rowid DESC LIMIT 200"
+        ).fetchall()
+        return [json.loads(row[0])["review"] for row in rows if json.loads(row[0]).get("review")]
+
+    def delegation_state(self, decision_id):
+        """子流程以不可变对象和有序事件保存检查点；已有工具合同负责限定父 Run 身份。"""
+        op = self.operation(decision_id)
+        if not op or not op["intent"].get("delegate"):
+            return None
+        row = self.store.db.execute(
+            "SELECT payload_json FROM events WHERE run_id=? AND kind='SubagentCheckpoint' "
+            "AND json_extract(payload_json,'$.delegation_id')=? ORDER BY sequence DESC LIMIT 1",
+            (op["run_id"], decision_id),
+        ).fetchone()
+        return json.loads(self.runtime.objects.get(json.loads(row[0])["state_ref"])) if row else None
+
+    def checkpoint_delegation(self, decision_id, state, *, expected_revision):
+        """对象先发布，事件 CAS 后提交；崩溃只可能留下未引用对象，不部分更新子游标。"""
+        value = {**state, "revision": expected_revision + 1}
+        state_ref = self.runtime.objects.put(canonical_json(value).encode())
+        with self.store.tx() as db:
+            op = self.operation(decision_id)
+            if not op or not op["intent"].get("delegate") or op["state"] == "RESOLVED":
+                raise ValueError("delegation is not accepting checkpoints")
+            current = self.delegation_state(decision_id)
+            if (current or {}).get("revision", 0) != expected_revision:
+                raise IdentityConflict("sub-agent checkpoint revision changed")
+            self.store._event(db, op["run_id"], "SubagentCheckpoint", {
+                "delegation_id": decision_id, "state_ref": state_ref, "revision": value["revision"],
+                "status": value["status"], "step": value["current_step"],
+            })
+        return value
 
     # 投影未归档项目及会话/知识数量；统计不授予文件范围。
     def projects(self):
@@ -823,6 +862,10 @@ class SqliteWorkspaceRepository:
         return any(
             item["state"] in {"TICKETED", "UNKNOWN"}
             for item in self.pending_operations(rid)
+            # 子工具 Ticket 是流程授权；已知游标可继续，不等于存在未决网络效果。
+            if not ("parallel" in item["intent"] or item["intent"].get("delegate", {}).get("protocol_version") == "handoff-v2"
+                    and (self.delegation_state(item["decision_id"]) or {}).get("status")
+                    in {None, "RUNNING", "INTERRUPTED", "PAUSED", "COMPLETED", "FAILED", "BUDGET_EXHAUSTED", "CANCELLED"})
         )
 
     # 根据持久未决效果选择 INTERRUPTED 或 UNKNOWN，保存恢复游标；安全中断才可继续规划。
@@ -1381,51 +1424,84 @@ class SqliteWorkspaceRepository:
 
     # 同事务登记工具意图、资源预留与唯一 Ticket；外部文件/Git 效果随后才发生。
     def start_operation(self, rid, decision_id, capability, intent):
-        # 本地事务边界：下列写入一起提交，异常整体回滚；文件/网络效果须在事务外另行核对。
+        with self.store.tx() as db:
+            self._start_operation(db, rid, decision_id, capability, intent)
+        return self.operation(decision_id)
+
+    def _start_operation(self, db, rid, decision_id, capability, intent, *, owner_decision_id=None):
+        """仅供仓储同事务协调；批量子 Ticket 的权限来自已核对的父模型决定。"""
+        old = self.operation(decision_id)
+        if old:
+            return old
+        if self.turn(rid)["status"] != "RUNNING":
+            raise ValueError("turn stopped")
+        if capability == "agent.evaluate":
+            # 一个子任务只接受一次主评分；与 Ticket 同事务检查，重启/并发不能重复训练。
+            target = intent["result"]["review"]["delegation_id"]
+            if db.execute(
+                "SELECT 1 FROM workspace_operations WHERE run_id=? AND capability='agent.evaluate' "
+                "AND json_extract(intent_json,'$.result.review.delegation_id')=?", (rid, target)
+            ).fetchone():
+                raise ValueError("子任务已经评分，不可重复记录")
+        if capability == "agent.resolve":
+            target = intent["result"]["resolution"]["delegation_id"]
+            if db.execute(
+                "SELECT 1 FROM workspace_operations WHERE run_id=? AND capability='agent.resolve' "
+                "AND json_extract(intent_json,'$.result.resolution.delegation_id')=?", (rid, target)
+            ).fetchone():
+                raise ValueError("子任务已有主模型替代内容，不可重复补做记录")
+        owner = db.execute(
+            "SELECT run_id FROM step_decisions WHERE decision_id=?", (owner_decision_id or decision_id,)
+        ).fetchone()
+        if not owner or owner[0] != rid:
+            raise ValueError("decision belongs to another turn")
+        amount = intent.get("write_bytes", 0)
+        for meter, cost in {"tool_calls": 1, "write_bytes": amount}.items():
+            changed = db.execute(
+                "UPDATE accounts SET reserved=reserved+? WHERE run_id=? AND meter=? AND limit_units-settled-reserved-unknown_held>=?",
+                (cost, rid, meter, cost),
+            )
+            if not changed.rowcount:
+                raise BudgetExceeded(f"insufficient {meter}")
+        db.execute(
+            "INSERT INTO workspace_operations(decision_id,run_id,capability,state,intent_json,ticket_id,reserved_bytes) VALUES(?,?,?,'TICKETED',?,?,?)",
+            (
+                decision_id,
+                rid,
+                capability,
+                canonical_json(intent),
+                new_id("ctkt"),
+                amount,
+            ),
+        )
+        self._checkpoint(
+            db,
+            rid,
+            self.turn(rid)["current_step"],
+            "TOOL_TICKETED",
+            checkpoint_step=max(0, self.turn(rid)["current_step"] - 1),
+            detail=capability,
+        )
+        self.store._event(
+            db,
+            rid,
+            "ConversationToolTicket",
+            {"decision_id": decision_id, "capability": capability},
+        )
+
+    def start_parallel(self, rid, decision_id, contracts, fallbacks):
+        """一次短事务准入父批次及全部子 Ticket；额度不足整体回滚，任何子模型尚未派发。"""
         with self.store.tx() as db:
             old = self.operation(decision_id)
             if old:
                 return old
-            if self.turn(rid)["status"] != "RUNNING":
-                raise ValueError("turn stopped")
-            owner = db.execute(
-                "SELECT run_id FROM step_decisions WHERE decision_id=?", (decision_id,)
-            ).fetchone()
-            if not owner or owner[0] != rid:
-                raise ValueError("decision belongs to another turn")
-            amount = intent.get("write_bytes", 0)
-            for meter, cost in {"tool_calls": 1, "write_bytes": amount}.items():
-                changed = db.execute(
-                    "UPDATE accounts SET reserved=reserved+? WHERE run_id=? AND meter=? AND limit_units-settled-reserved-unknown_held>=?",
-                    (cost, rid, meter, cost),
-                )
-                if not changed.rowcount:
-                    raise BudgetExceeded(f"insufficient {meter}")
-            db.execute(
-                "INSERT INTO workspace_operations(decision_id,run_id,capability,state,intent_json,ticket_id,reserved_bytes) VALUES(?,?,?,'TICKETED',?,?,?)",
-                (
-                    decision_id,
-                    rid,
-                    capability,
-                    canonical_json(intent),
-                    new_id("ctkt"),
-                    amount,
-                ),
-            )
-            self._checkpoint(
-                db,
-                rid,
-                self.turn(rid)["current_step"],
-                "TOOL_TICKETED",
-                checkpoint_step=max(0, self.turn(rid)["current_step"] - 1),
-                detail=capability,
-            )
-            self.store._event(
-                db,
-                rid,
-                "ConversationToolTicket",
-                {"decision_id": decision_id, "capability": capability},
-            )
+            intent = {"write_bytes": 0, "requires_receipt": True,
+                      "parallel": contracts, "fallbacks": fallbacks}
+            self._start_operation(db, rid, decision_id, "agent.parallel", intent)
+            for contract in contracts:
+                self._start_operation(db, rid, contract["delegation_id"], "agent.delegate",
+                    {"write_bytes": 0, "requires_receipt": True, "delegate": contract},
+                    owner_decision_id=decision_id)
         return self.operation(decision_id)
 
     # 以已发布收据原子完成工具记录和计量；记录晚到结果，不抹去先前 Stop/Pause。

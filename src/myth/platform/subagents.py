@@ -1,41 +1,10 @@
 """子 Agent 的隔离执行合同与预算分配原语。
-父 Agent 负责决定是否委派，Runtime 保留权限与预算边界；第一版只提供无工具、无写入、不可递归的隔离 worker。
+父 Agent 负责决定是否委派，Runtime 保留权限与预算边界；隔离 worker 使用共同引擎，只可分页读取本次输入。
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-
-
-# SUBAGENT_RESULT_SCHEMA：隔离 worker 只能返回完成结果；Schema 限制表示，本地仍会复核决定种类与证据引用。
-SUBAGENT_RESULT_SCHEMA: dict[str, object] = {
-    "type": "object",
-    "additionalProperties": False,
-    "required": [
-        "decision_type",
-        "reason",
-        "capability_id",
-        "arguments_json",
-        "question",
-        "missing_info_category",
-        "claim",
-        "goal_coverage",
-        "evidence_refs",
-        "remaining",
-    ],
-    "properties": {
-        "decision_type": {"type": "string", "enum": ["request_completion"]},
-        "reason": {"type": "string"},
-        "capability_id": {"type": "string"},
-        "arguments_json": {"type": "string"},
-        "question": {"type": "string"},
-        "missing_info_category": {"type": "string"},
-        "claim": {"type": "string"},
-        "goal_coverage": {"type": "string"},
-        "evidence_refs": {"type": "array", "items": {"type": "string"}},
-        "remaining": {"type": "array", "items": {"type": "string"}},
-    },
-}
 
 
 # 显式子角色与预算/上下文边界合同；角色登记不代表已经启动子工作。
@@ -45,9 +14,9 @@ class SubAgentSpec:
     role_id: str
     # instruction：角色的显式工作说明；不能覆盖父授权上限。
     instruction: str
-    # capability_allowlist：角色明确允许能力集合；第一版 isolated worker 固定为空。
+    # capability_allowlist：角色明确允许能力集合；隔离 worker 仅允许分页读取固定输入。
     capability_allowlist: tuple[str, ...]
-    # max_steps：子工作规划步硬上限；第一版 worker 使用单次模型完成。
+    # max_steps：子工作规划步硬上限；实际步数由冻结槽位配置收紧。
     max_steps: int = 6
     # budget_fraction：从父额度分配的比例，范围 (0,1]；按 meter 向下取整。
     budget_fraction: float = 0.25
@@ -114,11 +83,11 @@ def default_subagents() -> SubAgentRegistry:
         SubAgentSpec(
             role_id="isolated_worker",
             instruction=(
-                "在隔离上下文中完成一个只读子任务；不得使用工具、写入、"
+                "在隔离上下文中完成一个子任务；仅可读取显式输入，不得写入、"
                 "请求用户或再次委派。"
             ),
-            capability_allowlist=(),
-            max_steps=1,
+            capability_allowlist=("input.read",),
+            max_steps=8,
             budget_fraction=0.5,
         )
     )

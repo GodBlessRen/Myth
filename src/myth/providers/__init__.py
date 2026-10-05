@@ -10,6 +10,7 @@ from .deepseek import DeepSeekApiKeyProvider
 from .ollama import OllamaProvider
 from .openai import ChatGPTPlanProvider, OpenAIApiKeyProvider
 from .scripted import ScriptedPatchProvider
+from .messages import MessagesProvider
 from ..auth.provider_keys import ProviderApiKeyVault
 
 
@@ -29,11 +30,13 @@ def create_provider(
         if runtime_root is None:
             raise ValueError("chatgpt provider requires runtime_root")
         return ChatGPTPlanProvider(runtime_root)
-    if name in {"openai", "deepseek"}:
+    if name in {"openai", "deepseek", "anthropic", "kimi"}:
         if runtime_root is None:
             raise ValueError(f"{name} provider requires runtime_root")
         vault = ProviderApiKeyVault()
         token = token_supplier or (lambda: vault.resolve(name)[0])
+        if name in {"anthropic", "kimi"}:
+            return MessagesProvider(name, token)
         return (
             OpenAIApiKeyProvider(token_supplier=token)
             if name == "openai"

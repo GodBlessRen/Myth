@@ -283,7 +283,7 @@ class DecisionRuntime:
                 db,
                 run_id,
                 "ModelIntentRecorded",
-                {"model_attempt_id": attempt_id, "provider": provider_id},
+                {"model_attempt_id": attempt_id, "provider": provider_id, "request_key": request_key},
             )
             db.execute(
                 "UPDATE model_invocations SET state=?,ticket_id=? WHERE model_attempt_id=?",
@@ -645,7 +645,8 @@ class DecisionRuntime:
         if existing is not None:
             if existing["run_id"] != run_id:
                 raise ValueError("model request key belongs to another run")
-            self.recover(run_id)
+            # 去重只核对当前请求；并行兄弟可能尚在网络调用，不能扫描整 Run。
+            self.recover(run_id, request_key_prefix=request_key)
             saved = self.store.db.execute(
                 "SELECT * FROM step_decisions WHERE model_attempt_id=?",
                 (existing["model_attempt_id"],),
@@ -746,7 +747,8 @@ class DecisionRuntime:
                 attempt_id,
                 f"provider call raised after Ticket: {type(exc).__name__}: {exc}",
             )
-            raise
+            # 供应商边界内的 ValueError 等也属于未知效果；应用不得把它消费为参数拒绝后继续派发。
+            raise RecoveryRequired("Provider call has no conclusive receipt") from exc
 
         provider_wall_ms = max(
             0, int((time.monotonic() - provider_started) * 1000)
@@ -771,14 +773,18 @@ class DecisionRuntime:
         decision_id = self._save_decision(run_id, attempt_id, response_ref, decision)
         return decision_id, decision
 
-    def recover(self, run_id: str | None = None) -> list[dict[str, Any]]:
-        """用已有请求、Ticket、收据和对象核对执行状态；没有足够事实时保留 UNKNOWN，不盲目重发。"""
+    def recover(self, run_id: str | None = None, *, request_key_prefix: str | None = None) -> list[dict[str, Any]]:
+        """按作用域核对已有收据；并行子流程只核对自身，不将仍在调用的兄弟 Ticket 标为 UNKNOWN。"""
 
         sql = "SELECT * FROM model_invocations WHERE state IN (?,?)"
         args: list[Any] = [AttemptState.TICKETED.value, AttemptState.UNKNOWN.value]
         if run_id is not None:
             sql += " AND run_id=?"
             args.append(run_id)
+        if request_key_prefix is not None:
+            sql += (" AND model_attempt_id IN (SELECT model_attempt_id FROM model_request_keys "
+                    "WHERE request_key=? OR substr(request_key,1,?)=?)")
+            args.extend([request_key_prefix, len(request_key_prefix) + 1, request_key_prefix + ":"])
         recovered: list[dict[str, Any]] = []
         for row in self.store.db.execute(sql, args).fetchall():
             attempt_id = str(row["model_attempt_id"])
@@ -890,6 +896,13 @@ class DecisionRuntime:
 
     # 读取当前持久事实并生成状态投影；不得把模型 claim 当作已执行或已验收。
     def status(self, run_id: str) -> dict[str, Any]:
+        # 活动去重键可在零派发后解绑；历史归属从不可变意图事件读取，不能因此丢失失败调用的计量。
+        request_keys = {}
+        for event in self.store.db.execute(
+            "SELECT payload_json FROM events WHERE run_id=? AND kind='ModelIntentRecorded' ORDER BY sequence", (run_id,)
+        ):
+            payload = json.loads(event[0])
+            request_keys[payload.get("model_attempt_id")] = payload.get("request_key")
         invocations = []
         for row in self.store.db.execute(
             "SELECT m.*,k.request_key FROM model_invocations m "
@@ -898,6 +911,7 @@ class DecisionRuntime:
             (run_id,),
         ).fetchall():
             item = dict(row)
+            item["request_key"] = item.get("request_key") or request_keys.get(item["model_attempt_id"])
             try:
                 item["usage"] = json.loads(item.get("usage_json") or "{}")
             except json.JSONDecodeError:

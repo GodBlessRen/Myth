@@ -18,7 +18,7 @@
 | --- | --- |
 | 创建与状态所有权 | `test_state_boundaries.py`：SQL 故障、并发身份、事务回滚 |
 | 控制 | `test_control_atomicity.py`：Pause/Resume/Stop 跨聚合回滚、终态竞争、CAS、真实进程退出 |
-| 委派 | `test_delegation_boundaries.py`：父额度先于子费用、收据间崩溃、无 Provider 恢复、UNKNOWN 不重发 |
+| 委派 | `test_delegation_boundaries.py`：父额度先于子费用、收据间崩溃、无 Provider 恢复、UNKNOWN 不重发；`test_parallel_delegation.py` 验证并发重叠、乱序汇合、原子批次、预算争抢与兄弟恢复隔离 |
 | 交付 | `test_delivery_workflow.py`：回答提交后收尾、对象摘要验收、受信测试进程 |
 | 调度与长 Run | schedule / goal / long-run 测试：同机会争抢、同 Run 接续、租约和进度分离 |
 | 模型与认证 | provider / context / oauth 测试：请求窗口、用量缺测、轮转、PKCE/OIDC、日志无凭据 |

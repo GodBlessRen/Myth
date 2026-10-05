@@ -2,7 +2,7 @@
 通过五类端口协调状态、I/O、控制、记忆及进度；安全点控制未来派发，COMPLETED 仅表示回答结束，不能升级为语义验收。"""
 
 from ..acceptance import ContextBudgetError
-from ..domain import BudgetExceeded, RecoveryRequired, PatchContractError
+from ..domain import BudgetExceeded, RecoveryRequired, PatchContractError, ExecutionDeferred
 from ..failures import failure_result, observe_failure
 from ..models import StepDecision, DecisionValidationError, ProviderKnownFailure, ProviderUnavailable
 from ..platform.completion import CompletionGuard
@@ -28,6 +28,7 @@ class ConversationAgent:
         memory: ConversationMemory,
         personal: GoalCheckpoint | None = None,
         delivery: ConversationDelivery | None = None,
+        completion_guard=None,
     ):
         # repository：用例仓储端口/实现；持久状态写入归此协作对象所有。
         self.repository = repository
@@ -42,7 +43,7 @@ class ConversationAgent:
         # delivery：交付事实所有者；COMPLETED 不自动等于语义验收通过。
         self.delivery = delivery
         # completion_guard：Verify-on-Stop 纯策略；不执行测试，只核对现有 durable evidence。
-        self.completion_guard = CompletionGuard()
+        self.completion_guard = completion_guard or CompletionGuard()
 
     # 按 Turn 冻结 Goal 身份写长期进度；个人仓储负责拒绝旧 Run 的迟到覆盖。
     def _checkpoint_goal(
@@ -230,6 +231,9 @@ class ConversationAgent:
                                 next_action="Review the result and continue the next unfinished part of this goal.",
                             )
                         return
+                except ExecutionDeferred:
+                    # 子流程核对/控制已经保存游标；没有新效果，不冒充 UNKNOWN 或完成。
+                    return
                 except ProviderUnavailable:
                     # 明确零派发收据已经结算；保留同一 step，退出线程等待后台按持久截止时间继续。
                     if not self._gate(run_id):

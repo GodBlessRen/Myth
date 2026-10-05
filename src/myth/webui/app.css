@@ -41,6 +41,19 @@
   --shadow: 0 18px 56px rgb(0 0 0 / 38%);
 }
 * { box-sizing: border-box; scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
+/* 子模型沿用设置表单的间距与颜色；长模型名可换行，窄屏保留完整可编辑字段。 */
+.pool-child { min-width: 0; margin: 24px 0; padding: 16px 0; border: 0; border-top: 1px solid var(--line); }
+.pool-child .button-row { margin-top: 16px; }
+.pool-advanced { margin: 16px 0; }
+.pool-advanced summary { cursor: pointer; color: var(--ink-2); padding: 8px 0; }
+.pool-advanced button { margin-top: 12px; }
+.pool-toggle { display: flex; align-items: center; gap: 10px; }
+.pool-toggle input { width: 18px; height: 18px; accent-color: var(--focus); }
+.pool-pricing { margin-top: 10px; }
+.pool-task-types { border: 0; padding: 0; margin: 18px 0; display: flex; flex-wrap: wrap; gap: 4px 16px; }
+.pool-task-types legend { font-size: 13px; margin-bottom: 8px; }
+.pool-child .field-meta { display: block; margin-top: 10px; overflow-wrap: anywhere; }
+.execution-graph-copy { min-width: 0; overflow-wrap: anywhere; }
 html, body { margin: 0; height: 100%; background: var(--paper); color: var(--ink); }
 body { font: 14px/1.65 var(--sans); overflow: hidden; -webkit-font-smoothing: antialiased; font-synthesis: none; }
 button, input, textarea, select { font: inherit; color: inherit; }
