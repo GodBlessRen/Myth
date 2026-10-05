@@ -432,6 +432,15 @@ def make_handler(service: AgentWebService):
                 if path == "/app.css":
                     self._asset("app.css", "text/css; charset=utf-8")
                     return
+                # 离线字体属于封闭静态白名单；请求路径不参与文件系统拼接，防止目录穿越。
+                font_assets = {
+                    "/fonts/myth-sans.woff2": "fonts/myth-sans.woff2",
+                    "/fonts/myth-serif.woff2": "fonts/myth-serif.woff2",
+                    "/fonts/myth-latin.woff2": "fonts/myth-latin.woff2",
+                }
+                if path in font_assets:
+                    self._asset(font_assets[path], "font/woff2")
+                    return
                 if path == "/app.js":
                     self._asset("app.js", "text/javascript; charset=utf-8")
                     return

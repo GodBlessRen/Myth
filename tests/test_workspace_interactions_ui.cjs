@@ -137,6 +137,25 @@ test("a live elapsed-time refresh preserves historical message nodes", () => {
   assert.equal(typing.children.some(node => node.className === "typing-dot"), false);
 });
 
+// 中文投影不能覆盖版本变化或改写成熟度事实；冻结数据同时检查纯展示边界。
+test("architecture localization preserves raw state and unrecognized newer backend facts", () => {
+  const h = boot();
+  const known = Object.freeze({ label: "Ticket", maturity: "usable", responsibility: "Durable authority to start one Attempt; not success proof." });
+  const changed = Object.freeze({ label: "constructor", maturity: "experimental", responsibility: "New backend boundary, not the previous description." });
+  const cap = Object.freeze({ id: "file.read", state: "executable", family: "file", risk: "read" });
+  h.state.data.platform = { core: [known, changed], domains: [], strategies: [], adapters: [], capabilities: [cap], executable_capabilities: ["file.read"] };
+  h.context.renderRuntime();
+  assert.match(h.$("runtimeCore").textContent, /启动一次 Attempt 的持久授权；不代表操作成功/);
+  assert.match(h.$("runtimeCore").textContent, /可使用/);
+  assert.match(h.$("runtimeCore").textContent, /constructor/);
+  assert.match(h.$("runtimeCore").textContent, /experimental/);
+  assert.match(h.$("runtimeCore").textContent, /New backend boundary/);
+  assert.match(h.$("platformCapabilities").textContent, /文件 · 读取/);
+  assert.match(h.$("platformCapabilities").textContent, /可执行/);
+  assert.equal(known.maturity, "usable");
+  assert.equal(cap.state, "executable");
+});
+
 test("a late connection report cannot repopulate a different provider form", async () => {
   const h = boot(), pending = deferred();
   h.$("provider").value = "ollama";

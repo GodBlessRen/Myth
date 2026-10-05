@@ -7,9 +7,10 @@
 <meta charset="utf-8"/>
 <meta content="width=device-width,initial-scale=1" name="viewport"/>
 <meta content="light dark" name="color-scheme"/>
-<meta content="#f8f6f0" name="theme-color"/>
+<meta content="#f7f0e5" name="theme-color"/>
 <script src="/theme.js"></script>
 <title>Myth · 工作空间</title>
+<link href="/fonts/myth-sans.woff2" rel="preload" as="font" type="font/woff2" crossorigin="anonymous"/>
 <link href="/app.css" rel="stylesheet"/>
 <link href="/favicon.svg" rel="icon" type="image/svg+xml"/>
 </head>
@@ -17,7 +18,7 @@
 <!-- 三栏布局：导航、当前工作区、常驻 Runtime Observatory；窄屏入口保留全部观测区域。 -->
 <div class="shell">
 <aside aria-label="主导航" class="sidebar" id="sidebar">
-<div class="sidebar-brand"><a aria-label="Myth 工作空间" class="brand" href="#chat"><span aria-hidden="true" class="brand-symbol"><svg viewbox="0 0 28 28"><path d="M4 22V6l10 12L24 6v16M4 6l10 5 10-5"></path></svg></span><span class="brand-word">Myth</span></a><button aria-expanded="true" aria-label="收起侧栏" class="icon-button" id="sidebarCollapse" title="收起侧栏"><svg aria-hidden="true" class="icon" viewbox="0 0 24 24"><path d="M4 4h16v16H4ZM9 4v16m7-12-4 4 4 4"></path></svg></button></div>
+<div class="sidebar-brand"><a aria-label="Myth 工作空间" class="brand" href="#chat"><span aria-hidden="true" class="brand-symbol"><svg viewBox="0 0 28 28"><path d="M4 22V6l10 12L24 6v16M4 6l10 5 10-5"></path></svg></span><span class="brand-word">Myth</span></a><button aria-expanded="true" aria-label="收起侧栏" class="icon-button" id="sidebarCollapse" title="收起侧栏"><svg aria-hidden="true" class="icon" viewBox="0 0 24 24"><path d="M4 4h16v16H4ZM9 4v16m7-12-4 4 4 4"></path></svg></button></div>
 <button class="new-chat" id="newChat" title="新建对话"><span data-icon="plus"></span><span class="nav-text">新建对话</span><kbd>⇧ O</kbd></button>
 <button class="command-trigger" id="commandToggle" title="搜索与快捷操作"><span data-icon="search"></span><span class="nav-text">搜索与快捷操作</span><kbd>Ctrl K</kbd></button>
 <nav aria-label="工作空间" class="navigation primary-nav">
@@ -57,13 +58,12 @@
 <section class="chat-page page" id="chatPage">
 <div class="chat-scroll" id="chatScroll">
 <div class="welcome" id="welcome">
-<div aria-hidden="true" class="welcome-emblem"><svg viewbox="0 0 56 56"><path d="M10 44V12l18 22 18-22v32M10 12l18 9 18-9"></path></svg></div>
-<h1>开始一段新对话</h1><p>想法、问题，或一件需要完成的事。</p>
-<div aria-label="开始方式" class="suggestions"><button data-suggestion="请帮我梳理这个任务的目标、约束和下一步："><span data-icon="pen"></span><span>梳理任务</span></button><button data-action="projects"><span data-icon="folder"></span><span>查看项目</span></button><button data-action="knowledge"><span data-icon="book"></span><span>查阅资料</span></button></div>
-<div class="welcome-connection hidden" id="welcomeConnection"><span data-icon="info"></span><span>连接模型后即可开始</span><a href="#settings">前往设置<span aria-hidden="true"> →</span></a></div>
+<h1>有什么想推进的？</h1><p>写下一个问题，或一件需要完成的事。</p>
+
+
 </div>
 <div class="thread hidden" id="thread"></div>
-</div><button aria-label="回到最新消息" class="scroll-latest icon-button hidden" id="scrollToBottom" title="回到最新消息" type="button"><svg aria-hidden="true" class="icon" viewbox="0 0 24 24"><path d="M12 5v14m-6-6 6 6 6-6"></path></svg></button>
+</div><button aria-label="回到最新消息" class="scroll-latest icon-button hidden" id="scrollToBottom" title="回到最新消息" type="button"><svg aria-hidden="true" class="icon" viewBox="0 0 24 24"><path d="M12 5v14m-6-6 6 6 6-6"></path></svg></button>
 <div class="composer-area">
 <div class="turn-notice hidden" id="turnNotice" role="status"></div>
 <div class="attachment-chips" id="attachmentChips"></div>
@@ -80,12 +80,13 @@
 <span data-icon="plus"></span></button><span class="agent-mode"><span class="agent-dot"></span>Agent</span>
 </div>
 <div class="send-area">
-<span id="inputHint">Enter 发送 · Shift Enter 换行</span><button aria-label="停止当前轮次" class="stop-button hidden" id="stopTurn" type="button"><svg aria-hidden="true" class="icon" viewbox="0 0 24 24"><path d="M7 7h10v10H7Z"></path></svg></button><button aria-label="发送消息" class="send-button" id="send" type="submit">
+<span id="inputHint">Enter 发送 · Shift Enter 换行</span><button aria-label="停止当前轮次" class="stop-button hidden" id="stopTurn" type="button"><svg aria-hidden="true" class="icon" viewBox="0 0 24 24"><path d="M7 7h10v10H7Z"></path></svg></button><button aria-label="发送消息" class="send-button" id="send" type="submit">
 <span data-icon="arrow"></span>
 </button>
 </div>
 </div>
 </form>
+<div class="welcome-starts"><div aria-label="开始方式" class="suggestions"><button data-suggestion="请帮我梳理这个任务的目标、约束和下一步："><span data-icon="pen"></span><span>梳理任务</span><svg aria-hidden="true" class="icon suggestion-arrow" viewBox="0 0 24 24"><path d="M5 12h14m-6-6 6 6-6 6"/></svg></button><button data-action="projects"><span data-icon="folder"></span><span>查看项目</span><svg aria-hidden="true" class="icon suggestion-arrow" viewBox="0 0 24 24"><path d="M5 12h14m-6-6 6 6-6 6"/></svg></button><button data-action="knowledge"><span data-icon="book"></span><span>查阅资料</span><svg aria-hidden="true" class="icon suggestion-arrow" viewBox="0 0 24 24"><path d="M5 12h14m-6-6 6 6-6 6"/></svg></button></div><div class="welcome-connection hidden" id="welcomeConnection"><span data-icon="info"></span><span>连接模型后即可开始</span><a href="#settings">前往设置<span aria-hidden="true"> →</span></a></div></div>
 <input accept=".txt,.md,.py,.json,.csv,.yaml,.yml,.html,.js,.ts" hidden="" id="chatFiles" multiple="" type="file"/>
 </div>
 </section>
@@ -122,7 +123,7 @@
 <div class="project-cards" id="projectCards"></div>
 </section>
 <section class="page content-page hidden" id="projectPage">
-<a class="back-link" href="#projects"><svg aria-hidden="true" class="icon" viewbox="0 0 24 24"><path d="M19 12H5m6-6-6 6 6 6"></path></svg>所有项目</a>
+<a class="back-link" href="#projects"><svg aria-hidden="true" class="icon" viewBox="0 0 24 24"><path d="M19 12H5m6-6-6 6 6 6"></path></svg>所有项目</a>
 <div class="page-heading">
 <div>
 <h1 id="projectName"></h1>
@@ -221,28 +222,28 @@
 </div>
 <section class="architecture-section">
 <div class="architecture-heading">
-<h2>Core</h2>
+<h2>核心</h2>
 <p>运行的核心身份与证据。</p>
 </div>
 <div class="platform-grid" id="runtimeCore"></div>
 </section>
 <section class="architecture-section">
 <div class="architecture-heading">
-<h2>Domains</h2>
+<h2>职责领域</h2>
 <p>状态、执行、控制与观测的职责。</p>
 </div>
 <div class="platform-grid" id="platformLayers"></div>
 </section>
 <section class="architecture-section">
 <div class="architecture-heading">
-<h2>Strategies</h2>
+<h2>处理策略</h2>
 <p>按任务选择的处理策略。</p>
 </div>
 <div class="platform-grid" id="runtimeStrategies"></div>
 </section>
 <section class="architecture-section">
 <div class="architecture-heading">
-<h2>Adapters</h2>
+<h2>接入适配</h2>
 <p>模型、工具与存储的接入。</p>
 </div>
 <div class="platform-grid" id="runtimeAdapters"></div>
@@ -340,13 +341,13 @@
 </main>
 <aside aria-label="Runtime Observatory" class="inspector" id="runtimeInspector">
 <div class="inspector-head"><span class="inspector-title">运行观测</span><div class="inspector-status"><span class="inspector-pulse" id="inspectorPulse"></span><div class="inspector-status-copy"><strong id="inspectorState">空闲</strong><span class="inspector-acceptance hidden" id="inspectorAcceptance"></span></div></div></div>
-<div class="inspector-scroll"><div class="observatory-intro"><span aria-hidden="true" class="observatory-indicator"></span><p>执行状态与资源用量</p></div><details class="observatory-group" open=""><summary><span>概览</span><svg aria-hidden="true" class="icon" viewbox="0 0 24 24"><path d="m9 5 7 7-7 7"></path></svg></summary><section class="inspector-section session-statistics"><h2 class="inspector-label">会话统计</h2><div aria-live="polite" class="context-facts" id="sessionStatistics">
+<div class="inspector-scroll"><details class="observatory-group" open=""><summary><span>概览</span><svg aria-hidden="true" class="icon" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"></path></svg></summary><section class="inspector-section session-statistics"><h2 class="inspector-label">会话统计</h2><div aria-live="polite" class="context-facts" id="sessionStatistics">
 <div class="inspector-empty">选择会话后显示统计</div>
 </div><p class="statistics-note">端到端 TPS 包含首 Token 等待</p></section><section class="inspector-section"><h2 class="inspector-label">Goal</h2><div class="context-facts" id="inspectorGoal">
 <div class="inspector-empty">暂无长期 Goal</div>
 </div></section><section class="inspector-section"><h2 class="inspector-label">交付与验收</h2><div class="context-facts" id="inspectorDelivery">
 <div class="inspector-empty">暂无交付验收</div>
-</div></section></details><details class="observatory-group"><summary><span>执行</span><svg aria-hidden="true" class="icon" viewbox="0 0 24 24"><path d="m9 5 7 7-7 7"></path></svg></summary><section class="inspector-section"><h2 class="inspector-label">执行流程</h2><div class="execution-spine" id="executionSpine">
+</div></section></details><details class="observatory-group"><summary><span>执行</span><svg aria-hidden="true" class="icon" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"></path></svg></summary><section class="inspector-section"><h2 class="inspector-label">执行流程</h2><div class="execution-spine" id="executionSpine">
 <div class="spine-empty">
                 开始一个任务后，这里显示决策与执行事实。
               </div>
@@ -360,7 +361,7 @@
 <div class="inspector-empty">暂无工具调用</div>
 </div></section><section class="inspector-section"><h2 class="inspector-label">控制状态</h2><div class="context-facts" id="inspectorControl">
 <div class="inspector-empty">暂无 Control state</div>
-</div></section></details><details class="observatory-group"><summary><span>资源</span><svg aria-hidden="true" class="icon" viewbox="0 0 24 24"><path d="m9 5 7 7-7 7"></path></svg></summary><section class="inspector-section"><h2 class="inspector-label">模型调用</h2><div class="context-facts" id="inspectorModel">
+</div></section></details><details class="observatory-group"><summary><span>资源</span><svg aria-hidden="true" class="icon" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"></path></svg></summary><section class="inspector-section"><h2 class="inspector-label">模型调用</h2><div class="context-facts" id="inspectorModel">
 <div class="inspector-empty">暂无模型证据</div>
 </div><details class="provider-evidence hidden" id="providerEvidenceDetails">
 <summary>Provider Evidence</summary>
@@ -383,7 +384,7 @@
 <form id="goalForm">
 <div class="dialog-heading">
 <h2 id="goalDialogTitle">新建目标</h2>
-<button aria-label="关闭 Goal 表单" class="icon-button" data-close="goalDialog" type="button"><svg aria-hidden="true" class="icon" viewbox="0 0 24 24"><path d="m6 6 12 12M6 18 18 6"></path></svg></button>
+<button aria-label="关闭 Goal 表单" class="icon-button" data-close="goalDialog" type="button"><svg aria-hidden="true" class="icon" viewBox="0 0 24 24"><path d="m6 6 12 12M6 18 18 6"></path></svg></button>
 </div>
 <p class="muted">Goal 会跨会话保留进度与下一步。</p>
 <label for="goalTitleInput">目标</label><input id="goalTitleInput" maxlength="200" placeholder="例如：持续推进 Myth 的真实任务基线" required=""/><label for="goalDescriptionInput">说明</label><textarea id="goalDescriptionInput" placeholder="完成标准、范围和长期约束" rows="4"></textarea>
@@ -397,7 +398,7 @@
 <form id="scheduleForm">
 <div class="dialog-heading">
 <h2 id="scheduleDialogTitle">安排下一次工作</h2>
-<button aria-label="关闭计划表单" class="icon-button" data-close="scheduleDialog" type="button"><svg aria-hidden="true" class="icon" viewbox="0 0 24 24"><path d="m6 6 12 12M6 18 18 6"></path></svg></button>
+<button aria-label="关闭计划表单" class="icon-button" data-close="scheduleDialog" type="button"><svg aria-hidden="true" class="icon" viewBox="0 0 24 24"><path d="m6 6 12 12M6 18 18 6"></path></svg></button>
 </div>
 <p class="muted" id="scheduleGoalTitle"></p>
 <label for="scheduleSession">工作会话</label><select id="scheduleSession" required=""></select>
@@ -423,7 +424,7 @@
 <form id="projectForm">
 <div class="dialog-heading">
 <h2 id="projectDialogTitle">新建项目</h2>
-<button aria-label="关闭项目表单" class="icon-button" data-close="projectDialog" type="button"><svg aria-hidden="true" class="icon" viewbox="0 0 24 24"><path d="m6 6 12 12M6 18 18 6"></path></svg></button>
+<button aria-label="关闭项目表单" class="icon-button" data-close="projectDialog" type="button"><svg aria-hidden="true" class="icon" viewBox="0 0 24 24"><path d="m6 6 12 12M6 18 18 6"></path></svg></button>
 </div>
 <p class="muted">为相关工作提供同一份上下文。</p>
 <label for="projectNameInput">项目名称</label><input id="projectNameInput" maxlength="100" placeholder="例如：Myth 产品开发" required=""/><label for="projectDescriptionInput">简介</label><input id="projectDescriptionInput" placeholder="这个项目要做什么"/><label for="projectRootInput">本地目录 <span class="muted">选填，赋予文件读取范围</span></label><input id="projectRootInput" placeholder="C:\projects\myth"/><label for="projectInstructionsInput">项目指令</label><textarea id="projectInstructionsInput" placeholder="例如：使用中文回答，先理解代码，再提出修改建议。" rows="5"></textarea>
@@ -437,7 +438,7 @@
 <form id="knowledgeForm">
 <div class="dialog-heading">
 <h2 id="knowledgeDialogTitle">导入知识</h2>
-<button aria-label="关闭知识表单" class="icon-button" data-close="knowledgeDialog" type="button"><svg aria-hidden="true" class="icon" viewbox="0 0 24 24"><path d="m6 6 12 12M6 18 18 6"></path></svg></button>
+<button aria-label="关闭知识表单" class="icon-button" data-close="knowledgeDialog" type="button"><svg aria-hidden="true" class="icon" viewBox="0 0 24 24"><path d="m6 6 12 12M6 18 18 6"></path></svg></button>
 </div>
 <label class="upload-zone" for="knowledgeFile"><span data-icon="upload"></span><strong>选择文本文件</strong><small>TXT / MD / 代码 / JSON · 每个文件最多 1 MB</small><input accept=".txt,.md,.py,.json,.csv,.yaml,.yml,.html,.js,.ts" id="knowledgeFile" multiple="" type="file"/></label><label for="documentTitle">资料名称</label><input id="documentTitle" placeholder="例如：产品需求说明" required=""/><label for="documentProject">保存到</label><select id="documentProject">
 <option value="">共享知识库</option></select><label for="documentContent">内容 <span class="muted">也可以直接粘贴</span></label><textarea id="documentContent" placeholder="在这里粘贴你的资料…" required="" rows="7"></textarea>
@@ -451,7 +452,7 @@
 <form id="sessionForm">
 <div class="dialog-heading">
 <h2 id="sessionDialogTitle">会话设置</h2>
-<button aria-label="关闭会话设置" class="icon-button" data-close="sessionDialog" type="button"><svg aria-hidden="true" class="icon" viewbox="0 0 24 24"><path d="m6 6 12 12M6 18 18 6"></path></svg></button>
+<button aria-label="关闭会话设置" class="icon-button" data-close="sessionDialog" type="button"><svg aria-hidden="true" class="icon" viewBox="0 0 24 24"><path d="m6 6 12 12M6 18 18 6"></path></svg></button>
 </div>
 <label for="sessionTitleInput">会话名称</label><input id="sessionTitleInput" maxlength="100" required=""/><label for="sessionProjectInput">所属项目</label><select id="sessionProjectInput">
 <option value="">独立会话</option></select><label class="check-label"><input id="sessionPinned" type="checkbox"/>置顶会话</label>
@@ -464,7 +465,7 @@
 <dialog aria-labelledby="previewTitle" class="document-dialog" id="documentDialog">
 <div class="dialog-heading">
 <h2 id="previewTitle"></h2>
-<button aria-label="关闭资料预览" class="icon-button" data-close="documentDialog" type="button"><svg aria-hidden="true" class="icon" viewbox="0 0 24 24"><path d="m6 6 12 12M6 18 18 6"></path></svg></button>
+<button aria-label="关闭资料预览" class="icon-button" data-close="documentDialog" type="button"><svg aria-hidden="true" class="icon" viewBox="0 0 24 24"><path d="m6 6 12 12M6 18 18 6"></path></svg></button>
 </div>
 <div class="muted" id="previewMeta"></div>
 <pre id="previewContent"></pre>
@@ -473,7 +474,7 @@
 <form id="controlForm">
 <div class="dialog-heading">
 <h2 id="controlDialogTitle">当前 Run</h2>
-<button aria-label="关闭控制面" class="icon-button" data-close="controlDialog" type="button"><svg aria-hidden="true" class="icon" viewbox="0 0 24 24"><path d="m6 6 12 12M6 18 18 6"></path></svg></button>
+<button aria-label="关闭控制面" class="icon-button" data-close="controlDialog" type="button"><svg aria-hidden="true" class="icon" viewBox="0 0 24 24"><path d="m6 6 12 12M6 18 18 6"></path></svg></button>
 </div>
 <p class="muted">调整在后续安全点生效，已开始的操作保留执行记录。</p>
 <label for="steerInput">Steering</label><textarea id="steerInput" placeholder="例如：先不要改代码，先比较两种架构方案。" rows="3"></textarea><button class="secondary" id="applySteer" type="button">
@@ -490,7 +491,7 @@
 </div>
 </form>
 </dialog>
-<dialog aria-labelledby="commandPaletteTitle" class="command-palette" id="commandPalette"><div class="command-heading"><h2 id="commandPaletteTitle">搜索与快捷操作</h2><button aria-label="关闭快捷操作" class="icon-button" data-close="commandPalette" type="button"><svg aria-hidden="true" class="icon" viewbox="0 0 24 24"><path d="m6 6 12 12M6 18 18 6"></path></svg></button></div><div class="command-search-field"><span data-icon="search"></span><input aria-label="搜索操作或会话" autocomplete="off" id="commandSearch" placeholder="搜索操作、页面或会话…" type="search"/></div><div class="command-results" id="commandResults"></div><div class="command-foot"><span><kbd>↑</kbd><kbd>↓</kbd> 选择</span><span><kbd>Enter</kbd> 打开</span><span><kbd>Esc</kbd> 关闭</span></div></dialog><div class="toast hidden" id="toast" role="alert"></div>
+<dialog aria-labelledby="commandPaletteTitle" class="command-palette" id="commandPalette"><div class="command-heading"><h2 id="commandPaletteTitle">搜索与快捷操作</h2><button aria-label="关闭快捷操作" class="icon-button" data-close="commandPalette" type="button"><svg aria-hidden="true" class="icon" viewBox="0 0 24 24"><path d="m6 6 12 12M6 18 18 6"></path></svg></button></div><div class="command-search-field"><span data-icon="search"></span><input aria-label="搜索操作或会话" autocomplete="off" id="commandSearch" placeholder="搜索操作、页面或会话…" type="search"/></div><div class="command-results" id="commandResults"></div><div class="command-foot"><span><kbd>↑</kbd><kbd>↓</kbd> 选择</span><span><kbd>Enter</kbd> 打开</span><span><kbd>Esc</kbd> 关闭</span></div></dialog><div class="toast hidden" id="toast" role="alert"></div>
 <!-- 装配顺序是依赖合同：主助手与 state 先定义，再装配观测区和 Goal 入口。 -->
 <script src="/reconnect.js"></script>
 <script src="/app.js"></script>
