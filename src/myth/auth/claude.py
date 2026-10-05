@@ -43,16 +43,26 @@ class ClaudeOAuthError(RuntimeError):
 
 @dataclass(frozen=True)
 class ClaudeAuthStatus:
+    # connected：系统凭据库存在可用 access token；不证明具体模型请求成功。
     connected: bool
+    # client_id_configured：Myth 自己的公开 OAuth 客户端身份已配置；不是秘钥。
     client_id_configured: bool
+    # email：授权响应公开账号邮箱；仅用于 UI 标识。
     email: str | None = None
+    # organization：授权响应公开组织名称/身份；不授予额外 Runtime 权限。
     organization: str | None = None
+    # workspace：授权响应公开工作区名称/身份；不替代项目 scope。
     workspace: str | None = None
+    # scopes：供应商实际返回的 OAuth scope；执行仍走 Runtime 准入。
     scopes: tuple[str, ...] = ()
+    # expires_at：access token 的 Unix 到期时间；仅用于提前刷新。
     expires_at: float | None = None
+    # login_revision：最近成功登录挑战身份；供浏览器轮询确认本次授权。
     login_revision: str | None = None
+    # reason：未连接时的脱敏原因；不得包含 token/code/verifier。
     reason: str | None = None
 
+    # 生成可返回 Web 的脱敏投影；不包含任何 access/refresh token。
     def serializable(self) -> dict[str, Any]:
         return {
             "connected": self.connected,
@@ -70,6 +80,7 @@ class ClaudeAuthStatus:
 class ClaudeOAuthManager:
     """Claude OAuth 生命周期所有者；挑战只在内存，token 只在 OS credential store。"""
 
+    # 装配公开元数据路径、安全凭据端口与进程内登录挑战；构造本身不访问远端。
     def __init__(
         self,
         root: str | Path,
@@ -77,13 +88,20 @@ class ClaudeOAuthManager:
         credential_store: CredentialStore | None = None,
         timeout: float = 30.0,
     ) -> None:
+        # root：用户明确选择的 Myth 根目录；只保存非秘钥 OAuth 元数据。
         self.root = Path(root).resolve()
+        # metadata_path：公开客户端/账号投影；严禁写 access/refresh token。
         self.metadata_path = self.root / ".runtime" / "oauth" / "claude.json"
+        # credential_store：系统安全凭据端口；生产无明文文件降级。
         self.credential_store = credential_store or KeyringCredentialStore(KEYRING_SERVICE)
+        # timeout：单次 OAuth 网络请求秒数上限；超时不泄露请求凭据。
         self.timeout = min(max(float(timeout), 1.0), 60.0)
+        # _pending：当前进程的限时 PKCE/state 挑战；重启后旧挑战自然失效。
         self._pending: dict[str, dict[str, Any]] = {}
+        # _lock：串行本实例登录/刷新/退出，防止同进程令牌轮换交叉覆盖。
         self._lock = threading.RLock()
 
+    # 读取非秘钥 OAuth 元数据并校验形状；损坏时显式失败而不是猜测账号状态。
     def _load_metadata(self) -> dict[str, Any]:
         if not self.metadata_path.exists():
             return {}
@@ -95,6 +113,7 @@ class ClaudeOAuthManager:
             raise ClaudeOAuthError("Claude OAuth metadata has an invalid shape.")
         return value
 
+    # 原子保存白名单公开字段；即使调用方多给字段也不会把 token 落盘。
     def _save_metadata(self, value: dict[str, Any]) -> None:
         self.metadata_path.parent.mkdir(parents=True, exist_ok=True)
         safe = {
@@ -110,6 +129,7 @@ class ClaudeOAuthManager:
             json.dumps(safe, ensure_ascii=False, sort_keys=True).encode("utf-8"),
         )
 
+    # 解析 Myth 自有 client_id；元数据优先，环境变量仅作显式部署配置。
     def _client_id(self) -> str:
         metadata = self._load_metadata()
         value = str(metadata.get("client_id") or os.environ.get("MYTH_CLAUDE_OAUTH_CLIENT_ID") or "").strip()
@@ -119,6 +139,7 @@ class ClaudeOAuthManager:
             )
         return value
 
+    # 保存公开 client_id；切换客户端时清除旧客户端绑定的安全凭据。
     def configure(self, client_id: str) -> ClaudeAuthStatus:
         value = str(client_id or "").strip()
         if not 1 <= len(value) <= 200 or re.fullmatch(r"[A-Za-z0-9._:-]+", value) is None:
@@ -134,11 +155,13 @@ class ClaudeOAuthManager:
             self._save_metadata(metadata)
             return self.status()
 
+    # 从随机 verifier 计算 RFC 7636 S256 challenge；verifier 本身不持久化。
     @staticmethod
     def _pkce(verifier: str) -> str:
         digest = hashlib.sha256(verifier.encode("ascii")).digest()
         return base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
 
+    # 回调敏感字段必须恰好出现一次；重复参数拒绝而不择一猜测。
     @staticmethod
     def _single(query: dict[str, list[str]], name: str) -> str:
         values = query.get(name) or []
@@ -146,6 +169,7 @@ class ClaudeOAuthManager:
             raise ClaudeOAuthError(f"OAuth callback is missing a valid {name}.")
         return values[0]
 
+    # 只接受当前 Myth loopback Claude callback，防止 code 被转发到任意地址。
     @staticmethod
     def _validate_redirect(redirect_uri: str) -> None:
         parsed = parse.urlparse(redirect_uri)
@@ -161,6 +185,7 @@ class ClaudeOAuthManager:
         ):
             raise ValueError("Claude OAuth redirect must be the exact Myth loopback callback")
 
+    # 创建一次性 PKCE/state 登录挑战并返回供应商授权 URL；不产生持久凭据。
     def begin_login(self, redirect_uri: str) -> dict[str, Any]:
         self._validate_redirect(redirect_uri)
         client_id = self._client_id()
@@ -193,6 +218,7 @@ class ClaudeOAuthManager:
             "expires_at": now + LOGIN_TTL_SECONDS,
         }
 
+    # 用固定 token endpoint 交换 code；client_id/redirect/state 必须与原挑战完全一致。
     def _token_exchange(self, pending: dict[str, Any], code: str, state: str) -> dict[str, Any]:
         body = parse.urlencode({
             "grant_type": "authorization_code",
@@ -210,6 +236,7 @@ class ClaudeOAuthManager:
         )
         return self._read_token_response(req, "Claude OAuth authorization was rejected.")
 
+    # 有界读取 token 响应并只暴露固定错误文本；远端正文不进入异常消息。
     def _read_token_response(self, req: request.Request, public_error: str) -> dict[str, Any]:
         try:
             with open_credential_request(req, timeout=self.timeout) as response:
@@ -227,6 +254,7 @@ class ClaudeOAuthManager:
             raise ClaudeOAuthError("Claude OAuth did not return an access token.")
         return value
 
+    # 消费一次性 state、交换 token 并分离保存秘钥与公开账号元数据。
     def complete_callback(self, query: dict[str, list[str]]) -> ClaudeAuthStatus:
         if query.get("error"):
             raise ClaudeOAuthError("Claude authorization was denied.")
@@ -267,6 +295,7 @@ class ClaudeOAuthManager:
             self._save_metadata(metadata)
             return self.status()
 
+    # 用 refresh token 和原 client_id 刷新；旋转后的 refresh token 原子替换系统凭据。
     def _refresh(self, credential: dict[str, Any]) -> dict[str, Any]:
         refresh = credential.get("refresh_token")
         client_id = credential.get("client_id") or self._client_id()
@@ -314,6 +343,7 @@ class ClaudeOAuthManager:
         self._save_metadata(metadata)
         return updated
 
+    # 按到期窗口取得/刷新 access token；仅传给 Provider 调用边界。
     def access_token(self) -> str:
         with self._lock:
             credential = self.credential_store.load(PROFILE_ID)
@@ -327,6 +357,7 @@ class ClaudeOAuthManager:
                 raise ClaudeOAuthError("Claude access token is unavailable.")
             return token
 
+    # 生成脱敏连接状态；安全凭据库不可用时报告原因而不降级到明文。
     def status(self) -> ClaudeAuthStatus:
         metadata = self._load_metadata()
         client_id_configured = bool(metadata.get("client_id") or os.environ.get("MYTH_CLAUDE_OAUTH_CLIENT_ID"))
@@ -348,6 +379,7 @@ class ClaudeOAuthManager:
             reason=None if connected else ("not_configured" if not client_id_configured else "not_signed_in"),
         )
 
+    # 清除 Myth 本机 OAuth 使用权和公开账号投影；不虚构供应商远端撤销结果。
     def logout(self) -> dict[str, Any]:
         with self._lock:
             self.credential_store.delete(PROFILE_ID)
