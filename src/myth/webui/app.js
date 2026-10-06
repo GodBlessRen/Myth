@@ -1,807 +1,532 @@
-/* Myth 对话工作台：原生 JS 投影持久 Runtime 状态。
- * 浏览器负责导航/草稿/显式控制与只读轮询，不以渲染状态替代准入、Receipt 或 UNKNOWN 核对。
- */
+// 主工作台：会话、项目、知识、设置和路由的浏览器投影。
+// state 只拥有展示/请求状态；Run、预算、Goal、收据由服务端所有。超时重试须保留身份，迟到响应须核对 generation。
 "use strict";
-
-// 前端易失状态：data/session 为服务端投影；drafts/busy/generation 只管理当前页面交互。
-const state = {
-  // data：最近一次 bootstrap 只读投影；不保存认证 token。
-  data: null,
-  // page/id：当前 hash 路由和资源身份；不是后端权限凭据。
-  page: "chat",
-  id: null,
-  // session：当前会话的持久事实投影，只有 API 可改变真实 Turn。
-  session: null,
-  // connection：公开 Provider/model 目录检查结果，不代表模型调用成功。
-  connection: null,
-  // chatgptAuth/claudeAuth/providerAuth：脱敏连接投影；不含 access/refresh/API token。
-  chatgptAuth: null,
-  claudeAuth: null,
-  providerAuth: null,
-  // attached/drafts：尚未发送的显式资料与逐会话草稿；刷新服务端投影不能清空它们。
-  attached: [],
-  drafts: new Map(),
-  composerKey: "new",
-  // busy/composing/loadingSession：本机发送、输入法与会话装载边界，避免重复/错误输入提交。
-  busy: false,
-  composing: false,
-  loadingSession: false,
-  // archived：会话目录筛选，不改变 Run 生命周期。
-  archived: false,
-  // generation/threadKey：丢弃迟到读取和避免重复重绘；不是业务 revision。
-  generation: 0,
-  threadKey: "",
-  // pending：当前草稿待确认入口身份；网络超时后复用 request_id，不盲目新建 Turn。
-  pending: null,
-};
-// 固定 DOM 身份查找；页面结构变化必须由测试同步核对。
+// 共享 DOM 定位助手；固定 id 的 HTML 必须与三个脚本保持一致。
 const $ = (id) => document.getElementById(id);
-
-// 封闭矢量图标目录，不解释用户提供的 SVG/HTML。
-const paths = {
-  plus: "M12 5v14M5 12h14",
-  close: "m6 6 12 12M18 6 6 18",
-  arrow: "m12 19 0-14m-6 6 6-6 6 6",
-  right: "m9 5 7 7-7 7",
-  down: "m6 9 6 6 6-6",
-  search: "M21 21l-4.4-4.4M19 10.5a8.5 8.5 0 1 1-17 0 8.5 8.5 0 0 1 17 0",
-  chat: "M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.4 8.4 0 0 1 3.8-.9h.5a8.5 8.5 0 0 1 8 8v.5Z",
-  folder: "M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z",
-  book: "M4 19.5A2.5 2.5 0 0 1 6.5 17H20M6.5 3H20v19H6.5A2.5 2.5 0 0 1 4 19.5v-14A2.5 2.5 0 0 1 6.5 3Z",
-  settings: "M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8m8.4 4a7.7 7.7 0 0 0-.1-1.3l1.1-1.3-1.7-3-1.7.3a8 8 0 0 0-2.2-1.3l-.6-1.6h-3.4l-.6 1.6A8 8 0 0 0 7 6.7l-1.7-.3-1.7 3 1.1 1.3a7.7 7.7 0 0 0 0 2.6l-1.1 1.3 1.7 3 1.7-.3a8 8 0 0 0 2.2 1.3l.6 1.6h3.4l.6-1.6a8 8 0 0 0 2.2-1.3l1.7.3 1.7-3-1.1-1.3a7.7 7.7 0 0 0 .1-1.3Z",
-  moon: "M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8Z",
-  sun: "M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4",
-  menu: "M4 6h16M4 12h16M4 18h16",
-  panels: "M4 4h16v16H4ZM9 4v16",
-  paperclip: "m21.4 11.6-9.2 9.2a6 6 0 0 1-8.5-8.5L13 3a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5",
-  stop: "M6 6h12v12H6Z",
-  pause: "M7 5v14M17 5v14",
-  play: "m8 5 11 7-11 7Z",
-  refresh: "M20 7v5h-5M4 17v-5h5M6.1 7a7 7 0 0 1 11.6-2L20 8M4 16l2.3 3A7 7 0 0 0 17.9 17",
-  file: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Zm0 0v6h6M8 13h8M8 17h6",
-  download: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3",
-  more: "M5 12h.01M12 12h.01M19 12h.01",
-  pin: "m16 3 5 5-4 1-4 4-1 5-2-2-5 5 5-5-2-2 5-1 4-4Z",
-  trash: "M3 6h18M8 6V4h8v2M5 6l1 14h12l1-14M10 10v6M14 10v6",
-  spark: "m12 3 2.6 6.4L21 12l-6.4 2.6L12 21l-2.6-6.4L3 12l6.4-2.6Z",
-  goal: "M12 3v3M12 18v3M3 12h3M18 12h3M19 12a7 7 0 1 1-14 0 7 7 0 0 1 14 0M14 12a2 2 0 1 1-4 0 2 2 0 0 1 4 0",
-  clock: "M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0M12 7v5l3 2",
-  check: "m5 12 4 4L19 6",
-  link: "M10 13a5 5 0 0 0 7 .5l3-3a5 5 0 0 0-7-7l-2 2M14 11a5 5 0 0 0-7-.5l-3 3a5 5 0 0 0 7 7l2-2",
-  terminal: "m4 17 6-5-6-5M13 17h7",
-  layout: "M3 3h7v7H3ZM14 3h7v7h-7ZM3 14h7v7H3ZM14 14h7v7h-7Z",
-  shield: "M12 22s8-4 8-11V5l-8-3-8 3v6c0 7 8 11 8 11Zm-4-11 3 3 5-6",
+const state = {
+  // bootstrap 公开投影；不包含 token。
+  data: null,
+  // 当前会话公开快照；不是 Run 状态所有者。
+  session: null,
+  // 当前 hash 页面的名称。
+  page: "chat",
+  // 当前页面的业务身份，随路由变化。
+  id: null,
+  // 页面请求代数；迟到响应必须匹配，防止页面串台。
+  generation: 0,
+  // 已渲染讨论的签名；仅用于增量展示。
+  threadKey: "",
+  // 最近一次供应商检查报告；不等于任务结果。
+  connection: null,
+  // 连接目录只属于被检查的 Provider/端点；编辑后不能沿用旧供应商的能力。
+  connectionKey: null,
+  // 连接请求代数；晚到检查不能重填已切换的模型表单。
+  connectionGeneration: 0,
+  // 脱敏账号投影；凭据保存在系统库。
+  chatgptAuth: null,
+  // Claude OAuth 的脱敏状态；浏览器不保存 token。
+  claudeAuth: null,
+  // API Key Provider 的脱敏连接状态；浏览器从不保存 secret。
+  providerKeys: null,
+  // 会话列表的归档筛选。
+  archived: false,
+  // 当前编辑的会话元数据副本。
+  editingSession: null,
+  // 当前编辑的项目元数据副本。
+  editingProject: null,
+  // 正文/附件/设置指纹与稳定 request_id；失败重试保留。
+  pending: null,
+  // 尚未发送的显式资料选择；发送时冻结快照。
+  attached: [],
+  // 本地发送互斥标志；不代替服务器准入约束。
+  busy: false,
+  // 单个只读重连控制器；与业务 Run 生命周期独立。
+  poll: null,
+  // 首次 bootstrap 失败后继续只读重连；已有内容和 request_id 保留到服务恢复。
+  initialized: false,
+  // 草稿按会话身份保存在当前标签页；切页不会把正文、附件或重试身份带到另一会话。
+  drafts: new Map(),
+  // 当前输入归属的会话键；新会话取得持久身份后显式迁移。
+  composerKey: "new",
+  // 中文输入法组合事件；确认候选字时不能发出消息。
+  composing: false,
+  // 会话加载仅约束可编辑状态，不是业务运行状态。
+  loadingSession: false,
+  // 手机导航展示控制器；不保存到浏览器存储或数据库。
+  closeNavigationDrawer: null,
+  // Runtime 模态抽屉的本地关闭入口；原生弹窗接管焦点前先释放背景，不涉及执行控制。
+  closeRuntimeDrawer: null,
+  // 最近会话按实际显示事实缓存；轮询不能反复移除正在被键盘聚焦的锚点。
+  sidebarKey: null,
 };
-// 从封闭图标名建立 SVG 节点；未知名字回退固定 spark，不注入外部标记。
-function icon(name, className = "icon") {
-  const s = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  s.setAttribute("viewBox", "0 0 24 24");
-  s.setAttribute("class", className);
-  s.setAttribute("aria-hidden", "true");
-  const p = document.createElementNS(s.namespaceURI, "path");
-  p.setAttribute("d", paths[name] || paths.spark);
-  s.append(p);
-  return s;
+// 既有图标的固定矢量目录；新增图标沿用此系统。
+const iconPaths = {
+  plus: "M12 5v14M5 12h14",
+  chat: "M21 11.5a8.4 8.4 0 0 1-9 8.4 9.5 9.5 0 0 1-4-.9L3 21l1.8-5A9 9 0 1 1 21 11.5Z",
+  history: "M3 11a9 9 0 1 1 2.5 7M3 5v6h6M12 7v5l3 2",
+  folder: "M3 6h7l2 3h9v11H3Z",
+  book: "M3 4h7l2 2 2-2h7v16h-7l-2 2-2-2H3ZM12 6v16",
+  settings:
+    "M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8ZM9 3h6l1 3 3 1 2 5-2 5-3 1-1 3H9l-1-3-3-1-2-5 2-5 3-1Z",
+  menu: "M4 6h16M4 12h16M4 18h16",
+  chevron: "m8 10 4 4 4-4",
+  more: "M5 12h.01M12 12h.01M19 12h.01",
+  spark: "m12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5Z",
+  code: "m8 5-6 7 6 7m8-14 6 7-6 7M14 3l-4 18",
+  pen: "m15 4 5 5-12 12H3v-5ZM12 7l5 5",
+  clip: "m9 17 8-8a3 3 0 0 0-4-4l-9 9a5 5 0 0 0 7 7l9-9",
+  info: "M12 10v7M12 7h.01M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z",
+  arrow: "M12 19V5m-6 6 6-6 6 6",
+  search: "M17 17l5 5M19 10a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z",
+  upload: "M12 16V3m-5 5 5-5 5 5M4 15v6h16v-6",
+  file: "M14 3H5v18h14V8ZM14 3v5h5M8 12h8M8 16h6",
+  download: "M12 3v13m-5-5 5 5 5-5M4 17v4h16v-4",
+  trash: "M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7",
+  sun: "M12 2v2M12 20v2M4.93 4.93 6.34 6.34M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41M12 17a5 5 0 1 0 0-10 5 5 0 0 0 0 10Z",
+  moon: "M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 9.79 9.79 7 7 0 0 0 21 12.79Z",
+  pin: "m8 3 8 0-1 6 4 4H5l4-4ZM12 13v8",
+  close: "m6 6 12 12M18 6 6 18",
+  down: "M12 5v14m-6-6 6 6 6-6",
+  right: "M5 12h14m-6-6 6 6-6 6",
+  target: "M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0ZM17 12a5 5 0 1 1-10 0 5 5 0 0 1 10 0ZM13 12a1 1 0 1 1-2 0 1 1 0 0 1 2 0Z",
+  activity: "M3 12h4l3-8 4 16 3-8h4",
+};
+// 创建安全 DOM 节点，正文经 textContent 写入；模型/资料文本不解释为 HTML。
+function el(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined) e.textContent = String(text);
+  return e;
 }
-// 同一离线矢量用于品牌与真实等待；图片无业务语义，状态由相邻文字说明。
+// 按固定 SVG 路径目录创建图标；输入只选择名称，不注入任意 SVG。
+function icon(name) {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("class", "icon");
+  svg.setAttribute("aria-hidden", "true");
+  const p = document.createElementNS(svg.namespaceURI, "path");
+  p.setAttribute("d", iconPaths[name] || iconPaths.file);
+  svg.append(p);
+  return svg;
+}
+// 同一太极矢量用于品牌与真实等待；图片无业务语义，状态继续由相邻文字说明。
 function brandMark(waiting = false) {
-  const mark = el("img", "brand-mark" + (waiting ? " brand-wait" : ""));
+  const mark = el("img", "taiji-mark brand-mark" + (waiting ? " taiji-wait brand-wait" : ""));
   mark.src = "/myth-mark.svg";
   mark.alt = "";
+  mark.setAttribute("aria-hidden", "true");
   mark.width = 16;
   mark.height = 16;
-  mark.setAttribute("aria-hidden", "true");
   return mark;
 }
-document.querySelectorAll("[data-icon]").forEach((n) => {
-  n.replaceChildren(icon(n.dataset.icon));
-});
-// 创建文本节点而非 innerHTML，用户/模型内容不能成为页面脚本。
-function el(tag, className = "", text) {
-  const n = document.createElement(tag);
-  if (className) n.className = className;
-  if (text !== undefined) n.textContent = text;
-  return n;
-}
-// 只切换固定节点可见性；业务状态由对应 API 投影决定。
-function show(id, yes) {
-  $(id)?.classList.toggle("hidden", !yes);
-}
-// 页面提示拥有独立短时生命周期；提示不表示任何持久业务完成。
-function toast(message) {
-  const n = $("toast");
-  n.textContent = message;
-  n.classList.remove("hidden");
-  clearTimeout(toast.timer);
-  toast.timer = setTimeout(() => n.classList.add("hidden"), 3600);
-}
-// 显式用户主题优先；选择跟随系统时保持未设置，不把自动主题误存为偏好。
+document
+  .querySelectorAll("[data-icon]")
+  .forEach((e) => e.replaceWith(icon(e.dataset.icon)));
+
+// 奶油白 / 星空黑仅改变浏览器投影；主题选择保存在本机，不进入 Runtime 或会话事实。
 const THEME_STORAGE_KEY = "myth-theme";
 const themeMedia = window.matchMedia("(prefers-color-scheme: dark)");
-function applyTheme(value, persist = false) {
-  const mode = value === "dark" ? "dark" : "light";
-  document.documentElement.dataset.theme = mode;
-  document.documentElement.style.colorScheme = mode;
-  if (persist) { try { localStorage.setItem(THEME_STORAGE_KEY, mode); } catch (_) {} }
-  $("themeToggle").replaceChildren(icon(mode === "dark" ? "sun" : "moon"));
-  $("themeToggle").setAttribute("aria-label", mode === "dark" ? "切换浅色主题" : "切换深色主题");
-  let choice = "system";
-  try { const saved = localStorage.getItem(THEME_STORAGE_KEY); if (["light", "dark"].includes(saved)) choice = saved; } catch (_) {}
-  document.querySelectorAll("[data-theme-choice]").forEach(button => {
+// 读取本机已保存的显式主题；读取失败返回空值并由系统偏好决定，不影响任何 Runtime 状态。
+function storedTheme() {
+  try {
+    const value = localStorage.getItem(THEME_STORAGE_KEY);
+    return value === "light" || value === "dark" ? value : null;
+  } catch (_) {
+    return null;
+  }
+}
+// 应用纯展示主题并可选持久到 localStorage；不把 UI 外观写入会话、Run 或业务设置。
+function applyTheme(theme, persist = false) {
+  const next = theme === "dark" ? "dark" : "light";
+  document.documentElement.dataset.theme = next;
+  document.documentElement.style.colorScheme = next;
+  const themeColor = document.querySelector('meta[name="theme-color"]');
+  if (themeColor) themeColor.content = next === "dark" ? "#0E100F" : "#FFFEF8";
+  const button = $("themeToggle");
+  if (button) {
+    button.replaceChildren(icon(next === "dark" ? "sun" : "moon"));
+    button.setAttribute("aria-pressed", String(next === "dark"));
+    button.setAttribute(
+      "aria-label",
+      next === "dark" ? "切换到奶油白" : "切换到星空黑",
+    );
+    button.title = next === "dark" ? "奶油白" : "星空黑";
+  }
+  if (persist) {
+    try {
+      localStorage.setItem(THEME_STORAGE_KEY, next);
+    } catch (_) {
+      // 主题持久化不可用时仍保留当前页面主题。
+    }
+  }
+  const choice = storedTheme() || "system";
+  document.querySelectorAll("[data-theme-choice]").forEach((button) => {
     const selected = button.dataset.themeChoice === choice;
     button.classList.toggle("selected", selected);
     button.setAttribute("aria-pressed", String(selected));
   });
-  const meta = document.querySelector('meta[name="theme-color"]');
-  if (meta) meta.setAttribute("content", mode === "dark" ? "#0E100F" : "#FFFEF8");
 }
-applyTheme(document.documentElement.dataset.theme);
-themeMedia.addEventListener("change", event => {
-  let saved = null; try { saved = localStorage.getItem(THEME_STORAGE_KEY); } catch (_) {}
-  if (!["light", "dark"].includes(saved)) applyTheme(event.matches ? "dark" : "light");
+applyTheme(
+  storedTheme() || document.documentElement.dataset.theme ||
+    (themeMedia.matches ? "dark" : "light"),
+);
+themeMedia.addEventListener?.("change", (event) => {
+  if (!storedTheme()) applyTheme(event.matches ? "dark" : "light");
 });
-window.addEventListener("storage", event => {
-  if (event.key === THEME_STORAGE_KEY) applyTheme(event.newValue || (themeMedia.matches ? "dark" : "light"));
+window.addEventListener("storage", (event) => {
+  if (event.key === THEME_STORAGE_KEY)
+    applyTheme(storedTheme() || (themeMedia.matches ? "dark" : "light"));
 });
-// 有界同源 JSON 传输，超时覆盖响应体；不自动重试可能已经准入的写入。
+// 切换已有节点可见性；只改变展示，不改变 Run 状态。
+function show(id, yes) {
+  $(id).classList.toggle("hidden", !yes);
+}
+// 显示一次操作结果并在五秒后隐藏；提示不是持久业务证据。
+function toast(text) {
+  $("toast").textContent = text;
+  show("toast", true);
+  clearTimeout(toast.timer);
+  toast.timer = setTimeout(() => show("toast", false), 5000);
+}
+// 工作区 JSON 请求最多等待二十秒；超时只停止本地等待，重试准入须复用 request_id。
 async function jsonRequest(prefix, path, value) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 20000);
   try {
-    const r = await fetch(prefix + path, {
+    const response = await fetch(prefix + path, {
       method: value === undefined ? "GET" : "POST",
       headers: { "Content-Type": "application/json" },
       body: value === undefined ? undefined : JSON.stringify(value),
       signal: controller.signal,
     });
-    const data = await r.json();
-    if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+    // 计时器覆盖响应体读取，不是只等到响应头就提前释放。
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
     return data;
   } finally {
     clearTimeout(timer);
   }
 }
-// 工作区写入保持调用者 request_id；传输失败不等于服务端未准入。
+// 工作区只传递调用者的请求身份；不自动重试可能已经准入的写入。
 function api(path, value) {
   return jsonRequest("/api/workspace", path, value);
 }
-// ChatGPT 的公开认证投影使用独立固定前缀；浏览器不读取 token。
+// ChatGPT 公开认证投影使用固定前缀；共享传输不共享凭据。
 function authApi(path, value) {
   return jsonRequest("/api/auth/chatgpt", path, value);
 }
-// Claude 配置与登录保持独立端点；不借共享传输跨越凭据所有权。
+// Claude 的挑战和登录状态属于自己的认证端点。
 function claudeAuthApi(path, value) {
   return jsonRequest("/api/auth/claude", path, value);
 }
-// API Key 只进入用户明确发起的请求体；不保存到浏览器持久状态。
+// API Key 仅随用户显式发起的连接请求传递，不进入本地持久状态。
 function providerAuthApi(path, value) {
   return jsonRequest("/api/auth/providers", path, value);
 }
-// Provider API Key 可由 Myth 内保存，也可由环境变量提供；页面只呈现公开连接事实。
-function renderProviderKeyAuth() {
-  const provider = $("provider").value;
-  const supportsKey = ["openai", "deepseek", "moonshot"].includes(provider);
-  show("apiKeyAuthBox", supportsKey);
-  if (!supportsKey) return;
-  const status = state.providerAuth?.providers?.[provider] || {};
-  const connected = !!status.connected;
-  const label = provider === "deepseek" ? "DeepSeek" : provider === "moonshot" ? "Kimi" : "OpenAI";
-  $("providerAuthSummary").textContent = connected ? `${label} 已连接` : `在 Myth 内连接 ${label}`;
-  $("providerAuthDetail").textContent = connected
-    ? status.source === "secure_store" ? "API Key 已保存在系统安全凭据库；不会写入项目文件、日志或页面状态。" : "当前使用显式环境变量配置；也可以在这里保存 Myth 专用 API Key。"
-    : status.reason === "secure_store_unavailable" ? "系统安全凭据库不可用；Myth 不会降级为明文保存。请启用系统凭据服务后重试。" : "粘贴一次 API Key 后即可在应用内直接选择模型；不需要 PowerShell 或外部脚本。";
-  $("providerKeyDisconnect").disabled = status.source !== "secure_store";
-  $("providerKeyConnect").textContent = status.source === "secure_store" ? "更新并验证" : "连接并验证";
+
+// 把数据库 UTC 时间投影为本地中文日期；不改写保存时间。
+function date(value) {
+  return new Date(value.replace(" ", "T") + "Z").toLocaleDateString("zh-CN", {
+    month: "short",
+    day: "numeric",
+  });
 }
-// 获取脱敏连接状态，不把 API Key 从后端带回浏览器。
-async function refreshProviderKeys() {
-  try { state.providerAuth = await providerAuthApi("/status"); }
-  catch (_) { state.providerAuth = { providers: {} }; }
-  renderProviderKeyAuth();
-}
-// 用非秘钥元数据显示 ChatGPT 账号连接，不以页面“已连接”扩大 Runtime 权限。
-function renderChatGPTAuth() {
-  const isChatGPT = $("provider").value === "chatgpt";
-  show("chatgptAuthBox", isChatGPT);
-  if (!isChatGPT) return;
-  const status = state.chatgptAuth?.status;
-  const connected = !!status?.connected;
-  $("chatgptAuthSummary").textContent = connected
-    ? "ChatGPT 已连接"
-    : "使用 ChatGPT 账号登录";
-  $("chatgptAuthDetail").textContent = connected
-    ? [status.email, status.plan, status.profile_id].filter(Boolean).join(" · ")
-    : status?.reason === "client_not_configured"
-      ? "尚未配置 Myth 的 OAuth client_id。请按 README 完成应用注册后登录；Myth 不会借用其他应用的客户端身份。"
-      : "登录使用 PKCE/OIDC；token 仅保存在系统安全凭据库，资料与会话不含 token。";
-  $("chatgptLogin").textContent = connected ? "重新授权" : "登录 ChatGPT";
-  $("chatgptLogout").disabled = !connected;
-}
-// 获取公开认证状态供表单展示；失败仅降级展示，不把未知状态当作 token 可用。
-async function refreshChatGPTAuth() {
-  try {
-    state.chatgptAuth = await authApi("/status");
-  } catch (_) {
-    state.chatgptAuth = null;
-  }
-  renderChatGPTAuth();
-}
-// 只展示 Claude OAuth 的公开元数据；client_id 是应用身份，token 不进入浏览器。
-function renderClaudeAuth() {
-  const isClaude = $("provider").value === "claude";
-  show("claudeAuthBox", isClaude);
-  if (!isClaude) return;
-  const status = state.claudeAuth?.status;
-  const connected = !!status?.connected;
-  $("claudeAuthSummary").textContent = connected
-    ? "Claude 已连接"
-    : status?.client_id_configured
-      ? "使用 Claude 账号登录"
-      : "先配置 Myth 的 Claude OAuth 客户端";
-  $("claudeAuthDetail").textContent = connected
-    ? [status.email, status.organization, status.workspace].filter(Boolean).join(" · ") || "Claude OAuth 凭据已保存在系统安全凭据库。"
-    : status?.client_id_configured
-      ? "登录使用 authorization-code + PKCE S256；浏览器只取得脱敏状态，token 不写入项目文件。"
-      : "填写你为 Myth 配置的 OAuth Client ID。Myth 不会复用 Claude Code 或其他应用的客户端身份。";
-  $("claudeLogin").textContent = connected ? "重新授权 Claude" : "登录 Claude";
-  $("claudeLogin").disabled = !status?.client_id_configured;
-  $("claudeLogout").disabled = !connected;
-}
-// 读取 Claude 的非秘钥连接事实；失败保留未知状态，不伪造可用模型。
-async function refreshClaudeAuth() {
-  try { state.claudeAuth = await claudeAuthApi("/status"); }
-  catch (_) { state.claudeAuth = null; }
-  renderClaudeAuth();
-}
-// 在点击栈同步打开认证窗口，随后才创建挑战；noopener 防止供应商页面控制 Myth。
-async function beginClaudeLogin() {
-  let popup = window.open("about:blank", "myth-claude-login");
-  if (popup) popup.opener = null;
-  try {
-    const started = await claudeAuthApi("/start", {});
-    if (popup) popup.location.href = started.auth_url;
-    else window.open(started.auth_url, "_blank", "noopener,noreferrer");
-    toast("请在新窗口完成 Claude 登录，完成后会自动更新连接状态。");
-    const until = Date.now() + 10 * 60 * 1000;
-    // 轮询只确认本次 login_revision；旧账号连接不能冒充新挑战完成。
-    const watch = async () => {
-      await refreshClaudeAuth();
-      if (state.claudeAuth?.status?.login_revision === started.login_id) {
-        try { popup?.close(); } catch (_) {}
-        await checkConnection(false);
-        toast("Claude 已连接，可以直接在 Myth 内选择模型。");
-        return;
-      }
-      if (Date.now() < until) setTimeout(watch, 1800);
-    };
-    watch();
-  } catch (e) {
-    try { popup?.close(); } catch (_) {}
-    toast(e.message);
-  }
-}
-// 在用户点击栈同步打开窗口，再请求 PKCE 入口，防止浏览器拦截异步弹窗；不使用外部 CLI/token 导入。
-async function beginChatGPTLogin() {
-  let popup = window.open("about:blank", "myth-chatgpt-login");
-  if (popup) popup.opener = null;
-  try {
-    const started = await authApi("/start", {});
-    if (popup) popup.location.href = started.auth_url;
-    else window.open(started.auth_url, "_blank", "noopener,noreferrer");
-    toast("请在新窗口完成 ChatGPT 登录，完成后会自动更新连接状态。");
-    const until = Date.now() + 10 * 60 * 1000;
-    // 每次只读取非秘钥状态确认当前挑战完成，超时不创建重复认证请求。
-    const watch = async () => {
-      await refreshChatGPTAuth();
-      if (
-        state.chatgptAuth?.status?.connected &&
-        state.chatgptAuth?.status?.profile_id === started.profile_id &&
-        state.chatgptAuth?.status?.login_revision === started.login_id
-      ) {
-        try { popup?.close(); } catch (_) {}
-        await checkConnection(false);
-        toast("ChatGPT 已连接");
-        return;
-      }
-      if (Date.now() < until) setTimeout(watch, 1800);
-    };
-    watch();
-  } catch (e) {
-    try { popup?.close(); } catch (_) {}
-    toast(e.message);
-  }
-}
-// 展示体积，不把字符长度等同文件字节数。
+// 格式化字节数用于展示；KB 按千字节显示，不当成 Token。
 function bytes(n) {
-  return n < 1024
-    ? `${n} B`
-    : n < 1024 ** 2
-      ? `${(n / 1024).toFixed(1)} KB`
-      : `${(n / 1024 ** 2).toFixed(1)} MB`;
+  return n > 1000 ? `${(n / 1000).toFixed(1)} KB` : `${n} B`;
 }
-// 将 API 时间按浏览器本地显示；原始时间事实仍保留在服务端。
-function date(s) {
-  return s
-    ? new Date(s.replace(" ", "T") + "Z").toLocaleString("zh-CN", {
-        month: "short",
-        day: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-      })
-    : "";
+// 关闭窄屏导航和遮罩，保留当前页面/执行状态。
+function closeNavigation() {
+  if (state.closeNavigationDrawer) state.closeNavigationDrawer();
+  else {
+    $("sidebar").classList.remove("open");
+    $("menuToggle").setAttribute("aria-expanded", "false");
+    show("sidebarShade", false);
+  }
 }
-// 回复耗时只取后端给出的 wall-clock 元数据；缺失保持不显示，不用浏览器猜测模型内部推理时间。
-function workedTime(seconds) {
-  const value = Math.max(0, Math.floor(Number(seconds) || 0));
-  if (value < 60) return `已用时 ${value} 秒`;
-  const minutes = Math.floor(value / 60);
-  const rest = value % 60;
-  return `已用时 ${minutes} 分 ${rest} 秒`;
+// 手机导航成为独立模态区域；背景、焦点和断点只属于展示层，关闭时逐项释放。
+function bindNavigationDrawer() {
+  const panel = $("sidebar"), toggle = $("menuToggle");
+  const compact = window.matchMedia("(max-width: 800px)");
+  const background = new Map();
+  let previousFocus = null;
+  const targets = () => [...panel.querySelectorAll("a[href], button, input, [tabindex]")]
+    .filter(node => !node.disabled && node.tabIndex >= 0 && node.getClientRects().length);
+  const setOpen = (requested) => {
+    const open = compact.matches && requested;
+    const wasOpen = panel.classList.contains("open");
+    panel.classList.toggle("open", open);
+    panel.inert = compact.matches && !open || $("runtimeInspector")?.classList.contains("open");
+    toggle.setAttribute("aria-expanded", String(open));
+    show("sidebarShade", open);
+    document.body.classList.toggle("navigation-open", open);
+    if (open) {
+      panel.setAttribute("role", "dialog");
+      panel.setAttribute("aria-modal", "true");
+      if (!wasOpen) {
+        previousFocus = document.activeElement;
+        for (const node of document.querySelectorAll(".shell > *")) {
+          if (node === panel || node.id === "sidebarShade") continue;
+          background.set(node, node.inert);
+          node.inert = true;
+        }
+        requestAnimationFrame(() => { if (panel.classList.contains("open")) targets()[0]?.focus(); });
+      }
+    } else {
+      panel.removeAttribute("role");
+      panel.removeAttribute("aria-modal");
+      // 另一抽屉的闭合规则随当前视口计算，不能恢复已过期断点的 inert 快照。
+      background.forEach((value, node) => {
+        node.inert = node.id === "runtimeInspector" ? window.matchMedia("(max-width: 1120px)").matches : value;
+      });
+      background.clear();
+      if (wasOpen) {
+        const target = previousFocus?.isConnected ? previousFocus : toggle;
+        if (target.getClientRects().length) target.focus();
+        else $("mainContent").focus();
+      }
+    }
+  };
+  state.closeNavigationDrawer = () => setOpen(false);
+  toggle.onclick = () => setOpen(!panel.classList.contains("open"));
+  $("sidebarShade").onclick = closeNavigation;
+  document.addEventListener("keydown", event => {
+    if (!panel.classList.contains("open")) return;
+    if (event.key === "Tab") {
+      const items = targets(), first = items[0], last = items.at(-1);
+      if (!first) { event.preventDefault(); return; }
+      if (event.shiftKey && (document.activeElement === first || !panel.contains(document.activeElement))) {
+        event.preventDefault(); last.focus();
+      } else if (!event.shiftKey && (document.activeElement === last || !panel.contains(document.activeElement))) {
+        event.preventDefault(); first.focus();
+      }
+    }
+  });
+  compact.addEventListener("change", () => setOpen(false));
+  window.addEventListener("hashchange", closeNavigation);
+  setOpen(false);
 }
-// 显式改变导航，状态变更由 hashchange 和 generation 管理。
+// 更新 hash 路由并关闭导航；业务数据由 route 异步取得。
 function go(page, id) {
   location.hash = id ? `${page}/${encodeURIComponent(id)}` : page;
-}
-// 新对话只准备本地空白视图；真正 Session/Turn 由发送时的 API 创建。
-function newChat(projectId) {
-  saveDraft();
-  state.drafts.delete("new");
-  restoreDraft("new");
-  state.session = null;
-  state.id = null;
-  state.threadKey = "";
-  go("chat");
-  route().then(() => {
-    if (projectId) $("chatProject").value = projectId;
-    saveDraft();
-    $("prompt").focus();
-  });
   closeNavigation();
 }
-// 归还导航焦点并撤销背景 inert；不会折叠 Runtime 桌面轨道。
-function closeNavigation() {
-  const wasOpen = $("sidebar").classList.contains("open");
-  $("sidebar").classList.remove("open");
-  show("sidebarShade", false);
-  if ($("mainContent")) $("mainContent").inert = false;
-  if ($("runtimeInspector")) $("runtimeInspector").inert = false;
-  $("mobileMenu")?.setAttribute("aria-expanded", "false");
-  if (wasOpen) $("mobileMenu")?.focus();
-}
-// 手机导航保留同一信息树；打开期间焦点和键盘不落入遮罩后的页面。
-function bindNavigationDrawer() {
-  $("mobileMenu")?.setAttribute("aria-expanded", "false");
-  $("mobileMenu").onclick = () => {
-    $("sidebar").classList.add("open");
-    show("sidebarShade", true);
-    $("mobileMenu").setAttribute("aria-expanded", "true");
-    $("mainContent").inert = true;
-    $("runtimeInspector").inert = true;
-    $("sidebar").querySelector("a, button")?.focus();
-  };
-  $("sidebarShade").onclick = closeNavigation;
-  $("sidebar").addEventListener("keydown", event => {
-    if (!$("sidebar").classList.contains("open")) return;
-    if (event.key === "Escape") { event.preventDefault(); closeNavigation(); return; }
-    if (event.key !== "Tab") return;
-    const controls = [...$("sidebar").querySelectorAll("a[href], button, input, summary, [tabindex]")]
-      .filter(node => !node.disabled && node.tabIndex >= 0 && node.getClientRects().length);
-    const first = controls[0], last = controls.at(-1);
-    if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
-    else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
-  });
-  window.matchMedia("(min-width: 801px)").addEventListener("change", event => {
-    if (event.matches) closeNavigation();
-  });
-}
-// 草稿只活在本页内存，按会话隔离；pending 和正文一起保留，防止失败后换 request_id。
-function saveDraft() {
-  const key = state.composerKey;
-  const draft = state.drafts.get(key) || {};
-  Object.assign(draft, {
-    text: $("prompt").value,
-    attached: [...state.attached],
-    pending: state.pending,
-    projectId: $("chatProject").value,
-    goalId: $("chatGoal")?.value || "",
-  });
-  state.drafts.set(key, draft);
-  return draft;
-}
-// 切换会话只切换草稿视图；尚未准入的消息不会因轮询或路由改变而丢失。
-function restoreDraft(key) {
-  const draft = state.drafts.get(key) || { text: "", attached: [], pending: null, projectId: "", goalId: "" };
-  state.composerKey = key;
-  $("prompt").value = draft.text;
-  state.attached = [...draft.attached];
-  state.pending = draft.pending;
-  $("chatProject").value = draft.projectId || "";
-  if ($("chatGoal")) $("chatGoal").value = draft.goalId || "";
-  return draft;
-}
-// 排除输入法组合、空正文、在途 POST 与不可直接追加的 Turn；WAITING_USER 只走对应回答入口。
-function composerCanSend() {
-  const status = state.session?.turns.at(-1)?.status;
-  const blocked = ["RUNNING", "INTERRUPTED", "UNKNOWN", "PAUSED"].includes(status);
-  return state.page === "chat" && !state.loadingSession && !state.busy && !state.composing && !blocked && !!$("prompt").value.trim();
-}
-// 输入控件只计算本地可交互状态；持续轮询不覆盖用户输入或焦点。
-function updateComposer() {
-  const input = $("prompt");
-  input.style.height = "auto";
-  input.style.height = Math.min(input.scrollHeight, 220) + "px";
-  $("send").disabled = !composerCanSend();
-  $("send").setAttribute("aria-busy", String(state.busy));
-}
-// 阅读中只显示回到底部入口；不在用户向上阅读时强行自动滚动。
-function updateScrollButton() {
-  const scroll = $("chatScroll");
-  const distance = scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight;
-  show("scrollToBottom", state.page === "chat" && distance > 160);
-}
-// 原生 dialog 负责模态焦点围栏；记录启动点，关闭时回到仍存在的按钮。
-function openDialog(id, focusId) {
-  const dialog = $(id);
-  if (!dialog || dialog.open) return;
-  dialog._returnFocus = document.activeElement;
-  dialog.showModal();
-  if (focusId) $(focusId)?.focus();
-}
-// 复制结果有可观察反馈；剪贴板受限时保留可手工选择的原文。
-async function copyText(text, button, success = "已复制") {
-  try {
-    await navigator.clipboard.writeText(text);
-    const previous = button.textContent;
-    button.textContent = "已复制";
-    toast(success);
-    setTimeout(() => { if (button.isConnected) button.textContent = previous; }, 1400);
-  } catch (_) { toast("浏览器未允许复制，请选中文字后复制。"); }
-}
-// 命令菜单只导航或打开用户可见表单；搜索结果不自动执行任何工具。
-let commandItems = [];
-let selectedCommand = 0;
-function commandCandidates(query) {
-  const commands = [
-    { label: "新建对话", detail: "开始一个新的讨论", icon: "plus", key: "⌘ ⇧ O", run: () => newChat() },
-    { label: "目标与计划", detail: "查看长期目标与执行安排", icon: "goal", run: () => go("goals") },
-    { label: "所有会话", detail: "搜索与整理历史讨论", icon: "chat", run: () => go("sessions") },
-    { label: "项目", detail: "打开项目工作区", icon: "folder", run: () => go("projects") },
-    { label: "知识库", detail: "检索与管理资料", icon: "book", run: () => go("knowledge") },
-    { label: "模型与设置", detail: "连接模型、调整外观", icon: "settings", run: () => go("settings") },
-    { label: "新建项目", detail: "为一项长期工作建立空间", icon: "folder", run: () => { go("projects"); projectDialog(); } },
-  ];
-  const sessions = (state.data?.sessions || []).map(s => ({
-    label: s.title, detail: s.project_name || "会话", icon: "chat", run: () => go("chat", s.id),
-  }));
-  const projects = (state.data?.projects || []).map(p => ({
-    label: p.name, detail: p.description || "项目", icon: "folder", run: () => go("projects", p.id),
-  }));
-  const all = query ? [...commands, ...sessions, ...projects] : [...commands, ...sessions.slice(0, 4)];
-  const q = query.trim().toLowerCase();
-  return (q ? all.filter(item => (item.label + " " + item.detail).toLowerCase().includes(q)) : all).slice(0, 30);
-}
-// 键盘选中态与 aria-activedescendant 同步，避免可见选择和读屏位置分离。
-function selectCommand(index) {
-  selectedCommand = index;
-  $("commandResults").querySelectorAll(".command-item").forEach((button, i) => {
-    button.classList.toggle("selected", i === index);
-    button.setAttribute("aria-selected", String(i === index));
-  });
-  const option = $("command-option-" + index);
-  if (option) {
-    $("commandSearch").setAttribute("aria-activedescendant", option.id);
-    option.scrollIntoView({ block: "nearest" });
-  } else $("commandSearch").removeAttribute("aria-activedescendant");
-}
-// 关闭菜单后再执行显式命令，确保新表单获得正确焦点。
-function runCommand(index) {
-  const item = commandItems[index];
-  if (!item) return;
-  $("commandPalette").close();
-  item.run();
-}
-// 使用节点文本构建本地检索结果；用户项目名不会成为 HTML。
-function renderCommands() {
-  commandItems = commandCandidates($("commandSearch").value);
-  $("commandResults").replaceChildren();
-  commandItems.forEach((item, index) => {
-    const row = el("button", "command-item");
-    row.type = "button";
-    row.id = "command-option-" + index;
-    row.setAttribute("role", "option");
-    row.setAttribute("aria-selected", "false");
-    const main = el("span", "command-item-main");
-    main.append(el("strong", "", item.label), el("small", "", item.detail));
-    row.append(icon(item.icon), main);
-    if (item.key) row.append(el("span", "command-key", item.key));
-    row.onclick = () => runCommand(index);
-    row.onmouseenter = () => selectCommand(index);
-    $("commandResults").append(row);
-  });
-  if (!commandItems.length) $("commandResults").append(el("p", "command-empty", "没有找到匹配结果"));
-  selectCommand(0);
-}
-// 搜索入口在打开时重建当前目录，不引入新的后端查询或执行机会。
-function openCommandPalette() {
-  if (!$("commandPalette")) return;
-  $("commandSearch").value = "";
-  renderCommands();
-  openDialog("commandPalette", "commandSearch");
-}
-// 统一空态的标题/原因/明确下一步，不用不可操作的占位卡片。
-function empty(parent, title, description, name = "folder", action, actionLabel) {
-  const n = el("div", "empty-card");
-  n.append(icon(name), el("h3", "", title), el("p", "", description));
-  if (action && actionLabel) {
-    const button = el("button", "secondary", actionLabel);
-    button.type = "button";
-    button.onclick = action;
-    n.append(button);
+// 装配空状态与明确操作按钮；不会因空页面自动创建业务工作。
+function empty(parent, title, copy, iconName = "chat", action, label) {
+  const c = el("div", "empty-card");
+  c.append(icon(iconName), el("h3", "", title), el("p", "", copy));
+  if (action) {
+    const b = el("button", "primary", label);
+    b.onclick = action;
+    c.append(b);
   }
-  parent.append(n);
+  parent.append(c);
 }
-// 仅提供服务端可见项目选项；选择本身不授予本机文件权限。
-function fillProjects(select, emptyText, selected = "") {
+// 重建可见项目选项并恢复显式选择；范围仍由服务端校验。
+function fillProjects(select, emptyLabel, selected = "") {
   select.replaceChildren();
-  const o = el("option", "", emptyText);
-  o.value = "";
-  select.append(o);
-  for (const p of state.data?.projects || []) {
+  const first = el("option", "", emptyLabel);
+  first.value = "";
+  select.append(first);
+  state.data.projects.forEach((p) => {
     const o = el("option", "", p.name);
     o.value = p.id;
     select.append(o);
-  }
+  });
   select.value = selected;
 }
-// 渲染导航与最近会话投影；不会因查看列表重启任何 Run。
-function renderSidebar() {
-  document.querySelectorAll(".navigation a").forEach((a) => {
-    const active = a.dataset.page === state.page;
-    a.classList.toggle("active", active);
-    if (active) a.setAttribute("aria-current", "page");
-    else a.removeAttribute("aria-current");
-  });
-  const list = $("recentSessions");
-  list.replaceChildren();
-  const sessions = state.data?.sessions || [];
-  sessions.slice(0, 12).forEach((s) => {
-    const a = el("a", "recent-item");
-    a.href = `#chat/${encodeURIComponent(s.id)}`;
-    a.classList.toggle("active", s.id === state.id && state.page === "chat");
-    if (s.pinned) a.append(icon("pin", "icon pin"));
-    const text = el("span", "recent-title", s.title);
-    a.append(text);
-    list.append(a);
-  });
-  if (!sessions.length)
-    list.append(el("p", "recent-empty", "还没有会话"));
-  $("sessionCount").textContent = sessions.length;
-  if ($("projectCount")) $("projectCount").textContent = state.data?.projects?.length || 0;
-  if ($("knowledgeCount")) $("knowledgeCount").textContent = state.data?.documents?.length || 0;
-  if ($("goalCount")) $("goalCount").textContent = state.data?.goals?.length || 0;
-  $("profileName").textContent = "本机工作区";
+// 展示未归档 Goal 与进度；选中 Goal 不等于已获新 Run 授权。
+function fillGoals(select, selected = "") {
+  if (!select) return;
+  select.replaceChildren();
+  const first = el("option", "", "无 Goal");
+  first.value = "";
+  select.append(first);
+  (state.data.goals || [])
+    .filter((g) => g.state !== "ARCHIVED")
+    .forEach((g) => {
+      const work = g.work || {};
+      const label =
+        g.title + (work.current_state ? " · " + work.current_state : "");
+      const o = el("option", "", label);
+      o.value = g.goal_id;
+      select.append(o);
+    });
+  select.value = selected || "";
 }
-// 只读取 bootstrap；写入、模型探测与用户表单分别管理，避免轮询副作用。
+// 从当前 bootstrap 投影最近会话；页面活动标记与 Driver 状态分开。
+function renderSidebar() {
+  const box = $("recentSessions");
+  const sessions = state.data.sessions.slice(0, 9);
+  const key = JSON.stringify([state.page, state.id, sessions.map(s => [s.id, s.title, s.pinned])]);
+  if (key !== state.sidebarKey) {
+    state.sidebarKey = key;
+    box.replaceChildren();
+    if (!sessions.length)
+      box.append(el("p", "recent-empty", "暂无会话"));
+    sessions.forEach((s) => {
+      const a = el("a", "recent-item" + (state.id === s.id ? " active" : ""));
+      a.href = `#chat/${s.id}`;
+      if (s.pinned) {
+        const pin = el("span", "pin");
+        pin.append(icon("pin"));
+        pin.setAttribute("aria-label", "已置顶");
+        a.append(pin);
+      }
+      a.append(el("span", "recent-title", s.title));
+      a.title = s.title;
+      if (state.page === "chat" && state.id === s.id) a.setAttribute("aria-current", "page");
+      a.onclick = closeNavigation;
+      box.append(a);
+    });
+  }
+  document
+    .querySelectorAll("[data-page]")
+    .forEach((a) => {
+      const active = a.dataset.page === state.page;
+      a.classList.toggle("active", active);
+      if (active) a.setAttribute("aria-current", "page");
+      else a.removeAttribute("aria-current");
+    });
+  window.MythStudio?.sync(state.session, state.page, state.id);
+}
+// 刷新共享产品投影；并发页面请求通过各自 generation 防止迟到覆写。
 async function refresh() {
   state.data = await api("");
   renderSidebar();
-  renderConnection();
 }
-// 按实际 Provider 能力选择认证说明和可用字段，不把设置页初始化当作已连接。
-function settingsProviderMode() {
-  const provider = $("provider").value;
-  const isOllama = provider === "ollama";
-  show("ollamaField", isOllama);
-  $("ollamaUrl").disabled = !isOllama;
-  $("modelHelp").textContent = provider === "claude"
-    ? "登录后读取账号可用模型；也可以填写该账号已获权限的精确模型 ID。"
-    : provider === "chatgpt"
-    ? "登录后读取 ChatGPT 可用模型；Thinking 与上下文限制以实际目录为准。"
-    : provider === "deepseek"
-      ? "DeepSeek 能力随模型变化；思考开关与档位只在当前模型支持时显示。"
-      : provider === "moonshot"
-        ? "Kimi 能力随模型变化；连接后读取可用模型，也支持填写精确模型 ID。"
-        : isOllama
-        ? "从本机 Ollama 读取已安装模型；只对实际报告支持的模型开放思考设置。"
-        : "填写精确模型 ID；连接后读取可用目录与能力。";
+// 读取当前连接目录中某模型的公开能力；目录缺失时返回空，不用品牌猜测补齐。
+function modelCapability(modelId = $("model").value.trim()) {
+  if (state.connectionKey !== connectionConfigKey(settingsPayload())) return null;
+  const profiles = state.connection?.details?.model_capabilities;
+  return profiles && typeof profiles === "object" ? profiles[modelId] || null : null;
 }
-// 页面明确编辑的连接目标；后台活跃 Run 的历史设置不允许反过来覆盖表单。
-function connectionSettings() {
-  const settings = state.data?.settings || {};
-  if (state.page === "settings") return { ...settings, ...settingsPayload() };
-  const turnSettings = state.session?.turns.at(-1)?.settings;
-  return { ...settings, ...(turnSettings || {}) };
+// 将动态 Thinking 选择还原为持久设置；default 表示交给 Provider 使用其模型默认值。
+function reasoningSelectionValue(select = $("reasoningSetting")) {
+  if (!select || !select.value || select.value === "default") return null;
+  if (select.value === "__on__") return true;
+  if (select.value === "__off__") return false;
+  return select.value;
 }
-// 连接检查绑定 Provider 与端点；目标改变后旧成功结果不能显示成新目标已连接。
-function connectionIdentity(settings) {
-  return JSON.stringify([
-    settings.provider || "ollama",
-    settings.provider === "ollama" ? settings.ollama_url || "" : "",
-  ]);
-}
-// 用户改动连接字段时显式失效上一次目录结果，不触发新的联网检查。
-function invalidateConnection() {
-  state.connection = null;
-  $("connectionResult").textContent = "";
-  $("connectionResult").classList.remove("bad");
-  renderConnection();
-  renderAdaptiveModelSettings();
-}
-// 只显示与当前目标匹配的连接事实；首屏未知保持待检查，不制造成功反馈。
-function renderConnection() {
-  const settings = connectionSettings();
-  const provider = settings.provider || "ollama";
-  const result = state.connection?.identity === connectionIdentity(settings) ? state.connection : null;
-  const readiness = result ? !!result.ready : null;
-  $("connectionDot").className = "connection-dot" + (readiness === true ? " connected" : readiness === false ? " disconnected" : "");
-  $("modelLabel").textContent = settings.model || "选择模型";
-  const label = provider === "claude" ? "Claude OAuth" : provider === "chatgpt" ? "ChatGPT OAuth" : provider === "deepseek" ? "DeepSeek API" : provider === "moonshot" ? "Kimi API" : provider === "openai" ? "OpenAI API" : "Ollama";
-  $("connectionLabel").textContent = label + (readiness === true ? " 已连接" : readiness === false ? " 未连接" : " 待检查");
-  $("welcomeConnectionText").textContent = readiness === true
-    ? settings.model ? "已连接到 " + settings.model : "已连接，请选择一个模型"
-    : readiness === false ? "模型未连接，检查连接后即可开始对话。" : "选择模型并检查连接，开始第一段对话。";
-}
-// 读取目录时冻结连接身份；用户中途切换 Provider 后迟到结果丢弃而不是误填新表单。
-async function checkConnection(quiet = false) {
-  if (state.checkingConnection) return;
-  settingsProviderMode();
-  const payload = settingsPayload();
-  const identity = connectionIdentity(payload);
-  state.checkingConnection = true;
-  $("checkConnection").disabled = true;
-  $("checkConnection").textContent = "正在连接…";
-  $("connectionResult").textContent = "";
-  try {
-    const result = await api("/connection", payload);
-    if (connectionIdentity(settingsPayload()) !== identity) return;
-    state.connection = { ...result, identity };
-    state.modelCapabilities = result.details?.model_capabilities || {};
-    const models = result.details?.models || [];
-    $("modelList").replaceChildren();
-    models.forEach((m) => {
-      const o = el("option"); o.value = m; $("modelList").append(o);
-    });
-    if (!$("model").value && models[0]) $("model").value = models[0];
-    const message = result.ready
-      ? `${models.length} 个可用模型 · 连接正常`
-      : result.details?.error || "连接失败，请检查配置。";
-    $("connectionResult").textContent = message;
-    $("connectionResult").classList.toggle("bad", !result.ready);
-    renderConnection();
-    renderChatGPTAuth();
-    renderClaudeAuth();
-    renderProviderKeyAuth();
-    renderAdaptiveModelSettings();
-    poolRefreshPrices();
-    if (!quiet) toast(result.ready ? "连接正常，模型列表已更新。" : message);
-  } catch (e) {
-    if (connectionIdentity(settingsPayload()) === identity) {
-      state.connection = { ready: false, identity };
-      $("connectionResult").textContent = e.message;
-      $("connectionResult").classList.add("bad");
-      renderConnection();
-    }
-    if (!quiet) toast(e.message);
-  } finally {
-    state.checkingConnection = false;
-    $("checkConnection").disabled = false;
-    $("checkConnection").textContent = "检查连接";
-  }
-}
-// 模型档位文案只映射已报告的能力值；无报告不猜测 OpenAI/Claude/Kimi 的支持范围。
-function reasoningLabel(value) {
-  return ({
-    none: "不启用额外思考", off: "不启用额外思考", no: "不启用额外思考", false: "不启用额外思考",
-    minimal: "最小", low: "低", medium: "中", high: "高", xhigh: "很高", max: "最大",
-  })[String(value).toLowerCase()] || value;
-}
-// 优先使用最近一次同连接的目录能力；DeepSeek 的确定性模型规则是离线后备，而不是全 Provider 通用档位。
-function selectedModelCapability(provider, model) {
-  const sameConnection = state.connection?.identity === connectionIdentity({ provider, ollama_url: $("ollamaUrl").value });
-  const exact = sameConnection ? state.connection?.details?.model_capabilities?.[model] : null;
-  if (exact) return exact;
-  if (provider === "deepseek") {
-    const key = String(model || "").toLowerCase();
-    if (key === "deepseek-v4-pro") return { context_window: 1_000_000, max_output_tokens: 393216, reasoning: { off: "none", levels: ["high", "max"], default: "high" }, source: "provider mapping" };
-    if (key === "deepseek-v4-flash") return { context_window: 1_000_000, max_output_tokens: 393216, reasoning: { off: "none", levels: ["high"], default: "high" }, source: "provider mapping" };
-    if (key === "deepseek-chat") return { context_window: 131072, max_output_tokens: 8192, source: "provider mapping" };
-    if (key === "deepseek-reasoner") return { context_window: 131072, max_output_tokens: 65536, reasoning: { off: "none", levels: ["low", "high"], default: "high" }, source: "provider mapping" };
-  }
-  return {};
-}
-// 由真实能力配置思考选择器；缺能力时只保留已保存/正在执行的显式值，不补造可选档位。
-function populateReasoningSelect(select, capability, current) {
-  const reasoning = capability?.reasoning || {};
-  const levels = Array.isArray(reasoning.levels) ? reasoning.levels.filter((item) => typeof item === "string" && item) : [];
+// 按 Provider/model capability 生成原生 reasoning 选项；不制造 Myth 全局 effort 档位。
+function fillReasoningSelect(select, profile, current, metaNode = null) {
   select.replaceChildren();
-  if (reasoning.off) {
-    const off = el("option", "", "不启用额外思考");
-    off.value = "__off__";
-    off.dataset.value = reasoning.off;
-    select.append(off);
-  }
-  levels.forEach((level) => {
-    const option = el("option", "", reasoningLabel(level));
-    option.value = level;
+  const reasoning = profile?.reasoning;
+  if (!reasoning) return false;
+  const add = (value, label) => {
+    const option = el("option");
+    option.value = value;
+    option.textContent = label;
     select.append(option);
-  });
-  if (!reasoning.off && !levels.length) {
-    const option = el("option", "", current ? `当前设置 · ${reasoningLabel(current)}` : "当前模型未报告可调思考档位");
-    option.value = current || "";
-    select.append(option);
-    select.disabled = true;
-    return;
-  }
-  const candidates = [...select.options].map((option) => option.value);
-  const selected = current === reasoning.off ? "__off__" : current;
-  if (current && !candidates.includes(selected)) {
-    // 手动保存的原始设置不因能力目录暂缺而静默删除；提交时由服务端再次核对。
-    const raw = el("option", "", `已保存设置 · ${reasoningLabel(current)}`);
-    raw.value = current;
-    select.append(raw);
-  }
-  select.value = selected && [...select.options].some((option) => option.value === selected)
-    ? selected
-    : reasoning.default || (reasoning.off ? "__off__" : levels[0] || "");
-  select.disabled = false;
-}
-// disabled 表示没有可供选择的新档位，不表示抹掉已有设置。
-function reasoningSelectionValue(select) {
-  return select.value === "__off__" ? select.options[0]?.dataset.value || "none" : select.value || null;
-}
-// 运行时控制始终相对最新模型/Control 投影计算档位；不会沿用设置页另一个模型的能力。
-function renderTurnReasoning(turn, thinking) {
-  const provider = turn?.settings?.provider || state.data?.settings?.provider || "ollama";
-  const model = $("turnModelInput").value.trim() || turn?.control?.model || turn?.settings?.model || "";
-  populateReasoningSelect($("turnThinkingInput"), selectedModelCapability(provider, model), thinking);
-}
-// 表单尺寸与最大值来自能力目录，但仅在值仍由目录自动填入时更新；不覆盖用户手动输入。
-function renderAdaptiveModelSettings() {
-  settingsProviderMode();
-  const provider = $("provider").value;
-  const model = $("model").value.trim();
-  const sameIdentity = state.reasoningModelIdentity === `${provider}:${model}`;
-  const current = sameIdentity
-    ? reasoningSelectionValue($("reasoningSetting"))
-    : (state.data?.settings?.provider === provider && state.data?.settings?.model === model ? state.data.settings.thinking : null);
-  const capability = selectedModelCapability(provider, model);
-  populateReasoningSelect($("reasoningSetting"), capability, current);
-  state.reasoningModelIdentity = `${provider}:${model}`;
-  const levels = capability.reasoning?.levels || [];
-  $("reasoningHelp").textContent = levels.length
-    ? `当前模型报告 ${levels.map(reasoningLabel).join(" / ")}${capability.reasoning?.off ? "，支持关闭额外思考。" : "。"}`
-    : "未报告可调档位；Myth 不会根据模型名称猜测远端支持。已保存设置保持原样。";
-  const output = Number(capability.max_output_tokens) || 0;
-  const nextMax = output > 0 ? String(Math.min(output, 393216)) : "393216";
-  const previousMax = $("maxTokens").dataset.catalogMax;
-  $("maxTokens").max = nextMax;
-  if (previousMax !== nextMax && Number($("maxTokens").value) > Number(nextMax)) $("maxTokens").value = nextMax;
-  $("maxTokens").dataset.catalogMax = nextMax;
-  $("maxTokensHelp").textContent = output > 0
-    ? `当前模型单次输出上限 ${output.toLocaleString()} token。`
-    : "此值是 Myth 的单次输出限制；远端可能报告更低上限。";
-  const reportedContext = Number(capability.context_window) || 0;
-  const autoContext = $("contextWindow").dataset.auto;
-  if (reportedContext > 0 && (!$("contextWindow").value || $("contextWindow").value === autoContext)) {
-    $("contextWindow").value = String(reportedContext);
-    $("contextWindow").dataset.auto = String(reportedContext);
-  }
-  $("contextWindowHelp").textContent = reportedContext > 0
-    ? `模型目录报告 ${reportedContext.toLocaleString()} token；可手动使用更保守的窗口。`
-    : "模型未报告上下文窗口；此值是显式本地预算，不代表远端能力。";
-  const metadata = {
-    provider,
-    model: model || "未选择",
-    capability_source: capability.source || (Object.keys(capability).length ? "provider catalog" : "not_reported"),
-    reported_context_window: reportedContext || null,
-    reported_max_output_tokens: output || null,
-    reasoning: capability.reasoning || null,
   };
-  $("modelCapabilitySummary").textContent = Object.keys(capability).length
-    ? "模型特性与来源" : "模型尚未报告能力";
-  $("modelCapabilityDetail").textContent = JSON.stringify(metadata, null, 2);
+  add(
+    "default",
+    reasoning.default ? `默认 · ${reasoning.default}` : "默认 · Provider 决定",
+  );
+  const seen = new Set();
+  if (reasoning.kind === "toggle") { add("__on__", "开启推理"); seen.add("__on__"); }
+  if (reasoning.off !== undefined && reasoning.off !== null) {
+    const raw = typeof reasoning.off === "boolean"
+      ? (reasoning.off ? "__on__" : "__off__")
+      : String(reasoning.off);
+    seen.add(raw);
+    add(raw, `关闭 · ${String(reasoning.off)}`);
+  }
+  (reasoning.levels || []).forEach((level) => {
+    const raw = String(level);
+    if (seen.has(raw)) return;
+    seen.add(raw);
+    add(raw, raw);
+  });
+  const currentRaw =
+    current === null || current === undefined
+      ? "default"
+      : current === true
+        ? "__on__"
+        : current === false
+          ? "__off__"
+          : String(current);
+  if (![...select.options].some((option) => option.value === currentRaw)) {
+    add(currentRaw, `${currentRaw} · 已保存`);
+    select.lastElementChild.disabled = true;
+  }
+  select.value = currentRaw;
+  if (metaNode) {
+    const source = profile.source === "remote" ? "Provider 实时发现" : "Provider 能力声明";
+    metaNode.textContent = `${source} · 增加推理通常需要更多时间与输出 Token；档位按该模型定义。`;
+  }
+  return true;
 }
-// 读取明确的表单值形成提交 payload；模型池/密钥管理各由专用入口处理。
+// 根据当前模型能力调整设置表单；只显示当前 Provider 真正声明/发现的控制。
+function renderAdaptiveModelSettings(options = {}) {
+  const provider = $("provider").value;
+  show("ollamaEndpointField", provider === "ollama");
+  show("ollamaContextField", provider === "ollama");
+  const profile = modelCapability();
+  const saved = state.data?.settings || {};
+  const select = $("reasoningSetting");
+  const modelKey = JSON.stringify([connectionConfigKey(settingsPayload()), $("model").value.trim()]);
+  // 同一模型的重绘保留未保存选择；只有加载已保存设置才显式回填，避免保存期间的新编辑被覆盖。
+  const currentThinking = Object.hasOwn(options, "thinking") ? options.thinking
+    : select.dataset.modelKey === modelKey ? reasoningSelectionValue(select)
+    : $("model").value.trim() === saved.model && connectionConfigKey(settingsPayload()) === connectionConfigKey(saved) ? saved.thinking : null;
+  select.dataset.modelKey = modelKey;
+  const reasoningVisible = fillReasoningSelect(
+    $("reasoningSetting"),
+    profile,
+    currentThinking,
+    $("reasoningMeta"),
+  );
+  show("reasoningField", reasoningVisible);
+  const temperature = $("temperature");
+  temperature.max = ["anthropic", "claude_oauth"].includes(provider) ? "1" : "2";
+  temperature.disabled = provider === "chatgpt" || provider === "openai" && (!profile || !!profile.reasoning) || ["anthropic", "claude_oauth"].includes(provider) && profile?.temperature?.supported !== true;
+  // 停用采样控制时恢复可持久化的默认值；供应商切换不会遗留无法编辑的超界配置。
+  if (temperature.disabled) temperature.value = "0";
+  $("temperatureMeta").textContent = temperature.disabled ? "当前适配器使用模型默认采样。" : `0–${temperature.max} · 越低越稳定，越高越多样。`;
+  const facts = [];
+  if (profile?.context_window) facts.push(`Context ${Number(profile.context_window).toLocaleString()} tokens`);
+  if (profile?.max_output_tokens) {
+    facts.push(`Max output ${Number(profile.max_output_tokens).toLocaleString()}`);
+    $("maxTokens").max = String(Math.min(393216, profile.max_output_tokens, Number($("maxTokens").dataset.catalogMax) || 393216));
+  } else {
+    $("maxTokens").max = String(Math.min(393216, Number($("maxTokens").dataset.catalogMax) || 393216));
+  }
+  if (profile?.input_modalities?.length) facts.push(`Input ${profile.input_modalities.join(" + ")}`);
+  const capabilityMeta = $("modelCapabilityMeta");
+  capabilityMeta.replaceChildren();
+  if (facts.length) capabilityMeta.append(document.createTextNode(facts.join(" · ")));
+  const providerMetadata = profile?.provider_metadata;
+  if (providerMetadata && Object.keys(providerMetadata).length) {
+    const details = document.createElement("details");
+    details.className = "model-provider-details";
+    const summary = document.createElement("summary");
+    summary.textContent = "Provider 模型详情";
+    const pre = document.createElement("pre");
+    pre.textContent = JSON.stringify(providerMetadata, null, 2);
+    details.append(summary, pre);
+    capabilityMeta.append(details);
+  }
+  show(
+    "modelCapabilityMeta",
+    facts.length > 0 || !!(providerMetadata && Object.keys(providerMetadata).length),
+  );
+  window.MythChoices?.sync();
+}
+// Control 面板复用同一 capability 目录，但保持当前 Run 已保存的原生值可见。
+function renderTurnReasoning(turn, current) {
+  const model = $("turnModelInput").value.trim() || turn?.settings?.model || "";
+  const profile = modelCapability(model);
+  const visible = fillReasoningSelect(
+    $("turnThinkingInput"),
+    profile,
+    current,
+    $("turnThinkingMeta"),
+  );
+  show("turnThinkingField", visible || current !== null && current !== undefined);
+}
+
+// 从表单收集非秘钥模型配置；服务端校验并固定到未来 Turn。
 function settingsPayload() {
   return {
     provider: $("provider").value,
@@ -809,12 +534,13 @@ function settingsPayload() {
     ollama_url: $("ollamaUrl").value.trim(),
     max_steps: Number($("maxSteps").value),
     max_output_tokens: Number($("maxTokens").value),
-    context_window: Number($("contextWindow").value),
-    thinking: reasoningSelectionValue($("reasoningSetting")),
-    system_prompt: $("systemPrompt").value,
+    num_ctx: Number($("numCtx").value),
+    temperature: Number($("temperature").value),
+    thinking: reasoningSelectionValue(),
+    model_pool: typeof modelPoolPayload === "function" ? modelPoolPayload() : {children: []},
   };
 }
-// 只在进入设置页或首次启动时回填，普通状态轮询不会覆盖未保存编辑。
+// 回填保存设置及认证展示；不会改变在途请求的配置。
 function loadSettings() {
   const s = state.data.settings;
   $("provider").value = s.provider;
@@ -822,135 +548,617 @@ function loadSettings() {
   $("ollamaUrl").value = s.ollama_url;
   $("maxSteps").value = s.max_steps;
   $("maxTokens").value = s.max_output_tokens;
-  $("contextWindow").value = s.context_window;
-  delete $("contextWindow").dataset.auto;
-  state.reasoningModelIdentity = null;
-  $("systemPrompt").value = s.system_prompt;
-  $("settingsSaved").textContent = "";
-  settingsProviderMode();
+  $("numCtx").value = s.num_ctx ?? 8192;
+  $("temperature").value = s.temperature ?? 0;
+  if (typeof loadModelPool === "function") loadModelPool(s.model_pool);
   renderChatGPTAuth();
   renderClaudeAuth();
   renderProviderKeyAuth();
+  renderAdaptiveModelSettings({thinking: s.thinking});
+  poolRefreshPrices();
+  window.MythChoices?.sync();
+}
+// 仅展示公开账号/scope 状态；身份已连接与 plan usage 已授权分开。
+function renderChatGPTAuth() {
+  const panel = $("chatgptAuthPanel");
+  if (!panel) return;
+  const enabled = $("provider").value === "chatgpt";
+  show("chatgptAuthPanel", enabled);
+  if (!enabled) return;
+  const s = state.chatgptAuth?.status;
+  if (!s) {
+    $("chatgptAuthState").textContent = "检查 ChatGPT 连接…";
+    $("chatgptAuthMeta").textContent =
+      "OAuth 凭据由 Myth 保存到系统安全凭据库。";
+    show("chatgptLogout", false);
+    return;
+  }
+  if (s.connected) {
+    $("chatgptAuthState").textContent = s.email || s.name || "ChatGPT 已连接";
+    $("chatgptAuthMeta").textContent = s.sharing
+      ? "ChatGPT plan usage 已授权 · 凭据不进入 Runtime 数据库"
+      : "身份已连接，但尚未授权 ChatGPT plan usage";
+    show("chatgptLogout", true);
+    $("chatgptLogin").textContent = s.sharing
+      ? "重新授权"
+      : "启用 ChatGPT plan";
+  } else {
+    $("chatgptAuthState").textContent = "未连接 ChatGPT";
+    $("chatgptAuthMeta").textContent =
+      s.reason === "not_signed_in"
+        ? "使用 ChatGPT 登录，凭据保存在系统安全凭据库。"
+        : s.reason || "需要登录";
+    show("chatgptLogout", false);
+    $("chatgptLogin").textContent = "使用 ChatGPT 登录";
+  }
+}
+// 渲染 OpenAI / DeepSeek 的应用内 API Key 连接；Provider 特有认证不污染通用模型表单。
+function renderProviderKeyAuth() {
+  const provider = $("provider").value;
+  const enabled = ["openai", "deepseek", "anthropic", "kimi"].includes(provider);
+  show("providerKeyPanel", enabled);
+  if (!enabled) return;
+  const status = (state.providerKeys?.providers || []).find(
+    (item) => item.provider === provider,
+  );
+  const label = status?.label || ({openai: "OpenAI", deepseek: "DeepSeek", anthropic: "Claude", kimi: "Kimi"}[provider] || provider);
+  if (status?.configured) {
+    $("providerKeyState").textContent = `${label} 已连接`;
+    $("providerKeyMeta").textContent =
+      status.source === "myth"
+        ? "凭据保存在操作系统安全凭据库 · 不进入 Runtime 数据库"
+        : "检测到旧环境配置 · 可直接使用，也可在 Myth 内重新连接";
+    show("providerKeyDisconnect", status.source === "myth");
+    $("providerKeyConnect").textContent =
+      status.source === "myth" ? "替换 API Key" : "改为 Myth 安全连接";
+  } else {
+    $("providerKeyState").textContent = `连接 ${label}`;
+    $("providerKeyMeta").textContent =
+      "粘贴一次 API Key 即可。Myth 会保存到操作系统安全凭据库。";
+    show("providerKeyDisconnect", false);
+    $("providerKeyConnect").textContent = "连接";
+  }
+}
+// 刷新 API Key Provider 的脱敏状态；失败只影响设置提示，不把未知状态伪装成未连接。
+async function refreshProviderKeys() {
+  try {
+    state.providerKeys = await providerAuthApi("/status");
+  } catch (e) {
+    state.providerKeys = { providers: [], error: e.message };
+  }
+  renderProviderKeyAuth();
+}
+// 读取脱敏认证状态；错误保留为页面提示，不伪造 ready。
+async function refreshChatGPTAuth() {
+  try {
+    state.chatgptAuth = await authApi("/status");
+    renderChatGPTAuth();
+  } catch (e) {
+    state.chatgptAuth = {
+      status: { connected: false, sharing: false, reason: e.message },
+    };
+    renderChatGPTAuth();
+  }
+}
+// 按明确点击创建登录挑战并打开授权入口；轮询只等待完成状态，凭据保存在系统库。
+async function beginChatGPTLogin() {
+  let popup = null;
+  try {
+    popup = window.open(
+      "about:blank",
+      "myth-chatgpt-oauth",
+      "width=640,height=760",
+    );
+    const profileId = state.chatgptAuth?.status?.profile_id || null;
+    const attempt = await authApi("/start", { profile_id: profileId });
+    if (!popup) throw new Error("浏览器阻止了登录窗口，请允许弹窗后重试。");
+    // 授权页来自另一源，先断开 opener，避免其导航/操纵本机工作台。
+    popup.opener = null;
+    popup.location = attempt.auth_url;
+    for (let i = 0; i < 180; i++) {
+      await new Promise((r) => setTimeout(r, 1000));
+      await refreshChatGPTAuth();
+      if (state.chatgptAuth?.status?.login_revision === attempt.login_id) {
+        try {
+          popup.close();
+        } catch {}
+        await checkConnection(true);
+        toast(
+          state.chatgptAuth.status.sharing
+            ? "ChatGPT 已连接。"
+            : "ChatGPT 身份已连接，但 plan usage 未授权。",
+        );
+        return;
+      }
+      if (popup.closed && i > 2) break;
+    }
+    throw new Error("ChatGPT 登录未完成。");
+  } catch (e) {
+    try {
+      popup?.close();
+    } catch {}
+    toast(e.message);
+  }
+}
+// Claude OAuth 只在独立 Provider 身份下显示；API Key 的 anthropic 路径保持原样。
+function renderClaudeAuth() {
+  const panel = $("claudeAuthPanel");
+  if (!panel) return;
+  const enabled = $("provider").value === "claude_oauth";
+  show("claudeAuthPanel", enabled);
+  if (!enabled) return;
+  const s = state.claudeAuth?.status;
+  if (!s) {
+    $("claudeAuthState").textContent = "检查 Claude OAuth…";
+    $("claudeAuthMeta").textContent = "OAuth token 只保存到系统安全凭据库。";
+    show("claudeLogout", false);
+    return;
+  }
+  if (s.connected) {
+    $("claudeAuthState").textContent = s.email || "Claude 已连接";
+    const scope = (s.scopes || []).join(" · ");
+    $("claudeAuthMeta").textContent =
+      [s.organization, s.workspace, scope].filter(Boolean).join(" · ") ||
+      "Claude OAuth 已连接 · token 不进入 Runtime 数据库";
+    show("claudeLogout", true);
+    $("claudeLogin").textContent = "重新授权";
+  } else {
+    $("claudeAuthState").textContent =
+      s.client_id_configured ? "Claude OAuth 未登录" : "先配置 Myth OAuth Client ID";
+    $("claudeAuthMeta").textContent =
+      s.client_id_configured
+        ? "使用 Claude/Anthropic 账号授权 user:inference。"
+        : "Client ID 是公开配置；不要粘贴 client secret 或其他应用的 token。";
+    show("claudeLogout", false);
+    $("claudeLogin").textContent = "连接 Claude";
+  }
+}
+
+// 刷新 Claude OAuth 脱敏状态；失败只影响设置提示，不伪造已连接。
+async function refreshClaudeAuth() {
+  try {
+    state.claudeAuth = await claudeAuthApi("/status");
+  } catch (e) {
+    state.claudeAuth = {status: {connected: false, client_id_configured: false, reason: e.message}};
+  }
+  renderClaudeAuth();
+}
+
+// 由用户点击发起 Claude PKCE 登录；轮询只等待本次 login_revision，不接触 token。
+async function beginClaudeLogin() {
+  let popup = null;
+  try {
+    popup = window.open("about:blank", "myth-claude-oauth", "width=640,height=760");
+    const attempt = await claudeAuthApi("/start", {});
+    if (!popup) throw new Error("浏览器阻止了登录窗口，请允许弹窗后重试。");
+    popup.opener = null;
+    popup.location = attempt.auth_url;
+    for (let i = 0; i < 180; i++) {
+      await new Promise((r) => setTimeout(r, 1000));
+      await refreshClaudeAuth();
+      if (state.claudeAuth?.status?.login_revision === attempt.login_id) {
+        try { popup.close(); } catch {}
+        await checkConnection(true);
+        toast("Claude OAuth 已连接。");
+        return;
+      }
+      if (popup.closed && i > 2) break;
+    }
+    throw new Error("Claude 登录未完成。");
+  } catch (e) {
+    try { popup?.close(); } catch {}
+    toast(e.message);
+  }
+}
+
+// 呈现当前检查报告；连接 ready 不能当作某个任务已完成。
+function renderConnection() {
+  const c = state.connectionKey === connectionConfigKey(settingsPayload()) ? state.connection : null;
+  const savedConnection = state.connectionKey === connectionConfigKey(state.data.settings) ? state.connection : null;
+  $("connectionDot").className =
+    "connection-dot " + (savedConnection ? (savedConnection.ready ? "connected" : "disconnected") : "");
+  const activeModel = state.session?.turns?.at(-1)?.settings?.model;
+  const provider = state.data.settings.provider;
+  $("modelLabel").textContent =
+    activeModel ||
+    state.data.settings.model ||
+    (provider === "ollama"
+      ? "连接 Ollama"
+      : provider === "chatgpt"
+        ? "连接 ChatGPT"
+        : provider === "claude_oauth"
+          ? "连接 Claude"
+          : provider === "deepseek"
+            ? "连接 DeepSeek"
+            : "连接模型");
+  $("modelPill").setAttribute("aria-label", $("modelLabel").textContent + "，打开模型设置或运行控制");
+  $("modelPill").title = $("modelLabel").textContent;
+  show("welcomeConnection", !state.data.settings.model || (savedConnection && !savedConnection.ready));
+  $("connectionResult").textContent = "";
+  $("connectionResult").className = "connection-result";
+  $("modelOptions").replaceChildren();
+  if (c) {
+    const fallback =
+      $("provider").value === "ollama"
+        ? "未连接，请确认 Ollama 正在运行。"
+        : $("provider").value === "chatgpt"
+          ? "ChatGPT 尚未完成授权或当前计划不可用。"
+          : $("provider").value === "claude_oauth"
+            ? "Claude OAuth 尚未连接或 user:inference 不可用。"
+          : $("provider").value === "deepseek"
+            ? "DeepSeek 尚未就绪，请在 Myth 内连接 API Key。"
+            : $("provider").value === "openai"
+              ? "OpenAI 尚未就绪，请在 Myth 内连接 API Key。"
+              : "模型提供方尚未就绪。";
+    $("connectionResult").textContent = c.ready
+      ? `已连接 · ${c.details.models?.length || 0} 个可用模型`
+      : c.details.error || c.details.reason || fallback;
+    $("connectionResult").className =
+      "connection-result" + (c.ready ? "" : " bad");
+    (c.details.models || []).forEach((m) => {
+      const o = el("option");
+      o.value = m;
+      $("modelOptions").append(o);
+    });
+  }
   renderAdaptiveModelSettings();
 }
-// 受限 Markdown 行内渲染：只创建文本、code、strong/em 与显式 http(s) 链接，不接受原始 HTML。
-function inline(parent, text) {
-  const re = /(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*|\[[^\]]+\]\(https?:\/\/[^)]+\))/g;
-  let last = 0;
-  for (const m of text.matchAll(re)) {
-    if (m.index > last)
-      parent.append(document.createTextNode(text.slice(last, m.index)));
-    const x = m[0];
-    let n;
-    if (x.startsWith("`")) n = el("code", "", x.slice(1, -1));
-    else if (x.startsWith("**")) n = el("strong", "", x.slice(2, -2));
-    else if (x.startsWith("*")) n = el("em", "", x.slice(1, -1));
-    else {
-      const a = x.match(/^\[([^\]]+)\]\((https?:\/\/[^)]+)\)$/);
-      n = el("a", "", a[1]);
-      n.href = a[2];
-      n.target = "_blank";
-      n.rel = "noopener noreferrer";
+// 模型目录由供应商和端点定义；模型选择和采样参数不改变目录身份。
+function connectionConfigKey(value) {
+  return JSON.stringify([value.provider, value.provider === "ollama" ? value.ollama_url : null]);
+}
+// 表单切换使旧检查失效，清理公开目录；不改写已保存设置或在途 Turn。
+function invalidateConnection() {
+  ++state.connectionGeneration;
+  state.connection = null;
+  state.connectionKey = null;
+  $("checkConnection").disabled = false;
+  $("checkConnection").textContent = "检查连接";
+  $("settingsSaved").textContent = "";
+  renderConnection();
+}
+// 提交明确当前配置做连接检查；模型列表只是可用目录，保存设置后影响未来工作。
+async function checkConnection(auto = false) {
+  const generation = ++state.connectionGeneration;
+  const payload = {...(auto ? state.data.settings : settingsPayload())};
+  const key = connectionConfigKey(payload);
+  $("checkConnection").disabled = true;
+  $("checkConnection").textContent = "正在检查…";
+  try {
+    const result = await api("/connection", payload);
+    if (generation !== state.connectionGeneration || connectionConfigKey(settingsPayload()) !== key) return;
+    state.connection = result;
+    state.connectionKey = key;
+    if (
+      auto &&
+      !payload.model &&
+      state.connection.ready &&
+      state.connection.details.models?.[0]
+    ) {
+      payload.model = state.connection.details.models[0];
+      state.data.settings = await api("/settings", payload);
+      loadSettings();
+    } else if (
+      !auto &&
+      !$("model").value &&
+      state.connection.details.models?.[0]
+    )
+      $("model").value = state.connection.details.models[0];
+    renderConnection();
+  } catch (e) {
+    if (generation === state.connectionGeneration) toast(e.message);
+  } finally {
+    if (generation === state.connectionGeneration) {
+      $("checkConnection").disabled = false;
+      $("checkConnection").textContent = "检查连接";
     }
-    parent.append(n);
-    last = m.index + x.length;
+  }
+}
+// 准备新对话展示并可固定项目；实际会话/Turn 由发送入口创建。
+async function newChat(projectId = null) {
+  if (!state.data) return;
+  if (state.page === "chat") saveDraft();
+  ++state.generation;
+  // 新建是显式清空独立草稿的操作；已有会话的草稿仍按原身份保留。
+  state.drafts.set("new", { text: "", attached: [], projectId: projectId || "", goalId: "", pending: null });
+  state.session = null;
+  state.loadingSession = false;
+  state.id = null;
+  state.threadKey = "";
+  restoreDraft("new");
+  go("chat");
+  renderChat(null);
+  $("prompt").focus();
+}
+
+// 只有编辑器拥有草稿；服务端会话、Run 与收据从不由草稿回写。
+function saveDraft() {
+  const key = state.composerKey;
+  const draft = state.drafts.get(key) || {};
+  Object.assign(draft, {
+    text: $("prompt").value,
+    attached: [...state.attached],
+    projectId: $("chatProject").value,
+    goalId: $("chatGoal")?.value || "",
+    pending: state.pending,
+  });
+  state.drafts.set(key, draft);
+  return draft;
+}
+// 把输入所有权切到指定会话，连同附件、Goal 和稳定请求身份还原其草稿。
+function restoreDraft(key) {
+  state.composerKey = key;
+  const draft = state.drafts.get(key) || { text: "", attached: [], projectId: "", goalId: "", pending: null };
+  state.drafts.set(key, draft);
+  $("prompt").value = draft.text;
+  state.attached = [...draft.attached];
+  state.pending = draft.pending;
+  fillProjects($("chatProject"), "独立对话", draft.projectId);
+  fillGoals($("chatGoal"), draft.goalId);
+  renderAttachments();
+  updateComposer();
+}
+// 判断当前输入是否可发；UNKNOWN 和中断恢复仍由控制入口处理，不准入新 Run。
+function composerCanSend() {
+  const status = state.session?.turns.at(-1)?.status;
+  return state.page === "chat" && !!state.data && !state.busy && !state.loadingSession &&
+    !state.composing && !!$("prompt").value.trim() &&
+    !["RUNNING", "INTERRUPTED", "UNKNOWN", "PAUSED"].includes(status);
+}
+// 高度、可发送状态和草稿是同一输入事件的投影，程序回填也调用此入口。
+function updateComposer() {
+  const prompt = $("prompt");
+  prompt.style.height = "auto";
+  prompt.style.height = Math.min(Math.max(prompt.scrollHeight, 52), 220) + "px";
+  prompt.style.overflowY = prompt.scrollHeight > 220 ? "auto" : "hidden";
+  $("send").disabled = !composerCanSend();
+  $("composer").setAttribute("aria-busy", String(state.busy));
+  $("attachButton").disabled = state.busy;
+}
+
+// 原生 dialog 提供焦点圈定；记录打开入口，让关闭后的键盘焦点回到原位置。
+function openDialog(id, focusId) {
+  closeNavigation();
+  state.closeRuntimeDrawer?.();
+  const dialog = $(id);
+  if (dialog.open) return;
+  dialog._returnFocus = document.activeElement;
+  dialog.showModal();
+  const target = focusId ? $(focusId) : dialog.querySelector("[autofocus], input:not([type=checkbox]), textarea, button");
+  target?.focus();
+}
+
+// 剪贴板成功才反馈复制完成，权限失败保留正文供用户手动选择。
+async function copyText(text, button, success) {
+  const previous = button.textContent;
+  try {
+    await navigator.clipboard.writeText(text);
+    button.textContent = "已复制";
+    toast(success);
+    setTimeout(() => { if (button.isConnected) button.textContent = previous; }, 1800);
+  } catch (_) { toast("浏览器未允许剪贴板访问，请手动选择并复制。"); }
+}
+// 只在用户离开最新消息时提供定位入口；滚动位置不影响后台执行。
+function updateScrollButton() {
+  const button = $("scrollToBottom");
+  if (!button) return;
+  const scroll = $("chatScroll");
+  button.classList.toggle("hidden", state.page !== "chat" || !state.session?.messages.length ||
+    scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 180);
+}
+
+// 命令面板只打开已有功能；执行和授权仍使用原入口。
+let commandItems = [];
+let selectedCommand = 0;
+// 命令目录只引用已有操作和公开对象身份，不从标题解释代码或扩大权限。
+function availableCommands() {
+  const commands = [
+    { label: "新建对话", detail: "开始一个独立会话", icon: "plus", shortcut: "Ctrl Shift O", action: () => newChat() },
+    { label: "会话", detail: "查看与管理所有会话", icon: "history", action: () => go("sessions") },
+    { label: "项目", detail: "文件、资料与项目会话", icon: "folder", action: () => go("projects") },
+    { label: "知识库", detail: "导入与检索资料", icon: "book", action: () => go("knowledge") },
+    { label: "目标与计划", detail: "查看 Goal 与执行计划", icon: "spark", action: () => go("goals") },
+    { label: "Runtime", detail: "架构与能力", icon: "code", action: () => go("runtime") },
+    { label: "模型与设置", detail: "模型连接与界面偏好", icon: "settings", action: () => go("settings") },
+  ];
+  (state.data?.sessions || []).forEach((session) => commands.push({
+    label: session.title, detail: session.project_name ? "会话 · " + session.project_name : "会话", icon: "chat", action: () => go("chat", session.id),
+  }));
+  (state.data?.projects || []).forEach((project) => commands.push({
+    label: project.name, detail: "项目", icon: "folder", action: () => go("projects", project.id),
+  }));
+  return commands;
+}
+// 选中位置只属于命令面板，键盘焦点固定在输入框并通过 ARIA 指向结果。
+function selectCommand(index) {
+  selectedCommand = Math.max(0, Math.min(index, commandItems.length - 1));
+  [...$("commandResults").children].forEach((node, i) => {
+    node.classList.toggle("selected", i === selectedCommand);
+    node.setAttribute("aria-selected", String(i === selectedCommand));
+  });
+  const selected = $("commandResults").children[selectedCommand];
+  if (selected && commandItems.length) {
+    $("commandSearch").setAttribute("aria-activedescendant", selected.id);
+    selected.scrollIntoView({ block: "nearest" });
+  } else $("commandSearch").removeAttribute("aria-activedescendant");
+}
+// 关闭面板后调用显式选中的已有入口，业务写入仍由对应服务校验。
+function runCommand(index) {
+  const command = commandItems[index];
+  if (!command) return;
+  $("commandPalette").close();
+  Promise.resolve(command.action()).catch((e) => toast(e.message));
+}
+// 按安全文本过滤公开名称，有限结果保持键盘可达，空结果不创建占位操作。
+function renderCommands() {
+  const query = $("commandSearch").value.trim().toLocaleLowerCase();
+  commandItems = availableCommands().filter((item) =>
+    (item.label + " " + item.detail).toLocaleLowerCase().includes(query),
+  ).slice(0, 14);
+  const box = $("commandResults");
+  box.replaceChildren();
+  commandItems.forEach((item, index) => {
+    const button = el("button", "command-item");
+    button.type = "button";
+    button.id = "command-option-" + index;
+    button.tabIndex = -1;
+    button.setAttribute("role", "option");
+    const main = el("span", "command-item-main");
+    main.append(el("strong", "", item.label), el("small", "", item.detail));
+    button.append(icon(item.icon), main);
+    if (item.shortcut) button.append(el("kbd", "command-key", item.shortcut));
+    button.onclick = () => runCommand(index);
+    button.onpointermove = () => selectCommand(index);
+    box.append(button);
+  });
+  if (!commandItems.length) box.append(el("p", "command-empty", "没有匹配的命令、会话或项目"));
+  selectCommand(0);
+}
+// 快捷搜索不覆盖已打开的业务表单，避免失去当前编辑的保护焦点。
+function openCommandPalette() {
+  if (!$("commandPalette") || !state.data || document.querySelector("dialog[open]")) return;
+  $("commandSearch").value = "";
+  renderCommands();
+  openDialog("commandPalette", "commandSearch");
+}
+
+// 解析有限行内格式并以 DOM 安全输出；禁止资料文本成为任意 HTML。
+function inline(parent, text) {
+  const pattern = /(\*\*([^*]+)\*\*|`([^`]+)`|\[doc:([^\]]+)\])/g;
+  let last = 0;
+  for (const match of text.matchAll(pattern)) {
+    parent.append(document.createTextNode(text.slice(last, match.index)));
+    if (match[2]) parent.append(el("strong", "", match[2]));
+    else if (match[3]) parent.append(el("code", "", match[3]));
+    else {
+      const citation = "doc:" + match[4];
+      const allSources =
+        state.session?.turns.flatMap((t) => [
+          ...t.snapshot.knowledge,
+          ...t.activities.flatMap((s) => s.result?.sources || []),
+        ]) || [];
+      const source = allSources.find((s) => s.citation === citation);
+      const b = el("button", "source-chip", source ? source.title : "资料引用");
+      b.onclick = () =>
+        source
+          ? previewDocument(source.document_id)
+          : toast("这个引用未匹配到本轮检索来源。");
+      parent.append(b);
+    }
+    last = match.index + match[0].length;
   }
   parent.append(document.createTextNode(text.slice(last)));
 }
-// 行级 Markdown 使用 DOM 节点并保持代码可复制；错误/未知内容作为原文，不执行脚本。
+// 渲染有限 Markdown 子集；代码块/正文均按文本处理，外链按允许协议建立。
 function markdown(parent, text) {
-  const lines = String(text).split("\n");
-  let code = null,
-    language = "",
-    paragraph = [];
-  // 延后合并普通段落，代码围栏与列表边界先落盘到 DOM，避免丢失换行或跨段解释。
-  const flush = () => {
-    if (paragraph.length) {
-      const p = el("p");
-      inline(p, paragraph.join("\n"));
-      p.style.whiteSpace = "pre-wrap";
-      parent.append(p);
-      paragraph = [];
-    }
-  };
-  // 代码块正文只进 textContent；复制反馈不改写代码证据。
-  const codeBlock = () => {
-    const box = el("div", "code-block"),
-      head = el("div", "code-head");
-    head.append(el("span", "", language || "code"));
-    const b = el("button", "code-copy", "复制");
-    b.prepend(icon("file"));
-    const value = code.join("\n");
-    b.onclick = () => copyText(value, b, "已复制代码");
-    head.append(b);
-    box.append(head, el("pre", "", value));
-    parent.append(box);
-  };
-  for (const line of lines) {
-    if (line.startsWith("```")) {
-      if (code !== null) {
-        codeBlock();
-        code = null;
-      } else {
-        flush();
-        code = [];
-        language = line.slice(3).trim();
+  const pieces = text.split(/```/);
+  pieces.forEach((part, i) => {
+    if (i % 2) {
+      const newline = part.indexOf("\n");
+      const language = newline >= 0 ? part.slice(0, newline).trim() || "代码" : "代码";
+      const code = newline >= 0 ? part.slice(newline + 1) : part;
+      const block = el("div", "code-block"),
+        head = el("div", "code-head"),
+        copy = el("button", "code-copy", "复制");
+      copy.type = "button";
+      copy.setAttribute("aria-label", "复制代码");
+      copy.onclick = () => copyText(code, copy, "已复制代码");
+      head.append(el("span", "", language), copy);
+      block.append(head, el("pre", "", code));
+      parent.append(block);
+    } else {
+      let paragraph = [];
+      function flush() {
+        if (paragraph.length) {
+          const p = el("p");
+          inline(p, paragraph.join("\n"));
+          p.style.whiteSpace = "pre-wrap";
+          parent.append(p);
+          paragraph = [];
+        }
       }
-      continue;
-    }
-    if (code !== null) {
-      code.push(line);
-      continue;
-    }
-    const heading = line.match(/^(#{1,4})\s+(.+)$/);
-    if (heading) {
+      for (const line of part.split("\n")) {
+        if (!line.trim()) {
+          flush();
+          continue;
+        }
+        const heading = line.match(/^(#{1,4})\s+(.+)$/);
+        if (heading) {
+          flush();
+          const h = el(heading[1].length <= 2 ? "h2" : "h3");
+          inline(h, heading[2]);
+          parent.append(h);
+        } else if (/^[-*]\s+/.test(line)) {
+          flush();
+          const p = el("p");
+          inline(p, "• " + line.slice(2));
+          parent.append(p);
+        } else paragraph.push(line);
+      }
       flush();
-      const h = el(heading[1].length < 3 ? "h2" : "h3");
-      inline(h, heading[2]);
-      parent.append(h);
-    } else if (!line.trim()) flush();
-    else if (/^[-*]\s/.test(line) || /^\d+\.\s/.test(line)) {
-      flush();
-      const p = el("p");
-      p.style.paddingLeft = "16px";
-      inline(p, line.replace(/^[-*]\s/, "• "));
-      parent.append(p);
-    } else paragraph.push(line);
-  }
-  if (code !== null) codeBlock();
-  flush();
+    }
+  });
 }
-// 按真实步骤投影可折叠工具过程；只读 UI 不重新执行工具或补造收据。
+// 能力身份到产品文案的映射；不改变服务器能力合同。
+const toolLabels = {
+  "knowledge.search": "检索资料",
+  "project.list": "浏览项目文件",
+  "project.read": "读取项目文件",
+  "project.search": "搜索项目",
+  "diff.preview": "预览 Diff",
+  "git.status": "Git 状态",
+  "git.diff": "Git Diff",
+  "artifact.write": "生成文件",
+  "project.patch_exact": "修改文件副本",
+  "math.calculate": "计算",
+};
+// 将服务端 wall-clock 秒数格式化为回复旁的紧凑“用时”；这是整轮处理时间，不冒充纯模型推理时延。
+function workedTime(seconds) {
+  const total = Math.max(0, Math.floor(Number(seconds || 0)));
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const secs = total % 60;
+  if (hours) return `用时 ${hours}小时 ${minutes}分 ${secs}秒`;
+  if (minutes) return `用时 ${minutes}分 ${secs}秒`;
+  return `用时 ${secs}秒`;
+}
+
+// 以持久 activities 投影工具过程；折叠 UI 不删除收据或原始结果。
 function toolGroup(turn) {
   const steps = turn.activities.filter(
-    (s) => s.decision.decision_type === "tool_call",
+    (s) => s.decision?.decision_type === "tool_call" || s.result?.error,
   );
   if (!steps.length) return null;
   const details = el("details", "tool-group");
   details.dataset.turn = turn.run_id;
   const summary = el("summary");
-  summary.append(icon("terminal"), el("span", "", `执行了 ${steps.length} 个操作`));
+  summary.append(
+    icon("spark"),
+    el("span", "", `已处理 ${steps.length} 个步骤`),
+  );
   details.append(summary);
   steps.forEach((s) => {
-    const item = el("div", "tool-item"),
-      d = s.decision,
-      r = s.result;
+    const item = el("div", "tool-item");
+    const cap = s.decision?.capability_id;
     item.append(
-      el("strong", "", `${s.step}. ${d.capability_id || "工具"} · ${s.state}`),
+      el(
+        "strong",
+        "",
+        `${s.step.toString().padStart(2, "0")}  ${toolLabels[cap] || "步骤"} · ${s.state === "DONE" ? "已记录" : "处理中"}`,
+      ),
     );
-    if (d.reason) item.append(el("p", "muted", d.reason));
+    const r = s.result;
     if (r) {
-      const content = r.content ?? r.feedback ?? r.error ?? JSON.stringify(r, null, 2);
-      const full = String(content);
-      const output = el("pre", "", full.slice(0, 3000));
+      const text = String(r.error ?? r.content ?? r.feedback ?? r.diff ?? r.output ?? JSON.stringify(r, null, 2));
+      const output = el("pre", "", text.slice(0, 3000));
       item.append(output);
-      if (full.length > 3000) {
+      if (text.length > 3000) {
         const more = el("button", "tool-truncation", "显示完整结果");
         more.type = "button";
         more.setAttribute("aria-expanded", "false");
         more.onclick = () => {
           const expanded = more.getAttribute("aria-expanded") !== "true";
-          output.textContent = expanded ? full : full.slice(0, 3000);
+          output.textContent = expanded ? text : text.slice(0, 3000);
           more.setAttribute("aria-expanded", String(expanded));
           more.textContent = expanded ? "收起长结果" : "显示完整结果";
         };
@@ -961,20 +1169,26 @@ function toolGroup(turn) {
   });
   return details;
 }
-// 产物入口绑定已结算 decision_id，下载由服务器再次核对真实对象摘要。
-function artifactCard(a) {
-  const link = `/api/workspace/artifacts/${encodeURIComponent(a.decision_id)}`;
-  const card = el("a", "artifact-card");
-  card.href = link;
-  card.download = a.name;
+// 建立固定产物下载卡；实际下载必须由服务器校验对象身份。
+function artifactCard(artifact) {
+  const a = el("a", "artifact-card");
+  a.href = `/api/workspace/artifacts/${encodeURIComponent(artifact.decision_id)}`;
+  a.download = artifact.name.split("/").at(-1);
   const mark = el("span", "artifact-icon");
   mark.append(icon("file"));
   const info = el("div");
-  info.append(el("strong", "", a.name), el("small", "", "已保存的产物 · " + bytes(a.bytes || 0)));
+  info.append(
+    el("strong", "", artifact.name),
+    el(
+      "small",
+      "",
+      `${bytes(artifact.bytes)} · 文件副本 · 版本 ${artifact.version || 1}`,
+    ),
+  );
   const download = el("span", "download", "下载");
   download.append(icon("download"));
-  card.append(mark, info, download);
-  return card;
+  a.append(mark, info, download);
+  return a;
 }
 // 持久事实不变时只更新执行中的时钟，不能用心跳重建历史消息打断阅读与选择。
 function liveTurnLabel(turn) {
@@ -982,16 +1196,16 @@ function liveTurnLabel(turn) {
   const elapsed = turn.reply_timing?.elapsed_seconds;
   return "正在处理…" + (typeof elapsed === "number" && Number.isFinite(elapsed) && elapsed >= 0 ? " · " + workedTime(elapsed) : "");
 }
-// 一次投影建立临时索引，避免每条消息重扫所有 Turn/产物；不持久化或改写输入。
+// 一次投影建立临时索引，消息不再重扫全部 Turn/产物；不改写持久事实。
 function indexThread(session) {
   const turns = new Map(), artifacts = new Map();
   for (const turn of session.turns) {
     if (!turns.has(turn.run_id)) turns.set(turn.run_id, turn);
   }
   for (const artifact of session.artifacts) {
-    const items = artifacts.get(artifact.run_id) || [];
-    items.push(artifact);
-    artifacts.set(artifact.run_id, items);
+    const group = artifacts.get(artifact.run_id) || [];
+    group.push(artifact);
+    artifacts.set(artifact.run_id, group);
   }
   return { turns, artifacts };
 }
@@ -1026,7 +1240,8 @@ function renderThread(session) {
   );
   $("thread").replaceChildren();
   const groups = new Set(),
-    emitted = new Set();
+    emitted = new Set(),
+    emittedRuns = new Set();
   const indexed = indexThread(session);
   session.messages.forEach((message) => {
     const turn = indexed.turns.get(message.run_id);
@@ -1090,13 +1305,15 @@ function renderThread(session) {
     }
     row.append(main);
     $("thread").append(row);
-    if (message.role === "assistant" && turn)
+    if (message.role === "assistant" && turn && !emittedRuns.has(turn.run_id)) {
+      emittedRuns.add(turn.run_id);
       (indexed.artifacts.get(turn.run_id) || [])
         .filter((a) => !emitted.has(a.decision_id))
         .forEach((a) => {
           emitted.add(a.decision_id);
           $("thread").append(artifactCard(a));
         });
+    }
   });
   session.artifacts
     .filter((a) => !emitted.has(a.decision_id))
@@ -1228,15 +1445,14 @@ function renderChat(session) {
                   : turn.error;
     if (text) {
       show("turnNotice", true);
-      $("turnNotice").className =
-        "turn-notice" +
-        (["FAILED", "BUDGET_EXHAUSTED"].includes(status) ? " error"
-          : ["UNKNOWN", "INTERRUPTED"].includes(status) ? " warning" : "");
+      $("turnNotice").className = "turn-notice" + (
+        ["UNKNOWN", "INTERRUPTED"].includes(status) ? " warning" :
+        ["FAILED", "BUDGET_EXHAUSTED"].includes(status) ? " error" : ""
+      );
       $("turnNotice").append(el("span", "", text));
-      // 默认说明下一步，技术原因仍可展开；UNKNOWN 不是已知失败。
-      if (turn.error && turn.error !== text) {
-        const detail = el("details", "turn-detail");
-        detail.append(el("summary", "", "查看原因"), el("pre", "", turn.error));
+      if (turn.error && ["UNKNOWN", "INTERRUPTED"].includes(status)) {
+        const detail = el("details", "notice-detail");
+        detail.append(el("summary", "", "技术原因"), el("pre", "", turn.error));
         $("turnNotice").append(detail);
       }
       if (
@@ -2192,7 +2408,7 @@ if ($("scrollToBottom")) $("scrollToBottom").onclick = () => {
 $("chatScroll").addEventListener("scroll", updateScrollButton, { passive: true });
 document
   .querySelectorAll(".navigation a,.settings-link")
-  .forEach((a) => (a.onclick = closeNavigation()));
+  .forEach((a) => (a.onclick = closeNavigation));
 $("createProject").onclick = () => projectDialog();
 $("editProject").onclick = () => projectDialog(state.project);
 $("projectChat").onclick = () => newChat(state.project.id);
