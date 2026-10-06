@@ -41,19 +41,8 @@ jobs:
         run: python scripts/check_annotations.py
       - name: Check known secret patterns without printing values
         run: python scripts/audit_secret_patterns.py
-      - name: Check Web JavaScript
-        run: |
-          node --check src/myth/webui/app.js
-          node --check src/myth/webui/model-pool.js
-          node --check src/myth/webui/inspector.js
-          node --check src/myth/webui/goals.js
-          node --check src/myth/webui/reconnect.js
-          node --check src/myth/webui/statistics.js
-          node --check src/myth/webui/theme.js
-          node --check src/myth/webui/studio.js
-          node --check src/myth/webui/choices.js
-      - name: Browser observability, reconnect and session statistics tests
-        run: node --test tests/test_observatory_ui.cjs tests/test_reconnect_ui.cjs tests/test_statistics_ui.cjs tests/test_workspace_interactions_ui.cjs
+      - name: Verify all Web scripts and discovered UI contracts
+        run: node scripts/check_web.cjs
       - name: Unit and crash-recovery tests
         run: python -m unittest discover -s tests -v
 
