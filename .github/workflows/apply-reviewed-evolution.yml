@@ -1,0 +1,88 @@
+# 临时交付入口：仅在既定演进分支应用本轮已审查的文本补丁；不导出源码历史或凭据。
+name: Apply reviewed evolution
+on:
+  push:
+    branches: [evolve/2026-10-06]
+    paths: ['.evolution/*.patch']
+permissions:
+  contents: write
+concurrency:
+  group: reviewed-evolution
+  cancel-in-progress: false
+jobs:
+  apply:
+    if: github.repository == 'GodBlessRen/Myth'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Apply reviewed patches without rewriting existing history
+        run: |
+          git config user.name 'Myth Evolution Review'
+          git config user.email 'noreply@users.noreply.github.com'
+          git merge-base --is-ancestor d5e066f8c68ef29bd67d66e48c321e45f8870caa HEAD
+          for patch in .evolution/*.patch; do
+            git apply --check "$patch"
+            git am "$patch"
+          done
+      - name: Install test dependencies
+        run: |
+          python -m pip install -e . build playwright
+          python -m playwright install --with-deps chromium
+          npm install --no-save --prefix "$RUNNER_TEMP/browser-tools" playwright
+          echo "NODE_PATH=$RUNNER_TEMP/browser-tools/node_modules" >> "$GITHUB_ENV"
+      - name: Verify Python and browser-independent contracts
+        run: |
+          python -m compileall -q src tests scripts
+          python scripts/check_test_discovery.py
+          python scripts/check_annotations.py
+          python scripts/audit_secret_patterns.py
+          python -m unittest discover -s tests -v
+          for file in src/myth/webui/*.js; do node --check "$file"; done
+          node --test tests/test_*_ui.cjs
+      - name: Verify release and installed wheel
+        run: |
+          python -m build
+          python scripts/validate_release.py dist
+          python -m venv "$RUNNER_TEMP/myth-fresh"
+          "$RUNNER_TEMP/myth-fresh/bin/python" -m pip install dist/*.whl
+          PACKAGE_DIR=$("$RUNNER_TEMP/myth-fresh/bin/python" -c "import sysconfig; print(sysconfig.get_paths()['purelib'])")
+          "$RUNNER_TEMP/myth-fresh/bin/python" scripts/validate_package.py --package-dir "$PACKAGE_DIR"
+      - name: Run real browser matrix
+        run: |
+          mkdir -p .work
+          python tests/browser_fixture.py > .work/browser-fixture.log 2>&1 &
+          FIXTURE_PID=$!
+          trap 'kill "$FIXTURE_PID" 2>/dev/null || true' EXIT
+          for i in $(seq 1 60); do
+            if test -f .work/browser-fixture.json; then break; fi
+            sleep 1
+          done
+          python tests/check_browser_matrix.py
+      - name: Preserve browser evidence, including failed checks
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: reviewed-browser-${{ github.sha }}
+          path: .work/browser-evidence/
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: Retire transport files after all gates pass
+        run: |
+          git rm .evolution/*.patch .github/workflows/apply-reviewed-evolution.yml
+          git commit -m '移除已验收的临时补丁交付入口；仅保留产品源码与验证'
+      - name: Fast-forward only the authorized working branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          test "$GITHUB_REF" = 'refs/heads/evolve/2026-10-06'
+          git -c credential.helper='!gh auth git-credential' push origin HEAD:refs/heads/evolve/2026-10-06
