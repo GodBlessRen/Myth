@@ -1,5 +1,7 @@
 # 本轮逐文件处置
 
+2026-10-07 Skill/MCP 增量：`extension_ports.py` 为实际注入的合同；`adapters/extension_config.py`、`local_skills.py`、`mcp_stdio.py` 分别承担操作者配置、只读资源、可选 SDK 传输。调用方为 `Workspace`、`LocalConversationExecution` 与只读扩展 API，使用说明/示例见 [EXTENSIONS](EXTENSIONS.md)。旧垃圾站占位目录没有恢复；本增量仅作源码/差异阅读，按用户要求没有新增或运行测试，不沿用下面历史门禁作为新代码通过证据。
+
 基线 `27462b2d70a775f3b4a597f9c7b9c010356c6fde` 的 234 个跟踪文件全部列入，包含宪法、开发规范、源码、前端、测试、配置、证据与垃圾站。方法：读取文件职责与结构、核对生产引用和发布归属；关键控制/预算/恢复路径进一步人工追踪并做 SQL、并发与进程故障验证。
 
 “保留”表示有当前用途，不表示穷尽证明每行正确。长文件保留完整恢复职责；无调用者合同和重复入口才做删除。总体结论与实测见 [审查报告](REFINEMENT_REVIEW.md)。

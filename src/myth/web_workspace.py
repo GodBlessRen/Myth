@@ -255,6 +255,19 @@ class ConversationWebService:
             "scheduler": dict(self.scheduler_state),
         }
 
+    def extensions(self):
+        """显式只读扩展目录入口；不在 bootstrap 轮询扫描技能，不启动 MCP 连接。"""
+        with MythRuntime(self.root) as runtime:
+            workspace = Workspace(runtime)
+            result = {}
+            for name, read in (("skills", workspace.skills.list_skills), ("mcp", workspace.mcp.servers)):
+                try:
+                    result[name] = read()
+                except (ValueError, PermissionError, OSError):
+                    # 配置错误不会泄露本机命令/路径或拖垮另一种扩展目录。
+                    result[name] = {"status": "unavailable", "error": "本机扩展配置或资源不可用"}
+            return result
+
     # 按该 Turn/计划固定设置装配供应商；认证秘钥由独立适配器提供。
     def provider(self, settings):
         return create_provider(
@@ -921,6 +934,8 @@ class ConversationWebService:
             return self.bootstrap()
         if parts == ["platform"]:
             return self.platform()
+        if parts == ["extensions"]:
+            return self.extensions()
         if parts == ["connection"]:
             return self.connection(force=True)
         if parts == ["memories"]:

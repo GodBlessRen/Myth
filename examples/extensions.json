@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "mcp_servers": [
+    {
+      "id": "local-demo",
+      "enabled": false,
+      "transport": "stdio",
+      "command": "C:/path/to/Myth/.venv/Scripts/python.exe",
+      "args": ["C:/path/to/Myth/examples/mcp_server.py"],
+      "allowed_tools": ["add"],
+      "timeout_seconds": 30
+    }
+  ]
+}

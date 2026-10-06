@@ -22,6 +22,7 @@ from ..platform.tool_discovery import describe_tool, search_tools, visible_tool_
 from ..strategies import LiveInformationController, RuleIntentPicker
 from ..verification import SqliteVerificationProfiles
 from ..failures import failure_result, observe_failure
+from ..extension_ports import SkillLibrary, MCPGateway
 from .delegation import DelegationCoordinator
 from .parallel_delegation import ParallelDelegation
 
@@ -85,6 +86,8 @@ class LocalConversationExecution:
         memory_store=None,
         provider_factory=None,
         parent_control=None,
+        skill_library: SkillLibrary | None = None,
+        mcp_gateway: MCPGateway | None = None,
     ):
         # runtime：共享 Runtime 装配对象；其 SQLite 连接只在所属线程使用。
         # repository：用例仓储端口/实现；持久状态写入归此协作对象所有。
@@ -107,6 +110,9 @@ class LocalConversationExecution:
         self.information_controller = information_controller or LiveInformationController()
         # memory_store：Memory 的权威读取协作者；渐进披露工具只读，不授予执行权限。
         self.memory_store = memory_store
+        # skills/mcp：装配根注入的扩展端口；资源目录和远端发现不能修改 Runtime 执行白名单。
+        self.skills = skill_library
+        self.mcp = mcp_gateway
         # verification：显式受信项目的固定 Python unittest profile；不提供任意 shell。
         self.verification = SqliteVerificationProfiles(runtime, repository)
         # receipts：持久效果日志协作对象；不存在日志不自动证明调用未发出。
@@ -668,6 +674,42 @@ class LocalConversationExecution:
         )
         return self.repository.settle_operation(op["decision_id"], result, tool_wall_ms=tool_wall_ms)
 
+    def _execute_mcp(self, turn, decision_id, capability, args):
+        """先核对本 Turn 发现与配置，再签 Ticket；握手/调用在事务外，任何未决效果不自动重发。"""
+        if self.mcp is None:
+            raise ValueError("MCP gateway is not configured")
+        discovery = None
+        if capability == "mcp.call":
+            if not isinstance(args.get("tool_name"), str) or not args["tool_name"] or not isinstance(args.get("arguments"), dict):
+                raise ValueError("mcp.call requires tool_name and an arguments object")
+            # 只消费本 Turn 的已结算工具发现；模型参数不能伪造 discovery、argv 或允许名单。
+            for activity in reversed(turn.get("activities") or []):
+                result = activity.get("result") or {}
+                if result.get("capability_id") == "mcp.tools" and result.get("server_id") == args.get("server_id") and not result.get("error"):
+                    if any(row.get("name") == args.get("tool_name") for row in result.get("tools", [])):
+                        discovery = result
+                        break
+        plan = self.mcp.prepare(args.get("server_id"),
+            tool_name=args.get("tool_name") if capability == "mcp.call" else None,
+            arguments=args.get("arguments") if capability == "mcp.call" else None,
+            cursor=args.get("cursor"), discovery=discovery)
+        intent = {"write_bytes": 0, "requires_receipt": True, "mcp": {
+            "server_id": plan.server_id, "configuration_digest": plan.configuration_digest,
+            "tool_name": plan.tool_name, "schema_digest": plan.schema_digest, "cursor": plan.cursor,
+            "arguments_digest": sha256_bytes(plan.arguments_json.encode("utf-8"))}}
+        op = self.repository.start_operation(turn["run_id"], decision_id, capability, intent)
+        started = time.monotonic()
+        try:
+            result = {**self.mcp.invoke(plan), "capability_id": capability}
+        except Exception:
+            # Ticket 已持久化；SDK/进程错误正文可能含敏感数据，不复制到异常、数据库或 UI。
+            raise RecoveryRequired(f"MCP outcome unknown for {plan.server_id}; reconcile before replay") from None
+        # 收据发布失败也属于待核对；不能被应用的参数错误分支消费成安全重试。
+        try:
+            return self._record_tool_receipt(op, result, max(0, int((time.monotonic() - started) * 1000)))
+        except Exception:
+            raise RecoveryRequired(f"MCP receipt pending for {plan.server_id}; reconcile before replay") from None
+
     # 执行已校验/准入的工作并留下结果证据；已存在稳定绑定时复用事实而非重复效果。
     def execute(self, turn, decision_id, decision, *, provider=None):
         saved = self.repository.operation(decision_id)
@@ -724,12 +766,28 @@ class LocalConversationExecution:
             tool_wall_ms = max(0, int((time.monotonic() - tool_started) * 1000))
             return self._record_tool_receipt(op, result, tool_wall_ms)
 
+        if capability in {"mcp.tools", "mcp.call"}:
+            return self._execute_mcp(turn, decision_id, capability, args)
+
         # 单调时钟只测本次真实执行/结果准备；已结算的稳定决定在上方直接复用，不重复测量或累加。
         tool_started = time.monotonic()
         result = {"capability_id": capability}
         intent = {"write_bytes": 0}
         if capability == "agent.parallel":
             return self.parallel.execute(turn, decision_id, args)
+        elif capability == "skill.list":
+            if self.skills is None:
+                raise ValueError("Skill library is not configured")
+            result.update(self.skills.list_skills())
+        elif capability == "skill.load":
+            if self.skills is None:
+                raise ValueError("Skill library is not configured")
+            result.update(self.skills.load(args.get("skill_id"), args.get("expected_digest"),
+                                           args.get("offset", 0), args.get("max_chars", 12000)))
+        elif capability == "mcp.servers":
+            if self.mcp is None:
+                raise ValueError("MCP gateway is not configured")
+            result.update(self.mcp.servers())
         elif capability == "agent.delegate":
             result.update(self._delegate(turn, decision_id, args, provider))
             # 已知子调用失败已经发布父工具收据，不能用另一份结果再次结算。

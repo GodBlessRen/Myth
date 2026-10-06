@@ -31,6 +31,11 @@ DEFAULT_VISIBLE_TOOL_IDS = (
     "agent.resolve",
     "tool.search",
     "tool.describe",
+    "skill.list",
+    "skill.load",
+    "mcp.servers",
+    "mcp.tools",
+    "mcp.call",
 )
 
 # 目录小于等于该规模时无需延迟加载；当前目录超过阈值后才启用渐进披露。

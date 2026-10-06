@@ -19,6 +19,7 @@ Myth 是共享 SQLite 的单机模块化应用。纯合同、策略和应用用�
 | `goal_scheduler.py`、`web_workspace.py` | 计划机会与本机 Driver 生命周期 | opportunity 去重、租约、物理锁、线程独立连接和停止后的晚到收据 |
 | `providers/`、`auth/` | 供应商传输、独立 OAuth 和安全凭据 | ChatGPT/Claude OAuth 使用各自客户端身份与回调；凭据不进 Runtime、网络超时不证明未执行、认证存储不是跨系统事务 |
 | `web.py`、`webui/`、`cli.py` | 入站与产品投影 | Host/Origin、稳定请求身份、迟到响应 generation、第三栏事实完整性 |
+| `extension_ports.py`、`adapters/local_skills.py`、`adapters/extension_config.py`、`adapters/mcp_stdio.py` | 本地 Skill 与可选 MCP | 固定根配置/资源，发现不授予权限；MCP 连接在 Ticket 后，配置与输入 schema 绑定，无收据不重放 |
 | `evaluation_runner.py`、`task_benchmark.py`、`platform/evaluation*`、`platform/evolution*` | 固定测量、配对、发布资格与显式切换 | 完整分母、固定版本、真实字节 Oracle、partial 不发布、资格不自动 Promote |
 
 ## 一次 Conversation 的协作

@@ -74,6 +74,11 @@ class CapabilityRegistry:
 # 登记已接入工具及其效果合同；执行由适配器承担，test.run 仍需显式受信 profile。
 def default_capabilities() -> CapabilityRegistry:
     executable = [
+        ("skill.list", "skill", "Discover local bounded SKILL.md resources without executing scripts.", "read"),
+        ("skill.load", "skill", "Read one discovered skill under its fixed source digest.", "read"),
+        ("mcp.servers", "mcp", "Inspect operator-configured MCP servers without connecting.", "read"),
+        ("mcp.tools", "mcp", "Initialize one enabled stdio MCP server and discover a bounded tool page after Ticket.", "execute"),
+        ("mcp.call", "mcp", "Call one operator-allowed discovered MCP tool after Ticket; unresolved effects require reconciliation.", "execute"),
         (
             "knowledge.search",
             "knowledge",
