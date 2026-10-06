@@ -34,23 +34,23 @@
 
 ```bash
 python -m compileall -q src tests scripts
+python scripts/check_test_discovery.py
 python scripts/check_annotations.py
 python scripts/audit_secret_patterns.py
 python -m unittest discover -s tests -v
-node --check src/myth/webui/app.js
-node --check src/myth/webui/model-pool.js
-node --check src/myth/webui/inspector.js
-node --check src/myth/webui/goals.js
-node --check src/myth/webui/reconnect.js
-node --check src/myth/webui/statistics.js
-node --check src/myth/webui/theme.js
-node --test tests/test_observatory_ui.cjs tests/test_reconnect_ui.cjs tests/test_statistics_ui.cjs tests/test_workspace_interactions_ui.cjs
+node scripts/check_web.cjs
 python -m build
 python scripts/validate_release.py dist
 ```
 
+Python 发现门禁拒绝导入错误和零测试，但发现成功不代表测试正文通过。Web 门禁自动发现 `src/myth/webui/*.js` 与 `tests/test_*_ui.cjs`；新增文件无需维护第二份 CI 名单，`--list` 仅列出发现结果。
+
+前端同时保护两条合同：轻量 DOM 用例验证状态与事件；真实 HTML 身份模式验证启动绑定，不得为不存在的节点自动造替身。HTML、Provider 身份、设置字段和脚本必须配套修改，不能用可选链掩盖缺失的必需节点。真实浏览器另验布局、焦点、主题与可读性；自动断言不替代读图。
+
 关键路径补对应故障回归：Control 检查跨聚合回滚、终态竞争与提交前后进程退出；委派检查父工具额度先于子模型费用、收据间崩溃与无 Provider 恢复；准入/恢复检查 UNKNOWN、崩溃、租约和同 Run 接续；Goal 检查跨 Session/restart；调度检查争抢与提交后退出；认证检查协议、凭据轮换与泄漏；Context 检查来源、窗口和用量；验收检查对象摘要与完整评测。
 
-安装 wheel 后运行 `scripts/validate_package.py --package-dir <安装目录>`，核对真实导入、HTTP 资源和基本 API。
+公开静态资源由 `myth.web_assets.PUBLIC_ASSETS` 单一清单声明，HTTP 与安装检查共同消费。文件存在不等于能从页面访问；新资源须通过 MIME、响应字节、同源限制及未知路径拒绝回归。不得改为任意目录公开来解决 404。
+
+在全新环境安装 wheel 后运行 `scripts/validate_package.py --package-dir <安装目录>`，核对真实导入、全部 HTTP 资源和基本 API。直接指定 `src` 仅用于开发探针，不是安装验收。受管理策略、依赖缺失、平台或凭据限制的检查明确标为未验证，不放宽限制或借用旧提交结果冒充通过。
 
 README 做导航，CHANGELOG 记历史，架构描述当前事实，ROADMAP 保留下一步。测试结论写清输入、版本和测量范围，不把替身通过称为真实模型可靠。宪法也可按证据修订，但不能削弱上述事实与权限边界。
