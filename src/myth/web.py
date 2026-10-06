@@ -209,7 +209,14 @@ class AgentWebService:
                 with self._lock:
                     self._active.discard(run_id)
 
-        threading.Thread(target=worker, name=f"myth-{run_id[:16]}", daemon=True).start()
+        try:
+            threading.Thread(target=worker, name=f"myth-{run_id[:16]}", daemon=True).start()
+        except Exception:
+            # 构造/start 失败时还没有 Driver 接管；原 Run 保留，只撤回本次占位。
+            # 不捕获启动期的 BaseException：进程中断不能被猜成线程确定未启动。
+            with self._lock:
+                self._active.discard(run_id)
+            raise
 
     # 校验明确允许文件和固定验收后创建 Exact Run，提交后启动后台执行。
     def start_run(self, payload: dict[str, Any]) -> dict[str, Any]:
