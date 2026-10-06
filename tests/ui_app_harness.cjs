@@ -56,7 +56,7 @@ class Element {
   getBoundingClientRect() { return { left: 10, top: 10, right: 300, bottom: 300 }; }
 }
 
-function boot(storage = {}) {
+function boot(storage = {}, options = {}) {
   const nodes = new Map();
   const dialogs = ["commandPalette", "projectDialog", "sessionDialog", "goalDialog", "knowledgeDialog", "documentDialog", "controlDialog"];
   const themes = ["light", "dark", "system"].map((value) => {
@@ -70,7 +70,12 @@ function boot(storage = {}) {
     }
     return nodes.get(id);
   };
-  document.getElementById = $;
+  // 严格模式从真实 HTML 取节点身份；不存在的 id 返回 null，不让替身凭空补齐页面。
+  const html = options.html ?? fs.readFileSync(path.join(__dirname, "../src/myth/webui/index.html"), "utf8");
+  const ids = new Set([...html.matchAll(/\bid="([^"]+)"/g)].map(match => match[1]));
+  document.getElementById = options.strictDOM
+    ? id => ids.has(id) ? $(id) : null
+    : $;
   document.body = new Element("body");
   document.documentElement = new Element("html");
   document.documentElement.dataset.theme = "light";
