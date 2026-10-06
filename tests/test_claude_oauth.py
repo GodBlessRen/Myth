@@ -11,7 +11,6 @@ from unittest.mock import patch
 from urllib import parse
 
 from myth.auth.claude import ClaudeOAuthManager, OAUTH_BETA
-from myth.models import ModelRequest, Message
 from myth.providers.messages import MessagesProvider
 
 

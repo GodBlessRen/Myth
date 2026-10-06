@@ -3,3 +3,9 @@
 .trash/** export-ignore
 output export-ignore
 output/** export-ignore
+
+# 即使误受跟踪，开发进度与 notes 工作树仍不进入源码归档。
+.work export-ignore
+.work/** export-ignore
+.work-notes export-ignore
+.work-notes/** export-ignore

@@ -13,3 +13,6 @@ prune .trash
 prune output
 prune .runtime
 global-exclude __pycache__ *.py[cod]
+# 长任务进度与孤儿分支工作树属于开发状态，不是发布输入。
+prune .work
+prune .work-notes

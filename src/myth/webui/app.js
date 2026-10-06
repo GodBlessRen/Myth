@@ -110,9 +110,9 @@ function icon(name) {
   return svg;
 }
 // 同一太极矢量用于品牌与真实等待；图片无业务语义，状态继续由相邻文字说明。
-function taijiMark(waiting = false) {
-  const mark = el("img", "taiji-mark" + (waiting ? " taiji-wait" : ""));
-  mark.src = "/taiji.svg";
+function brandMark(waiting = false) {
+  const mark = el("img", "taiji-mark brand-mark" + (waiting ? " taiji-wait brand-wait" : ""));
+  mark.src = "/myth-mark.svg";
   mark.alt = "";
   mark.setAttribute("aria-hidden", "true");
   mark.width = 16;
@@ -141,7 +141,7 @@ function applyTheme(theme, persist = false) {
   document.documentElement.dataset.theme = next;
   document.documentElement.style.colorScheme = next;
   const themeColor = document.querySelector('meta[name="theme-color"]');
-  if (themeColor) themeColor.content = next === "dark" ? "#0E100F" : "#F8F4ED";
+  if (themeColor) themeColor.content = next === "dark" ? "#0E100F" : "#FFFEF8";
   const button = $("themeToggle");
   if (button) {
     button.replaceChildren(icon(next === "dark" ? "sun" : "moon"));
@@ -189,76 +189,39 @@ function toast(text) {
   toast.timer = setTimeout(() => show("toast", false), 5000);
 }
 // 工作区 JSON 请求最多等待二十秒；超时只停止本地等待，重试准入须复用 request_id。
-async function api(path, value) {
+async function jsonRequest(prefix, path, value) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 20000);
   try {
-    const r = await fetch("/api/workspace" + path, {
+    const response = await fetch(prefix + path, {
       method: value === undefined ? "GET" : "POST",
       headers: { "Content-Type": "application/json" },
       body: value === undefined ? undefined : JSON.stringify(value),
       signal: controller.signal,
     });
-    const data = await r.json();
-    if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+    // 计时器覆盖响应体读取，不是只等到响应头就提前释放。
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
     return data;
   } finally {
     clearTimeout(timer);
   }
 }
-// 请求脱敏认证投影；浏览器只取得登录入口和状态，不保存 token。
-async function authApi(path, value) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 20000);
-  try {
-    const r = await fetch("/api/auth/chatgpt" + path, {
-      method: value === undefined ? "GET" : "POST",
-      headers: { "Content-Type": "application/json" },
-      body: value === undefined ? undefined : JSON.stringify(value),
-      signal: controller.signal,
-    });
-    const data = await r.json();
-    if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
-    return data;
-  } finally {
-    clearTimeout(timer);
-  }
+// 工作区只传递调用者的请求身份；不自动重试可能已经准入的写入。
+function api(path, value) {
+  return jsonRequest("/api/workspace", path, value);
 }
-// Claude OAuth 的独立认证接口；与 ChatGPT OAuth 使用不同 namespace/callback，避免跨提供方 state 混用。
-async function claudeAuthApi(path, value) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 20000);
-  try {
-    const r = await fetch("/api/auth/claude" + path, {
-      method: value === undefined ? "GET" : "POST",
-      headers: { "Content-Type": "application/json" },
-      body: value === undefined ? undefined : JSON.stringify(value),
-      signal: controller.signal,
-    });
-    const data = await r.json();
-    if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
-    return data;
-  } finally {
-    clearTimeout(timer);
-  }
+// ChatGPT 公开认证投影使用固定前缀；共享传输不共享凭据。
+function authApi(path, value) {
+  return jsonRequest("/api/auth/chatgpt", path, value);
 }
-// API Key Provider 的应用内凭据接口；浏览器只在 connect 请求中短暂持有用户刚粘贴的 secret。
-async function providerAuthApi(path, value) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 20000);
-  try {
-    const r = await fetch("/api/auth/providers" + path, {
-      method: value === undefined ? "GET" : "POST",
-      headers: { "Content-Type": "application/json" },
-      body: value === undefined ? undefined : JSON.stringify(value),
-      signal: controller.signal,
-    });
-    const data = await r.json();
-    if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
-    return data;
-  } finally {
-    clearTimeout(timer);
-  }
+// Claude 的挑战和登录状态属于自己的认证端点。
+function claudeAuthApi(path, value) {
+  return jsonRequest("/api/auth/claude", path, value);
+}
+// API Key 仅随用户显式发起的连接请求传递，不进入本地持久状态。
+function providerAuthApi(path, value) {
+  return jsonRequest("/api/auth/providers", path, value);
 }
 
 // 把数据库 UTC 时间投影为本地中文日期；不改写保存时间。
@@ -1186,21 +1149,21 @@ function toolGroup(turn) {
     );
     const r = s.result;
     if (r) {
-      const text =
-        r.error ||
-        r.content ||
-        r.diff ||
-        r.output ||
-        r.artifact?.name ||
-        (r.value !== undefined
-          ? String(r.value)
-          : r.sources?.map((x) => x.title).join(" · ")) ||
-        r.matches
-          ?.map((x) => x.path + ":" + x.line + " " + x.preview)
-          .join("\n") ||
-        r.files?.map((x) => x.path).join("\n") ||
-        "";
-      if (text) item.append(el("pre", "", text.slice(0, 3000)));
+      const text = String(r.error ?? r.content ?? r.feedback ?? r.diff ?? r.output ?? JSON.stringify(r, null, 2));
+      const output = el("pre", "", text.slice(0, 3000));
+      item.append(output);
+      if (text.length > 3000) {
+        const more = el("button", "tool-truncation", "显示完整结果");
+        more.type = "button";
+        more.setAttribute("aria-expanded", "false");
+        more.onclick = () => {
+          const expanded = more.getAttribute("aria-expanded") !== "true";
+          output.textContent = expanded ? text : text.slice(0, 3000);
+          more.setAttribute("aria-expanded", String(expanded));
+          more.textContent = expanded ? "收起长结果" : "显示完整结果";
+        };
+        item.append(more);
+      }
     }
     details.append(item);
   });
@@ -1233,6 +1196,19 @@ function liveTurnLabel(turn) {
   const elapsed = turn.reply_timing?.elapsed_seconds;
   return "正在处理…" + (typeof elapsed === "number" && Number.isFinite(elapsed) && elapsed >= 0 ? " · " + workedTime(elapsed) : "");
 }
+// 一次投影建立临时索引，消息不再重扫全部 Turn/产物；不改写持久事实。
+function indexThread(session) {
+  const turns = new Map(), artifacts = new Map();
+  for (const turn of session.turns) {
+    if (!turns.has(turn.run_id)) turns.set(turn.run_id, turn);
+  }
+  for (const artifact of session.artifacts) {
+    const group = artifacts.get(artifact.run_id) || [];
+    group.push(artifact);
+    artifacts.set(artifact.run_id, group);
+  }
+  return { turns, artifacts };
+}
 // 按消息/步骤签名增量重建讨论与工具展示；滚动位置只属于本地视图。
 function renderThread(session) {
   const signature = JSON.stringify([
@@ -1264,9 +1240,11 @@ function renderThread(session) {
   );
   $("thread").replaceChildren();
   const groups = new Set(),
-    emitted = new Set();
+    emitted = new Set(),
+    emittedRuns = new Set();
+  const indexed = indexThread(session);
   session.messages.forEach((message) => {
-    const turn = session.turns.find((t) => t.run_id === message.run_id);
+    const turn = indexed.turns.get(message.run_id);
     if (message.role === "assistant" && turn && !groups.has(turn.run_id)) {
       groups.add(turn.run_id);
       const group = toolGroup(turn);
@@ -1327,13 +1305,15 @@ function renderThread(session) {
     }
     row.append(main);
     $("thread").append(row);
-    if (message.role === "assistant" && turn)
-      session.artifacts
-        .filter((a) => a.run_id === turn.run_id && !emitted.has(a.decision_id))
+    if (message.role === "assistant" && turn && !emittedRuns.has(turn.run_id)) {
+      emittedRuns.add(turn.run_id);
+      (indexed.artifacts.get(turn.run_id) || [])
+        .filter((a) => !emitted.has(a.decision_id))
         .forEach((a) => {
           emitted.add(a.decision_id);
           $("thread").append(artifactCard(a));
         });
+    }
   });
   session.artifacts
     .filter((a) => !emitted.has(a.decision_id))
@@ -1349,7 +1329,7 @@ function renderThread(session) {
     }
     const typing = el("div", "typing");
     // 动态点仅对应在线 Driver；断连保持静态说明，不伪装任务继续推进。
-    if (last.driver_active) typing.append(taijiMark(true));
+    if (last.driver_active) typing.append(brandMark(true));
     const label = el("span", "", liveTurnLabel(last));
     label.dataset.liveRun = last.run_id;
     typing.append(label);
@@ -1449,9 +1429,9 @@ function renderChat(session) {
       turn.network_retry && status === "INTERRUPTED"
         ? "连接中断，" + Math.max(0, Math.ceil(turn.network_retry.retry_at - Date.now() / 1000)) + " 秒后自动重试；已完成步骤保留。"
         : status === "UNKNOWN"
-        ? turn.error || "存在结果不明确的执行，必须先核对再继续。"
+        ? "结果尚未确认；请先核对已发出的操作，不要重复发送。"
         : status === "INTERRUPTED"
-          ? turn.error || "Driver 已中断；断点已保存，可以继续。"
+          ? "Driver 已中断；断点已保存，可以继续。"
           : status === "PAUSED"
             ? "Run 已暂停；已发出的调用仍会保留真实晚到结果。"
             : detached && leaseRemaining > 0
@@ -1465,14 +1445,16 @@ function renderChat(session) {
                   : turn.error;
     if (text) {
       show("turnNotice", true);
-      $("turnNotice").className =
-        "turn-notice" +
-        (["FAILED", "UNKNOWN", "BUDGET_EXHAUSTED", "INTERRUPTED"].includes(
-          status,
-        )
-          ? " error"
-          : "");
+      $("turnNotice").className = "turn-notice" + (
+        ["UNKNOWN", "INTERRUPTED"].includes(status) ? " warning" :
+        ["FAILED", "BUDGET_EXHAUSTED"].includes(status) ? " error" : ""
+      );
       $("turnNotice").append(el("span", "", text));
+      if (turn.error && ["UNKNOWN", "INTERRUPTED"].includes(status)) {
+        const detail = el("details", "notice-detail");
+        detail.append(el("summary", "", "技术原因"), el("pre", "", turn.error));
+        $("turnNotice").append(detail);
+      }
       if (
         status === "UNKNOWN" ||
         status === "INTERRUPTED" ||
@@ -2195,7 +2177,7 @@ async function route() {
         show("welcome", false);
         show("thread", true);
         const loading = el("p", "thread-loading", "正在载入会话…");
-        loading.prepend(taijiMark(true));
+        loading.prepend(brandMark(true));
         $("thread").replaceChildren(loading);
         await openSession(state.id, generation);
       }

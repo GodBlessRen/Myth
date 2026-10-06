@@ -3,11 +3,15 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, "evolve/**"]
   pull_request:
 
 permissions:
   contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
@@ -17,44 +21,39 @@ jobs:
         os: [ubuntu-latest, windows-latest]
         python: ["3.12", "3.13"]
     runs-on: ${{ matrix.os }}
-    # Windows 慢速 runner 的安装与 444 项恢复回归可能超过五分钟；保留有界总时限。
+    # Windows 慢速 runner 的安装与恢复回归可能超过五分钟；用例数量由发现门禁实测。
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
       - name: Install package
         run: python -m pip install -e .
       - name: Compile Python
-        run: python -m compileall -q src tests
+        run: python -m compileall -q src tests scripts
+      - name: Verify test discovery before slow gates
+        run: python scripts/check_test_discovery.py
       - name: Check Chinese guidance coverage
         run: python scripts/check_annotations.py
       - name: Check known secret patterns without printing values
         run: python scripts/audit_secret_patterns.py
-      - name: Check Web JavaScript
-        run: |
-          node --check src/myth/webui/app.js
-          node --check src/myth/webui/model-pool.js
-          node --check src/myth/webui/inspector.js
-          node --check src/myth/webui/goals.js
-          node --check src/myth/webui/reconnect.js
-          node --check src/myth/webui/statistics.js
-          node --check src/myth/webui/theme.js
-          node --check src/myth/webui/studio.js
-          node --check src/myth/webui/choices.js
-      - name: Browser observability, reconnect and session statistics tests
-        run: node --test tests/test_observatory_ui.cjs tests/test_reconnect_ui.cjs tests/test_statistics_ui.cjs tests/test_workspace_interactions_ui.cjs
+      - name: Verify all Web scripts and discovered UI contracts
+        run: node scripts/check_web.cjs
       - name: Unit and crash-recovery tests
         run: python -m unittest discover -s tests -v
 
   release:
+    needs: test
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -68,3 +67,24 @@ jobs:
         run: |
           python -m pip install dist/*.whl --target .runtime/wheel-installed
           python scripts/validate_package.py --package-dir .runtime/wheel-installed
+      - name: Verify a fresh environment using only downloaded wheels
+        run: |
+          python -m pip download --dest dist/offline-wheels dist/*.whl build "setuptools>=68"
+          python -m venv .runtime/offline-check
+          .runtime/offline-check/bin/python -m pip install --no-index --find-links dist/offline-wheels dist/*.whl build setuptools
+          PACKAGE_DIR=$(.runtime/offline-check/bin/python -c "import sysconfig; print(sysconfig.get_paths()['purelib'])")
+          .runtime/offline-check/bin/python scripts/validate_package.py --package-dir "$PACKAGE_DIR"
+      # 仅留存已通过校验的发布物，不上传 checkout、.git、运行库或凭据；名称绑定精确提交。
+      - name: Retain validated distributions for reproducible review
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: myth-distributions-${{ github.sha }}
+          path: |
+            dist/*.whl
+            dist/*.tar.gz
+            dist/myth-source.zip
+            dist/offline-wheels/*.whl
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+          include-hidden-files: false

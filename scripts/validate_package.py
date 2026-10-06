@@ -26,6 +26,7 @@ def main():
     sys.path.insert(0, str(package_dir))
     import myth
     from myth.web import AgentWebService, make_handler
+    from myth.web_assets import PUBLIC_ASSETS
     from myth.runtime import MythRuntime
     from myth.workspace import Workspace
 
@@ -55,12 +56,14 @@ def main():
                 return json.load(response)
 
         try:
-            for asset in ("/", "/app.css", "/app.js", "/inspector.js", "/goals.js",
-                          "/theme.js", "/reconnect.js", "/statistics.js", "/favicon.svg",
-                          "/fonts/myth-sans.woff2", "/fonts/myth-serif.woff2", "/fonts/myth-latin.woff2", "/model-pool.js", "/studio.js", "/choices.js", "/taiji.svg", "/ink-taiji.png"):
+            for asset, (filename, content_type) in PUBLIC_ASSETS.items():
                 with request.urlopen(base + asset, timeout=5) as response:
-                    if response.status != 200 or not response.read():
-                        raise RuntimeError(f"missing packaged asset: {asset}")
+                    body = response.read()
+                    expected = package_dir / "myth" / "webui" / filename
+                    if response.status != 200 or not body or body != expected.read_bytes():
+                        raise RuntimeError(f"missing or mismatched packaged asset: {asset}")
+                    if response.headers["Content-Type"] != content_type:
+                        raise RuntimeError(f"wrong media type: {asset}")
             session = call(
                 "/api/workspace/sessions", {"title": "Installed package check"}
             )
