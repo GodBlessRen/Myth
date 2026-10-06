@@ -173,6 +173,51 @@ _TOOL_ARGUMENTS = {
 }
 # 批次每项复用同一单任务 schema；Runtime 仍逐项核对作用域与准入额度。
 _TOOL_ARGUMENTS["agent.parallel"]["properties"]["tasks"]["items"] = _TOOL_ARGUMENTS["agent.delegate"]
+
+
+def validate_tool_arguments(capability_id: str, arguments) -> None:
+    """Ticket/Hook 前复用模型目录校验参数形状；路径、MCP 远端 schema 和预算仍由适配器核对。
+    仅实现本目录实际使用的 JSON Schema 子集，不宣称为通用 JSON Schema 校验器。"""
+    schema = _TOOL_ARGUMENTS.get(capability_id)
+    if schema is None:
+        raise ValueError("unknown tool argument schema")
+    _validate_tool_value(arguments, schema, "arguments")
+
+
+def _validate_tool_value(value, schema, field) -> None:
+    """递归核对固定目录中的类型、必填、枚举与界限；错误不包含参数原值。"""
+    kind = schema.get("type")
+    valid = {"object": isinstance(value, dict), "array": isinstance(value, list),
+             "string": isinstance(value, str), "integer": type(value) is int,
+             "boolean": type(value) is bool}
+    if kind not in valid or not valid[kind]:
+        raise ValueError(f"{field} must be {kind}")
+    if "enum" in schema and value not in schema["enum"]:
+        raise ValueError(f"{field} has an unsupported choice")
+    if kind == "object":
+        properties = schema.get("properties", {})
+        if any(key not in value for key in schema.get("required", [])):
+            raise ValueError(f"{field} lacks required fields")
+        if schema.get("additionalProperties") is False and set(value) - set(properties):
+            raise ValueError(f"{field} contains unsupported fields")
+        for key, child in properties.items():
+            if key in value:
+                _validate_tool_value(value[key], child, f"{field}.{key}")
+    elif kind == "array":
+        if len(value) < schema.get("minItems", 0) or len(value) > schema.get("maxItems", math.inf):
+            raise ValueError(f"{field} has an invalid item count")
+        for item in value:
+            _validate_tool_value(item, schema["items"], f"{field}[]")
+    elif kind == "string":
+        if len(value) < schema.get("minLength", 0) or len(value) > schema.get("maxLength", math.inf):
+            raise ValueError(f"{field} has an invalid length")
+        if "pattern" in schema and re.search(schema["pattern"], value) is None:
+            raise ValueError(f"{field} has an invalid format")
+    elif kind == "integer":
+        if value < schema.get("minimum", -math.inf) or value > schema.get("maximum", math.inf):
+            raise ValueError(f"{field} is outside the allowed range")
+
+
 # CONVERSATION_SCHEMA：Conversation 的统一决定传输合同；不能替代工具参数专用校验。
 CONVERSATION_SCHEMA = {
     "oneOf": [

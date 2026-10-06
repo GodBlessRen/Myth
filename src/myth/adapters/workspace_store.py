@@ -1539,6 +1539,21 @@ class SqliteWorkspaceRepository:
             }
         )
 
+    def record_tool_hook(self, rid, decision_id, capability, trace):
+        """短事务核对模型决定归属后追加 Hook 元数据；不保存参数、结果、回调输出或异常正文。"""
+        # 白名单只接收管线固定的机器字段；Hook 回调从未取得此写入入口。
+        payload = {key: trace.get(key) for key in (
+            "hook_id", "phase", "status", "reason_code", "duration_ms", "operation_state", "error_type"
+        )}
+        payload.update({"decision_id": decision_id, "capability": capability})
+        with self.store.tx() as db:
+            owner = db.execute(
+                "SELECT run_id,payload_json FROM step_decisions WHERE decision_id=?", (decision_id,)
+            ).fetchone()
+            if not owner or owner["run_id"] != rid or json.loads(owner["payload_json"]).get("capability_id") != capability:
+                raise IdentityConflict("tool hook decision owner or capability mismatch")
+            self.store._event(db, rid, "ConversationToolHook", payload)
+
     # 同事务登记工具意图、资源预留与唯一 Ticket；外部文件/Git 效果随后才发生。
     def start_operation(self, rid, decision_id, capability, intent):
         with self.store.tx() as db:

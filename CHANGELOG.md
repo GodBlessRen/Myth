@@ -1,5 +1,11 @@
 # Changelog
 
+## 未发布 — 工具 Hook 首版
+
+- 接入 `before_tool / after_tool / on_tool_error`：受信 Python 注册与固定 `.myth/hooks.json` 规则，按能力 glob/优先级运行，同次调用冻结计划与只读参数/结果。
+- 前置拒绝/故障不签 Ticket；后置及错误观察不覆盖原结果或 UNKNOWN，已有 Ticket 的恢复/复用不重发 Hook。仓储核对身份后记录无业务正文的 `ConversationToolHook` Trace。
+- 复用工具目录作参数形状/界限校验；扩展 API 增加 Hook 目录。按用户要求未新增/运行测试或其他执行验证；同步回调、接入范围及后续验收见 [Hook 说明](docs/TOOL_HOOKS.md)。
+
 ## 未发布 — Skill / MCP 首版接入
 
 - 新增 `skill.list / skill.load`：只读 `.myth/skills/<id>/SKILL.md`，元数据发现、全文摘要与有界分页；不执行技能脚本或扩张权限。

@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "hooks": [
+    {
+      "id": "block-mcp",
+      "phase": "before_tool",
+      "tools": ["mcp.call"],
+      "priority": -100,
+      "enabled": false,
+      "action": "deny"
+    },
+    {
+      "id": "observe-results",
+      "phase": "after_tool",
+      "tools": ["*"],
+      "priority": 0,
+      "enabled": true,
+      "action": "observe"
+    },
+    {
+      "id": "observe-errors",
+      "phase": "on_tool_error",
+      "tools": ["*"],
+      "priority": 0,
+      "enabled": true,
+      "action": "observe"
+    }
+  ]
+}

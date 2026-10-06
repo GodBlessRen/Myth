@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import difflib
+from dataclasses import replace
 import json
 import os
 from pathlib import Path
@@ -13,7 +14,7 @@ import time
 
 from ..artifacts import atomic_write
 from .driver_lock import local_run_lock
-from ..conversation import TOOL_CATALOG, conversation_request, calculate
+from ..conversation import TOOL_CATALOG, conversation_request, calculate, validate_tool_arguments
 from ..domain import BudgetExceeded, RecoveryRequired, canonical_json, exact_patch, sha256_bytes
 from ..platform.capabilities import CapabilityState, default_capabilities
 from ..models import ModelMessage, ModelRequest, StepDecision, ProviderKnownFailure
@@ -23,6 +24,7 @@ from ..strategies import LiveInformationController, RuleIntentPicker
 from ..verification import SqliteVerificationProfiles
 from ..failures import failure_result, observe_failure
 from ..extension_ports import SkillLibrary, MCPGateway
+from ..tool_hooks import ToolHookContext, ToolHookDenied, ToolHookRegistry, dispatch_tool_hooks, readonly_json
 from .delegation import DelegationCoordinator
 from .parallel_delegation import ParallelDelegation
 
@@ -88,6 +90,7 @@ class LocalConversationExecution:
         parent_control=None,
         skill_library: SkillLibrary | None = None,
         mcp_gateway: MCPGateway | None = None,
+        tool_hooks: ToolHookRegistry | None = None,
     ):
         # runtime：共享 Runtime 装配对象；其 SQLite 连接只在所属线程使用。
         # repository：用例仓储端口/实现；持久状态写入归此协作对象所有。
@@ -113,6 +116,8 @@ class LocalConversationExecution:
         # skills/mcp：装配根注入的扩展端口；资源目录和远端发现不能修改 Runtime 执行白名单。
         self.skills = skill_library
         self.mcp = mcp_gateway
+        # tool_hooks：只拥有回调目录；执行身份、Ticket、收据与审计写入仍归仓储。
+        self.tool_hooks = tool_hooks if tool_hooks is not None else ToolHookRegistry()
         # verification：显式受信项目的固定 Python unittest profile；不提供任意 shell。
         self.verification = SqliteVerificationProfiles(runtime, repository)
         # receipts：持久效果日志协作对象；不存在日志不自动证明调用未发出。
@@ -710,8 +715,73 @@ class LocalConversationExecution:
         except Exception:
             raise RecoveryRequired(f"MCP receipt pending for {plan.server_id}; reconcile before replay") from None
 
-    # 执行已校验/准入的工作并留下结果证据；已存在稳定绑定时复用事实而非重复效果。
+    # 围绕首次真实工具执行派发 Hook；已有 Ticket 的恢复/复用跳过回调与新策略读取。
     def execute(self, turn, decision_id, decision, *, provider=None):
+        if self.repository.operation(decision_id):
+            return self._execute_tool(turn, decision_id, decision, provider=provider)
+        capability = decision.capability_id
+        args = decision.arguments if decision.arguments is not None else {}
+        information_decision = self._admit_tool(turn, capability, args)
+        try:
+            hooks = self.tool_hooks.snapshot()
+        except (ValueError, PermissionError, OSError):
+            raise ToolHookDenied("configuration", "tool_hook_configuration_invalid", "configuration_invalid") from None
+        context = ToolHookContext(turn["run_id"], decision_id, capability, "before_tool", readonly_json(args))
+        try:
+            self._notify_tool_hooks(hooks, context)
+            result = self._execute_tool(turn, decision_id, decision, provider=provider,
+                                        information_decision=information_decision)
+        except Exception as exc:
+            # 错误回调只观察；派发后 RecoveryRequired/OSError 等仍原样进入 UNKNOWN 核对流程。
+            category = (exc.code if isinstance(exc, ToolHookDenied) else
+                        "recovery_required" if isinstance(exc, RecoveryRequired) else
+                        "budget_exceeded" if isinstance(exc, BudgetExceeded) else
+                        "permission_denied" if isinstance(exc, PermissionError) else
+                        "invalid_argument" if isinstance(exc, ValueError) else "execution_error")
+            self._notify_tool_hooks(hooks, replace(context, phase="on_tool_error", error_type=category))
+            raise
+        # 此时收据已发布并结算；观察失败不能把真实结果改写成失败或授权重跑。
+        self._notify_tool_hooks(hooks, replace(context, phase="after_tool"), result=result)
+        if result.get("error") or result.get("is_error") or result.get("isError") or result.get("failure"):
+            self._notify_tool_hooks(hooks, replace(context, phase="on_tool_error", error_type="tool_result_error"), result=result)
+        return result
+
+    def _notify_tool_hooks(self, hooks, context, *, result=None):
+        """构造只读阶段快照并调用仓储审计；所有回调都在短事务外运行。"""
+        try:
+            op = self.repository.operation(context.decision_id)
+            observed = replace(context, operation_state=op["state"] if op else None,
+                               result=readonly_json(result) if result is not None else None)
+            def record(trace):
+                """仓储核对决定归属后写入白名单元数据，回调不能取得写入函数。"""
+                self.repository.record_tool_hook(context.run_id, context.decision_id, context.capability_id, trace)
+            dispatch_tool_hooks(hooks, observed, record)
+        except ToolHookDenied:
+            if context.phase == "before_tool":
+                raise
+        except Exception:
+            if context.phase == "before_tool":
+                raise ToolHookDenied("pipeline", "tool_hook_failed", "pipeline_unavailable") from None
+            # 快照或审计异常仅影响观察，不遮蔽执行器要返回的 Receipt/要抛出的原异常。
+
+    def _admit_tool(self, turn, capability, args):
+        """复用现有能力可见性、注册状态和信息读取准入；Hook 继续不等于授权。"""
+        if capability not in TOOL_CATALOG:
+            raise PermissionError("tool is not admitted")
+        currently_visible = set(visible_tool_ids(TOOL_CATALOG, turn.get("activities") or []))
+        if capability not in currently_visible:
+            raise ValueError(f"tool is deferred: {capability}; use tool.search/tool.describe before requesting it")
+        spec = self.registry.get(capability)
+        if spec.state is not CapabilityState.EXECUTABLE:
+            raise PermissionError(f"capability is not executable: {capability}")
+        validate_tool_arguments(capability, args)
+        information_decision = self.information_controller.admit(turn, capability, args)
+        if information_decision is not None and not information_decision.admitted:
+            raise ValueError("information control denied: " + information_decision.reason)
+        return information_decision
+
+    # 执行经过外层准入/Hook 的工作；已有稳定绑定时复用事实而非重复效果。
+    def _execute_tool(self, turn, decision_id, decision, *, provider=None, information_decision=None):
         saved = self.repository.operation(decision_id)
         if saved:
             if saved["run_id"] != turn["run_id"]:
@@ -735,25 +805,6 @@ class LocalConversationExecution:
 
         capability = decision.capability_id
         args = decision.arguments or {}
-        if capability not in TOOL_CATALOG:
-            raise PermissionError("tool is not admitted")
-        currently_visible = set(visible_tool_ids(TOOL_CATALOG, turn.get("activities") or []))
-        if capability not in currently_visible:
-            raise ValueError(
-                f"tool is deferred: {capability}; use tool.search/tool.describe before requesting it"
-            )
-        spec = self.registry.get(capability)
-        if spec.state is not CapabilityState.EXECUTABLE:
-            raise PermissionError(f"capability is not executable: {capability}")
-
-        # 信息读取在 Tool Ticket 前先过纯控制策略；拒绝属于已知准入失败，不产生工具调用/UNKNOWN。
-        information_decision = self.information_controller.admit(
-            turn, capability, args
-        )
-        if information_decision is not None and not information_decision.admitted:
-            raise ValueError(
-                "information control denied: " + information_decision.reason
-            )
 
         # test.run 的结果必须在 Ticket 后产生；无收据时保持 UNKNOWN，绝不自动重跑项目代码。
         if capability == "test.run":

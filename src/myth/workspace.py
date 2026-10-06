@@ -8,6 +8,7 @@ from .adapters.personal_store import SqlitePersonalState
 from .adapters.extension_config import LocalExtensionConfig
 from .adapters.local_skills import LocalSkillLibrary
 from .adapters.mcp_stdio import StdioMCPGateway
+from .adapters.local_tool_hooks import LocalToolHooks
 from .application.conversation_agent import ConversationAgent
 from .platform import MythComponents
 from .platform.control_store import SqliteControlService
@@ -32,6 +33,7 @@ class Workspace:
         resolution_policy_id=None,
         evaluation_harness_mechanisms=None,
         child_provider_factory=None,
+        tool_hooks=None,
     ):
         # vector_index：可选 Milvus 派生索引；延迟连接/加载，缺失时词面检索保持完整可用。
         self.vector_index = create_milvus_vector_index(runtime)
@@ -82,6 +84,8 @@ class Workspace:
         self.extension_config = LocalExtensionConfig(runtime.root)
         self.skills = LocalSkillLibrary(self.extension_config)
         self.mcp = StdioMCPGateway(self.extension_config)
+        # tool_hooks：操作者可注入受信注册表；默认本机配置在新工具准入时读取，恢复不读。
+        self.tool_hooks = tool_hooks if tool_hooks is not None else LocalToolHooks(self.extension_config)
         # execution：用例执行端口/实现；外部效果须经过 Ticket 和收据协议。
         self.execution = LocalConversationExecution(
             runtime,
@@ -93,6 +97,7 @@ class Workspace:
             parent_control=self.control,
             skill_library=self.skills,
             mcp_gateway=self.mcp,
+            tool_hooks=self.tool_hooks,
         )
         # verification：与 execution 共用同一 profile 状态所有者，避免双写真相。
         self.verification = self.execution.verification
