@@ -35,6 +35,7 @@ Long-term Goal
 - State / Context 分离：旧 Tool Observation 可折叠但通过 `observation.read` 精确回读；Compact 使用 durable evidence seed，不把表示变化冒充任务进度；
 - Progressive Tool Disclosure：常用工具默认可见，专门能力通过 tool.search / tool.describe 渐进披露；
 - [Skill / MCP 首版](docs/EXTENSIONS.md)：本地技能发现与摘要绑定加载、明确配置的 stdio MCP 发现/调用，复用 Ticket/Receipt/UNKNOWN；首版未运行验证；
+- [工具 Hook 首版](docs/TOOL_HOOKS.md)：本机配置/Python 注册、前置拒绝、结果/错误观察与持久 Trace；保留收据和 UNKNOWN，未运行验证；
 - Structured Failure Observation + Verify-on-Stop；已知失败可机器恢复，模型 completion 不能覆盖 remaining/失败 verifier；
 - project.read / search、diff.preview、git.status / diff；
 - Artifact 生成与固定对象下载；

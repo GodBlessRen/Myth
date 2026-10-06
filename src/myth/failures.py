@@ -53,6 +53,11 @@ def observe_failure(
     lowered = message.lower()
     name = type(exc).__name__
 
+    if name == "ToolHookDenied":
+        return FailureObservation(
+            "authority", exc.code, message, False, capability_id,
+            hint="工具被本机 Hook 策略拒绝或 Hook 配置/执行不可用；检查操作者配置，不绕过策略或重放已有 Ticket。",
+        )
     if lowered.startswith("information control denied:"):
         return FailureObservation(
             "context",

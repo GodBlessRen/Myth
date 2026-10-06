@@ -260,7 +260,8 @@ class ConversationWebService:
         with MythRuntime(self.root) as runtime:
             workspace = Workspace(runtime)
             result = {}
-            for name, read in (("skills", workspace.skills.list_skills), ("mcp", workspace.mcp.servers)):
+            for name, read in (("skills", workspace.skills.list_skills), ("mcp", workspace.mcp.servers),
+                               ("hooks", workspace.tool_hooks.descriptors)):
                 try:
                     result[name] = read()
                 except (ValueError, PermissionError, OSError):
