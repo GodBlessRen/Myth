@@ -76,6 +76,7 @@ class DelegationCoordinator:
 
     def prepare(self, turn, decision_id, args):
         """纯准备固定输入、路由与依赖；返回合同或明确回退，不创建 Ticket、不访问 Provider。"""
+        # 先核对父观察引用和已采用依赖，再裁剪子预算并选模型；不满足条件时交回父模型，不能半派发。
         spec = self.execution.subagents.get("isolated_worker")
         task, context, expected = args.get("task"), args.get("context", ""), args.get("expected_output", "")
         if not isinstance(task, str) or not task.strip() or len(task) > spec.max_task_chars:

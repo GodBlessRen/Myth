@@ -88,6 +88,7 @@ class LocalAgentExecution:
 
     # 执行已校验/准入的工作并留下结果证据；已存在稳定绑定时复用事实而非重复效果。
     def execute(self, run_id, decision_id, decision):
+        # 先锁定准入时的受管基线；读复用原收据，精确补丁走 Core Ticket/Receipt，不能改读用户原件。
         args = decision.arguments or {}
         source = self.resolve(self._files(run_id), args.get("path"))
         managed = self.runtime.workspaces.path_for(run_id, source.name)

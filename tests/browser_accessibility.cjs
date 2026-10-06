@@ -35,7 +35,7 @@ function contrast(first, second) {
 // 从当前 DOM 测文本、placeholder、实际字重和触控框；关闭面板不冒充已测。
 function auditSurface() {
   const report = {text_count: 0, control_count: 0, minimum_contrast: null, minimum_weight: null,
-    contrast_failures: [], weight_failures: [], target_failures: [], unmeasured: []};
+    contrast_failures: [], weight_failures: [], target_failures: [], boundary_failures: [], icon_failures: [], unmeasured: []};
   const modal = document.querySelector('dialog[open]');
   const root = modal || document.body;
   const visible = element => {
@@ -75,11 +75,24 @@ function auditSurface() {
       report.unmeasured.push({id, kind, reason: error.message});
     }
   };
+  const controls = 'button, a[href], summary, input, textarea, select, [role="combobox"], [role="button"], [role="option"], [role="tab"], [role="checkbox"], [role="radio"], [role="switch"]';
+  // 控件边界和语义图标要求3:1；装饰分隔线不承担操作识别，不纳入边界阈值。
+  const nontext = (element, color, kind, adjacent = element) => {
+    try {
+      if (rgba(color)[3] === 0) return;
+      const ratio = contrast(pixel(element, rgba(color)), pixel(adjacent, [0, 0, 0, 0]));
+      if (ratio < 3) report[kind + '_failures'].push({id: identity(element), ratio, minimum: 3});
+    } catch (error) { report.unmeasured.push({id: identity(element), kind, reason: error.message}); }
+  };
   for (const element of root.querySelectorAll('*')) {
-    if (!visible(element) || element.matches('script, style, option, svg, path')) continue;
+    if (!visible(element) || element.matches('script, style, option, path')) continue;
     const style = getComputedStyle(element);
+    if (element.matches('svg.icon')) {
+      nontext(element, style.stroke === 'none' ? style.color : style.stroke, 'icon');
+      continue;
+    }
     const hasText = [...element.childNodes].some(node => node.nodeType === Node.TEXT_NODE && node.textContent.trim());
-    if (hasText || element.matches('input:not([type="checkbox"]):not([type="radio"]), textarea')) {
+    if (hasText || element.matches('input:not([type="checkbox"]):not([type="radio"]), textarea, select')) {
       text(element, style.color, Number(style.fontWeight), 'text');
     }
     if (element.matches('input[placeholder], textarea[placeholder]') && !element.value) {
@@ -88,7 +101,13 @@ function auditSurface() {
       color[3] *= Number(placeholder.opacity);
       text(element, `rgba(${color.join(',')})`, Number(placeholder.fontWeight), 'placeholder');
     }
-    if (!element.matches('button, a[href], summary, input, textarea, [role="combobox"]') ||
+    if (element.matches(controls + ', .composer, .search-field') && !element.matches(':disabled') && !element.closest('[aria-disabled="true"]')) {
+      for (const edge of ['Top', 'Right', 'Bottom', 'Left']) {
+        if (Number.parseFloat(style['border' + edge + 'Width']) > 0 && style['border' + edge + 'Style'] !== 'none')
+          nontext(element, style['border' + edge + 'Color'], 'boundary', element.parentElement);
+      }
+    }
+    if (!element.matches(controls) ||
         element.matches(':disabled') || element.closest('[aria-disabled="true"]')) continue;
     const rect = element.getBoundingClientRect();
     // 原生复选框的可操作外框由 label 提供；短图标必须有独立的四十像素目标。

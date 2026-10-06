@@ -9,6 +9,7 @@ from __future__ import annotations
 import uuid
 
 from ..conversation import chunks, score_chunk
+from ..domain import digest_json
 from ..platform.retrieval import reciprocal_rank_scores
 
 # SCHEMA：知识聚合拥有的当前表及查询索引；项目表先由 Workspace 建立。
@@ -49,6 +50,15 @@ class SqliteKnowledgeRepository:
                 (project_id, project_id),
             )
         ]
+
+    # 先发布 UTF-8 不可变对象，再同事务保存文档和 chunks；发布后 DB 失败只留下未引用对象。
+    def admission_revision(self, project_id=None):
+        """纯 SQL 返回可见候选版本，供 Turn 准备/提交 CAS；不访问对象或派生向量服务。"""
+        rows = self.store.db.execute(
+            "SELECT id,project_id,title,digest,bytes FROM workspace_documents "
+            "WHERE archived=0 AND (project_id IS NULL OR project_id=?) ORDER BY id", (project_id,)
+        ).fetchall()
+        return digest_json([dict(row) for row in rows])
 
     # 先发布 UTF-8 不可变对象，再同事务保存文档和 chunks；发布后 DB 失败只留下未引用对象。
     def import_document(self, value):
@@ -197,6 +207,7 @@ class SqliteKnowledgeRepository:
 
     # 遍历全可见候选后保留有界 top-k，报告 scanned/matched/pages；不能在排序前用 LIMIT 静默丢候选。
     def _lexical_search_report(self, query, project_id=None, limit=5):
+        # SQL 游标遍历全部可见块，内存只留 top-k 候选；先 LIMIT 会让后面的高分来源永远不可见。
         if not isinstance(query, str) or len(query) > 1000:
             raise ValueError("query up to 1000 characters")
         if type(limit) is not int or not 1 <= limit <= 8:

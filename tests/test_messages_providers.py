@@ -90,3 +90,40 @@ class MessagesProviderTests(unittest.TestCase):
             self.assertEqual(provider.check().details["models"], ["fixture-model"])
         with patch("myth.providers.messages.open_credential_request", side_effect=TimeoutError()):
             self.assertFalse(provider.check().ready)
+
+    def test_complete_malformed_shapes_are_known_failures_with_measured_usage(self):
+        """完整响应坏形状不能误记 UNKNOWN；已测调用和 Token 仍留在失败收据。"""
+        cases = [
+            ("anthropic", {"content": None, "stop_reason": "tool_use"}),
+            ("anthropic", {"content": ["bad"], "stop_reason": "tool_use"}),
+            ("anthropic", {"content": [{"type": "tool_use", "name": "myth_decision", "input": []}], "stop_reason": "tool_use"}),
+            ("kimi", {"choices": "bad"}),
+            ("kimi", {"choices": [1]}),
+            ("kimi", {"choices": [{"finish_reason": "stop", "message": "bad"}]}),
+        ]
+        for provider_id, body in cases:
+            body["usage"] = {"output_tokens": 17, "completion_tokens": 17}
+            with self.subTest(provider=provider_id, body=body), patch(
+                "myth.providers.messages.open_credential_request", return_value=self.response(body)
+            ):
+                with self.assertRaises(ProviderKnownFailure) as failed:
+                    MessagesProvider(provider_id, lambda: "secret").invoke(self.request())
+                self.assertEqual(failed.exception.usage, {"model_calls": 1, "output_tokens": 17})
+
+    def test_malformed_usage_preserves_unknown_measurements(self):
+        """非对象 Usage 是缺测，不应抹去已完整收到的有效决定。"""
+        for usage in ("bad", [], 7):
+            body = {"choices": [{"finish_reason": "stop", "message": {"content": decision()}}], "usage": usage}
+            with self.subTest(usage=usage), patch("myth.providers.messages.open_credential_request", return_value=self.response(body)):
+                result = MessagesProvider("kimi", lambda: "secret").invoke(self.request())
+            self.assertEqual(result.usage, {"model_calls": 1})
+
+    def test_http_errors_close_response_resources(self):
+        """HTTP 拒绝与不明结果都释放响应句柄，且不读不可信错误正文。"""
+        for code, expected in ((401, ProviderKnownFailure), (500, RuntimeError)):
+            body = io.BytesIO(b"secret")
+            failure = HTTPError("url", code, "secret", {}, body)
+            with self.subTest(code=code), patch("myth.providers.messages.open_credential_request", side_effect=failure):
+                with self.assertRaises(expected):
+                    MessagesProvider("kimi", lambda: "secret").invoke(self.request())
+            self.assertTrue(body.closed)

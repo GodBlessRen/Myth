@@ -65,6 +65,8 @@ def pricing_identity(settings):
 
 def clean_pool(value):
     """只保存公开白名单配置；每轮准入沿用设置快照，不读取执行中途的新配置。"""
+    # 池与槽位分别校验公开字段白名单，凭据不进入设置快照。
+    # 槽位身份、模型、上下文、输出和步数均有界；供应商相关窗口/温度约束在准入前确定。
     if value is None:
         value = {}
     if not isinstance(value, dict) or set(value) - {"enabled", "adaptive", "children", "main_pricing"}:
@@ -138,6 +140,8 @@ def profile_key(profile):
 
 def route(pool, task_type, difficulty, history, unavailable=(), preferred_profile_id=None):
     """档位是初始先验；主模型可明确选槽位，质量反馈校准同类能力并避开拒收结果。"""
+    # 先按冻结槽位的配置身份筛同类最近经验，再排除禁用、不可用和近期质量失败。
+    # 评分只校准能力档位；明确槽位偏好仍经过排除规则，无合格槽位返回父模型回退。
     if task_type not in TASK_TYPES or difficulty not in DIFFICULTIES:
         raise ValueError("任务类别或难度无效")
     required = DIFFICULTIES[difficulty]

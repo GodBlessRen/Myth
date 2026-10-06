@@ -10,6 +10,8 @@ recursive-include tests *.py *.cjs
 recursive-include src *.py *.html *.css *.js *.svg
 include src/myth/webui/fonts/README.md
 prune .trash
+prune .work
+prune .venv
 prune output
 prune .runtime
 global-exclude __pycache__ *.py[cod]

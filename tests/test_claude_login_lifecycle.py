@@ -64,7 +64,8 @@ class ClaudeLoginLifecycleTests(unittest.TestCase):
     def credential(self, client: str = "myth-a") -> dict:
         """构造有明确客户端身份的测试凭据，默认尚未到刷新窗口。"""
         return {"access_token": "fixture-access", "refresh_token": "fixture-refresh",
-                "client_id": client, "scope": "user:inference", "expires_at": time.time() + 3600}
+                "client_id": client, "scope": "user:inference", "expires_at": time.time() + 3600,
+                "login_epoch": self.manager._load_metadata().get("login_epoch")}
 
     def begin(self, configure: str | None = "myth-a") -> str:
         """经公开入口创建挑战，None 表示本用例已经选择环境变量配置。"""
@@ -90,15 +91,15 @@ class ClaudeLoginLifecycleTests(unittest.TestCase):
         self.manager.configure("myth-b")
         self.assert_rejected_before_exchange(state)
         self.assertEqual(json.loads(self.manager.metadata_path.read_text())["client_id"], "myth-b")
-        self.assertIsNone(self.store.load("default"))
+        self.assertIsNone(self.store.load(self.manager.profile_id))
 
     def test_environment_binding_is_considered_when_configuring(self) -> None:
         """没有 metadata client_id 时，显式配置仍需撤销旧环境身份与挑战。"""
         os.environ["MYTH_CLAUDE_OAUTH_CLIENT_ID"] = "myth-a"
         state = self.begin(configure=None)
-        self.store.save("default", self.credential())
+        self.store.save(self.manager.profile_id, self.credential())
         self.manager.configure("myth-b")
-        self.assertIsNone(self.store.load("default"))
+        self.assertIsNone(self.store.load(self.manager.profile_id))
         self.assert_rejected_before_exchange(state)
 
     def test_environment_change_is_checked_at_callback(self) -> None:
@@ -107,16 +108,16 @@ class ClaudeLoginLifecycleTests(unittest.TestCase):
         state = self.begin(configure=None)
         os.environ["MYTH_CLAUDE_OAUTH_CLIENT_ID"] = "myth-b"
         self.assert_rejected_before_exchange(state)
-        self.assertFalse(self.manager.metadata_path.exists())
+        self.assertNotIn("client_id", json.loads(self.manager.metadata_path.read_text()))
 
     def test_visible_configuration_change_after_exchange_is_rejected(self) -> None:
-        """交换期间另一实例已改客户端时，返回凭据不能再覆盖新配置；不外推原子性。"""
+        """不遵守 OS 锁的外部修改也需复核；晚到凭据不能覆盖可见的新配置。"""
         state = self.begin()
         other = ClaudeOAuthManager(self.root, credential_store=self.store)
 
         def changed_during_exchange(*args) -> dict:
-            """在远端返回边界注入已落盘的配置变化，不模拟真实跨进程事务。"""
-            other.configure("myth-b")
+            """故意绕过生命周期锁注入文件变更；正常 configure 无法在持锁时并发提交。"""
+            other._save_metadata({**other._load_metadata(), "client_id": "myth-b"})
             return self.token_response()
 
         with patch.object(self.manager, "_token_exchange", side_effect=changed_during_exchange) as exchange:
@@ -124,7 +125,7 @@ class ClaudeLoginLifecycleTests(unittest.TestCase):
                 self.manager.complete_callback(self.callback(state))
         exchange.assert_called_once()
         self.assertEqual(json.loads(self.manager.metadata_path.read_text())["client_id"], "myth-b")
-        self.assertIsNone(self.store.load("default"))
+        self.assertIsNone(self.store.load(self.manager.profile_id))
 
     def test_same_client_configuration_preserves_current_challenge(self) -> None:
         """重复保存同一个客户端不是退出，不能误杀当前有效登录。"""
@@ -133,7 +134,7 @@ class ClaudeLoginLifecycleTests(unittest.TestCase):
         with patch.object(self.manager, "_token_exchange", return_value=self.token_response()):
             status = self.manager.complete_callback(self.callback(state))
         self.assertTrue(status.connected)
-        self.assertEqual(self.store.load("default")["client_id"], "myth-a")
+        self.assertEqual(self.store.load(self.manager.profile_id)["client_id"], "myth-a")
 
     def test_invalid_configuration_does_not_cancel_valid_challenge(self) -> None:
         """无效输入在改变状态前拒绝，用户输错不能破坏旧的可用流程。"""
@@ -146,13 +147,13 @@ class ClaudeLoginLifecycleTests(unittest.TestCase):
     def test_failed_configuration_still_invalidates_pending_login(self) -> None:
         """删除凭据失败不能声称已切换；但未完成挑战必须取消，不能随后偷偷登录。"""
         state = self.begin()
-        self.store.save("default", self.credential())
+        self.store.save(self.manager.profile_id, self.credential())
         with patch.object(self.store, "delete", side_effect=RuntimeError("fixture delete failure")):
             with self.assertRaises(RuntimeError):
                 self.manager.configure("myth-b")
         self.assert_rejected_before_exchange(state)
         self.assertEqual(json.loads(self.manager.metadata_path.read_text())["client_id"], "myth-a")
-        self.assertIsNotNone(self.store.load("default"))
+        self.assertIsNotNone(self.store.load(self.manager.profile_id))
 
     def test_logout_invalidates_pending_login(self) -> None:
         """已退出后晚到的页面回调不能重新连接。"""
@@ -165,12 +166,12 @@ class ClaudeLoginLifecycleTests(unittest.TestCase):
     def test_failed_logout_cancels_pending_without_claiming_signout(self) -> None:
         """凭据删除失败仍抛错且保留原凭据事实，但不得保留可完成的登录挑战。"""
         state = self.begin()
-        self.store.save("default", self.credential())
+        self.store.save(self.manager.profile_id, self.credential())
         with patch.object(self.store, "delete", side_effect=RuntimeError("fixture delete failure")):
             with self.assertRaises(RuntimeError):
                 self.manager.logout()
         self.assert_rejected_before_exchange(state)
-        self.assertIsNotNone(self.store.load("default"))
+        self.assertIsNotNone(self.store.load(self.manager.profile_id))
 
     def test_denial_consumes_only_its_own_challenge(self) -> None:
         """用户拒绝授权也结束对应一次性挑战，不得被之后的回调复活。"""
@@ -205,7 +206,7 @@ class ClaudeLoginLifecycleTests(unittest.TestCase):
     def test_foreign_credentials_cannot_be_used_or_shown_connected(self) -> None:
         """共享凭据槽中若出现另一个客户端的 token，状态与使用入口都拒绝。"""
         self.manager.configure("myth-b")
-        self.store.save("default", self.credential("myth-a"))
+        self.store.save(self.manager.profile_id, self.credential("myth-a"))
         status = self.manager.status()
         self.assertFalse(status.connected)
         self.assertEqual(status.reason, "client_binding_mismatch")
@@ -220,7 +221,7 @@ class ClaudeLoginLifecycleTests(unittest.TestCase):
         self.manager.configure("myth-a")
         credential = self.credential()
         del credential["client_id"]
-        self.store.save("default", credential)
+        self.store.save(self.manager.profile_id, credential)
         self.assertFalse(self.manager.status().connected)
         with self.assertRaises(ClaudeOAuthError):
             self.manager.access_token()
@@ -237,7 +238,7 @@ class ClaudeLoginLifecycleTests(unittest.TestCase):
         self.manager.configure("myth-a")
         credential = self.credential()
         credential["access_token"] = 123
-        self.store.save("default", credential)
+        self.store.save(self.manager.profile_id, credential)
         self.assertFalse(self.manager.status().connected)
 
     def test_begin_reads_client_after_entering_owner_lock(self) -> None:
@@ -292,7 +293,7 @@ class ClaudeLoginLifecycleTests(unittest.TestCase):
         self.manager.configure("myth-a")
         credential = self.credential()
         credential["expires_at"] = time.time() - 1
-        self.store.save("default", credential)
+        self.store.save(self.manager.profile_id, credential)
         with patch.object(self.manager, "_read_token_response", return_value=self.token_response()) as response:
             self.assertEqual(self.manager.access_token(), "fixture-access")
         self.assertEqual(json.loads(response.call_args.args[0].data)["client_id"], "myth-a")

@@ -1,4 +1,4 @@
-// 用户修订验收：精确色板、中央边线、提供方专用字段与真实等待太极。
+// 用户修订验收：精确色板、中央边线、提供方专用字段与真实等待品牌笔势。
 // 仅使用专用固定 Provider 服务；输入/配置都通过可见控件，不改内部状态。
 "use strict";
 const assert = require("node:assert/strict");
@@ -14,9 +14,9 @@ async function capture(page, name) {
   await page.evaluate(() => document.fonts.ready);
   // 在途反馈保留真实时间窗口；普通画面等布局过渡完成，避免捕捉窄轨道中间帧。
   if (!name.startsWith("waiting")) await page.waitForTimeout(350);
-  const file = path.join(output, `taiji-${name}.png`);
+  const file = path.join(output, `brand-${name}.png`);
   await page.screenshot({ path: file, fullPage: true });
-  fs.copyFileSync(file, path.join(review, `taiji-${name}.png`));
+  fs.copyFileSync(file, path.join(review, `brand-${name}.png`));
   report.screenshots.push(file);
 }
 async function align(page, label) {
@@ -51,16 +51,16 @@ async function main() {
     const oldImage = await page.request.get(base + "/images/paper-study.png");
     assert.equal(oldImage.status(), 404);
     assert.equal(await page.locator(".welcome-art").count(), 0);
-    assert.equal(await page.locator(".brand-symbol .taiji-mark").evaluate(img => img.complete && img.naturalWidth > 0), true);
-    report.checks.push("paper asset retired; shared Taiji SVG loads");
+    assert.equal(await page.locator(".brand-symbol .brand-mark").evaluate(img => img.complete && img.naturalWidth > 0), true);
+    report.checks.push("paper asset retired; shared brand mark SVG loads");
     await page.evaluate(id => { location.hash = "chat/" + id; }, session.id);
     await page.locator("#thread .assistant").first().waitFor();
     for (const size of [{width:1440,height:960},{width:1280,height:900},{width:1024,height:768},{width:390,height:844},{width:320,height:740}]) {
       await page.setViewportSize(size);
       for (const mode of ["light", "dark"]) {
         if (await page.locator("html").getAttribute("data-theme") !== mode) await page.locator("#themeToggle").click();
-        assert.equal(await page.locator("body").evaluate(node => getComputedStyle(node).backgroundColor), mode === "light" ? "rgb(248, 244, 237)" : "rgb(14, 16, 15)");
-        assert.equal(await page.locator('meta[name="theme-color"]').getAttribute("content"), mode === "light" ? "#F8F4ED" : "#0E100F");
+        assert.equal(await page.locator("body").evaluate(node => getComputedStyle(node).backgroundColor), mode === "light" ? "rgb(255, 254, 248)" : "rgb(14, 16, 15)");
+        assert.equal(await page.locator('meta[name="theme-color"]').getAttribute("content"), mode === "light" ? "#FFFEF8" : "#0E100F");
         await align(page, size.width + "/" + mode);
         if (size.width > 1120) {
           await page.locator("#focusMode").click();
@@ -96,9 +96,9 @@ async function main() {
     // 未保存的表单不影响 Run；回到既有会话发送固定验收问题。
     await page.evaluate(id => { location.hash = "chat/" + id; }, session.id);
     await page.locator("#thread .assistant").first().waitFor();
-    await page.locator("#prompt").fill("核对太极等待反馈。");
+    await page.locator("#prompt").fill("核对品牌笔势等待反馈。");
     await page.locator("#send").click();
-    const spinner = page.locator(".typing .taiji-wait");
+    const spinner = page.locator(".typing .brand-wait");
     await spinner.waitFor({ state: "visible" });
     const active = await (await page.request.get(base + "/api/workspace/sessions/" + session.id)).json();
     assert.equal(active.turns.at(-1).status, "RUNNING");
@@ -111,11 +111,11 @@ async function main() {
     await page.emulateMedia({ reducedMotion: "reduce" });
     assert.equal(await spinner.evaluate(node => getComputedStyle(node).animationName), "none");
     await spinner.waitFor({ state: "hidden" });
-    report.checks.push("14px Taiji accompanies real active Driver, stops on completion, respects reduced motion");
+    report.checks.push("14px brand mark accompanies real active Driver, stops on completion, respects reduced motion");
     assert.deepEqual(report.errors, []);
     console.log(JSON.stringify({ passed: true, checks: report.checks.length, alignmentChecks: report.alignment.length }, null, 2));
   } finally {
-    fs.writeFileSync(path.join(output,"taiji-browser-report.json"),JSON.stringify(report,null,2));
+    fs.writeFileSync(path.join(output,"brand-browser-report.json"),JSON.stringify(report,null,2));
     await browser.close();
   }
 }

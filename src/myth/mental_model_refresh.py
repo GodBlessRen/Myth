@@ -158,6 +158,8 @@ class MentalModelRefreshScheduler:
     # admit：固定 prepare 快照、水位与模型预算，先创建 Core Run，再登记唯一 occurrence；同水位竞争只成功一次。
     def admit(self, model_id: str, *, now: float | None = None) -> str | None:
         now = time.time() if now is None else float(now)
+        # 按固定model_revision与Memory水位合并同一刷新发生；已有不可重放工作沿原Run续接。
+        # 新发生在短事务内登记occurrence与Core Run，模型调用在事务外且继续受Ticket/UNKNOWN约束。
         policy = self.policy(model_id)
         if not policy["enabled"] or policy["retry_at"] > now:
             return None

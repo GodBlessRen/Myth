@@ -7,6 +7,7 @@ from __future__ import annotations
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from myth.platform.memory_lifecycle import MemoryDeltaError
 from myth.runtime import MythRuntime
@@ -124,6 +125,73 @@ class MemoryLifecycleTests(unittest.TestCase):
             row["memory_id"], [], expected_revision=row["revision"]
         )
         self.assertEqual(same["revision"], row["revision"])
+        self.assertEqual(self.memory.changes_since(1), [])
+
+    # 水位写失败必须回滚已经写入的正文、证据和snapshot，不能留下“新正文/旧freshness”。
+    def test_change_record_failure_rolls_back_delta_revision(self):
+        row = self.memory.remember(
+            kind="semantic", text="Stable.", source_ref="delta:rollback"
+        )
+        before = self.memory.current_change_seq()
+        evidence = self.memory.evidence(row["memory_id"])
+        with patch.object(self.memory, "_record_change", side_effect=RuntimeError("disk full")):
+            with self.assertRaisesRegex(RuntimeError, "disk full"):
+                self.memory.apply_delta(
+                    row["memory_id"], [{"op": "replace_text", "text": "Uncommitted."}],
+                    expected_revision=1,
+                )
+        self.assertEqual(self.memory.get(row["memory_id"]), row)
+        self.assertEqual(self.memory.evidence(row["memory_id"]), evidence)
+        self.assertEqual(self.memory.current_change_seq(), before)
+        with self.assertRaises(KeyError):
+            self.memory.revision_snapshot(row["memory_id"], 2)
+
+    # Delta 的新 revision 必须与变化水位同事务提交；否则后台物化视图会永久错认 fresh。
+    def test_delta_records_revision_in_change_watermark(self):
+        row = self.memory.remember(
+            kind="semantic", text="Old source.", source_ref="decision:delta-watermark"
+        )
+        before = self.memory.current_change_seq()
+        updated = self.memory.apply_delta(
+            row["memory_id"], [{"op": "replace_text", "text": "New source."}],
+            expected_revision=row["revision"],
+        )
+        changes = self.memory.changes_since(before)
+        self.assertEqual(len(changes), 1)
+        self.assertEqual(changes[0]["memory_id"], updated["memory_id"])
+        self.assertEqual(changes[0]["revision"], updated["revision"])
+
+    # 先出现别的项目变化不能占掉本项目的 limit=1；limit 约束可见结果而非原始全库行。
+    def test_change_limit_applies_after_scope_filter(self):
+        before = self.memory.current_change_seq()
+        self.memory.remember(
+            kind="semantic", text="Other project.", source_ref="scope:other",
+            scope_type="project", scope_id="other",
+        )
+        visible = self.memory.remember(
+            kind="semantic", text="Current project.", source_ref="scope:current",
+            scope_type="project", scope_id="current",
+        )
+        changes = self.memory.changes_since(before, project_id="current", limit=1)
+        self.assertEqual([item["memory_id"] for item in changes], [visible["memory_id"]])
+
+    # 同一来源转移 scope 要让旧范围和新范围各自失效；历史revision仍保持不可变。
+    def test_scope_move_invalidates_both_old_and_new_scopes(self):
+        row = self.memory.remember(
+            kind="semantic", text="Project source.", source_ref="scope:move",
+            scope_type="project", scope_id="before",
+        )
+        watermark = self.memory.current_change_seq()
+        moved = self.memory.remember(
+            kind="semantic", text="Moved source.", source_ref="scope:move",
+            scope_type="project", scope_id="after",
+        )
+        for scope_id in ("before", "after"):
+            with self.subTest(scope_id=scope_id):
+                changes = self.memory.changes_since(watermark, project_id=scope_id)
+                self.assertTrue(any(item["memory_id"] == moved["memory_id"] for item in changes))
+        self.assertEqual(row["memory_id"], moved["memory_id"])
+        self.assertEqual(self.memory.revision_snapshot(row["memory_id"], 1)["text"], "Project source.")
 
     # 任一 Delta 操作非法时整批失败，正文/revision/evidence 都不部分写入。
     def test_invalid_delta_fails_closed_without_partial_revision(self):

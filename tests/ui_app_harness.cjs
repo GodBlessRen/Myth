@@ -2,6 +2,7 @@
 const fs = require("node:fs");
 const vm = require("node:vm");
 const path = require("node:path");
+const {shellNodes} = require('./ui_shell_nodes.cjs');
 
 class Element {
   constructor(tag = "div") {
@@ -57,7 +58,7 @@ class Element {
 }
 
 function boot(storage = {}, options = {}) {
-  const nodes = new Map();
+  let nodes = new Map();
   const dialogs = ["commandPalette", "projectDialog", "sessionDialog", "goalDialog", "knowledgeDialog", "documentDialog", "controlDialog"];
   const themes = ["light", "dark", "system"].map((value) => {
     const node = new Element("button"); node.dataset.themeChoice = value; return node;
@@ -72,14 +73,15 @@ function boot(storage = {}, options = {}) {
   };
   // 严格模式从真实 HTML 取节点身份；不存在的 id 返回 null，不让替身凭空补齐页面。
   const html = options.html ?? fs.readFileSync(path.join(__dirname, "../src/myth/webui/index.html"), "utf8");
-  const ids = new Set([...html.matchAll(/\bid="([^"]+)"/g)].map(match => match[1]));
+  if (options.strictDOM) nodes = shellNodes(html, tag => { const node = new Element(tag); node.document = document; return node; });
+  const ids = new Set(nodes.keys());
   document.getElementById = options.strictDOM
     ? id => ids.has(id) ? $(id) : null
     : $;
   document.body = new Element("body");
   document.documentElement = new Element("html");
   document.documentElement.dataset.theme = "light";
-  document.activeElement = $("newChat");
+  document.activeElement = document.getElementById("newChat");
   document.createElement = (tag) => { const node = new Element(tag); node.document = document; return node; };
   document.createElementNS = (_, tag) => document.createElement(tag);
   document.createTextNode = (text) => { const node = new Element("text"); node.textContent = text; return node; };

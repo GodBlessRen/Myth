@@ -133,7 +133,7 @@ DOMAINS: tuple[ArchitectureItem, ...] = (
         "Memory / 记忆",
         "domain",
         Maturity.USABLE,
-        "Versioned working/episodic/semantic/procedural records with provenance/revoke. Recall scans the full visible active candidate set with project/session scope and fact level; Information Delta is not yet a lifecycle engine.",
+        "Versioned working/episodic/semantic/procedural records with provenance/revoke. Atomic Delta updates revision, evidence and source-change watermarks; scoped freshness and materialized views reject stale sources. Recall ranks visible candidates with derived-source exclusion.",
         ("context",),
     ),
     ArchitectureItem(

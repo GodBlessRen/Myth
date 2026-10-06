@@ -61,6 +61,7 @@ def verify_goal(
     remaining: tuple[str, ...],
 ) -> tuple[Verdict, str]:
     """独立检查全部候选摘要、已成功收据、引用覆盖和剩余项；证据不足返回 INCONCLUSIVE。"""
+    # 先查合同与证据身份，再查当前字节；没有合同只能未定，字节不符才是明确失败。
     if not manifest.get("rules"):
         return (
             Verdict.INCONCLUSIVE,

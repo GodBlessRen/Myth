@@ -22,6 +22,11 @@ class InformationResolution(StrEnum):
 # 固定来源的投影视图；分辨率可以改变，source/provenance 身份不能被替换。
 @dataclass(frozen=True)
 class InformationView:
+    """来源版本固定的只读表示；内容随粒度展开，权限不会跟着展开。
+
+    例如同一 ``memory:mem_1@3`` 从 L0 摘要展开到 L2 证据，仍指向 revision 3。
+    新 revision 需要新视图；不能换正文却沿用旧来源身份。预算估算缺测保留 None。
+    """
     # source_ref：固定资料/对象/Run 来源身份；分辨率改变时保留原来源。
     source_ref: str
     # resolution：同源表示等级 L0/L1/L2；不是语义置信度。
@@ -36,7 +41,11 @@ class InformationView:
 
 @dataclass(frozen=True)
 class InformationDelta:
-    """两个信息状态间的变化事实；added/updated/removed/conflicted 不等于价值判断。"""
+    """两个信息状态间的身份变化，所有权属于事实来源的生命周期。
+
+    例如 Memory revision 更新会产生 updated；投影视图据此失效，不能推导任务成功。
+    Delta 只报告变化；执行提案还须 expected_revision 校验与事务提交，不授予写权限。
+    """
 
     # added：新增来源/事实身份集合；只表示变化。
     added: tuple[str, ...] = ()
@@ -55,7 +64,11 @@ class InformationDelta:
 
 @dataclass(frozen=True)
 class InformationGain:
-    """声明估计语义的边际价值/成本；未校准保留 None，不宣称香农互信息。"""
+    """同源粒度变化的边际任务价值和显式成本提案。
+
+    估计器必须说明样本与单位；信息量多不等于质量提高。只有同题同配置的配对评测
+    才能校准 estimated_gain；缺测保留 None，成本为零也不能伪造无限收益。
+    """
 
     # source_ref：固定资料/对象/Run 来源身份；分辨率改变时保留原来源。
     source_ref: str

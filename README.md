@@ -1,5 +1,7 @@
 # Myth
 
+本轮准入、认证、缺测计量与工作台改动的实际证据和未完成验收见 [续跑交付记录](docs/CONTINUATION_REVIEW.md)。
+
 **一个可持续推进真实工作的本地 Agent Runtime。**
 
 Myth 的中心不是“聊天 + 一堆 Agent 概念”，而是：

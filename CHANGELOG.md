@@ -1,5 +1,14 @@
 # Changelog
 
+## 未发布 — 22:56 续跑的事实与授权边界
+
+- Turn 上下文在写事务外准备，提交核对版本；Scheduler 保留机会/预算/Goal 同连接原子提交。委派复用固定父 Ticket。
+- Core 禁止 UNKNOWN 假完成和跨 Run/候选验收；test.run 要有实际执行测试的完成证据。
+- OAuth 授权代次、一次性挑战与根目录安全槽隔离，OS 锁串行轮转；未知刷新不重放，明确零派发保留网络恢复。
+- 修复 Memory Delta 水位、scope 迁移与派生来源检索；Web/SOTA/Eval 缺测保持未知，环境扫描提前剪枝私有目录。
+- 当前 UI 底色更新为 `#FFFEF8` / `#0E100F`，原创 SVG 替代旧太极；同步设置/DOM 合同、中文输入与迟到响应保护。旧设计合同、资源和截图留档。
+- 按用户最新指示优先推送 PR；完整视觉矩阵、新环境安装及全任务单验收仍待完成，见 [交付记录](docs/CONTINUATION_REVIEW.md)。
+
 ## 未发布 — Runtime Continuity Guard
 
 - 吸收 Commerce Agents 的 Runtime follow-through 思路，但不引入平行框架：可恢复的效果工具失败后，模型首次 completion 会被 `CompletionGuard` 拒绝并收到结构化恢复 Observation；同能力后续真实成功自动闭合，若模型在提醒后明确重新判断阻塞则允许结束说明，避免死循环。

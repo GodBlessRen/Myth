@@ -97,6 +97,7 @@ class MilvusVectorIndex:
 
     def _ensure(self) -> None:
         """按首次真实使用加载 PyMilvus、embedding model 和 collections；Workspace 构造不偷偷下载模型。"""
+        # 先加载可选依赖与模型，再建缺失集合；每阶段失败只标投影不可用，SQLite 来源事实保持权威。
         with self._lock:
             if self._client is None or self._embedder is None:
                 try:
@@ -144,6 +145,7 @@ class MilvusVectorIndex:
 
     def _sync(self, collection: str, rows: list[dict[str, Any]]) -> dict[str, int]:
         """仅对当前进程未见过的 source version 做 embedding/upsert；正文不作为 Milvus metadata 保存。"""
+        # 过滤已同步版本后按 64 条编码；只有 upsert 成功才推进版本缓存，失败后仍可完整补建。
         self._ensure()
         pending = [
             row

@@ -60,7 +60,7 @@ class ClaudePublicMetadataTests(unittest.TestCase):
         public = self.public_text()
         for key in ("access_token", "refresh_token"):
             self.assertNotIn(response[key], public)
-            self.assertEqual(self.store.load("default")[key], response[key])
+            self.assertEqual(self.store.load(self.manager.profile_id)[key], response[key])
         self.assertIn("[REDACTED]", public)
 
     def test_nested_account_fields_are_not_serialized_as_public_metadata(self) -> None:
@@ -79,17 +79,19 @@ class ClaudePublicMetadataTests(unittest.TestCase):
     def test_status_redacts_current_credential_echo_without_mutating_store(self) -> None:
         """即使安全库的公开 scope 异常，也不能把当前 token 带进 Web JSON。"""
         credential = {**self.response(), "client_id": "myth-a", "expires_at": time.time() + 3600}
+        credential["login_epoch"] = self.manager._load_metadata()["login_epoch"]
         credential["scope"] = "user:inference " + credential["refresh_token"]
-        self.store.save("default", credential)
+        self.store.save(self.manager.profile_id, credential)
         status = self.manager.status()
         self.assertNotIn(credential["refresh_token"], json.dumps(status.serializable()))
-        self.assertEqual(self.store.load("default"), credential)
+        self.assertEqual(self.store.load(self.manager.profile_id), credential)
 
     def test_refresh_redacts_old_and_new_token_echoes(self) -> None:
         """轮换响应可能回显旧 refresh token，脱敏必须同时包含旧、新凭据。"""
         old = {"access_token": "fixture-old-access", "refresh_token": "fixture-old-refresh",
-               "client_id": "myth-a", "expires_at": time.time() - 1, "scope": "user:inference"}
-        self.store.save("default", old)
+               "client_id": "myth-a", "expires_at": time.time() - 1, "scope": "user:inference",
+               "login_epoch": self.manager._load_metadata()["login_epoch"]}
+        self.store.save(self.manager.profile_id, old)
         response = self.response()
         response["account"] = {"email_address": old["refresh_token"] + " " + response["access_token"]}
         response["organization"] = {"name": old["access_token"] + " " + response["refresh_token"]}
@@ -99,24 +101,25 @@ class ClaudePublicMetadataTests(unittest.TestCase):
         for source in (old, response):
             for key in ("access_token", "refresh_token"):
                 self.assertNotIn(source[key], self.public_text())
-        self.assertEqual(self.store.load("default")["refresh_token"], response["refresh_token"])
+        self.assertEqual(self.store.load(self.manager.profile_id)["refresh_token"], response["refresh_token"])
 
     def test_visible_client_change_during_refresh_is_rejected_before_save(self) -> None:
         """刷新期间已经可见的客户端切换也要核对，不能保存迟到的旧绑定。"""
         old = {"access_token": "fixture-old-access", "refresh_token": "fixture-old-refresh",
-               "client_id": "myth-a", "expires_at": time.time() - 1}
-        self.store.save("default", old)
+               "client_id": "myth-a", "expires_at": time.time() - 1,
+               "login_epoch": self.manager._load_metadata()["login_epoch"]}
+        self.store.save(self.manager.profile_id, old)
         other = ClaudeOAuthManager(self.root, credential_store=self.store)
 
         def changed(*args):
-            """在响应边界注入已落盘变更；本用例不声称任意跨进程竞争都已解决。"""
-            other.configure("myth-b")
+            """故意绕过 OS 锁修改公开文件；常规 configure 会先等待正在执行的刷新。"""
+            other._save_metadata({**other._load_metadata(), "client_id": "myth-b"})
             return self.response()
 
         with patch.object(self.manager, "_read_token_response", side_effect=changed):
             with self.assertRaises(ClaudeOAuthError):
                 self.manager.access_token()
-        self.assertIsNone(self.store.load("default"))
+        self.assertEqual(self.store.load(self.manager.profile_id), old)
         self.assertEqual(json.loads(self.manager.metadata_path.read_text("utf-8"))["client_id"], "myth-b")
 
     def test_normal_account_labels_and_scopes_are_preserved(self) -> None:
@@ -157,19 +160,21 @@ class ClaudePublicMetadataTests(unittest.TestCase):
         status = self.login(response)
         self.assertEqual(status.scopes, ())
         self.assertNotIn("fixture-unrelated-secret", self.public_text())
-        credential = self.store.load("default")
+        credential = self.store.load(self.manager.profile_id)
         credential["scope"] = ["fixture-other-secret"]
-        self.store.save("default", credential)
+        self.store.save(self.manager.profile_id, credential)
         self.assertEqual(self.manager.status().scopes, ())
         self.assertNotIn("fixture-other-secret", self.public_text())
 
     def test_unknown_expiry_and_empty_scope_do_not_reuse_stale_metadata(self) -> None:
         """凭据事实为 None/0 或空 scope 时，公开缓存不得覆盖权威事实。"""
-        self.manager._save_metadata({"client_id": "myth-a", "scope": "user:profile", "expires_at": 9999999999})
+        self.manager._save_metadata({**self.manager._load_metadata(), "client_id": "myth-a",
+                                     "scope": "user:profile", "expires_at": 9999999999})
         for expires_at in (None, 0):
             with self.subTest(expires_at=expires_at):
                 credential = {**self.response(), "client_id": "myth-a", "expires_at": expires_at, "scope": ""}
-                self.store.save("default", credential)
+                credential["login_epoch"] = self.manager._load_metadata()["login_epoch"]
+                self.store.save(self.manager.profile_id, credential)
                 status = self.manager.status()
                 self.assertEqual(status.expires_at, expires_at)
                 self.assertEqual(status.scopes, ())
@@ -177,10 +182,11 @@ class ClaudePublicMetadataTests(unittest.TestCase):
     def test_refresh_preserves_unknown_scope_when_response_omits_it(self) -> None:
         """刷新没补充 scope 时沿用原事实，不能把未知范围补成全部请求范围。"""
         credential = {**self.response(), "client_id": "myth-a", "expires_at": 0, "scope": ""}
-        self.store.save("default", credential)
+        credential["login_epoch"] = self.manager._load_metadata()["login_epoch"]
+        self.store.save(self.manager.profile_id, credential)
         response = self.response()
         del response["scope"]
         with patch.object(self.manager, "_read_token_response", return_value=response):
             self.manager.access_token()
-        self.assertEqual(self.store.load("default")["scope"], "")
+        self.assertEqual(self.store.load(self.manager.profile_id)["scope"], "")
         self.assertEqual(self.manager.status().scopes, ())

@@ -286,6 +286,7 @@ def _require_provider(args: argparse.Namespace):
 
 # 分派明确 CLI 命令到用例并输出状态；固定任务失败保留报告且返回非零，不自动发布策略。
 def main() -> None:
+    # 每个分支只装配实际命令所需能力；Eval 记录不自动发布，显式 promote 才能切换策略。
     args = build_parser().parse_args()
 
     if args.command == "task-benchmark":

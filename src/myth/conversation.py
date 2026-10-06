@@ -454,6 +454,7 @@ def conversation_request(settings, snapshot, messages, activities, control=None)
 def build_context_request(settings, snapshot, messages, activities, control=None, *, system, schema,
                           visible_ids=(), deferred_ids=()):
     """主子模型共用预算、Compact 滞回与来源投影；工具范围由各自固定合同传入。"""
+    # 手动 Compact 必须仍保留必需信息；自动模式以实际投影字节和剩余机会决定，不改变权限。
     eval_mechanisms = snapshot.get("evaluation_harness_mechanisms")
     max_output_tokens = settings.get("max_output_tokens", 2048)
     is_ollama = settings.get("provider") == "ollama"

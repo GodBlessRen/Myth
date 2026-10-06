@@ -166,6 +166,11 @@ class SqliteMemoryStore:
 
             self._snapshot_revision(db, memory_id)
             self._record_change(db, memory_id)
+            # 迁移作用域既移入新范围，也移出旧范围；两边的派生视图都必须失效。
+            if row and (row["scope_type"], row["scope_id"]) != (scope, scope_value):
+                self._record_change(
+                    db, memory_id, scope=(str(row["scope_type"]), row["scope_id"])
+                )
 
         record = self.get(memory_id)
         # 外部向量索引不是同一事务；只有最外层提交后才同步，内部事务协作者负责在提交后调用。
@@ -262,7 +267,9 @@ class SqliteMemoryStore:
         )
 
     # _record_change：每次已提交 revision 追加单调水位；派生 Mental Model 用它判断 scope 是否出现新变化。
-    def _record_change(self, db, memory_id: str) -> int:
+    def _record_change(
+        self, db, memory_id: str, *, scope: tuple[str, str | None] | None = None
+    ) -> int:
         row = db.execute(
             "SELECT memory_id,revision,scope_type,scope_id,active FROM workspace_memories WHERE memory_id=?",
             (memory_id,),
@@ -275,8 +282,8 @@ class SqliteMemoryStore:
             (
                 memory_id,
                 int(row["revision"]),
-                str(row["scope_type"] or "global"),
-                row["scope_id"],
+                scope[0] if scope else str(row["scope_type"] or "global"),
+                scope[1] if scope else row["scope_id"],
                 int(row["active"]),
             ),
         )
@@ -330,6 +337,7 @@ class SqliteMemoryStore:
         project_id: str | None = None,
         session_id: str | None = None,
         limit: int = 1000,
+        exclude_memory_id: str | None = None,
     ) -> list[dict[str, Any]]:
         if type(change_seq) is not int or change_seq < 0:
             raise ValueError("change_seq must be a non-negative integer")
@@ -337,15 +345,14 @@ class SqliteMemoryStore:
             raise ValueError("limit must be 1-5000")
         rows = self.store.db.execute(
             "SELECT * FROM workspace_memory_changes WHERE change_seq>? "
+            "AND (scope_type='global' OR (scope_type='project' AND scope_id=?) "
+            "OR (scope_type='session' AND scope_id=?)) "
+            "AND (? IS NULL OR memory_id<>?) "
             "ORDER BY change_seq LIMIT ?",
-            (change_seq, limit),
+            (change_seq, project_id, session_id, exclude_memory_id, exclude_memory_id, limit),
         ).fetchall()
-        result = []
-        for row in rows:
-            item = dict(row)
-            if self._visible(item, project_id, session_id):
-                result.append(item)
-        return result
+        # limit 约束可见且非自身的变化；不可见/自身事件不能遮挡后续真实变更。
+        return [dict(row) for row in rows]
 
     # evidence：返回当前 revision 的证据链；Evidence 证明来源，不等同 Verification。
     def evidence(self, memory_id: str) -> list[dict[str, Any]]:
@@ -390,6 +397,8 @@ class SqliteMemoryStore:
         expected_revision: int,
     ) -> dict[str, Any]:
         normalized = normalize_delta_operations(operations)
+        # 空操作不推进revision；非空提案先在事务中核对expected_revision与active。
+        # 全部证据操作合法才一起写正文、证据、历史snapshot和change水位；失败回滚，向量同步在提交后。
         if not normalized:
             return self.get(memory_id)
 
@@ -435,6 +444,7 @@ class SqliteMemoryStore:
                 db, memory_id, [by_ref[key] for key in sorted(by_ref)]
             )
             self._snapshot_revision(db, memory_id)
+            self._record_change(db, memory_id)
 
         record = self.get(memory_id)
         self._sync_vector_record(record)
@@ -516,9 +526,12 @@ class SqliteMemoryStore:
         project_id: str | None = None,
         session_id: str | None = None,
         kinds: Iterable[str | MemoryKind] | None = None,
+        exclude_source_prefix: str | None = None,
     ) -> dict:
         if type(cursor) is not int or cursor < 0:
             raise ValueError("cursor must be a non-negative integer")
+        # rowid游标按原始页推进，过滤scope/kind/派生来源不改变分页覆盖。
+        # 每页报告原始scanned与has_more，调用方遍历全部候选后排名，避免限页制造漏召回。
         if type(page_size) is not int or not 1 <= page_size <= 500:
             raise ValueError("page_size must be 1-500")
         allowed = None
@@ -540,6 +553,8 @@ class SqliteMemoryStore:
         for row in rows[:page_size]:
             item = dict(row)
             if allowed and item["kind"] not in allowed:
+                continue
+            if exclude_source_prefix and str(item["source_ref"]).startswith(exclude_source_prefix):
                 continue
             scope = item.get("scope_type") or "global"
             scope_id = item.get("scope_id")
@@ -577,6 +592,7 @@ class SqliteMemoryStore:
         limit: int = 6,
         project_id: str | None = None,
         session_id: str | None = None,
+        exclude_source_prefix: str | None = None,
     ) -> dict:
         if type(limit) is not int or not 1 <= limit <= 20:
             raise ValueError("limit must be 1-20")
@@ -594,6 +610,7 @@ class SqliteMemoryStore:
                 project_id=project_id,
                 session_id=session_id,
                 kinds=kinds,
+                exclude_source_prefix=exclude_source_prefix,
             )
             pages += 1
             scanned += page["scanned"]
@@ -650,6 +667,7 @@ class SqliteMemoryStore:
         limit: int = 6,
         project_id: str | None = None,
         session_id: str | None = None,
+        exclude_source_prefix: str | None = None,
     ) -> dict:
         lexical = self._lexical_search_report(
             query,
@@ -657,6 +675,7 @@ class SqliteMemoryStore:
             limit=limit,
             project_id=project_id,
             session_id=session_id,
+            exclude_source_prefix=exclude_source_prefix,
         )
         if self.vector_index is None or not str(query).strip():
             return lexical
@@ -694,6 +713,10 @@ class SqliteMemoryStore:
                 or str(item.get("revision")) != str(hit.get("source_version") or "")
                 or not self._visible(item, project_id, session_id)
                 or (allowed and item.get("kind") not in allowed)
+                or (
+                    exclude_source_prefix
+                    and str(item["source_ref"]).startswith(exclude_source_prefix)
+                )
             ):
                 stale_rejected += 1
                 continue

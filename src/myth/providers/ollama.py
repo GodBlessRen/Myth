@@ -38,6 +38,7 @@ class OllamaProvider:
     def _json_request(
         self, method: str, path: str, payload: dict | None = None
     ) -> dict:
+        # 派发前断连有明确零派发证据才可退避；HTTP 拒绝是已知失败，响应开始后的异常保持未知。
         body = (
             None
             if payload is None
@@ -91,6 +92,7 @@ class OllamaProvider:
 
     # 将已准入统一请求交给具体传输实现，返回模型结果/用量；不拥有业务状态或完成验收。
     def invoke(self, model_request: ModelRequest) -> ModelResult:
+        # 固定请求设置后派发；只采纳供应商明确报告的非负计量，并拒绝达到上下文上限的截断结果。
         payload: dict = {
             "model": model_request.model,
             "messages": [

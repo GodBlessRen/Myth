@@ -168,6 +168,7 @@ class DeliveryLedger:
 
     # 从已保存回答与已结算产物计算验收对象摘要，去重收据来源；摘要随产物改变。
     def _subject(self, run_id: str) -> tuple[str, list[Any]]:
+        # 摘要包含完整回答和已结算产物身份；引用只提供证据导航，不能代替对象摘要。
         answer_row = self.store.db.execute(
             "SELECT content,metadata_json FROM workspace_messages "
             "WHERE run_id=? AND role='assistant' ORDER BY rowid DESC LIMIT 1",
@@ -584,6 +585,7 @@ class DeliveryLedger:
         limit: int = 32,
     ) -> list[dict[str, Any]]:
         """仅对已 COMPLETED 的回答补派生投影；RUNNING/UNKNOWN 不猜测、不重放。"""
+        # memory_done/goal_done 各自持久记录；重启只补未履行义务，不重新生成回答。
         sql = "SELECT * FROM delivery_finalizations WHERE state<>'DONE'"
         args: list[Any] = []
         if run_id is not None:
@@ -639,6 +641,7 @@ class DeliveryLedger:
                         )
                     item["goal_done"] = 1
                 subject_digest, evidence = self._subject(item["run_id"])
+                # 重新读取对象后建立验收；收尾 DONE 表示义务履行，不表示语义 PASS。
                 acceptance = self.ensure_acceptance(item["run_id"], subject_digest, evidence)
                 self.update_root_work_item(
                     item["run_id"],

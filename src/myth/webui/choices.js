@@ -10,6 +10,7 @@
   }
 
   class Choice {
+    // 包装现有字段并建立ARIA关联；原字段保持唯一值来源，弹层不保存另一份业务配置。
     constructor(source) {
       this.source = source;
       this.editable = source.tagName === "INPUT";
@@ -63,8 +64,10 @@
       this.sync();
     }
 
+    // 以浏览器原生Popover状态为准，避免内部布尔值与顶层弹层失配。
     get isOpen() { return this.popup.matches(":popover-open"); }
 
+    // 从当前目录读取可见项；仅筛选显示，不修改提供方允许的值或禁用状态。
     options() {
       const list = this.editable ? document.getElementById(this.listId) : this.source;
       const query = this.editable ? this.source.value.trim().toLowerCase() : "";
@@ -73,6 +76,7 @@
         .map(option => ({value: option.value, label: option.label || option.textContent || option.value, disabled: option.disabled}));
     }
 
+    // 轮询更新标签或可用性，保留源字段；字段离开DOM时同时清理弹层与映射。
     sync() {
       if (!this.source.isConnected) { this.close(); this.popup.remove(); controls.delete(this.source); return; }
       if (!this.editable) {
@@ -87,6 +91,7 @@
       if (this.isOpen) this.render();
     }
 
+    // 每项只写textContent；当前选择和键盘活动项分开，导航本身不提交配置。
     render() {
       this.rows = this.options();
       this.popup.replaceChildren();
@@ -106,6 +111,7 @@
       if (!this.rows.length) this.close();
     }
 
+    // 全页最多一个选择菜单；打开只投影选项，不触发HTTP命令。
     open() {
       if (this.trigger.disabled) return;
       if (opened && opened !== this) opened.close();
@@ -116,6 +122,7 @@
       this.render(); this.position();
     }
 
+    // 弹层进入原生顶层后按当前视口定位，空间不足向上展开；不挤压工作台布局。
     position() {
       if (!this.isOpen) return;
       const bounds = this.trigger.getBoundingClientRect();
@@ -129,6 +136,7 @@
       this.popup.style.top = `${up ? Math.max(12, bounds.top - this.popup.offsetHeight - 6) : bounds.bottom + 6}px`;
     }
 
+    // 关闭同步清理ARIA活动项，焦点仍由触发字段所有。
     close() {
       if (this.isOpen) this.popup.hidePopover();
       this.trigger.setAttribute("aria-expanded", "false");
@@ -136,6 +144,7 @@
       if (opened === this) opened = null;
     }
 
+    // 键盘导航只改变活动项；aria-activedescendant让读屏器跟随而不移动DOM焦点。
     activate(index) {
       this.active = index;
       Array.from(this.popup.children).forEach((item, i) => item.classList.toggle("is-active", i === index));
@@ -143,6 +152,7 @@
       if (item) { this.trigger.setAttribute("aria-activedescendant", item.id); item.scrollIntoView({block: "nearest"}); }
     }
 
+    // 用户确认才写源字段并派发原有input/change事件；禁用项始终不能提交。
     choose(index) {
       const row = this.rows[index];
       if (!row || row.disabled) return;
@@ -153,7 +163,10 @@
       this.close(); this.trigger.focus({preventScroll: true});
     }
 
+    // Arrow/Home/End/字首定位与Enter确认遵循列表框合同；Escape只收起菜单，Tab继续原焦点顺序。
     key(event) {
+      // 中文候选确认属于输入法；菜单不能抢走 composition 的 Enter、方向键或 Escape。
+      if (event.isComposing || event.keyCode === 229) return;
       if (event.key === "Escape" && this.isOpen) {
         event.preventDefault(); event.stopPropagation(); this.close(); return;
       }

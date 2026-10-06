@@ -99,6 +99,8 @@ class LiveInformationController:
     @staticmethod
     def _normalized(capability: str, args: dict[str, Any]) -> dict[str, Any]:
         value = dict(args or {})
+        # 先按实际工具合同固定默认查询、粒度和分页值，使重复请求可比较。
+        # 归一化只服务去重/局部预算，不替代执行端参数校验；未登记能力保持原参数。
         if capability in {"knowledge.search", "memory.search"}:
             return {
                 "query": str(value.get("query") or "").strip().casefold(),

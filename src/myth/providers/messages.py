@@ -13,7 +13,7 @@ from urllib import request, error
 from ..auth.transport import open_credential_request, read_bounded, redact_response
 from ..model_capabilities import model_capability, reasoning_capability
 from ..models import ModelResult, ProviderStatus, ProviderKnownFailure, ProviderUnavailable
-from ..network_recovery import is_pre_dispatch_disconnect
+from ..network_recovery import ConnectionNotDispatched, is_pre_dispatch_disconnect
 from ..auth.claude import OAUTH_BETA
 from ..platform.handoff import public_metadata
 
@@ -45,6 +45,9 @@ class MessagesProvider:
             token = self._token_supplier()
             if not isinstance(token, str) or not token:
                 raise ValueError("missing key")
+        except ConnectionNotDispatched:
+            # OAuth 刷新连接也先于模型派发；仅这个带阶段证据的错误可进入同 Run 网络恢复。
+            raise ProviderUnavailable() from None
         except Exception:
             raise ProviderKnownFailure("Provider credential unavailable", usage={
                 "model_calls": 0, "input_tokens": 0, "output_tokens": 0}) from None
@@ -66,10 +69,12 @@ class MessagesProvider:
                 raw = read_bounded(response)
         except error.HTTPError as exc:
             # 4xx 明确拒绝仍不伪造 Token；5xx 可能已执行，保留 UNKNOWN。
-            if 400 <= exc.code < 500:
-                raise ProviderKnownFailure(f"Provider rejected request (HTTP {exc.code})",
-                    usage={"model_calls": int(payload is not None)}, raw={"http_status": exc.code}) from None
-            raise RuntimeError(f"Provider outcome unknown (HTTP {exc.code})") from None
+            code = exc.code
+            exc.close()
+            if 400 <= code < 500:
+                raise ProviderKnownFailure(f"Provider rejected request (HTTP {code})",
+                    usage={"model_calls": int(payload is not None)}, raw={"http_status": code}) from None
+            raise RuntimeError(f"Provider outcome unknown (HTTP {code})") from None
         except error.URLError as exc:
             if is_pre_dispatch_disconnect(exc.reason):
                 raise ProviderUnavailable() from None
@@ -117,8 +122,11 @@ class MessagesProvider:
                 payload["temperature"] = model_request.temperature
             value = self._request("/messages", payload)
             usage = self._usage(value.get("usage") or {})
-            blocks = [x for x in value.get("content", []) if x.get("type") == "tool_use" and x.get("name") == "myth_decision"]
-            if len(blocks) != 1 or value.get("stop_reason") != "tool_use":
+            content = value.get("content")
+            blocks = [x for x in content if isinstance(x, dict) and x.get("type") == "tool_use" and x.get("name") == "myth_decision"] if isinstance(content, list) else []
+            if (len(blocks) != 1 or value.get("stop_reason") != "tool_use"
+                    or not isinstance(blocks[0].get("input"), dict)
+                    or any(not isinstance(x, dict) for x in content)):
                 raise ProviderKnownFailure("Claude did not return a complete decision", usage=usage, raw=public_metadata(value))
             text = json.dumps(blocks[0].get("input"), ensure_ascii=False)
         else:
@@ -133,17 +141,21 @@ class MessagesProvider:
             value = self._request("/chat/completions", payload)
             usage = self._usage(value.get("usage") or {})
             choices = value.get("choices") or []
-            if len(choices) != 1 or choices[0].get("finish_reason") != "stop":
+            if not isinstance(choices, list) or len(choices) != 1 or not isinstance(choices[0], dict) or choices[0].get("finish_reason") != "stop":
                 raise ProviderKnownFailure("Kimi did not return a complete decision", usage=usage, raw=public_metadata(value))
-            text = (choices[0].get("message") or {}).get("content")
+            message = choices[0].get("message")
+            text = message.get("content") if isinstance(message, dict) else None
             if not isinstance(text, str):
                 raise ProviderKnownFailure("Kimi returned no decision text", usage=usage, raw=public_metadata(value))
         # 原始公开 Usage/时间/缓存扩展留存，不把规范化字段当作供应商完整报告；私有正文不进入计量对象。
-        return ModelResult(text, usage, {**public_metadata(value), "text": text}, value.get("id"))
+        response_id = value.get("id") if isinstance(value.get("id"), str) else None
+        return ModelResult(text, usage, {**public_metadata(value), "text": text}, response_id)
 
     def _usage(self, raw):
         """统一各家输入/输出与缓存口径；缺字段留空，Claude 输入包含缓存读写。"""
         usage = {"model_calls": 1}
+        if not isinstance(raw, dict):
+            return usage
         fields = {"input_tokens": "input_tokens", "output_tokens": "output_tokens",
                   "cache_read_input_tokens": "cached_input_tokens", "cache_creation_input_tokens": "cache_write_input_tokens"}
         if self.provider_id == "kimi":

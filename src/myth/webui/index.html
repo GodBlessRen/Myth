@@ -7,7 +7,7 @@
 <meta charset="utf-8"/>
 <meta content="width=device-width,initial-scale=1" name="viewport"/>
 <meta content="light dark" name="color-scheme"/>
-<meta content="#F8F4ED" name="theme-color"/>
+<meta content="#FFFEF8" name="theme-color"/>
 <script src="/theme.js"></script>
 <title>Myth · 工作空间</title>
 <link href="/fonts/myth-sans.woff2" rel="preload" as="font" type="font/woff2" crossorigin="anonymous"/>
@@ -18,11 +18,11 @@
 <!-- 三栏布局：导航、当前工作区、常驻 Runtime Observatory；窄屏入口保留全部观测区域。 -->
 <div class="shell">
 <aside aria-label="主导航" class="sidebar" id="sidebar">
-<div class="sidebar-brand"><a aria-label="Myth 工作空间" class="brand" href="#chat"><span aria-hidden="true" class="brand-symbol"><img class="ink-mark" src="/ink-taiji.png" alt="" width="56" height="24"/></span><span class="brand-word">Myth</span></a><button aria-expanded="true" aria-label="收起侧栏" class="icon-button" id="sidebarCollapse" title="收起侧栏"><svg aria-hidden="true" class="icon" viewBox="0 0 24 24"><path d="M4 4h16v16H4ZM9 4v16m7-12-4 4 4 4"></path></svg></button></div>
+<div class="sidebar-brand"><a aria-label="Myth 工作空间" class="brand" href="#chat"><span aria-hidden="true" class="brand-symbol"><img class="brand-mark" data-brand="main" src="/logo.svg" alt="" width="48" height="30"/></span><span class="brand-word">Myth</span></a><button aria-expanded="true" aria-label="收起侧栏" class="icon-button" id="sidebarCollapse" title="收起侧栏"><svg aria-hidden="true" class="icon" viewBox="0 0 24 24"><path d="M4 4h16v16H4ZM9 4v16m7-12-4 4 4 4"></path></svg></button></div>
 <button class="new-chat" id="newChat" title="新建对话"><span data-icon="plus"></span><span class="nav-text">新建对话</span><kbd>⇧ O</kbd></button>
 <button class="command-trigger" id="commandToggle" title="搜索与快捷操作"><span data-icon="search"></span><span class="nav-text">搜索与快捷操作</span><kbd>Ctrl K</kbd></button>
 <div class="sidebar-library"><details class="nav-group" data-nav-group="work" open><summary>工作<svg aria-hidden="true" class="icon fold-chevron" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"></path></svg></summary><nav aria-label="工作" class="navigation primary-nav"><a data-page="chat" href="#chat" title="对话"><span data-icon="chat"></span><span class="nav-text">对话</span></a><a data-page="goals" href="#goals" title="目标与计划"><span data-icon="target"></span><span class="nav-text">目标与计划</span></a></nav></details><details class="nav-group" data-nav-group="library" open><summary>资料<svg aria-hidden="true" class="icon fold-chevron" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"></path></svg></summary><nav aria-label="资料" class="navigation primary-nav"><a data-page="projects" href="#projects" title="项目"><span data-icon="folder"></span><span class="nav-text">项目</span></a><a data-page="knowledge" href="#knowledge" title="知识库"><span data-icon="book"></span><span class="nav-text">知识库</span></a><a data-page="sessions" href="#sessions" title="会话"><span data-icon="history"></span><span class="nav-text">会话</span></a></nav></details><details class="nav-group recent-group" data-nav-group="recent" open><summary>最近对话<span class="nav-count" id="recentCount"></span><svg aria-hidden="true" class="icon fold-chevron" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"></path></svg></summary><div class="recent-sessions" id="recentSessions"></div><a class="all-sessions" href="#sessions">查看全部会话<span aria-hidden="true">↗</span></a></details></div>
-<div class="sidebar-bottom"><nav aria-label="系统" class="navigation secondary-nav"><a data-page="runtime" href="#runtime" title="Runtime"><span data-icon="activity"></span><span class="nav-text">Runtime</span></a><a data-page="settings" href="#settings" title="设置"><span data-icon="settings"></span><span class="nav-text">设置</span></a></nav><div class="local-profile"><span aria-hidden="true" class="workspace-avatar"><img class="ink-mark" src="/ink-taiji.png" alt="" width="56" height="24"/></span><div><strong>个人工作空间</strong><small>本地工作区</small></div></div></div>
+<div class="sidebar-bottom"><nav aria-label="系统" class="navigation secondary-nav"><a data-page="runtime" href="#runtime" title="Runtime"><span data-icon="activity"></span><span class="nav-text">Runtime</span></a><a data-page="settings" href="#settings" title="设置"><span data-icon="settings"></span><span class="nav-text">设置</span></a></nav><div class="local-profile"><span aria-hidden="true" class="workspace-avatar"><img class="brand-mark" data-brand="main" src="/logo.svg" alt="" width="48" height="30"/></span><div><strong>个人工作空间</strong><small>本地工作区</small></div></div></div>
 </aside>
 <button aria-label="关闭导航" class="sidebar-shade hidden" id="sidebarShade"></button>
 <main class="main" id="mainContent" tabindex="-1">
@@ -34,7 +34,7 @@
 <div class="workspace-crumb"><span>工作空间</span><span class="crumb-separator">/</span><strong id="pageTitle">对话</strong></div>
 </div>
 <div class="topbar-right"><button aria-pressed="false" class="studio-focus" id="focusMode" title="展开专注工作区" type="button"><svg aria-hidden="true" class="icon" viewBox="0 0 24 24"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5"></path></svg><span>专注</span></button>
-<button aria-label="切换到星空黑" aria-pressed="false" class="icon-button theme-toggle" id="themeToggle" title="切换主题" type="button">
+<button aria-label="切换到墨黑" aria-pressed="false" class="icon-button theme-toggle" id="themeToggle" title="切换主题" type="button">
 <span data-icon="moon"></span>
 </button>
 <button aria-controls="runtimeInspector" aria-expanded="false" class="secondary inspector-toggle" id="inspectorToggle">运行详情</button>
@@ -50,7 +50,7 @@
 <section class="chat-page page" id="chatPage"><details class="conversation-index hidden" id="conversationIndex"><summary><span>会话目录</span><span class="directory-count" id="conversationCount"></span><svg aria-hidden="true" class="icon fold-chevron" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"></path></svg></summary><nav aria-label="定位到会话问题" id="conversationLinks"></nav></details>
 <div class="chat-scroll" id="chatScroll">
 <div class="welcome" id="welcome">
-<div class="welcome-copy"><h1>有什么想推进的？</h1><p>写下一个问题，或一件需要完成的事。</p></div>
+<div class="welcome-copy"><h1>新的对话</h1><p>写下一个问题，或一件需要完成的事。</p></div>
 
 
 </div>
@@ -350,7 +350,7 @@
 <button class="primary" id="saveSettings">保存设置</button><span class="muted" id="settingsSaved"></span>
 </div>
 </section>
-<div><section class="panel appearance-panel"><div class="panel-heading"><h2>外观</h2></div><div aria-label="外观主题" class="theme-choices" role="group"><button aria-pressed="false" class="theme-choice" data-theme-choice="light" type="button"><span aria-hidden="true" class="theme-preview theme-preview-light"><i></i><b></b></span><span>奶油白</span></button><button aria-pressed="false" class="theme-choice" data-theme-choice="dark" type="button"><span aria-hidden="true" class="theme-preview theme-preview-dark"><i></i><b></b></span><span>星空黑</span></button><button aria-pressed="false" class="theme-choice" data-theme-choice="system" type="button"><span aria-hidden="true" class="theme-preview theme-preview-system"><i></i><b></b></span><span>跟随系统</span></button></div></section><section class="panel shortcuts-panel"><div class="panel-heading"><h2>键盘快捷键</h2></div><div class="shortcut-row"><span>搜索与快捷操作</span><kbd>Ctrl K</kbd></div><div class="shortcut-row"><span>新建对话</span><kbd>Ctrl ⇧ O</kbd></div><div class="shortcut-row"><span>发送消息</span><kbd>Enter</kbd></div><div class="shortcut-row"><span>换行</span><kbd>Shift Enter</kbd></div></section><section class="panel quiet-panel"><h2>工作区数据</h2><p>会话、项目与知识保存在本机。模型调用使用所选提供方。</p><p>关联目录用于读取；生成与修改的文件保存在工作区副本中。</p></section></div>
+<div><section class="panel appearance-panel"><div class="panel-heading"><h2>外观</h2></div><div aria-label="外观主题" class="theme-choices" role="group"><button aria-pressed="false" class="theme-choice" data-theme-choice="light" type="button"><span aria-hidden="true" class="theme-preview theme-preview-light"><i></i><b></b></span><span>纸白</span></button><button aria-pressed="false" class="theme-choice" data-theme-choice="dark" type="button"><span aria-hidden="true" class="theme-preview theme-preview-dark"><i></i><b></b></span><span>墨黑</span></button><button aria-pressed="false" class="theme-choice" data-theme-choice="system" type="button"><span aria-hidden="true" class="theme-preview theme-preview-system"><i></i><b></b></span><span>跟随系统</span></button></div></section><section class="panel shortcuts-panel"><div class="panel-heading"><h2>键盘快捷键</h2></div><div class="shortcut-row"><span>搜索与快捷操作</span><kbd>Ctrl K</kbd></div><div class="shortcut-row"><span>新建对话</span><kbd>Ctrl ⇧ O</kbd></div><div class="shortcut-row"><span>发送消息</span><kbd>Enter</kbd></div><div class="shortcut-row"><span>换行</span><kbd>Shift Enter</kbd></div></section><section class="panel quiet-panel"><h2>工作区数据</h2><p>会话、项目与知识保存在本机。模型调用使用所选提供方。</p><p>关联目录用于读取；生成与修改的文件保存在工作区副本中。</p></section></div>
 </div>
 </section>
 </main>

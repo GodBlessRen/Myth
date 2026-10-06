@@ -30,6 +30,7 @@ EXCLUDED = {
     ".git",
     ".runtime",
     ".trash",
+    ".work",
     ".venv",
     "venv",
     "node_modules",
@@ -280,6 +281,7 @@ class LocalConversationExecution:
 
     # 在同 document/digest 下分页展开 L0/L1/L2；cursor/limit 单位随视图声明，旧 digest 不悄悄变源。
     def _resolve_knowledge(self, turn, args):
+        # 先核对文档作用域和固定摘要，再按 L0/L1/L2 的单位分页；L2 同时限制字符和 UTF-8 字节。
         document_id = args.get("document_id")
         document = self._knowledge_document(turn, document_id)
         resolution = str(args.get("resolution") or "L2").upper()
@@ -438,6 +440,7 @@ class LocalConversationExecution:
 
     # 在固定项目范围按字面查询分页结果；报告 candidate/cursor/has_more，不能把一个页当作全项目无命中。
     def _search_project(self, turn, args):
+        # cursor 计候选文件，limit 计返回行；扫描上限与命中上限分别报告，不能把截断页当全项目结论。
         query = str(args.get("query", ""))
         if not query.strip() or len(query) > 300:
             raise ValueError("search query must contain 1-300 characters")
@@ -733,6 +736,10 @@ class LocalConversationExecution:
             settled = self.repository.operation(decision_id)
             if settled and settled["state"] == "RESOLVED":
                 return settled["result"]
+            if settled:
+                # 委派已在子调用前固定父 Ticket；结果只写 Receipt，不能改写原 intent 再开一次 Ticket。
+                tool_wall_ms = max(0, int((time.monotonic() - tool_started) * 1000))
+                return self._record_tool_receipt(settled, result, tool_wall_ms)
         elif capability == "agent.evaluate":
             result.update(self._evaluate_delegate(turn, args))
         elif capability == "agent.result":

@@ -29,6 +29,7 @@ from keyring.errors import PasswordDeleteError
 from .. import __version__
 from ..artifacts import atomic_write
 from .transport import open_credential_request, read_bounded, public_error_code, redact_response
+from .state_lock import AuthStateLock
 
 
 # ISSUER：固定 OIDC 颁发者；验证 issuer 时必须精确匹配。
@@ -193,6 +194,7 @@ class KeyringCredentialStore:
 
     # 按 profile_id 读取系统秘钥库并校验 JSON 形状；错误脱敏，不向 Runtime 返回原始秘钥。
     def load(self, profile_id: str) -> dict[str, Any] | None:
+        # 先从系统安全库核对活动代次、完整块和摘要，不能读取半发布的凭据。
         try:
             backend = self._backend()
             manifest = self._manifest(backend, profile_id)
@@ -347,66 +349,6 @@ class ChatGPTAuthStatus:
         }
 
 
-# 认证聚合的跨进程锁；元数据、轮转、登录和退出共用，不参与 Run 执行。
-class _CrossProcessLock:
-    # 仅保存本机刷新锁路径；__enter__ 才取得阻塞 OS 锁，__exit__ 释放，不授予 Runtime 权限。
-    def __init__(self, path: Path, timeout: float = 65.0) -> None:
-        # path：本对象持久文件路径；数据身份由所属合同另行校验。
-        self.path = path
-        # file：本机锁文件句柄；仅在锁上下文有效，退出必须释放。
-        self.file = None
-        # timeout：争抢锁的最大等待秒数；超时拒绝认证修改，不能绕开锁。
-        self.timeout = timeout
-
-    # 进入本机资源作用域并返回可用对象；与退出路径配对管理资源生命周期。
-    def __enter__(self):
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.file = open(self.path, "a+b")
-        self.file.seek(0, os.SEEK_END)
-        if self.file.tell() == 0:
-            self.file.write(b"\0")
-            self.file.flush()
-        self.file.seek(0)
-        deadline = time.monotonic() + self.timeout
-        try:
-            while True:
-                try:
-                    if os.name == "nt":
-                        import msvcrt
-                        msvcrt.locking(self.file.fileno(), msvcrt.LK_NBLCK, 1)
-                    else:
-                        import fcntl
-                        fcntl.flock(self.file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-                    break
-                except OSError:
-                    if time.monotonic() >= deadline:
-                        raise ChatGPTOAuthError("ChatGPT authentication is busy; try again.") from None
-                    time.sleep(0.025)
-        except BaseException:
-            self.file.close()
-            self.file = None
-            raise
-        return self
-
-    # 离开作用域释放本实例资源；异常继续传播，不能在清理时伪造业务成功。
-    def __exit__(self, *_):
-        if self.file is None:
-            return
-        try:
-            self.file.seek(0)
-            if os.name == "nt":
-                import msvcrt
-
-                msvcrt.locking(self.file.fileno(), msvcrt.LK_UNLCK, 1)
-            else:
-                import fcntl
-
-                fcntl.flock(self.file.fileno(), fcntl.LOCK_UN)
-        finally:
-            self.file.close()
-            self.file = None
-
-
 # 同一认证聚合只允许一个修改者；嵌套调用复用当前线程已经取得的 OS 锁。
 def _serialized_auth(method):
     # 首次取得跨进程锁；finally 清深度，异常不能留下假锁所有权。
@@ -415,7 +357,8 @@ def _serialized_auth(method):
         with self._state_lock:
             if getattr(self._state_depth, "value", 0):
                 return method(self, *args, **kwargs)
-            with _CrossProcessLock(self.auth_dir / "state.lock", self.timeout * 2 + 5):
+            with AuthStateLock(self.auth_dir / "state.lock", self.timeout * 2 + 5,
+                               ChatGPTOAuthError("ChatGPT authentication is busy; try again.")):
                 self._state_depth.value = 1
                 try:
                     return method(self, *args, **kwargs)
@@ -866,6 +809,7 @@ class ChatGPTAuthManager:
 
     # 在认证边界发 HTTP 表单并分类脱敏拒绝；网络失败不凭重试猜测已轮转 token 的状态。
     def _form_request(self, url: str, parameters: dict[str, str]) -> dict[str, Any]:
+        # 认证参数只进入固定端点的禁止重定向传输；远端错误码经白名单投影后才公开。
         body = parse.urlencode(parameters).encode("utf-8")
         req = request.Request(
             url,
@@ -908,6 +852,7 @@ class ChatGPTAuthManager:
     # 返回账号/授予 scope/到期信息投影；不刷新 token 或公开秘钥，ready 只表示计划权限已授予。
     @_serialized_auth
     def status(self, profile_id: str | None = None) -> ChatGPTAuthStatus:
+        # 先检查公开账号状态，再读取安全库；状态查询不触发刷新或其他远端调用。
         profile_id = profile_id or self._active_profile_id()
         if not profile_id:
             return ChatGPTAuthStatus(
@@ -1124,6 +1069,7 @@ class ChatGPTAuthManager:
 
     # 使用一次有效凭据读取目录；只留公开字段，HTTP 重定向不携带 token 继续执行。
     def _fetch_models(self, token: str) -> list[dict[str, str]]:
+        # 先有界读取固定目录，再筛选公开身份；供应商回显 token 的模型标识必须拒绝。
         req = request.Request(
             f"{RESOURCE}/models",
             headers={

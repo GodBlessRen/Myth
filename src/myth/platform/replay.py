@@ -271,6 +271,8 @@ class ReplayWorld:
     ) -> ReplayResult:
         if max_steps < 1:
             raise ValueError("max_steps must be positive")
+        # 沿已观测历史前缀有界前进；到历史终态才可返回TERMINAL，前缀结束不是成功。
+        # 策略选择未观测动作返回UNOBSERVED，不能外推未知工具结果或重放现实效果。
         node_id = "root"
         action_keys: list[str] = []
         for _ in range(max_steps + 1):

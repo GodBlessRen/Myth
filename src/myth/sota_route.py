@@ -6,10 +6,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from pathlib import Path
 from typing import Any
 
 from .domain import canonical_json, digest_json
+from .session_statistics import measured_integer as _measured_int, usage_measurements
 
 
 # SOTA_ROUTE_SCHEMA：保存已验收路径快照；历史 Run 不因未来新纪录而被改写执行事实。
@@ -51,7 +53,7 @@ OPTIONAL_COSTS = (
 
 # PROJECT_SKIP：项目状态指纹跳过版本库/依赖/秘钥目录；只用于“环境是否相同”的比较身份。
 PROJECT_SKIP = {
-    ".git", ".runtime", ".trash", ".venv", "venv", "node_modules", "__pycache__",
+    ".git", ".runtime", ".trash", ".work", ".progress", ".venv", "venv", "node_modules", "__pycache__",
     ".aws", ".ssh", ".codex", ".myth", ".config", "secrets",
 }
 # PROJECT_TEXT_SUFFIXES：与当前项目文本工具的主范围对齐；二进制资产不作为首版 SOTA Route 可比条件。
@@ -62,14 +64,20 @@ PROJECT_TEXT_SUFFIXES = {
 }
 
 
+def _skip_project_name(name):
+    """跳过私有/生成目录与凭据文件；同一规则在遍历和文件收集处使用。"""
+    lowered = name.lower()
+    return lowered in PROJECT_SKIP or lowered.startswith(".env") or lowered.endswith((".key", ".pem"))
+
+
+def _raise_walk_error(error):
+    """目录无法读取时标记整个环境不完整，不能静默生成可比较摘要。"""
+    raise error
+
+
 # 只做轻量文本稳定化；不重写用户任务语义，代码/空格差异仍保留。
 def _task_text(value: str) -> str:
     return str(value or "").replace("\r\n", "\n").strip()
-
-
-# 安全读取非负整数；bool/文本/负数不是实测成本。
-def _measured_int(value) -> int | None:
-    return value if type(value) is int and value >= 0 else None
 
 
 # 统计文本行；空字符串不伪造一行代码。
@@ -118,20 +126,25 @@ class SotaRouteLedger:
         total_bytes = 0
         complete = True
         try:
-            for path in sorted(root.rglob("*"), key=lambda item: item.as_posix()):
-                if not path.is_file() or path.is_symlink():
-                    continue
+            candidates = []
+            # 在进入目录前剪枝；忽略过程目录不能只是“读完后不哈希”。候选数有界，避免大项目耗尽内存。
+            for current, directories, names in os.walk(root, onerror=_raise_walk_error):
+                directories[:] = sorted(name for name in directories if not _skip_project_name(name)
+                                        and not (Path(current) / name).is_symlink())
+                for name in names:
+                    path = Path(current) / name
+                    if _skip_project_name(name) or path.suffix.lower() not in PROJECT_TEXT_SUFFIXES or path.is_symlink():
+                        continue
+                    if path.stat().st_size <= 1_000_000:
+                        candidates.append(path)
+                    if len(candidates) > 10_000:
+                        complete = False
+                        break
+                if not complete:
+                    break
+            # 有效候选仍按原有全路径顺序哈希，保持相同真实项目的冻结身份。
+            for path in sorted(candidates, key=lambda item: item.as_posix()):
                 relative = path.relative_to(root)
-                lowered = [part.lower() for part in relative.parts]
-                if any(
-                    part in PROJECT_SKIP
-                    or part.startswith(".env")
-                    or part.endswith((".key", ".pem"))
-                    for part in lowered
-                ):
-                    continue
-                if path.suffix.lower() not in PROJECT_TEXT_SUFFIXES:
-                    continue
                 size = path.stat().st_size
                 if size > 1_000_000:
                     continue
@@ -267,6 +280,7 @@ class SotaRouteLedger:
 
     # 从持久 Account、Step、Receipt 和人工关注记录汇总成本；缺失耗时保持 None。
     def metrics(self, run_id: str) -> dict[str, Any]:
+        # 预算只表示已结算量；Token/耗时必须逐收据核对覆盖，工具改动只计已结算决定，人工耗时须显式记录。
         turn = self._turn(run_id)
         accounts = {
             row["meter"]: int(row["settled"])
@@ -275,22 +289,17 @@ class SotaRouteLedger:
             ).fetchall()
         }
         invocations = self.store.db.execute(
-            "SELECT usage_json FROM model_invocations WHERE run_id=? ORDER BY rowid",
+            "SELECT model_attempt_id,usage_json FROM model_invocations WHERE run_id=? ORDER BY rowid",
             (run_id,),
         ).fetchall()
-        model_wall_values = []
-        model_wall_complete = True
+        measurements = []
         for row in invocations:
             try:
                 usage = json.loads(row["usage_json"] or "{}")
             except json.JSONDecodeError:
                 usage = {}
-            calls = _measured_int(usage.get("model_calls"))
-            wall = _measured_int(usage.get("provider_wall_ms"))
-            if calls and wall is None:
-                model_wall_complete = False
-            if wall is not None:
-                model_wall_values.append(wall)
+            measurements.append({"model_attempt_id": row["model_attempt_id"], "usage": usage})
+        measured = usage_measurements(measurements, ("input_tokens", "output_tokens", "provider_wall_ms"))
 
         operations = self.store.db.execute(
             "SELECT decision_id,capability,state,tool_wall_ms FROM workspace_operations "
@@ -352,9 +361,7 @@ class SotaRouteLedger:
         human_attention = (
             int(attention["seconds"]) if int(attention["entries"]) > 0 else None
         )
-        model_wall = (
-            sum(model_wall_values) if model_wall_complete else None
-        )
+        model_wall = measured["totals"]["provider_wall_ms"]
         tool_wall = (
             sum(tool_wall_values) if tool_wall_complete else None
         )
@@ -363,8 +370,8 @@ class SotaRouteLedger:
             if model_wall is not None and tool_wall is not None
             else None
         )
-        input_tokens = int(accounts.get("input_tokens", 0))
-        output_tokens = int(accounts.get("output_tokens", 0))
+        input_tokens = measured["totals"]["input_tokens"]
+        output_tokens = measured["totals"]["output_tokens"]
         reasoning = self.reasoning(run_id)
         return {
             "model_calls": int(accounts.get("model_calls", 0)),
@@ -373,7 +380,8 @@ class SotaRouteLedger:
             "steps": int(turn.get("current_step") or 0),
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
-            "total_tokens": input_tokens + output_tokens,
+            "total_tokens": input_tokens + output_tokens if input_tokens is not None and output_tokens is not None else None,
+            "measurement_samples": measured["samples"],
             "reasoning_tokens": reasoning["reasoning_tokens"],
             "write_bytes": int(accounts.get("write_bytes", 0)),
             "model_wall_ms": model_wall,
@@ -435,6 +443,7 @@ class SotaRouteLedger:
 
     # 读取供应商公开 Reasoning Summary 与可测推理成本；原始隐藏 CoT 永远不从这里推断。
     def reasoning(self, run_id: str) -> dict[str, Any]:
+        # 每个成功 Attempt 单独读取公开 summary 和计量；对象不可读时保留空观察，不能推断隐藏推理。
         attempts = []
         total_reasoning_tokens = 0
         reasoning_tokens_measured = False
@@ -538,6 +547,7 @@ class SotaRouteLedger:
         settings: dict[str, Any],
         snapshot: dict[str, Any],
     ) -> dict[str, Any] | None:
+        # 同环境冠军只提供最多两条可观察路线/公开摘要；成本 minima 是各维度参考，不是一条可复制组合路线。
         identity = self.identity(task, settings, snapshot)
         group = self.group(identity["comparison_key"])
         champions = [item for item in group if item["status"] == "CHAMPION"]
@@ -669,6 +679,7 @@ class SotaRouteLedger:
 
     # 读取当前 Run 与同组 Champion 对比；未验收 Run 处于 WORKING，只观察实时成本与 Drift。
     def view(self, run_id: str) -> dict[str, Any]:
+        # 当前成本与已验收同组冠军分别投影；缺测 Token 不计算 drift，漂移提示不改变执行或验收状态。
         turn = self._turn(run_id)
         task = self._task_for_turn(turn)
         identity = self.identity(task, turn["settings"], turn["snapshot"])
@@ -711,6 +722,7 @@ class SotaRouteLedger:
                 drift_reasons.append("steps")
             if (
                 champion_tokens is not None
+                and metrics["total_tokens"] is not None
                 and champion_tokens > 0
                 and metrics["total_tokens"] > champion_tokens * 1.5
             ):

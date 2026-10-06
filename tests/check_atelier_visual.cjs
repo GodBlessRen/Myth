@@ -5,6 +5,9 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const { chromium } = require("playwright");
+const {verifyAuditProbes} = require('./browser_audit_probes.cjs');
+const base = process.env.MYTH_UI_BASE_URL || 'http://127.0.0.1:8772';
+const emptyBase = process.env.MYTH_UI_EMPTY_URL || 'http://127.0.0.1:8773';
 
 // 仅在独立本机验收服务执行；产物不进入生产静态包。
 const output = path.resolve(__dirname, "../output/playwright");
@@ -91,14 +94,15 @@ async function main() {
     if (!new URL(request.url()).hostname.match(/^(127\.0\.0\.1|localhost)$/)) report.externalRequests.push(request.url());
   });
   try {
+    report.auditProbes = await verifyAuditProbes(browser);
     if (process.argv.includes("--zoom-only")) {
-      await page.goto("http://127.0.0.1:8772/#settings", { waitUntil: "networkidle" });
+      await page.goto(base + "/#settings", { waitUntil: "networkidle" });
       await zoomReflow(page);
       assert.deepEqual(report.errors, []);
       console.log(JSON.stringify({ passed: true, zoomReflow: "720 CSS px / 1440 physical px" }));
       return;
     }
-    await page.goto("http://127.0.0.1:8773", { waitUntil: "networkidle" });
+    await page.goto(emptyBase, { waitUntil: "networkidle" });
     await settle(page);
     report.fonts = await page.evaluate(() => [...document.fonts].map(font => ({ family: font.family, status: font.status })));
     assert.ok(report.fonts.every(font => font.status === "loaded"));
@@ -106,7 +110,7 @@ async function main() {
       await theme(page, mode);
       await measure(page, `home/1440/${mode}`);
       const paper = await page.locator("body").evaluate(node => getComputedStyle(node).backgroundColor);
-      assert.equal(paper, mode === "light" ? "rgb(248, 244, 237)" : "rgb(14, 16, 15)");
+      assert.equal(paper, mode === "light" ? "rgb(255, 254, 248)" : "rgb(14, 16, 15)");
       await capture(page, `home-${mode}`);
     }
     for (const viewport of [{ width: 390, height: 844 }, { width: 320, height: 740 }]) {
@@ -119,8 +123,8 @@ async function main() {
         assert.ok(input.y >= 0 && input.y + input.height <= viewport.height, "home input must remain visible");
       }
     }
-    await page.goto("http://127.0.0.1:8772", { waitUntil: "networkidle" });
-    const data = await (await page.request.get("http://127.0.0.1:8772/api/workspace")).json();
+    await page.goto(base, { waitUntil: "networkidle" });
+    const data = await (await page.request.get(base + "/api/workspace")).json();
     const session = data.sessions.find(item => item.message_count > 0) || data.sessions[0];
     const project = data.projects[0];
     const routes = ["chat", `chat/${session.id}`, "sessions", "projects", `projects/${project.id}`, "knowledge", "goals", "runtime", "settings"];

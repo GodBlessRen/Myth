@@ -221,6 +221,7 @@ class AgentWebService:
 
     # 校验明确允许文件和固定验收后创建 Exact Run，提交后启动后台执行。
     def start_run(self, payload: dict[str, Any]) -> dict[str, Any]:
+        # 先检查供应商与显式文件，再固定 Run；线程只在提交后启动，稳定 request_id 复用原事实。
         goal = str(payload.get("goal") or "").strip()
         model = str(payload.get("model") or "").strip()
         if not goal:
@@ -509,6 +510,7 @@ def make_handler(service: AgentWebService):
 
         # 先校验 Host/Origin 和有界 JSON，再调用对应写用例；异常按合同回给页面。
         def do_POST(self) -> None:
+            # Host/Origin 与 JSON 上限先于所有写用例；只映射显式路由，未知路由不能落入任意执行入口。
             path = urlparse(self.path).path
             try:
                 self._check_origin()

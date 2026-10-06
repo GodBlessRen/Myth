@@ -1,7 +1,8 @@
 """项目宪法的中文说明覆盖守卫。
 
 只读取源码 AST/相邻注释，不导入生产模块、不访问 Runtime 状态。检查文件、类、
-函数和生产属性的中文说明是否存在；专家级准确性仍须代码审阅，不能由字符检测证明。
+函数和生产属性的中文说明是否存在，检查参数说明是否失效、复杂流程是否缺少步骤说明。
+专家级准确性仍须代码审阅，不能由字符检测证明。
 """
 
 from __future__ import annotations
@@ -32,6 +33,33 @@ def has_guidance(node: ast.AST, lines: list[str]) -> bool:
     return False
 
 
+# 函数自己的控制流才计入复杂度，嵌套函数另行检查，避免外层被替身/回调误判。
+def own_nodes(node: ast.AST):
+    yield node
+    for child in ast.iter_child_nodes(node):
+        if not isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            yield from own_nodes(child)
+
+
+# 参数名可机械核对；复杂流程至少解释一个实际步骤，但不能据此宣称解释正确。
+def inspect_quality(node: ast.FunctionDef | ast.AsyncFunctionDef, lines: list[str]) -> list[str]:
+    errors = []
+    doc = ast.get_docstring(node) or ""
+    arguments = {arg.arg for arg in (*node.args.posonlyargs, *node.args.args, *node.args.kwonlyargs)}
+    arguments.update(arg.arg for arg in (node.args.vararg, node.args.kwarg) if arg)
+    for documented in re.findall(r":param\s+([A-Za-z_]\w*)\s*:", doc):
+        if documented not in arguments:
+            errors.append(f"{node.name} 注释引用不存在参数 {documented}")
+    branches = sum(isinstance(item, (ast.If, ast.For, ast.AsyncFor, ast.While, ast.Try, ast.Match)) for item in own_nodes(node))
+    if branches >= 5 and node.end_lineno - node.lineno >= 35:
+        # AST 第一条语句不包含其前方步骤注释；从函数声明后扫描，保留入口处说明。
+        body = lines[node.lineno:node.end_lineno]
+        has_steps = any(line.lstrip().startswith("#") and CHINESE.search(line) for line in body)
+        if not has_steps and not re.search(r"(?:步骤|先.{2,}再|[123一二三][、.])", doc):
+            errors.append(f"{node.name} 有 {branches} 个控制分支却无中文步骤说明")
+    return errors
+
+
 # 返回一份文件的未覆盖声明；属性只检查生产类声明及构造时的持有字段，局部变量不是类属性。
 def inspect_python(path: Path, *, properties: bool) -> tuple[list[str], dict[str, int]]:
     source = path.read_text(encoding="utf-8")
@@ -47,6 +75,8 @@ def inspect_python(path: Path, *, properties: bool) -> tuple[list[str], dict[str
             counts[category] += 1
             if not has_guidance(node, lines):
                 errors.append(f"{path}:{node.lineno} {node.name} 缺少中文指导说明")
+            if properties and isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                errors.extend(f"{path}:{node.lineno} {finding}" for finding in inspect_quality(node, lines))
         if properties and isinstance(node, ast.ClassDef):
             for member in node.body:
                 if isinstance(member, (ast.Assign, ast.AnnAssign)):

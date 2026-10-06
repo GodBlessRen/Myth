@@ -1,4 +1,5 @@
 # Private runtime state / local data
+.work/
 .runtime/
 .myth/
 *.db

@@ -168,14 +168,13 @@ class SqliteKnowledgeViews:
         session_id = (
             str(model["scope_id"]) if model["scope_type"] == "session" else None
         )
-        changes = self.memory.changes_since(
+        return self.memory.changes_since(
             int(after_seq),
             project_id=project_id,
             session_id=session_id,
             limit=limit,
+            exclude_memory_id=model.get("backing_memory_id"),
         )
-        backing_id = str(model.get("backing_memory_id") or "")
-        return [item for item in changes if str(item["memory_id"]) != backing_id]
 
     # prepare_refresh：固定本次 synthesis 的来源版本与水位；LLM 调用必须发生在该方法之外。
     def prepare_refresh(
@@ -201,13 +200,10 @@ class SqliteKnowledgeViews:
             limit=min(20, limit),
             project_id=project_id,
             session_id=session_id,
+            exclude_source_prefix="mental-model:",
         )
-        source_rows = [
-            row
-            for row in report["memories"]
-            if not str(row.get("source_ref") or "").startswith("mental-model:")
-            and str(row.get("memory_id") or "") != str(model.get("backing_memory_id") or "")
-        ][:limit]
+        # 派生模型在候选阶段排除，不能占满 top-k 后再过滤掉真正来源。
+        source_rows = report["memories"][:limit]
         sources = [
             self.memory.resolve(
                 str(row["memory_id"]),

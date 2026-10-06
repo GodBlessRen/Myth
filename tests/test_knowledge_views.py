@@ -138,6 +138,142 @@ class KnowledgeViewTests(unittest.TestCase):
             )
         self.assertEqual(self.views.model(model["model_id"])["revision"], 1)
 
+    # 正文Delta与remember都是来源变化；当前UI状态和后台due共用同一持久水位。
+    def test_delta_marks_materialized_model_stale(self):
+        source = self.memory.remember(
+            kind="semantic", text="Initial architecture.", source_ref="delta:source"
+        )
+        model = self.views.create_model(name="Delta model", source_query="architecture")
+        prepared = self.views.prepare_refresh(model["model_id"])
+        self.views.commit_refresh(
+            model["model_id"], content="Initial synthesis.",
+            evidence_memory_ids=[source["memory_id"]],
+            expected_model_revision=prepared["model_revision"],
+            observed_change_seq=prepared["observed_change_seq"],
+        )
+        self.memory.apply_delta(
+            source["memory_id"], [{"op": "replace_text", "text": "Changed architecture."}],
+            expected_revision=source["revision"],
+        )
+        self.assertEqual(self.views.model(model["model_id"])["freshness"], "stale")
+
+    # 其它项目的变化既不让模型误报stale，也不拒绝已准备的本项目刷新。
+    def test_unrelated_scope_change_preserves_refresh_and_freshness(self):
+        source = self.memory.remember(
+            kind="semantic", text="Project architecture.", source_ref="isolation:source",
+            scope_type="project", scope_id="project-a",
+        )
+        model = self.views.create_model(
+            name="Isolated model", source_query="architecture",
+            scope_type="project", scope_id="project-a",
+        )
+        prepared = self.views.prepare_refresh(model["model_id"])
+        self.memory.remember(
+            kind="semantic", text="Other project.", source_ref="isolation:other",
+            scope_type="project", scope_id="project-b",
+        )
+        refreshed = self.views.commit_refresh(
+            model["model_id"], content="Current synthesis.",
+            evidence_memory_ids=[source["memory_id"]],
+            expected_model_revision=prepared["model_revision"],
+            observed_change_seq=prepared["observed_change_seq"],
+        )
+        self.memory.remember(
+            kind="semantic", text="Changed other project.", source_ref="isolation:other",
+            scope_type="project", scope_id="project-b",
+        )
+        self.assertEqual(refreshed["freshness"], "fresh")
+        self.assertEqual(self.views.model(model["model_id"])["freshness"], "fresh")
+
+    # 准备后来源移出scope，旧synthesis不能用“原scope没有新记录”骗过提交检查。
+    def test_scope_migration_rejects_prepared_refresh(self):
+        source = self.memory.remember(
+            kind="semantic", text="Initial project source.", source_ref="migration:source",
+            scope_type="project", scope_id="before",
+        )
+        model = self.views.create_model(
+            name="Migrating source model", source_query="project source",
+            scope_type="project", scope_id="before",
+        )
+        prepared = self.views.prepare_refresh(model["model_id"])
+        self.memory.remember(
+            kind="semantic", text="Moved project source.", source_ref="migration:source",
+            scope_type="project", scope_id="after",
+        )
+        with self.assertRaisesRegex(ValueError, "source scope changed"):
+            self.views.commit_refresh(
+                model["model_id"], content="Old scope synthesis.",
+                evidence_memory_ids=[source["memory_id"]],
+                expected_model_revision=prepared["model_revision"],
+                observed_change_seq=prepared["observed_change_seq"],
+            )
+        self.assertEqual(self.views.model(model["model_id"])["revision"], 1)
+
+    # prepare 后先变别的项目再变本项目，旧synthesis仍必须拒绝，不能被limit=1遮挡。
+    def test_out_of_scope_change_cannot_hide_later_refresh_conflict(self):
+        source = self.memory.remember(
+            kind="semantic", text="Project architecture.", source_ref="scope:source",
+            scope_type="project", scope_id="project-a",
+        )
+        model = self.views.create_model(
+            name="Scoped model", source_query="architecture",
+            scope_type="project", scope_id="project-a",
+        )
+        prepared = self.views.prepare_refresh(model["model_id"])
+        self.memory.remember(
+            kind="semantic", text="Unrelated change.", source_ref="scope:outside",
+            scope_type="project", scope_id="project-b",
+        )
+        self.memory.remember(
+            kind="semantic", text="New project source.", source_ref="scope:inside",
+            scope_type="project", scope_id="project-a",
+        )
+        with self.assertRaisesRegex(ValueError, "source scope changed"):
+            self.views.commit_refresh(
+                model["model_id"], content="Stale synthesis.",
+                evidence_memory_ids=[source["memory_id"]],
+                expected_model_revision=prepared["model_revision"],
+                observed_change_seq=prepared["observed_change_seq"],
+            )
+        self.assertIsNone(self.views.model(model["model_id"])["content"])
+
+    # Backing自身不算新底层证据，但也不能挡住更晚的真实source变化。
+    def test_backing_change_cannot_hide_later_source_change(self):
+        source = self.memory.remember(
+            kind="semantic", text="Source architecture.", source_ref="backing:source"
+        )
+        model = self.views.create_model(name="Backing model", source_query="architecture")
+        prepared = self.views.prepare_refresh(model["model_id"])
+        refreshed = self.views.commit_refresh(
+            model["model_id"], content="Architecture synthesis.",
+            evidence_memory_ids=[source["memory_id"]],
+            expected_model_revision=prepared["model_revision"],
+            observed_change_seq=prepared["observed_change_seq"],
+        )
+        self.memory.remember(
+            kind="semantic", text="Backing edited.",
+            source_ref=f"mental-model:{model['model_id']}",
+        )
+        self.memory.remember(
+            kind="semantic", text="Source changed.", source_ref="backing:source"
+        )
+        self.assertEqual(refreshed["freshness"], "fresh")
+        self.assertTrue(self.views.model(model["model_id"])["is_stale"])
+
+    # 大量派生模型不应抢占top-k后再被剔除，导致底层source永远无机会参与refresh。
+    def test_derived_memories_do_not_starve_refresh_sources(self):
+        source = self.memory.remember(
+            kind="semantic", text="Architecture source.", source_ref="rank:source"
+        )
+        for index in range(24):
+            self.memory.remember(
+                kind="semantic", text="Architecture synthesized model.",
+                source_ref=f"mental-model:rank-{index}",
+            )
+        model = self.views.create_model(name="Source model", source_query="architecture")
+        prepared = self.views.prepare_refresh(model["model_id"])
+        self.assertEqual([item["memory_id"] for item in prepared["sources"]], [source["memory_id"]])
+
     # Mental Model 的上一版 backing Memory 不能重新进入自己的 refresh sources，避免自我强化。
     def test_refresh_does_not_feed_back_its_own_materialized_memory(self):
         source = self.memory.remember(

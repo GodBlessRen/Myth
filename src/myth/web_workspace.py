@@ -18,7 +18,7 @@ from .platform.control import ControlCommand
 from .strategies import RuleIntentPicker
 from .goal_scheduler import GoalScheduler
 from .durable_executor import executor_snapshot, run_liveness
-from .session_statistics import session_statistics
+from .session_statistics import session_statistics, measured_integer, unique_records, usage_measurements
 from .adapters.model_catalog import PublicModelCatalog
 
 
@@ -53,6 +53,7 @@ class ConversationWebService:
 
     # 逐次读取待恢复/到期机会，在事务外检查供应商，再准入并交正常 Driver；本机调度并发有上限。
     def scheduler_tick(self):
+        # 恢复已有 Run 优先于到期准入；Provider 检查在数据库外，抢占资格仍由 Scheduler 原子决定。
         with MythRuntime(self.root) as runtime:
             scheduler = GoalScheduler(Workspace(runtime))
             pending = scheduler.dispatchable_runs()
@@ -297,42 +298,36 @@ class ConversationWebService:
     # 从持久模型收据聚合输入/输出/缓存及调用量；无缓存报告保留 N/A，不伪造命中率。
     @staticmethod
     def _model_usage_summary(invocations):
-        input_tokens = 0
-        output_tokens = 0
-        cached_input_tokens = 0
-        provider_wall_ms = 0
-        provider_wall_reported = False
+        records = list(unique_records(invocations, "model_attempt_id"))
+        measured = usage_measurements(records, ("input_tokens", "output_tokens", "cached_input_tokens", "provider_wall_ms"))
+        totals = measured["totals"]
+        input_tokens, output_tokens = totals["input_tokens"], totals["output_tokens"]
+        cached_input_tokens = totals["cached_input_tokens"] if records else None
+        provider_wall_ms = totals["provider_wall_ms"] if records else None
         # first_tokens：每个已报告调用的传输首个非空输出 delta 延迟，单位毫秒；无报告保留 N/A。
         first_tokens = []
-        cache_reported = False
-        for item in invocations:
+        for item in records:
             usage = item.get("usage") if isinstance(item.get("usage"), dict) else {}
-            input_tokens += max(0, int(usage.get("input_tokens") or 0))
-            output_tokens += max(0, int(usage.get("output_tokens") or 0))
-            if "cached_input_tokens" in usage:
-                cache_reported = True
-                cached_input_tokens += max(
-                    0, int(usage.get("cached_input_tokens") or 0)
-                )
-            if "provider_wall_ms" in usage:
-                provider_wall_reported = True
-                provider_wall_ms += max(0, int(usage.get("provider_wall_ms") or 0))
-            if type(usage.get("time_to_first_token_ms")) is int:
-                first_tokens.append(max(0, usage["time_to_first_token_ms"]))
+            first = measured_integer(usage.get("time_to_first_token_ms"))
+            wall = measured_integer(usage.get("provider_wall_ms"))
+            if first is not None and (wall is None or first <= wall):
+                first_tokens.append(first)
         hit_rate = (
             cached_input_tokens / input_tokens
-            if cache_reported and input_tokens > 0
+            if cached_input_tokens is not None and input_tokens is not None
+            and input_tokens > 0 and cached_input_tokens <= input_tokens
             else None
         )
         return {
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
-            "cached_input_tokens": cached_input_tokens if cache_reported else None,
+            "cached_input_tokens": cached_input_tokens,
             "cache_hit_rate": hit_rate,
-            "cache_metrics_available": cache_reported,
-            "provider_wall_ms": provider_wall_ms if provider_wall_reported else None,
-            "provider_wall_available": provider_wall_reported,
-            "model_calls": len(invocations),
+            "cache_metrics_available": cached_input_tokens is not None,
+            "provider_wall_ms": provider_wall_ms,
+            "provider_wall_available": provider_wall_ms is not None,
+            "measurement_samples": measured["samples"],
+            "model_calls": measured["attempts"],
             "first_token_ms": first_tokens[0] if first_tokens else None,
             "latest_first_token_ms": first_tokens[-1] if first_tokens else None,
         }
@@ -588,7 +583,7 @@ class ConversationWebService:
             release_claim()
             raise
 
-    # 校验明确用户消息与固定设置，读取作用域 Memory 后调用原子 Turn admission；提交后才启动 Driver。
+    # 校验明确用户消息与固定设置，由仓储在写事务外准备带版本的召回；提交后才启动 Driver。
     def send(self, sid, value):
         settings = self.model_catalog.quote_settings(self._use("settings"))
         text = value.get("text")
@@ -602,26 +597,13 @@ class ConversationWebService:
 
         with MythRuntime(self.root) as runtime:
             workspace = Workspace(runtime)
-            # 在 Run/Turn 创建前核对长期 Goal；入口身份绑定 goal_id，同请求不能悄悄换到另一个意图。
-            goal_context = None
-            if goal_id:
-                goal_context = workspace.personal.goal_view(goal_id)
-            session = workspace.repository.session(sid)
-            memory_report = workspace.memory.search_view_report(
-                str(text or ""),
-                limit=6,
-                project_id=session.get("project_id"),
-                session_id=sid,
-            )
+            # 仓储在召回前后核对 Goal/会话/Memory 版本，失败时不留下半准入 Run。
             turn = workspace.repository.create_turn(
                 sid,
                 text,
                 value.get("request_id"),
                 value.get("document_ids"),
-                memory_records=memory_report["memories"],
-                memory_retrieval_report=memory_report["retrieval"],
                 goal_id=goal_id,
-                goal_context=goal_context,
                 _settings=settings,
             )
             workspace.control.ensure(turn["run_id"])
@@ -933,6 +915,7 @@ class ConversationWebService:
 
     # 分派只读产品 API 到对应状态所有者；允许的恢复投影修正仍由仓储维护。
     def get(self, parts, query):
+        # 精确匹配路径段；例如 provider-evidence 仍核对所属 Run，未知 URL 不退化成文件读取。
         if not parts:
             return self.bootstrap()
         if parts == ["platform"]:
