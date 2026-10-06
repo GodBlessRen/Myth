@@ -55,10 +55,10 @@
       this.trigger.setAttribute("aria-controls", this.popup.id);
       this.trigger.setAttribute("aria-expanded", "false");
       this.trigger.addEventListener("keydown", event => this.key(event));
-      this.trigger.addEventListener("click", () => this.isOpen ? this.close() : this.open());
+      this.trigger.addEventListener("click", () => this.editable || !this.isOpen ? this.open() : this.close());
       if (this.editable) {
         this.trigger.addEventListener("input", () => this.open());
-        this.trigger.addEventListener("focus", () => this.open());
+        this.trigger.addEventListener("focus", () => { if (!this.restoringFocus) this.open(); });
       }
       this.trigger.addEventListener("blur", () => this.close());
       this.sync();
@@ -73,26 +73,33 @@
       const query = this.editable ? this.source.value.trim().toLowerCase() : "";
       return Array.from(list?.querySelectorAll("option") || [])
         .filter(option => !option.hidden && (!query || option.value.toLowerCase().includes(query) || option.textContent.toLowerCase().includes(query)))
-        .map(option => ({value: option.value, label: option.label || option.textContent || option.value, disabled: option.disabled}));
+        .map(option => ({value: option.value, label: option.label || option.textContent || option.value,
+          disabled: option.disabled || !!option.closest("optgroup")?.disabled}));
     }
+
+    // 原字段及所属 fieldset 决定可用性；只读模型输入也不能从建议菜单改写。
+    get unavailable() { return this.source.matches(":disabled") || (this.editable && this.source.readOnly); }
 
     // 轮询更新标签或可用性，保留源字段；字段离开DOM时同时清理弹层与映射。
     sync() {
       if (!this.source.isConnected) { this.close(); this.popup.remove(); controls.delete(this.source); return; }
       if (!this.editable) {
         this.text.textContent = this.source.selectedOptions[0]?.textContent || "请选择";
-        this.trigger.disabled = this.source.disabled;
+        this.trigger.disabled = this.unavailable;
         this.trigger.setAttribute("aria-label", `${labelFor(this.source)}：${this.text.textContent}`);
         this.wrapper.title = this.text.textContent;
       } else {
         this.trigger.setAttribute("aria-label", labelFor(this.source));
       }
       this.popup.setAttribute("aria-label", labelFor(this.source));
-      if (this.isOpen) this.render();
+      if (this.unavailable) this.close();
+      else if (this.isOpen) { this.render(true); this.position(); }
     }
 
     // 每项只写textContent；当前选择和键盘活动项分开，导航本身不提交配置。
-    render() {
+    render(preserveActive = false) {
+      // 目录刷新沿用正在浏览的选项身份，轮询不得把方向键位置拉回已选项。
+      const activeValue = preserveActive ? this.rows[this.active]?.value : undefined;
       this.rows = this.options();
       this.popup.replaceChildren();
       this.rows.forEach((row, index) => {
@@ -106,20 +113,22 @@
         item.addEventListener("click", () => this.choose(index));
         this.popup.append(item);
       });
+      const previous = this.rows.findIndex(row => row.value === activeValue && !row.disabled);
       const selected = this.rows.findIndex(row => row.value === this.source.value && !row.disabled);
-      this.activate(selected >= 0 ? selected : this.rows.findIndex(row => !row.disabled));
+      this.activate(previous >= 0 ? previous : selected >= 0 ? selected : this.rows.findIndex(row => !row.disabled));
       if (!this.rows.length) this.close();
     }
 
     // 全页最多一个选择菜单；打开只投影选项，不触发HTTP命令。
     open() {
-      if (this.trigger.disabled) return;
+      if (this.unavailable) return;
       if (opened && opened !== this) opened.close();
-      if (!this.options().length) return;
+      if (!this.options().length) { this.close(); return; }
+      const wasOpen = this.isOpen;
       if (!this.isOpen) this.popup.showPopover();
       opened = this;
       this.trigger.setAttribute("aria-expanded", "true");
-      this.render(); this.position();
+      this.render(wasOpen); this.position();
     }
 
     // 弹层进入原生顶层后按当前视口定位，空间不足向上展开；不挤压工作台布局。
@@ -150,23 +159,30 @@
       Array.from(this.popup.children).forEach((item, i) => item.classList.toggle("is-active", i === index));
       const item = this.popup.children[index];
       if (item) { this.trigger.setAttribute("aria-activedescendant", item.id); item.scrollIntoView({block: "nearest"}); }
+      else this.trigger.removeAttribute("aria-activedescendant");
     }
 
     // 用户确认才写源字段并派发原有input/change事件；禁用项始终不能提交。
     choose(index) {
       const row = this.rows[index];
+      if (this.unavailable) { this.close(); return; }
       if (!row || row.disabled) return;
       this.source.value = row.value;
       this.close(); this.sync();
       this.source.dispatchEvent(new Event("input", {bubbles: true}));
       this.source.dispatchEvent(new Event("change", {bubbles: true}));
-      this.close(); this.trigger.focus({preventScroll: true});
+      this.close();
+      // 确认后归还焦点，避免输入框的 focus 监听器立即重新展开建议。
+      this.restoringFocus = true;
+      try { this.trigger.focus({preventScroll: true}); }
+      finally { this.restoringFocus = false; }
     }
 
     // Arrow/Home/End/字首定位与Enter确认遵循列表框合同；Escape只收起菜单，Tab继续原焦点顺序。
     key(event) {
       // 中文候选确认属于输入法；菜单不能抢走 composition 的 Enter、方向键或 Escape。
       if (event.isComposing || event.keyCode === 229) return;
+      if (this.unavailable) { this.close(); return; }
       if (event.key === "Escape" && this.isOpen) {
         event.preventDefault(); event.stopPropagation(); this.close(); return;
       }
@@ -178,6 +194,7 @@
         event.preventDefault(); event.stopPropagation();
         if (!this.isOpen) { this.open(); return; }
         const enabled = this.rows.map((row, i) => row.disabled ? -1 : i).filter(i => i >= 0);
+        if (!enabled.length) return;
         const current = enabled.indexOf(this.active);
         const next = event.key === "Home" ? 0 : event.key === "End" ? enabled.length - 1 : (current + (event.key === "ArrowDown" ? 1 : -1) + enabled.length) % enabled.length;
         this.activate(enabled[next]); return;
@@ -201,6 +218,10 @@
   }
   window.MythChoices = {sync};
   document.addEventListener("change", sync);
+  // 对话框退出时同步收起其顶层弹层，避免隐藏字段继续占有菜单和 ARIA 展开状态。
+  document.addEventListener("close", event => {
+    if (event.target.tagName === "DIALOG" && opened && event.target.contains(opened.source)) opened.close();
+  }, true);
   document.addEventListener("pointerdown", event => {
     if (opened && !opened.wrapper.contains(event.target) && !opened.popup.contains(event.target)) opened.close();
   });
@@ -210,9 +231,9 @@
   }, true);
   let scheduled = false;
   const observer = new MutationObserver(records => {
-    if (!records.some(record => !record.target.closest?.(".choice-menu, .choice-control") || record.target.tagName === "SELECT" || record.target.closest?.("select"))) return;
+    if (!records.some(record => !record.target.closest?.(".choice-menu, .choice-control") || controls.has(record.target) || record.target.closest?.("select"))) return;
     if (!scheduled) { scheduled = true; queueMicrotask(() => { scheduled = false; sync(); }); }
   });
-  observer.observe(document.body, {childList: true, subtree: true, attributes: true, attributeFilter: ["disabled", "hidden", "label", "value"]});
+  observer.observe(document.body, {childList: true, subtree: true, attributes: true, attributeFilter: ["disabled", "readonly", "hidden", "label", "value"]});
   sync();
 })();

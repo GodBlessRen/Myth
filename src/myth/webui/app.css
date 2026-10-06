@@ -581,7 +581,7 @@ dialog .muted { font-size: 12px; }
 .command-empty { padding: 25px; text-align: center; font-size: 13px; color: var(--muted); }
 .command-foot { display: flex; align-items: center; gap: 17px; padding: 10px 20px; border-top: 1px solid var(--line-soft); color: var(--muted); font-size: 12px; }
 .command-foot kbd { margin-right: 4px; }
-@keyframes dialog-in { from { opacity: .5; transform: translateY(8px) scale(.985); } to { opacity: 1; transform: translateY(0) scale(1); } }
+@keyframes dialog-in { from { transform: translateY(8px) scale(.985); } to { transform: translateY(0) scale(1); } }
 .choice-control { position: relative; display: inline-flex; min-width: 0; width: 100%; align-items: center; }
 .choice-control > input { width: 100%; padding-right: 32px; }
 .choice-source { position: absolute !important; width: 1px !important; height: 1px !important; min-height: 1px !important; padding: 0 !important; margin: 0 !important; opacity: 0; pointer-events: none; }
