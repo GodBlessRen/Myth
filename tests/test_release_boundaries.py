@@ -64,7 +64,10 @@ class ReleaseBoundaryTests(unittest.TestCase):
         else:
             with zipfile.ZipFile(path, "w") as archive:
                 for filename, data in entries.items():
-                    archive.writestr(filename, data)
+                    info = zipfile.ZipInfo(filename)
+                    # 故意恢复原始样本名，防止写入库提前修正待测危险路径。
+                    info.filename = filename
+                    archive.writestr(info, data)
         return path
 
     def test_valid_wheel_and_source_archive_layouts(self) -> None:
@@ -153,12 +156,26 @@ class ReleaseBoundaryTests(unittest.TestCase):
 
     def test_unsafe_path_names_are_rejected_without_extraction(self) -> None:
         """相对上溯、绝对路径、Windows 分隔符和盘符在读取目录时直接拒绝。"""
-        for bad in ("../escape.txt", "/absolute.txt", "folder/../../escape.txt", "folder\\escape.txt", "C:/escape.txt"):
+        for bad in ("../escape.txt", "/absolute.txt", "folder/../../escape.txt", "folder\\escape.txt", "C:/escape.txt", "docs/visible\x00hidden.txt"):
             with self.subTest(name=bad):
                 entries = self.entries()
                 entries[bad] = b"never extract"
                 with self.assertRaisesRegex(ValueError, "unsafe archive path"):
                     VALIDATOR.inspect_archive(self.archive("bad.whl", entries))
+
+    def test_original_zip_name_survives_platform_normalization(self) -> None:
+        """真实 ZIP 目录保留原始名称；模拟 Windows 分隔符改写不能绕过验证。"""
+        for bad in ("folder\\escape.txt", "docs/visible\x00hidden.txt"):
+            with self.subTest(name=bad):
+                entries = self.entries()
+                entries[bad] = b"never extract"
+                path = self.archive("raw.whl", entries)
+                with patch("zipfile.os.sep", "\\"):
+                    with zipfile.ZipFile(path) as archive:
+                        self.assertEqual(archive.infolist()[-1].orig_filename, bad)
+                        self.assertNotEqual(archive.infolist()[-1].filename, bad)
+                    with self.assertRaisesRegex(ValueError, "unsafe archive path"):
+                        VALIDATOR.inspect_archive(path)
 
     def test_duplicate_zip_entry_is_rejected(self) -> None:
         """同名重复条目会令不同工具读取不同字节，不能视为唯一文件身份。"""
