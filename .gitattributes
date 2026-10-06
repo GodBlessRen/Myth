@@ -1,6 +1,8 @@
 # 垃圾站只供仓库维护；GitHub Source archive / git archive 不发布淘汰物。
 .trash export-ignore
 .trash/** export-ignore
+.work export-ignore
+.work/** export-ignore
 output export-ignore
 output/** export-ignore
 

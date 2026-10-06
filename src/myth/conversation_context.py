@@ -75,6 +75,7 @@ def _fold_activity(activity):
 
 # 从 durable Goal/Tool/Artifact/Verification 事实构造 Compact 导航种子；只保留身份与状态，不让摘要制造新领域事件。
 def _grounded_compaction_seed(snapshot, activities):
+    # 仅从持久步骤复制身份和已观测结果；例如测试 FAILED 不能被摘要改写成 Goal 完成。
     goal = snapshot.get("goal") or {}
     work = goal.get("work") or {}
     observations = []

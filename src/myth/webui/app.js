@@ -109,10 +109,10 @@ function icon(name) {
   svg.append(p);
   return svg;
 }
-// 同一太极矢量用于品牌与真实等待；图片无业务语义，状态继续由相邻文字说明。
+// 小尺寸原创笔势用于真实等待；图片无业务语义，状态继续由相邻文字说明。
 function brandMark(waiting = false) {
-  const mark = el("img", "taiji-mark brand-mark" + (waiting ? " taiji-wait brand-wait" : ""));
-  mark.src = "/myth-mark.svg";
+  const mark = el("img", "brand-mark brand-small" + (waiting ? " brand-wait" : ""));
+  mark.src = "/logo-16.svg";
   mark.alt = "";
   mark.setAttribute("aria-hidden", "true");
   mark.width = 16;
@@ -123,7 +123,7 @@ document
   .querySelectorAll("[data-icon]")
   .forEach((e) => e.replaceWith(icon(e.dataset.icon)));
 
-// 奶油白 / 星空黑仅改变浏览器投影；主题选择保存在本机，不进入 Runtime 或会话事实。
+// 纸白 / 墨黑仅改变浏览器投影；主题选择保存在本机，不进入 Runtime 或会话事实。
 const THEME_STORAGE_KEY = "myth-theme";
 const themeMedia = window.matchMedia("(prefers-color-scheme: dark)");
 // 读取本机已保存的显式主题；读取失败返回空值并由系统偏好决定，不影响任何 Runtime 状态。
@@ -142,15 +142,18 @@ function applyTheme(theme, persist = false) {
   document.documentElement.style.colorScheme = next;
   const themeColor = document.querySelector('meta[name="theme-color"]');
   if (themeColor) themeColor.content = next === "dark" ? "#0E100F" : "#FFFEF8";
+  document.querySelectorAll("[data-brand=main]").forEach(mark => {
+    mark.src = next === "dark" ? "/logo-dark.svg" : "/logo.svg";
+  });
   const button = $("themeToggle");
   if (button) {
     button.replaceChildren(icon(next === "dark" ? "sun" : "moon"));
     button.setAttribute("aria-pressed", String(next === "dark"));
     button.setAttribute(
       "aria-label",
-      next === "dark" ? "切换到奶油白" : "切换到星空黑",
+      next === "dark" ? "切换到纸白" : "切换到墨黑",
     );
-    button.title = next === "dark" ? "奶油白" : "星空黑";
+    button.title = next === "dark" ? "纸白" : "墨黑";
   }
   if (persist) {
     try {
@@ -188,8 +191,9 @@ function toast(text) {
   clearTimeout(toast.timer);
   toast.timer = setTimeout(() => show("toast", false), 5000);
 }
-// 工作区 JSON 请求最多等待二十秒；超时只停止本地等待，重试准入须复用 request_id。
-async function jsonRequest(prefix, path, value) {
+// 四个固定命名空间共享本地等待生命周期；20秒超时只取消浏览器等待，不能证明副作用未发生。
+// 网络失败由调用者决定如何恢复；这里不自动重试POST，不更换request_id，也不记录凭据正文。
+async function requestJSON(prefix, path, value) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 20000);
   try {
@@ -199,7 +203,6 @@ async function jsonRequest(prefix, path, value) {
       body: value === undefined ? undefined : JSON.stringify(value),
       signal: controller.signal,
     });
-    // 计时器覆盖响应体读取，不是只等到响应头就提前释放。
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
     return data;
@@ -207,22 +210,14 @@ async function jsonRequest(prefix, path, value) {
     clearTimeout(timer);
   }
 }
-// 工作区只传递调用者的请求身份；不自动重试可能已经准入的写入。
-function api(path, value) {
-  return jsonRequest("/api/workspace", path, value);
-}
-// ChatGPT 公开认证投影使用固定前缀；共享传输不共享凭据。
-function authApi(path, value) {
-  return jsonRequest("/api/auth/chatgpt", path, value);
-}
-// Claude 的挑战和登录状态属于自己的认证端点。
-function claudeAuthApi(path, value) {
-  return jsonRequest("/api/auth/claude", path, value);
-}
-// API Key 仅随用户显式发起的连接请求传递，不进入本地持久状态。
-function providerAuthApi(path, value) {
-  return jsonRequest("/api/auth/providers", path, value);
-}
+// 工作区公开投影与显式命令；业务准入、UNKNOWN核对和幂等身份仍由服务端所有。
+function api(path, value) { return requestJSON("/api/workspace", path, value); }
+// ChatGPT脱敏认证投影；浏览器仅展示入口和状态。
+function authApi(path, value) { return requestJSON("/api/auth/chatgpt", path, value); }
+// Claude使用独立namespace/callback，避免跨提供方state混用。
+function claudeAuthApi(path, value) { return requestJSON("/api/auth/claude", path, value); }
+// API Key仅在这次显式connect的正文短暂存在，不放入state、存储或日志。
+function providerAuthApi(path, value) { return requestJSON("/api/auth/providers", path, value); }
 
 // 把数据库 UTC 时间投影为本地中文日期；不改写保存时间。
 function date(value) {
@@ -836,7 +831,13 @@ async function checkConnection(auto = false) {
       state.connection.details.models?.[0]
     ) {
       payload.model = state.connection.details.models[0];
+      // 默认模型保存是第二次异步跳转；已保存事实可以更新，表单只能由原发起者回填。
+      const formIdentity = JSON.stringify(settingsPayload());
       state.data.settings = await api("/settings", payload);
+      if (generation !== state.connectionGeneration || JSON.stringify(settingsPayload()) !== formIdentity) {
+        $("settingsSaved").textContent = "未保存的修改";
+        return;
+      }
       loadSettings();
     } else if (
       !auto &&
@@ -1114,7 +1115,9 @@ const toolLabels = {
 };
 // 将服务端 wall-clock 秒数格式化为回复旁的紧凑“用时”；这是整轮处理时间，不冒充纯模型推理时延。
 function workedTime(seconds) {
-  const total = Math.max(0, Math.floor(Number(seconds || 0)));
+  // 未报告、字符串和非法值不转换成0；零秒本身是有效的持久测量。
+  if (typeof seconds !== "number" || !Number.isFinite(seconds) || seconds < 0) return "用时未报告";
+  const total = Math.floor(seconds);
   const hours = Math.floor(total / 3600);
   const minutes = Math.floor((total % 3600) / 60);
   const secs = total % 60;
@@ -1149,7 +1152,10 @@ function toolGroup(turn) {
     );
     const r = s.result;
     if (r) {
-      const text = String(r.error ?? r.content ?? r.feedback ?? r.diff ?? r.output ?? JSON.stringify(r, null, 2));
+      // 单一正文直接阅读；多字段结果完整序列化，不能因 content/error 优先级吞掉其他收据事实。
+      const entries = Object.entries(r);
+      const text = entries.length === 1 && typeof entries[0][1] === "string"
+        ? entries[0][1] : JSON.stringify(r, null, 2);
       const output = el("pre", "", text.slice(0, 3000));
       item.append(output);
       if (text.length > 3000) {
@@ -1196,21 +1202,19 @@ function liveTurnLabel(turn) {
   const elapsed = turn.reply_timing?.elapsed_seconds;
   return "正在处理…" + (typeof elapsed === "number" && Number.isFinite(elapsed) && elapsed >= 0 ? " · " + workedTime(elapsed) : "");
 }
-// 一次投影建立临时索引，消息不再重扫全部 Turn/产物；不改写持久事实。
+// 每次投影建立一次身份关联；保留首个 Turn 与 Artifact 原序，不跨投影缓存业务事实。
 function indexThread(session) {
   const turns = new Map(), artifacts = new Map();
-  for (const turn of session.turns) {
-    if (!turns.has(turn.run_id)) turns.set(turn.run_id, turn);
-  }
+  for (const turn of session.turns) if (!turns.has(turn.run_id)) turns.set(turn.run_id, turn);
   for (const artifact of session.artifacts) {
-    const group = artifacts.get(artifact.run_id) || [];
-    group.push(artifact);
-    artifacts.set(artifact.run_id, group);
+    if (!artifacts.has(artifact.run_id)) artifacts.set(artifact.run_id, []);
+    artifacts.get(artifact.run_id).push(artifact);
   }
-  return { turns, artifacts };
+  return {turns, artifacts};
 }
 // 按消息/步骤签名增量重建讨论与工具展示；滚动位置只属于本地视图。
 function renderThread(session) {
+  // 先核对持久内容签名；RUNNING计时不在签名中，心跳只能改末尾标签，不能打断历史阅读。
   const signature = JSON.stringify([
     session.messages,
     session.turns.map((t) => [
@@ -1239,12 +1243,13 @@ function renderThread(session) {
     ),
   );
   $("thread").replaceChildren();
+  // 一次建立身份索引，替代每条消息扫描全部Turn/Artifact；顺序与第一条匹配语义保持不变。
+  // 索引仅属于这次渲染，不能承担业务状态缓存，也不会跨新投影沿用旧事实。
+  const {turns: turnsByRun, artifacts: artifactsByRun} = indexThread(session);
   const groups = new Set(),
-    emitted = new Set(),
-    emittedRuns = new Set();
-  const indexed = indexThread(session);
+    emitted = new Set(), emittedRuns = new Set();
   session.messages.forEach((message) => {
-    const turn = indexed.turns.get(message.run_id);
+    const turn = turnsByRun.get(message.run_id);
     if (message.role === "assistant" && turn && !groups.has(turn.run_id)) {
       groups.add(turn.run_id);
       const group = toolGroup(turn);
@@ -1307,7 +1312,7 @@ function renderThread(session) {
     $("thread").append(row);
     if (message.role === "assistant" && turn && !emittedRuns.has(turn.run_id)) {
       emittedRuns.add(turn.run_id);
-      (indexed.artifacts.get(turn.run_id) || [])
+      (artifactsByRun.get(turn.run_id) || [])
         .filter((a) => !emitted.has(a.decision_id))
         .forEach((a) => {
           emitted.add(a.decision_id);
@@ -1318,6 +1323,7 @@ function renderThread(session) {
   session.artifacts
     .filter((a) => !emitted.has(a.decision_id))
     .forEach((a) => $("thread").append(artifactCard(a)));
+  // 无法匹配消息的产物仍显示；配对优化不能吞掉独立持久交付证据。
   const last = session.turns.at(-1);
   if (last && last.status === "RUNNING") {
     if (!groups.has(last.run_id)) {
@@ -1429,7 +1435,7 @@ function renderChat(session) {
       turn.network_retry && status === "INTERRUPTED"
         ? "连接中断，" + Math.max(0, Math.ceil(turn.network_retry.retry_at - Date.now() / 1000)) + " 秒后自动重试；已完成步骤保留。"
         : status === "UNKNOWN"
-        ? "结果尚未确认；请先核对已发出的操作，不要重复发送。"
+        ? "执行结果尚未确认，请先核对再继续。"
         : status === "INTERRUPTED"
           ? "Driver 已中断；断点已保存，可以继续。"
           : status === "PAUSED"
@@ -1445,14 +1451,18 @@ function renderChat(session) {
                   : turn.error;
     if (text) {
       show("turnNotice", true);
-      $("turnNotice").className = "turn-notice" + (
-        ["UNKNOWN", "INTERRUPTED"].includes(status) ? " warning" :
-        ["FAILED", "BUDGET_EXHAUSTED"].includes(status) ? " error" : ""
-      );
+      $("turnNotice").className =
+        "turn-notice" +
+        (["FAILED", "BUDGET_EXHAUSTED"].includes(
+          status,
+        )
+          ? " error"
+          : ["UNKNOWN", "INTERRUPTED"].includes(status) ? " warning" : "");
       $("turnNotice").append(el("span", "", text));
-      if (turn.error && ["UNKNOWN", "INTERRUPTED"].includes(status)) {
-        const detail = el("details", "notice-detail");
-        detail.append(el("summary", "", "技术原因"), el("pre", "", turn.error));
+      // 友好的恢复文案不能代替技术证据；原始错误用安全文本完整保留，不截断或改写。
+      if (["UNKNOWN", "INTERRUPTED"].includes(status) && turn.error) {
+        const detail = el("details", "turn-technical-detail");
+        detail.append(el("summary", "", "技术原因"), el("pre", "", String(turn.error)));
         $("turnNotice").append(detail);
       }
       if (

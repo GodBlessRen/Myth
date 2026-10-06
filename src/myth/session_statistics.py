@@ -21,6 +21,29 @@ def unique_records(records, identity):
         yield record
 
 
+def usage_measurements(invocations, fields):
+    """按 Attempt 聚合公开用量；完整总量要求每个调用实测，样本数说明覆盖。
+
+    没有调用时总量为 0；有调用但部分缺测时为 None，不能拿已结算预算代替供应商实测。
+    Web 与 SOTA 共用这个纯函数，不访问数据库或改变收据。
+    """
+    records = list(unique_records(invocations, "model_attempt_id"))
+    totals = {field: 0 for field in fields}
+    samples = {field: 0 for field in fields}
+    for item in records:
+        usage = item.get("usage") if isinstance(item.get("usage"), dict) else {}
+        for field in fields:
+            value = measured_integer(usage.get(field))
+            if value is not None:
+                totals[field] += value
+                samples[field] += 1
+    return {
+        "attempts": len(records),
+        "samples": samples,
+        "totals": {field: totals[field] if samples[field] == len(records) else None for field in fields},
+    }
+
+
 # 累计已报告耗时、按调用平均 TTFT；TPS 仅配对成功调用自己的输出/用时，不能借用其他调用的时间。
 def session_statistics(invocations, operations):
     model_ms = tool_ms = ttft_ms = output_tokens = output_wall_ms = 0

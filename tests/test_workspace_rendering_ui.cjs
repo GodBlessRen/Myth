@@ -115,9 +115,15 @@ test('HTTP and malformed JSON failures release timers without suppressing their 
 
 test('brand waiting state uses the current local asset and visible motion class', () => {
   const h = boot(), still = h.context.brandMark(), working = h.context.brandMark(true);
-  assert.equal(still.src, '/myth-mark.svg');
+  assert.equal(still.src, '/logo-16.svg');
   assert.equal(still.classList.contains('brand-wait'), false);
   assert.equal(working.classList.contains('brand-wait'), true);
   assert.equal(working.width, 16);
   assert.equal(working.height, 16);
+});
+
+test('multi-field tool receipts keep content and all additional evidence', () => {
+  const h = boot(), result = Object.freeze({content: 'read text', feedback: 'known boundary', bytes: 0, extra: {state: 'UNKNOWN'}});
+  const item = h.context.toolGroup({run_id: 'r', activities: [{step: 1, state: 'DONE', decision: {decision_type: 'tool_call'}, result}]}).children[1];
+  assert.deepEqual(JSON.parse(item.children.find(node => node.tagName === 'PRE').textContent), result);
 });

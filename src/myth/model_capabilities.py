@@ -114,6 +114,7 @@ def normalize_thinking(value: Any) -> str | bool | None:
 def validate_model_selection(
     settings: dict[str, Any], details: dict[str, Any] | None
 ) -> None:
+    # 目录没有事实就不臆造限制；有能力声明时才核对原生输出与 Thinking 选项。
     if not isinstance(details, dict):
         return
     model = str(settings.get("model") or "").strip()

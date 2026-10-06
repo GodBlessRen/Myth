@@ -77,6 +77,8 @@ def search_tools(
     limit: int = 6,
 ) -> list[dict[str, Any]]:
     text = str(query or "").strip().lower()
+    # 目录搜索只对能力身份、说明和参数名计词面分数，发现接口自身不参与命中。
+    # 相同分数沿目录顺序稳定输出；目录可见性不会绕过后续Capability/Ticket准入。
     if not text or len(text) > 200:
         raise ValueError("tool.search query must contain 1-200 characters")
     if type(limit) is not int or not 1 <= limit <= 8:

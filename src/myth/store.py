@@ -639,6 +639,9 @@ class RuntimeStore:
 
             if attempt["state"] == AttemptState.RESOLVED.value:
                 raise IdentityConflict("Attempt already resolved by another receipt")
+            # UNKNOWN 不是可结算效果：若标为 RESOLVED，恢复列表会丢掉这次机会且迟到真收据被拒。
+            if receipt.outcome == Outcome.UNKNOWN:
+                raise InvalidTransition("unknown receipt cannot resolve an execution effect")
 
             db.execute(
                 "INSERT INTO receipts(receipt_id,attempt_id,envelope_digest,outcome,evidence_ref,usage_json) "
@@ -789,16 +792,24 @@ class RuntimeStore:
                 raise IdentityConflict(
                     "verification report belongs to a different candidate"
                 )
+            # 验收版本与所属 Action 在交付事务再核对；旧 PASS 不能跨合同授权。
+            action = db.execute("SELECT run_id FROM actions WHERE action_id=?", (action_id,)).fetchone()
+            if action is None or action["run_id"] != run_id or report["acceptance_version"] != run["acceptance_version"]:
+                raise IdentityConflict("Delivery requires the current Run/Action acceptance contract")
             if report["verdict"] != Verdict.PASS.value:
                 raise InvalidTransition("only a PASS report can authorize Delivery")
             if run["state"] in {RunState.CANCELLED.value, RunState.FAILED.value}:
                 raise InvalidTransition("terminal control state forbids Delivery")
 
             existing = db.execute(
-                "SELECT delivery_id FROM deliveries WHERE run_id=?", (run_id,)
+                "SELECT * FROM deliveries WHERE run_id=?", (run_id,)
             ).fetchone()
             if existing is not None:
+                if (existing["action_id"], existing["candidate_digest"], existing["report_id"]) != (action_id, candidate_digest, report_id):
+                    raise IdentityConflict("Run already delivered a different verified candidate")
                 return str(existing["delivery_id"])
+            if run["state"] != RunState.VERIFYING.value:
+                raise InvalidTransition("Delivery requires an active verification state")
             db.execute(
                 "INSERT INTO deliveries(delivery_id,run_id,action_id,candidate_digest,report_id) "
                 "VALUES (?,?,?,?,?)",

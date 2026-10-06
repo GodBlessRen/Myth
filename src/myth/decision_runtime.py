@@ -775,7 +775,7 @@ class DecisionRuntime:
 
     def recover(self, run_id: str | None = None, *, request_key_prefix: str | None = None) -> list[dict[str, Any]]:
         """按作用域核对已有收据；并行子流程只核对自身，不将仍在调用的兄弟 Ticket 标为 UNKNOWN。"""
-
+        # 先以 Run/子调用键缩小机会集合，再逐个读本地收据；缺失只转 UNKNOWN，不调用 Provider 重试。
         sql = "SELECT * FROM model_invocations WHERE state IN (?,?)"
         args: list[Any] = [AttemptState.TICKETED.value, AttemptState.UNKNOWN.value]
         if run_id is not None:
@@ -803,6 +803,7 @@ class DecisionRuntime:
                 continue
             self._settle(attempt_id, receipt)
             try:
+                # 效果事实与模型决策语法分开：坏 JSON 不抹掉已收到响应的结算。
                 decision = parse_step_decision(str(receipt["text"]))
                 decision_id = self._save_decision(
                     str(row["run_id"]),

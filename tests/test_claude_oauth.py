@@ -6,11 +6,12 @@ import json
 from pathlib import Path
 import tempfile
 import time
+import threading
 import unittest
 from unittest.mock import patch
 from urllib import parse
 
-from myth.auth.claude import ClaudeOAuthManager, OAUTH_BETA
+from myth.auth.claude import ClaudeOAuthManager, ClaudeOAuthError, OAUTH_BETA
 from myth.providers.messages import MessagesProvider
 
 
@@ -96,7 +97,7 @@ class ClaudeOAuthTests(unittest.TestCase):
         with patch.object(self.manager, "_token_exchange", return_value=token):
             status = self.manager.complete_callback({"state": [state], "code": ["code-secret"]})
         self.assertTrue(status.connected)
-        self.assertEqual(self.store.values["default"]["access_token"], "access-secret")
+        self.assertEqual(self.store.values[self.manager.profile_id]["access_token"], "access-secret")
         raw = self.manager.metadata_path.read_text("utf-8")
         self.assertNotIn("access-secret", raw)
         self.assertNotIn("refresh-secret", raw)
@@ -105,12 +106,13 @@ class ClaudeOAuthTests(unittest.TestCase):
     # 到期 token 使用原客户端绑定刷新，并发送 Anthropic OAuth beta 合同。
     def test_expiring_access_token_refreshes_with_same_client_binding(self):
         self.manager.configure("myth-client-123")
-        self.store.save("default", {
+        self.store.save(self.manager.profile_id, {
             "access_token": "old-access",
             "refresh_token": "refresh-secret",
             "expires_at": time.time() - 1,
             "scope": "user:inference",
             "client_id": "myth-client-123",
+            "login_epoch": json.loads(self.manager.metadata_path.read_text())["login_epoch"],
         })
         refreshed = {
             "access_token": "new-access",
@@ -147,6 +149,78 @@ class ClaudeOAuthTests(unittest.TestCase):
         self.assertEqual(captured["authorization"], "Bearer oauth-access")
         self.assertIsNone(captured["x_api_key"])
         self.assertEqual(captured["beta"], OAUTH_BETA)
+
+    def test_configure_invalidates_pending_old_client_challenge(self):
+        """旧客户端回调不能撤回用户的新配置，也不能产生旧客户端凭据。"""
+        self.manager.configure("old-client")
+        login = self.manager.begin_login("http://127.0.0.1:45678/auth/claude/callback")
+        state = parse.parse_qs(parse.urlparse(login["auth_url"]).query)["state"][0]
+        self.manager.configure("new-client")
+        with patch.object(self.manager, "_token_exchange", return_value={
+            "access_token": "old-access", "refresh_token": "old-refresh", "expires_in": 3600
+        }) as exchange:
+            with self.assertRaises(ClaudeOAuthError):
+                self.manager.complete_callback({"state": [state], "code": ["old-code"]})
+        exchange.assert_not_called()
+        self.assertEqual(json.loads(self.manager.metadata_path.read_text())["client_id"], "new-client")
+        self.assertFalse(self.store.values)
+
+    def test_logout_other_instance_invalidates_pending_callback(self):
+        """同一根目录的退出权威必须影响其他仍持有内存挑战的实例。"""
+        self.manager.configure("client")
+        login = self.manager.begin_login("http://127.0.0.1:45678/auth/claude/callback")
+        state = parse.parse_qs(parse.urlparse(login["auth_url"]).query)["state"][0]
+        other = ClaudeOAuthManager(self.root, credential_store=self.store)
+        other.logout()
+        with patch.object(self.manager, "_token_exchange") as exchange:
+            with self.assertRaises(ClaudeOAuthError):
+                self.manager.complete_callback({"state": [state], "code": ["old-code"]})
+        exchange.assert_not_called()
+
+    def test_unknown_refresh_is_not_replayed_after_restart(self):
+        """轮转发出后失联不能重放旧 refresh token；本机标记要求重新登录。"""
+        self.manager.configure("client")
+        self.store.save(self.manager.profile_id, {"access_token": "old", "refresh_token": "rotating", "expires_at": 1, "client_id": "client",
+                                  "login_epoch": json.loads(self.manager.metadata_path.read_text())["login_epoch"]})
+        with patch.object(self.manager, "_read_token_response", side_effect=ClaudeOAuthError("temporarily unavailable")) as send:
+            with self.assertRaises(ClaudeOAuthError):
+                self.manager.access_token()
+            other = ClaudeOAuthManager(self.root, credential_store=self.store)
+            with self.assertRaises(ClaudeOAuthError):
+                other.access_token()
+        self.assertEqual(send.call_count, 1)
+        self.assertEqual(json.loads(self.manager.metadata_path.read_text())["refresh_pending"], True)
+        self.assertFalse(other.status().connected)
+
+    def test_two_instances_rotate_one_refresh_token_once(self):
+        """两个真实 OS 锁竞争者只允许一次轮转；后者重新读取已保存的新 token。"""
+        self.manager.configure("client")
+        self.store.save(self.manager.profile_id, {"access_token": "old", "refresh_token": "rotating", "expires_at": 1, "client_id": "client",
+                                  "login_epoch": json.loads(self.manager.metadata_path.read_text())["login_epoch"]})
+        other = ClaudeOAuthManager(self.root, credential_store=self.store)
+        barrier = threading.Barrier(2)
+        values, failures = [], []
+
+        def access(manager):
+            """共同起点竞争真实锁；失败保留在内存，断言只核对是否发生。"""
+            try:
+                barrier.wait(timeout=5)
+                values.append(manager.access_token())
+            except BaseException as exc:
+                failures.append(exc)
+
+        with patch.object(ClaudeOAuthManager, "_read_token_response", return_value={
+            "access_token": "new", "refresh_token": "rotated", "expires_in": 3600
+        }) as send:
+            threads = [threading.Thread(target=access, args=(manager,)) for manager in (self.manager, other)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join(timeout=10)
+            self.assertFalse(any(thread.is_alive() for thread in threads))
+            self.assertFalse(failures)
+            self.assertEqual(values, ["new", "new"])
+            self.assertEqual(send.call_count, 1)
 
 
 if __name__ == "__main__":

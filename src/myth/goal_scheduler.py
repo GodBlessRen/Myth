@@ -216,7 +216,31 @@ class GoalScheduler:
 
     # 同事务提交 occurrence、Turn/预算、Goal 关联/进度并返回 Run 身份；未到期返回 None，忙/等待明确拒绝且不消费机会。
     def admit(self, schedule_id, now=None):
+        """先准备再提交机会；准备不占写锁，机会/Turn/Goal 仍由一个事务提交。"""
         now = time.time() if now is None else float(now)
+        row = self.store.db.execute(
+            "SELECT * FROM goal_schedules WHERE schedule_id=?", (schedule_id,)
+        ).fetchone()
+        if row is None:
+            raise KeyError(schedule_id)
+        expected = dict(row)
+        if not row["enabled"] or row["due_at"] > now or row["retry_at"] > now:
+            return None
+        settings = json.loads(row["settings_json"])
+        request_id = f"wake:{schedule_id}:{row['sequence']}"
+        # 先在写锁外完成 Memory/知识/对象/环境读取；竞争者消费同一机会时，本次退出。
+        try:
+            prepared = self.workspace.repository.prepare_turn(
+                row["session_id"], row["prompt"], request_id,
+                goal_id=row["goal_id"], _settings=settings, _recall_memory=True,
+            )
+        except (IdentityConflict, ValueError):
+            current = self.store.db.execute(
+                "SELECT * FROM goal_schedules WHERE schedule_id=?", (schedule_id,)
+            ).fetchone()
+            if current is not None and dict(current) != expected:
+                return None
+            raise
         # 本地事务边界：下列写入一起提交，异常整体回滚；文件/网络效果须在事务外另行核对。
         with self.store.tx() as db:
             row = db.execute(
@@ -224,7 +248,7 @@ class GoalScheduler:
             ).fetchone()
             if row is None:
                 raise KeyError(schedule_id)
-            if not row["enabled"] or row["due_at"] > now or row["retry_at"] > now:
+            if dict(row) != expected:
                 return None
             # 在当前准入事务核对 Goal 和完整进度；缺失状态拒绝准入，不做旧库回填。
             goal = self.workspace.personal.admission_snapshot(db, row["goal_id"])
@@ -237,21 +261,14 @@ class GoalScheduler:
                 raise ValueError(
                     "Goal is paused, blocked, or waiting; resolve its existing work first"
                 )
-            session = self.workspace.repository.session(row["session_id"])
-            memory = self.workspace.memory.search(
-                row["prompt"],
-                limit=6,
-                project_id=session.get("project_id"),
-                session_id=row["session_id"],
-            )
             turn = self.workspace.repository.create_turn(
                 row["session_id"],
                 row["prompt"],
-                f"wake:{schedule_id}:{row['sequence']}",
-                memory_records=memory,
+                request_id,
                 goal_id=row["goal_id"],
                 _db=db,
-                _settings=json.loads(row["settings_json"]),
+                _settings=settings,
+                _prepared=prepared,
             )
             rid = turn["run_id"]
             db.execute(

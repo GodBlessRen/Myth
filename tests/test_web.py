@@ -21,7 +21,7 @@ from myth.web import ASSET_DIR, AgentWebService, make_handler, serve
 class WebSurfaceTests(unittest.TestCase):
     # 回归断言：包内静态资源及 renderer 入口存在；只证明打包合同，不证明视觉质量。
     def test_packaged_web_assets_exist(self) -> None:
-        for name in ("index.html", "app.css", "app.js", "studio.js", "taiji.svg", "inspector.js", "goals.js", "statistics.js", "reconnect.js", "theme.js", "favicon.svg", "fonts/myth-sans.woff2", "fonts/myth-serif.woff2", "fonts/myth-latin.woff2", "fonts/OFL-NotoSansSC.txt", "fonts/OFL-NotoSerifSC.txt", "fonts/OFL-Manrope.txt"):
+        for name in ("index.html", "app.css", "app.js", "studio.js", "logo.svg", "logo-dark.svg", "logo-mono.svg", "logo-16.svg", "logo-32.svg", "inspector.js", "goals.js", "statistics.js", "reconnect.js", "theme.js", "favicon.svg", "fonts/myth-sans.woff2", "fonts/myth-serif.woff2", "fonts/myth-latin.woff2", "fonts/OFL-NotoSansSC.txt", "fonts/OFL-NotoSerifSC.txt", "fonts/OFL-Manrope.txt"):
             path = ASSET_DIR / name
             self.assertTrue(path.is_file(), path)
             self.assertGreater(path.stat().st_size, 100)
@@ -51,7 +51,7 @@ class WebSurfaceTests(unittest.TestCase):
                     self.assertIn("script-src 'self'", response.headers["Content-Security-Policy"])
                     self.assertLess(html.index('src="/theme.js"'), html.index('href="/app.css"'))
                     self.assertNotRegex(html, r"<script(?![^>]*src=)[^>]*>\s*\S")
-                for path, content_type in (("/theme.js", "text/javascript"), ("/studio.js", "text/javascript"), ("/choices.js", "text/javascript"), ("/ink-taiji.png", "image/png"), ("/taiji.svg", "image/svg+xml"), ("/favicon.svg", "image/svg+xml"), ("/fonts/myth-sans.woff2", "font/woff2"), ("/fonts/myth-serif.woff2", "font/woff2"), ("/fonts/myth-latin.woff2", "font/woff2")):
+                for path, content_type in (("/theme.js", "text/javascript"), ("/studio.js", "text/javascript"), ("/choices.js", "text/javascript"), ("/logo.svg", "image/svg+xml"), ("/logo-dark.svg", "image/svg+xml"), ("/logo-mono.svg", "image/svg+xml"), ("/logo-16.svg", "image/svg+xml"), ("/logo-32.svg", "image/svg+xml"), ("/favicon.svg", "image/svg+xml"), ("/fonts/myth-sans.woff2", "font/woff2"), ("/fonts/myth-serif.woff2", "font/woff2"), ("/fonts/myth-latin.woff2", "font/woff2")):
                     with urlopen(base + path, timeout=3) as response:
                         self.assertEqual(response.status, 200)
                         self.assertIn(content_type, response.headers["Content-Type"])
@@ -61,7 +61,7 @@ class WebSurfaceTests(unittest.TestCase):
                             self.assertEqual(body[:4], b"wOF2")
                             self.assertIn("default-src 'self'", response.headers["Content-Security-Policy"])
                 # 新静态路径不得变成通用文件服务器；未知字体和编码后的穿越均不公开文件。
-                for path in ("/fonts/unknown.woff2", "/fonts/%2e%2e/web.py", "/fonts/OFL-NotoSansSC.txt"):
+                for path in ("/fonts/unknown.woff2", "/fonts/%2e%2e/web.py", "/fonts/OFL-NotoSansSC.txt", "/taiji.svg", "/ink-taiji.png", "/../web.py", "/logo.svg/../web.py"):
                     with self.assertRaises(HTTPError) as rejected:
                         urlopen(base + path, timeout=3)
                     self.assertEqual(rejected.exception.code, 404)

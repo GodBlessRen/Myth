@@ -407,24 +407,8 @@ class SqliteWorkspaceRepository:
         return self.session(sid)
 
 
-    # 同事务去重入口、校验会话/Goal、冻结上下文、预算、Turn、Goal 关联和游标；调度 occurrence 可加入同一连接事务。
-    def create_turn(
-        self,
-        sid,
-        text,
-        request_id,
-        document_ids=None,
-        memory_records=None,
-        goal_id=None,
-        goal_context=None,
-        memory_retrieval_report=None,
-        *,
-        _db=None,
-        _settings=None,
-    ):
-        # 调度机会显式加入相同连接事务；RuntimeStore.tx 保持不可嵌套，外部效果不因此移入事务。
-        if _db is not None and (_db is not self.store.db or not _db.in_transaction):
-            raise RuntimeError("admission requires this store's active transaction")
+    def _turn_entry(self, sid, text, request_id, document_ids, memory_records, goal_id, _settings):
+        """验证入口并计算稳定意图身份；召回、时间和环境版本不改变 request_id 的含义。"""
         if (
             not isinstance(text, str)
             or not text.strip()
@@ -437,7 +421,6 @@ class SqliteWorkspaceRepository:
         if not settings["model"]:
             raise ValueError("请先在模型设置中选择模型。")
         document_ids = document_ids or []
-        memory_records = memory_records or []
         if (
             not isinstance(document_ids, list)
             or len(document_ids) > 4
@@ -456,232 +439,303 @@ class SqliteWorkspaceRepository:
                 "evaluation_harness_mechanisms": self.evaluation_harness_mechanisms,
             }
         )
+        return settings, document_ids, memory_records, identity
+
+    def _admission_inputs(self, sid, goal_id, *, current_settings):
+        """只读 SQL 构建准入版本；跨聚合仍调用各状态所有者，不写他人表。"""
+        # 先拒绝归档/活跃工作，再固定 Goal、来源水位和设置；摘要只用于提交 CAS，不授予外部效果权限。
+        session = self.session(sid)
+        if session["archived"]:
+            raise ValueError("restore the archived conversation first")
+        if any(t["status"] in ACTIVE_TURN_STATUSES for t in session["turns"]):
+            raise ValueError("本会话仍有未完成一轮，请先继续、答复或停止。")
+        project = self.project(session["project_id"]) if session["project_id"] else None
+        goal = {}
+        if goal_id:
+            if self.personal is None:
+                raise RuntimeError("Goal admission requires the personal-state repository")
+            goal = (self.personal.admission_snapshot(self.store.db, goal_id)
+                    if self.store.db.in_transaction
+                    else {**self.personal.goal(goal_id), "work": self.personal.work_state(goal_id)})
+            if goal["state"] != "ACTIVE":
+                raise ValueError("only an active Goal admits new work")
+            if self.store.db.execute(
+                "SELECT 1 FROM goal_runs g JOIN workspace_turns t ON t.run_id=g.run_id "
+                "WHERE g.goal_id=? AND t.status IN ('RUNNING','INTERRUPTED','UNKNOWN','WAITING_USER','PAUSED') LIMIT 1",
+                (goal_id,),
+            ).fetchone():
+                raise ValueError("Goal has unfinished work; continue or stop that Run first")
+        facts = (self.memory_state.continuity_facts(project_id=session["project_id"], session_id=sid)
+                 if self.memory_state is not None else {"policy": "current-facts-unbound", "count": 0, "digest": None})
+        memory_revision = self.memory_state.current_change_seq() if self.memory_state is not None else None
+        basis = {
+            "session": {key: value for key, value in session.items() if key != "turns"},
+            "turns": [{"run_id": t["run_id"], "status": t["status"], "snapshot": t["snapshot"]} for t in session["turns"]],
+            "project": project, "goal": goal, "current_facts": facts,
+            "knowledge_revision": self.knowledge.admission_revision(session["project_id"]),
+            "memory_revision": memory_revision,
+            "settings": self.settings() if current_settings else None,
+            "resolution_policy": self.resolution_policy_id,
+            "evaluation_harness": self.evaluation_harness_mechanisms,
+        }
+        return {"session": session, "project": project, "goal": goal, "current_facts": facts,
+                "memory_revision": memory_revision, "basis": digest_json(basis), "settings": basis["settings"]}
+
+    def prepare_turn(self, sid, text, request_id, document_ids=None, memory_records=None,
+                     goal_id=None, goal_context=None, memory_retrieval_report=None, *,
+                     _settings=None, _memory_revision=None, _recall_memory=False):
+        """在写事务外准备上下文；外部服务失败没有 Run，稳定入口可以重新准备。
+
+        先读 SQL basis，再做知识/对象/文件读取，最后重读 basis；提交仍会再次 CAS。
+        这不是外部环境的锁：冻结文件摘要只是观察事实，执行时继续核对真实范围与效果。
+        """
+        if self.store.db.in_transaction:
+            raise RuntimeError("turn preparation must precede the write transaction")
+        settings, document_ids, memory_records, identity = self._turn_entry(
+            sid, text, request_id, document_ids, memory_records, goal_id, _settings)
+        inputs = self._admission_inputs(sid, goal_id, current_settings=_settings is None)
+        if _settings is None and settings != inputs["settings"]:
+            raise IdentityConflict("settings changed before turn preparation")
+        if _memory_revision is not None and _memory_revision != inputs["memory_revision"]:
+            raise IdentityConflict("memory changed during recall preparation")
+        session, project = inputs["session"], inputs["project"]
+        current_facts, goal_context = inputs["current_facts"], inputs["goal"]
+        # Memory 与知识召回共用准入前后版本核对；HTTP/调度入口不能提前取一份无版本的召回。
+        if memory_records is None:
+            if _recall_memory and self.memory_state is not None:
+                memory_report = self.memory_state.search_view_report(
+                    text, limit=6, project_id=session["project_id"], session_id=sid)
+                memory_records = memory_report["memories"]
+                memory_retrieval_report = memory_report["retrieval"]
+            else:
+                memory_records = []
+        retrieval = self.knowledge.search_report(text, session["project_id"])
+        knowledge = list(retrieval["sources"])
+        for did in document_ids:
+            document = self.knowledge.document(did)
+            if document["archived"]:
+                raise ValueError("attachment was removed from the retrieval index")
+            if document["project_id"] not in {None, session["project_id"]}:
+                raise PermissionError("attachment belongs to another project")
+            if not any(s["document_id"] == did for s in knowledge):
+                knowledge.append(
+                    {
+                        "document_id": did,
+                        "title": document["title"],
+                        "content": document["content"][:1800],
+                        "chunk_index": 0,
+                        "digest": document["digest"],
+                        "citation": f"doc:{did}:0",
+                        "score": 0,
+                    }
+                )
+        if document_ids:
+            # 每份显式附件先保留至少一个代表来源；同文档多片段不能挤掉另一份固定附件。
+            pinned = set(document_ids)
+            representatives = []
+            for did in document_ids:
+                candidates = [
+                    item for item in knowledge if item["document_id"] == did
+                ]
+                if candidates:
+                    representatives.append(
+                        max(
+                            candidates,
+                            key=lambda item: float(item.get("score") or 0.0),
+                        )
+                    )
+            representative_ids = {
+                (item["document_id"], item.get("chunk_index"))
+                for item in representatives
+            }
+            remainder = [
+                item
+                for item in knowledge
+                if (item["document_id"], item.get("chunk_index"))
+                not in representative_ids
+            ]
+            remainder.sort(
+                key=lambda item: (
+                    item["document_id"] not in pinned,
+                    -float(item.get("score") or 0.0),
+                )
+            )
+            knowledge = representatives + remainder
+        pick = self.intent_picker.pick(
+            text,
+            {
+                "project": project,
+                "sources": knowledge,
+                "attached_document_ids": document_ids,
+            },
+        )
+        plan = self.resolution_controller.choose(
+            text,
+            route=pick.route,
+            sources=knowledge,
+            attached_document_ids=document_ids,
+        )
+        projected_knowledge = []
+        effective_max = max(plan.max_sources, len(document_ids))
+        for source in knowledge[:effective_max]:
+            item = dict(source)
+            item["source_ref"] = f"doc:{item['document_id']}@{item['digest']}"
+            if plan.resolution.value == "L0":
+                item["content"] = item.get("content", "")[
+                    : plan.max_chars_per_source
+                ]
+            elif plan.resolution.value == "L2":
+                document = self.knowledge.document(item["document_id"])
+                chunk_index = int(item.get("chunk_index") or 0)
+                start = max(0, chunk_index * 1600 - 800)
+                item["content"] = document["content"][
+                    start : start + plan.max_chars_per_source
+                ]
+                item["source_ref"] = (
+                    f"doc:{item['document_id']}@{document['digest']}"
+                )
+                item["resolution_offset"] = start
+            item["resolution"] = plan.resolution.value
+            projected_knowledge.append(item)
+        # Continuity 先读取完整历史；提交时核对 basis，历史变化会使整份准备失效。
+        history_records = list(session["messages"])
+        history_messages = [
+            {"role": m["role"], "content": m["content"]}
+            for m in history_records
+        ]
+        previous_turn = None
+        previous_row = self.store.db.execute(
+            "SELECT run_id,status,snapshot_json FROM workspace_turns "
+            "WHERE session_id=? ORDER BY rowid DESC LIMIT 1",
+            (sid,),
+        ).fetchone()
+        if previous_row:
+            previous_turn = {
+                "run_id": previous_row["run_id"],
+                "status": previous_row["status"],
+                "snapshot": json.loads(previous_row["snapshot_json"]),
+            }
+        continuity = plan_conversation_continuity(
+            previous_turn=previous_turn,
+            history=history_records,
+            settings=settings,
+            project=project,
+            current_facts=current_facts,
+        )
+        previous_anchor = (
+            previous_turn["snapshot"].get("context_anchor")
+            if previous_turn and continuity["anchor_reuse"]
+            else None
+        )
+        context_anchor = (
+            build_context_anchor(
+                previous_anchor,
+                history_messages,
+                cover_count=max(0, len(history_messages) - 8),
+            )
+            if len(history_messages) > 12
+            else previous_anchor
+        )
+        recent_history = (
+            history_messages[-8:] if context_anchor else history_messages[-30:]
+        )
+        snapshot = {
+            "project": project,
+            "knowledge": projected_knowledge,
+            "retrieval_report": retrieval["retrieval"],
+            "intent_pick": {
+                "route": pick.route.value,
+                "objective": pick.objective,
+                "confidence": pick.confidence,
+                "reason": pick.reason,
+                "metadata": pick.metadata or {},
+            },
+            "information_resolution": plan.serializable(),
+            "policy_bindings": {
+                "information_resolution": self.resolution_policy_id,
+            },
+            "attached_document_ids": list(document_ids),
+            "context_anchor": context_anchor,
+            "continuity": continuity,
+            "turn_message_start": len(recent_history),
+            "memory": [
+                {
+                    "memory_id": m.get("memory_id"),
+                    "kind": m.get("kind"),
+                    "text": m.get("text", ""),
+                    "source_ref": m.get("source_ref"),
+                    "provenance_ref": m.get("provenance_ref"),
+                    "scope_type": m.get("scope_type", "global"),
+                    "scope_id": m.get("scope_id"),
+                    "fact_level": m.get("fact_level", "context"),
+                    "revision": m.get("revision"),
+                    "resolution": m.get("resolution", "L0"),
+                }
+                for m in memory_records[:8]
+            ],
+            "memory_retrieval_report": dict(memory_retrieval_report or {}),
+            "messages": recent_history
+            + [{"role": "user", "content": text}],
+            "goal": dict(goal_context or {}),
+        }
+        if self.evaluation_harness_mechanisms is not None:
+            snapshot["evaluation_harness_mechanisms"] = list(
+                self.evaluation_harness_mechanisms
+            )
+        if self.sota_route is not None:
+            # 冻结项目/上下文环境摘要，使“SOTA Route”只在可证明同条件时比较。
+            snapshot["sota_route_environment"] = self.sota_route.freeze_environment(snapshot)
+            hint = self.sota_route.hint_for_snapshot(text, settings, snapshot)
+            if hint:
+                snapshot["sota_route_hint"] = hint
+        final = self._admission_inputs(sid, goal_id, current_settings=_settings is None)
+        if final["basis"] != inputs["basis"]:
+            raise IdentityConflict("admission context changed during preparation; prepare again")
+        return {"identity": identity, "basis": inputs["basis"], "snapshot": snapshot,
+                "current_settings": _settings is None}
+
+    def create_turn(self, sid, text, request_id, document_ids=None, memory_records=None,
+                    goal_id=None, goal_context=None, memory_retrieval_report=None, *,
+                    _db=None, _settings=None, _prepared=None, _memory_revision=None, _recall_memory=False):
+        """稳定请求去重后准备，再用同连接短事务准入 Turn/预算/Goal/游标。
+
+        仓储拥有准入事实：准备失败不留 Run；SQL basis 变化拒绝整份快照，不能半采用。
+        调度者必须先 prepare_turn 再传入自己的事务；任何写入失败整体回滚 occurrence。
+        重入先核对 request_id，让竞争赢家复用原 Run，不因后来的 Memory 变化重放效果。
+        """
+        if _db is not None and (_db is not self.store.db or not _db.in_transaction):
+            raise RuntimeError("admission requires this store's active transaction")
+        settings, document_ids, memory_records, identity = self._turn_entry(
+            sid, text, request_id, document_ids, memory_records, goal_id, _settings)
+        existing = self.store.db.execute(
+            "SELECT run_id,entry_digest FROM workspace_turns WHERE request_id=?", (request_id,)
+        ).fetchone()
+        if existing:
+            if existing["entry_digest"] != identity:
+                raise IdentityConflict("request_id reused with different message or settings")
+            return self.turn(existing["run_id"])
+        if _prepared is None:
+            if _db is not None:
+                raise RuntimeError("shared admission requires a prepared turn")
+            _prepared = self.prepare_turn(sid, text, request_id, document_ids, memory_records,
+                goal_id, goal_context, memory_retrieval_report, _settings=_settings,
+                _memory_revision=_memory_revision, _recall_memory=_recall_memory)
+        if _prepared["identity"] != identity:
+            raise IdentityConflict("prepared turn belongs to a different entry")
         with self.store.tx() if _db is None else nullcontext(_db) as db:
             existing = db.execute(
-                "SELECT run_id,entry_digest FROM workspace_turns WHERE request_id=?",
-                (request_id,),
+                "SELECT run_id,entry_digest FROM workspace_turns WHERE request_id=?", (request_id,)
             ).fetchone()
             if existing:
                 if existing["entry_digest"] != identity:
-                    raise IdentityConflict(
-                        "request_id reused with different message or settings"
-                    )
+                    raise IdentityConflict("request_id reused with different message or settings")
                 return self.turn(existing["run_id"])
-            session = self.session(sid)
-            if session["archived"]:
-                raise ValueError("restore the archived conversation first")
-            if any(t["status"] in ACTIVE_TURN_STATUSES for t in session["turns"]):
-                raise ValueError("本会话仍有未完成一轮，请先继续、答复或停止。")
-            if goal_id:
-                if self.personal is None:
-                    raise RuntimeError(
-                        "Goal admission requires the personal-state repository"
-                    )
-                # 本仓储协调 Turn 原子准入；个人表的校验和写入交给其状态所有者。
-                goal_context = self.personal.admission_snapshot(db, goal_id)
-                occupied = db.execute(
-                    "SELECT 1 FROM goal_runs g JOIN workspace_turns t ON t.run_id=g.run_id "
-                    "WHERE g.goal_id=? AND t.status IN ('RUNNING','INTERRUPTED','UNKNOWN','WAITING_USER','PAUSED') LIMIT 1",
-                    (goal_id,),
-                ).fetchone()
-                if occupied:
-                    raise ValueError(
-                        "Goal has unfinished work; continue or stop that Run first"
-                    )
-            project = (
-                self.project(session["project_id"]) if session["project_id"] else None
-            )
-            # Current Facts 与 query-based Recall 分开：版本绑定来自权威 Memory 状态，不由相似度排名决定。
-            current_facts = (
-                self.memory_state.continuity_facts(
-                    project_id=session["project_id"], session_id=sid
-                )
-                if self.memory_state is not None
-                else {
-                    "policy": "current-facts-unbound",
-                    "count": 0,
-                    "digest": None,
-                }
-            )
-            retrieval = self.knowledge.search_report(text, session["project_id"])
-            knowledge = list(retrieval["sources"])
-            for did in document_ids:
-                document = self.knowledge.document(did)
-                if document["archived"]:
-                    raise ValueError("attachment was removed from the retrieval index")
-                if document["project_id"] not in {None, session["project_id"]}:
-                    raise PermissionError("attachment belongs to another project")
-                if not any(s["document_id"] == did for s in knowledge):
-                    knowledge.append(
-                        {
-                            "document_id": did,
-                            "title": document["title"],
-                            "content": document["content"][:1800],
-                            "chunk_index": 0,
-                            "digest": document["digest"],
-                            "citation": f"doc:{did}:0",
-                            "score": 0,
-                        }
-                    )
-            if document_ids:
-                # 每份显式附件先保留至少一个代表来源；同文档多片段不能挤掉另一份固定附件。
-                pinned = set(document_ids)
-                representatives = []
-                for did in document_ids:
-                    candidates = [
-                        item for item in knowledge if item["document_id"] == did
-                    ]
-                    if candidates:
-                        representatives.append(
-                            max(
-                                candidates,
-                                key=lambda item: float(item.get("score") or 0.0),
-                            )
-                        )
-                representative_ids = {
-                    (item["document_id"], item.get("chunk_index"))
-                    for item in representatives
-                }
-                remainder = [
-                    item
-                    for item in knowledge
-                    if (item["document_id"], item.get("chunk_index"))
-                    not in representative_ids
-                ]
-                remainder.sort(
-                    key=lambda item: (
-                        item["document_id"] not in pinned,
-                        -float(item.get("score") or 0.0),
-                    )
-                )
-                knowledge = representatives + remainder
-            pick = self.intent_picker.pick(
-                text,
-                {
-                    "project": project,
-                    "sources": knowledge,
-                    "attached_document_ids": document_ids,
-                },
-            )
-            plan = self.resolution_controller.choose(
-                text,
-                route=pick.route,
-                sources=knowledge,
-                attached_document_ids=document_ids,
-            )
-            projected_knowledge = []
-            effective_max = max(plan.max_sources, len(document_ids))
-            for source in knowledge[:effective_max]:
-                item = dict(source)
-                item["source_ref"] = f"doc:{item['document_id']}@{item['digest']}"
-                if plan.resolution.value == "L0":
-                    item["content"] = item.get("content", "")[
-                        : plan.max_chars_per_source
-                    ]
-                elif plan.resolution.value == "L2":
-                    document = self.knowledge.document(item["document_id"])
-                    chunk_index = int(item.get("chunk_index") or 0)
-                    start = max(0, chunk_index * 1600 - 800)
-                    item["content"] = document["content"][
-                        start : start + plan.max_chars_per_source
-                    ]
-                    item["source_ref"] = (
-                        f"doc:{item['document_id']}@{document['digest']}"
-                    )
-                    item["resolution_offset"] = start
-                item["resolution"] = plan.resolution.value
-                projected_knowledge.append(item)
-            # Continuity 在 Turn 准入事务内核对完整持久消息；Context Anchor 只在证明可复用后增量推进。
-            history_records = list(session["messages"])
-            history_messages = [
-                {"role": m["role"], "content": m["content"]}
-                for m in history_records
-            ]
-            previous_turn = None
-            previous_row = db.execute(
-                "SELECT run_id,status,snapshot_json FROM workspace_turns "
-                "WHERE session_id=? ORDER BY rowid DESC LIMIT 1",
-                (sid,),
-            ).fetchone()
-            if previous_row:
-                previous_turn = {
-                    "run_id": previous_row["run_id"],
-                    "status": previous_row["status"],
-                    "snapshot": json.loads(previous_row["snapshot_json"]),
-                }
-            continuity = plan_conversation_continuity(
-                previous_turn=previous_turn,
-                history=history_records,
-                settings=settings,
-                project=project,
-                current_facts=current_facts,
-            )
-            previous_anchor = (
-                previous_turn["snapshot"].get("context_anchor")
-                if previous_turn and continuity["anchor_reuse"]
-                else None
-            )
-            context_anchor = (
-                build_context_anchor(
-                    previous_anchor,
-                    history_messages,
-                    cover_count=max(0, len(history_messages) - 8),
-                )
-                if len(history_messages) > 12
-                else previous_anchor
-            )
-            recent_history = (
-                history_messages[-8:] if context_anchor else history_messages[-30:]
-            )
-            snapshot = {
-                "project": project,
-                "knowledge": projected_knowledge,
-                "retrieval_report": retrieval["retrieval"],
-                "intent_pick": {
-                    "route": pick.route.value,
-                    "objective": pick.objective,
-                    "confidence": pick.confidence,
-                    "reason": pick.reason,
-                    "metadata": pick.metadata or {},
-                },
-                "information_resolution": plan.serializable(),
-                "policy_bindings": {
-                    "information_resolution": self.resolution_policy_id,
-                },
-                "attached_document_ids": list(document_ids),
-                "context_anchor": context_anchor,
-                "continuity": continuity,
-                "turn_message_start": len(recent_history),
-                "memory": [
-                    {
-                        "memory_id": m.get("memory_id"),
-                        "kind": m.get("kind"),
-                        "text": m.get("text", ""),
-                        "source_ref": m.get("source_ref"),
-                        "provenance_ref": m.get("provenance_ref"),
-                        "scope_type": m.get("scope_type", "global"),
-                        "scope_id": m.get("scope_id"),
-                        "fact_level": m.get("fact_level", "context"),
-                        "revision": m.get("revision"),
-                        "resolution": m.get("resolution", "L0"),
-                    }
-                    for m in memory_records[:8]
-                ],
-                "memory_retrieval_report": dict(memory_retrieval_report or {}),
-                "messages": recent_history
-                + [{"role": "user", "content": text}],
-                "goal": dict(goal_context or {}),
-            }
-            if self.evaluation_harness_mechanisms is not None:
-                snapshot["evaluation_harness_mechanisms"] = list(
-                    self.evaluation_harness_mechanisms
-                )
-            if self.sota_route is not None:
-                # 冻结项目/上下文环境摘要，使“SOTA Route”只在可证明同条件时比较。
-                snapshot["sota_route_environment"] = self.sota_route.freeze_environment(snapshot)
-                hint = self.sota_route.hint_for_snapshot(text, settings, snapshot)
-                if hint:
-                    snapshot["sota_route_hint"] = hint
+            inputs = self._admission_inputs(sid, goal_id, current_settings=_prepared["current_settings"])
+            if inputs["basis"] != _prepared["basis"]:
+                raise IdentityConflict("admission context changed before commit; prepare again")
+            snapshot = _prepared["snapshot"]
+            continuity = snapshot["continuity"]
+            retrieval = {"retrieval": snapshot["retrieval_report"]}
             rid = new_id("run")
             db.execute(
                 "INSERT INTO runs(run_id,request_id,entry_digest,goal,acceptance_version,state) VALUES(?,?,?,?,?,'RUNNING')",
@@ -727,8 +781,8 @@ class SqliteWorkspaceRepository:
                 "ConversationTurnStarted",
                 {
                     "session_id": sid,
-                    "intent_route": pick.route.value,
-                    "information_resolution": plan.resolution.value,
+                    "intent_route": snapshot["intent_pick"]["route"],
+                    "information_resolution": snapshot["information_resolution"]["resolution"],
                     "retrieval_scanned": retrieval["retrieval"]["scanned"],
                     "retrieval_matched": retrieval["retrieval"]["matched"],
                     "goal_id": goal_id,
@@ -1108,9 +1162,23 @@ class SqliteWorkspaceRepository:
     def bind(self, rid, step, decision_id, decision):
         # 本地事务边界：下列写入一起提交，异常整体回滚；文件/网络效果须在事务外另行核对。
         with self.store.tx() as db:
+            payload = canonical_json(decision.serializable())
+            row = db.execute(
+                "SELECT s.*,t.current_step FROM workspace_steps s JOIN workspace_turns t ON t.run_id=s.run_id "
+                "WHERE s.run_id=? AND s.step=?", (rid, step)
+            ).fetchone()
+            if row is None:
+                raise InvalidTransition("step has not been admitted")
+            if row["decision_id"] is not None:
+                if row["decision_id"] != decision_id or row["decision_json"] != payload:
+                    raise IdentityConflict("step already bound to a different decision")
+                # 相同决定重入保留 DONE/原游标；不重复发布 checkpoint 或推进 Goal 时间。
+                return
+            if row["state"] != "STARTED" or row["current_step"] != step:
+                raise InvalidTransition("only the current started step can bind a decision")
             db.execute(
                 "UPDATE workspace_steps SET state='DECIDED',decision_id=?,decision_json=? WHERE run_id=? AND step=?",
-                (decision_id, canonical_json(decision.serializable()), rid, step),
+                (decision_id, payload, rid, step),
             )
             self._checkpoint(
                 db,
@@ -1481,6 +1549,8 @@ class SqliteWorkspaceRepository:
         """仅供仓储同事务协调；批量子 Ticket 的权限来自已核对的父模型决定。"""
         old = self.operation(decision_id)
         if old:
+            if old["run_id"] != rid or old["capability"] != capability or old["intent_json"] != canonical_json(intent):
+                raise IdentityConflict("operation identity reused with a different owner or intent")
             return old
         if self.turn(rid)["status"] != "RUNNING":
             raise ValueError("turn stopped")
@@ -1505,6 +1575,8 @@ class SqliteWorkspaceRepository:
         if not owner or owner[0] != rid:
             raise ValueError("decision belongs to another turn")
         amount = intent.get("write_bytes", 0)
+        if type(amount) is not int or amount < 0:
+            raise ValueError("write_bytes must be a non-negative integer")
         for meter, cost in {"tool_calls": 1, "write_bytes": amount}.items():
             changed = db.execute(
                 "UPDATE accounts SET reserved=reserved+? WHERE run_id=? AND meter=? AND limit_units-settled-reserved-unknown_held>=?",
@@ -1541,11 +1613,12 @@ class SqliteWorkspaceRepository:
     def start_parallel(self, rid, decision_id, contracts, fallbacks):
         """一次短事务准入父批次及全部子 Ticket；额度不足整体回滚，任何子模型尚未派发。"""
         with self.store.tx() as db:
-            old = self.operation(decision_id)
-            if old:
-                return old
             intent = {"write_bytes": 0, "requires_receipt": True,
                       "parallel": contracts, "fallbacks": fallbacks}
+            old = self.operation(decision_id)
+            if old:
+                self._start_operation(db, rid, decision_id, "agent.parallel", intent)
+                return old
             self._start_operation(db, rid, decision_id, "agent.parallel", intent)
             for contract in contracts:
                 self._start_operation(db, rid, contract["delegation_id"], "agent.delegate",
@@ -1558,7 +1631,11 @@ class SqliteWorkspaceRepository:
         # 本地事务边界：下列写入一起提交，异常整体回滚；文件/网络效果须在事务外另行核对。
         with self.store.tx() as db:
             op = self.operation(decision_id)
+            if op is None:
+                raise InvalidTransition("operation has not been ticketed")
             if op["state"] == "RESOLVED":
+                if op["result_json"] != canonical_json(result):
+                    raise IdentityConflict("resolved operation cannot accept a different receipt")
                 return op["result"]
             if "result" in op["intent"] and result != op["intent"]["result"]:
                 raise IdentityConflict("tool result differs from admitted intent")

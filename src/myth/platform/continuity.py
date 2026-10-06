@@ -142,6 +142,8 @@ def plan_conversation_continuity(
     current_facts: Mapping[str, Any] | None,
 ) -> dict[str, Any]:
     """决定派生历史能否复用；rebuild 不删除历史，也不授予任何效果重放权。"""
+    # 先核对上一Turn终态、策略版本和配置/当前事实绑定，再核对历史前缀摘要。
+    # 任一绑定或前缀变化都重建epoch；只有完整匹配才允许追加历史并复用派生anchor。
     messages = list(history)
     binding = continuity_binding(settings, project, current_facts)
     if previous_turn is None:

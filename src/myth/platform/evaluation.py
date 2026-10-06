@@ -133,6 +133,8 @@ def compare_observations(
 ) -> PairedEvalComparison:
     if baseline.case_id != candidate.case_id:
         raise ValueError("paired evaluation requires the same case_id")
+    # 配对先要求同题、同comparison_key和明确policy；未测质量保持None。
+    # 成本差只取双方共同测量维度，不能补零把缺测变成节省。
     baseline_key = baseline.comparison_key or baseline.case_id
     candidate_key = candidate.comparison_key or candidate.case_id
     if baseline_key != candidate_key:
@@ -185,7 +187,7 @@ class EvalReport:
     inconclusive_count: int
     # safety_regressions：安全/恢复不变量回归数量。
     safety_regressions: int
-    # measured_cost：当前已报告标量 cost 汇总；不能代替完整真实用量测量。
+    # measured_cost：已报告标量 cost 的小计；全部缺测为 None，实测零为 0，不代替全量费用。
     measured_cost: int | None = None
     # unsupported_count：运行器未支持题数；不是通过，也不静默省略。
     unsupported_count: int = 0
@@ -243,6 +245,13 @@ def summarize_observations(
     observations: Iterable[EvalObservation],
 ) -> EvalReport:
     values = tuple(observations)
+    # 先收集真实报告的 cost，再求小计：例如 [None, 0] 是 0，[None] 必须是 None。
+    # 混合缺测题仍留在质量分母；小计不证明全部成本已测，也不参与替代配对效率门。
+    costs = [
+        int(item.metrics["cost"])
+        for item in values
+        if (item.metrics or {}).get("cost") is not None
+    ]
     return EvalReport(
         suite_id=suite_id,
         pass_count=sum(item.verdict is EvalVerdict.PASS for item in values),
@@ -254,11 +263,7 @@ def summarize_observations(
             item.verdict is EvalVerdict.UNSUPPORTED for item in values
         ),
         safety_regressions=sum(bool(item.safety_regression) for item in values),
-        measured_cost=sum(
-            int((item.metrics or {}).get("cost", 0))
-            for item in values
-            if (item.metrics or {}).get("cost") is not None
-        ),
+        measured_cost=sum(costs) if costs else None,
     )
 
 
@@ -333,6 +338,8 @@ def capability_efficiency_gate(
 ) -> tuple[bool, str, dict[str, float]]:
     if baseline.suite_id != candidate.suite_id or baseline.total != candidate.total:
         return False, "baseline/candidate suite identity differs", {}
+    # 先保护完整分母、安全和质量下限，再检查每组配对是否有真实测量。
+    # 只聚合白名单成本meter；任何成本变差都拒绝，要求改进时还需至少一项严格下降。
     if candidate.safety_regressions:
         return False, "safety/runtime invariant regression", {}
     if candidate.unsupported_count or candidate.inconclusive_count:
@@ -380,6 +387,8 @@ def attribution_matrix(
     baseline_policy_id: str,
 ) -> dict[str, object]:
     values = tuple(observations)
+    # 以明确baseline建立task×policy矩阵，缺失观测保持None。
+    # 只列双方实际观测的结论翻转；机制事件仅辅助定位，不能代替受控消融的因果证明。
     policies = sorted({item.policy_id for item in values if item.policy_id})
     if baseline_policy_id not in policies:
         raise ValueError("attribution requires an explicit observed baseline_policy_id")

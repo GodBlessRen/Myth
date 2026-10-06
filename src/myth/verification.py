@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import signal
 import subprocess
 import sys
@@ -81,6 +82,7 @@ class SqliteVerificationProfiles:
 
     # 只为用户明确可信项目保存 Python unittest 配置；路径、超时秒数和输出字节上限先校验。
     def create(self, project_id: str, value: dict[str, Any]) -> dict[str, Any]:
+        # 信任项目是显式授权；只保存固定 profile，实际进程要等 test.run 的 Ticket 后启动。
         self.repository.project(project_id)
         if value.get("trusted_project") is not True:
             raise ValueError(
@@ -270,15 +272,38 @@ class SqliteVerificationProfiles:
                 spawn_error = f"{type(exc).__name__}: {exc}"
             elapsed_ms = max(0, int((time.monotonic() - start) * 1000))
             limit = int(profile["max_output_bytes"])
+            # unittest 收尾写在 stderr 尾部；展示头部截断不能抹掉完成证据。
+            stderr_file.seek(0, 2)
+            stderr_file.seek(max(0, stderr_file.tell() - 16_384))
+            tail = stderr_file.read(16_384).decode("utf-8", errors="replace").replace("\r\n", "\n")
             stdout_file.seek(0)
             stderr_file.seek(0)
             stdout_raw = stdout_file.read(limit + 1)
             stderr_raw = stderr_file.read(limit + 1)
+        # 固定 CLI 的摘要仅证明受信测试 runner 已收尾，不把项目代码当作安全沙箱。
+        summaries = list(re.finditer(r"^Ran (\d+) tests? in [0-9.]+s$", tail, re.MULTILINE))
+        test_count = int(summaries[-1].group(1)) if summaries else None
+        completed = tail[summaries[-1].end():] if summaries else ""
+        ok = re.search(r"^OK(?: \(([^\n)]+)\))?\s*$", completed, re.MULTILINE)
+        skipped = re.search(r"\bskipped=(\d+)\b", ok.group(1) or "") if ok else None
+        executed_count = max(0, test_count - (int(skipped.group(1)) if skipped else 0)) if test_count is not None else None
+        if spawn_error:
+            reason = "spawn_failed"
+        elif timed_out:
+            reason = "timeout"
+        elif test_count is None:
+            reason = "runner_incomplete"
+        elif executed_count == 0:
+            reason = "no_executed_tests"
+        elif returncode != 0 or not ok:
+            reason = "tests_failed"
+        else:
+            reason = "completed"
         result = {
             "capability_id": "test.run",
             "status": (
                 "PASSED"
-                if returncode == 0 and not timed_out and not spawn_error
+                if reason == "completed"
                 else "FAILED"
             ),
             "profile_id": profile["profile_id"],
@@ -287,6 +312,9 @@ class SqliteVerificationProfiles:
             "timed_out": timed_out,
             "spawn_error": spawn_error,
             "elapsed_ms": elapsed_ms,
+            "test_count": test_count,
+            "executed_test_count": executed_count,
+            "completion_reason": reason,
             "stdout": stdout_raw[:limit].decode("utf-8", errors="replace"),
             "stderr": stderr_raw[:limit].decode("utf-8", errors="replace"),
             "stdout_truncated": len(stdout_raw) > limit,

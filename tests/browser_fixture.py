@@ -2,7 +2,10 @@
 from __future__ import annotations
 
 from http.server import ThreadingHTTPServer
+import argparse
+import hashlib
 import json
+import os
 from pathlib import Path
 import signal
 import tempfile
@@ -15,6 +18,7 @@ from myth.runtime import MythRuntime
 from myth.web import AgentWebService, make_handler
 from myth.web_workspace import ConversationWebService
 from myth.workspace import Workspace
+from myth.web_assets import PUBLIC_ASSETS
 from test_workspace import ChatProvider, decision
 
 
@@ -115,6 +119,9 @@ def main():
     """临时根和所有服务器由当前测试进程拥有；SIGTERM 清理，无真实 OAuth 或外网调用。"""
     out = Path(__file__).resolve().parents[1] / ".work"
     out.mkdir(exist_ok=True)
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--dynamic-ports', action='store_true', help='Allocate independent loopback listeners')
+    args = parser.parse_args()
     signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))
     catalog = {p: {"models": {m: {"cost": {"input": 1, "output": 3}, "limit": {"output": 8192}}
                for m in ("review-model", "review-reasoning")}} for p in ("openai", "anthropic", "deepseek", "moonshotai")}
@@ -123,18 +130,25 @@ def main():
         ids = seed(root / "populated")
         servers = []
         try:
-            for port, sub in ((8770, "populated"), (8772, "populated"), (8773, "empty"), (8776, "populated")):
+            addresses = {}
+            for name, port, sub in (("workflow", 8770, "populated"), ("base", 8772, "populated"), ("empty", 8773, "empty"), ("settings", 8776, "populated"), ("standard", 8769, "standard")):
                 service = AgentWebService(root / sub)
-                service.workspace = FixtureWebService(root / sub)
-                service.workspace.model_catalog = PublicModelCatalog(lambda: catalog)
-                service.provider_key_status = lambda: {"providers": []}
-                service._provider = lambda payload: FixtureProvider(payload.get("provider", "ollama"))
-                server = ThreadingHTTPServer(("127.0.0.1", port), make_handler(service))
+                if name != "standard":
+                    service.workspace = FixtureWebService(root / sub)
+                    service.workspace.model_catalog = PublicModelCatalog(lambda: catalog)
+                    service.provider_key_status = lambda: {"providers": []}
+                    service._provider = lambda payload: FixtureProvider(payload.get("provider", "ollama"))
+                server = ThreadingHTTPServer(("127.0.0.1", 0 if args.dynamic_ports else port), make_handler(service))
                 threading.Thread(target=server.serve_forever, daemon=True).start()
                 servers.append((server, service))
+                addresses[name] = "http://127.0.0.1:" + str(server.server_port)
+            source_root = Path(__file__).resolve().parents[1] / "src/myth/webui"
+            assets = {url: {"file": filename, "mime": mime, "sha256": hashlib.sha256((source_root / filename).read_bytes()).hexdigest()}
+                      for url, (filename, mime) in PUBLIC_ASSETS.items()}
             (out / "browser-fixture.json").write_text(json.dumps({"root": str(root), "ids": ids,
-                "base": "http://127.0.0.1:8772", "boundary": "real HTTP/SQLite/Runtime; deterministic provider"}, ensure_ascii=False), encoding="utf-8")
-            print("READY", flush=True)
+                **addresses, "pid": os.getpid(), "assets": assets,
+                "boundary": "real HTTP/SQLite/Runtime; deterministic provider; separately owned loopback listeners"}, ensure_ascii=False), encoding="utf-8")
+            print("READY " + json.dumps(addresses), flush=True)
             while True:
                 time.sleep(1)
         except KeyboardInterrupt:

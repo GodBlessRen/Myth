@@ -212,7 +212,7 @@ function poolAddChild(profile = {}) {
   remove.onclick = () => { root.remove(); document.getElementById("poolAdd").disabled = false; };
   check.onclick = async () => {
     const config = poolReadChild(root), signature = JSON.stringify([config.provider, config.model, config.ollama_url]); check.disabled = true; status.textContent = "正在检查…";
-    check.replaceChildren(taijiMark(true), document.createTextNode("检查中"));
+    check.replaceChildren(brandMark(true), document.createTextNode("检查中"));
     try {
       const result = await api("/connection", config);
       if (!root.isConnected || signature !== JSON.stringify([poolValue(root, "provider"), poolValue(root, "model").trim(), poolValue(root, "ollama_url")])) return;
@@ -225,7 +225,7 @@ function poolAddChild(profile = {}) {
   };
   connect.onclick = async () => {
     const selected = provider.value; connect.disabled = true;
-    connect.replaceChildren(taijiMark(true), document.createTextNode("验证中"));
+    connect.replaceChildren(brandMark(true), document.createTextNode("验证中"));
     try { await providerAuthApi("/connect", {provider: selected, api_key: key.value}); if (root.isConnected && provider.value === selected) status.textContent = "凭据已验证并保存，同提供方的槽位共用此连接"; }
     catch (error) { if (root.isConnected) status.textContent = error.message; }
     finally { key.value = ""; connect.disabled = false; connect.textContent = "验证并保存凭据"; }

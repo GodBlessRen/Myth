@@ -29,6 +29,8 @@ def normalize_evidence_input(
 ) -> dict[str, str | None]:
     if not isinstance(value, Mapping):
         raise MemoryDeltaError("memory evidence must be an object")
+    # 证据字段严格白名单；来源可为外部ref或Memory身份，revision只能由Store解析。
+    # 正文引用、相关性与时间各自限长，避免证明字段绕过上下文大小边界。
     allowed = {
         "evidence_ref",
         "source_memory_id",
@@ -101,6 +103,8 @@ def normalize_delta_operations(
 ) -> tuple[dict[str, Any], ...]:
     if isinstance(operations, (str, bytes, Mapping)):
         raise MemoryDeltaError("memory delta operations must be a list")
+    # 每项只允许其op对应的确切字段，正文整批最多替换一次。
+    # 证据增删只形成规范提案；任何未知操作拒绝整批，Store稍后按expected_revision原子应用。
     normalized: list[dict[str, Any]] = []
     replace_count = 0
     for index, raw in enumerate(operations):
@@ -176,6 +180,8 @@ def evaluate_freshness(
     current_sources: Mapping[str, Mapping[str, Any] | None],
 ) -> dict[str, Any]:
     rows = [dict(item) for item in evidence]
+    # 只比较固定到source_revision的Memory来源；失踪、撤销和版本变化分别保留原因。
+    # 外部证据没有可核对水位时仍计来源数量，但全部外部来源只能标untracked。
     linked = [item for item in rows if item.get("source_memory_id")]
     stale_sources: list[dict[str, Any]] = []
     for item in linked:

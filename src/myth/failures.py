@@ -48,6 +48,7 @@ def observe_failure(
     *,
     capability_id: str | None = None,
 ) -> FailureObservation:
+    # 先匹配最窄的合同拒绝，再按异常类型归类；retryable 只是建议，不能签发新的 Ticket。
     message = (str(exc) or type(exc).__name__).strip()[:4000]
     lowered = message.lower()
     name = type(exc).__name__
@@ -89,6 +90,7 @@ def observe_failure(
             hint="Read the current source again, then issue a patch whose old_text and expected_count match the observed bytes.",
         )
     if isinstance(exc, PermissionError):
+        # 权限失败不可由模型修复成更大权限；用户授权变更仍须重新准入。
         return FailureObservation(
             "authority",
             "permission_denied",

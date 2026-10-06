@@ -135,7 +135,7 @@ class SqliteEvolutionControl:
     ) -> dict[str, Any]:
         if domain != "information_resolution":
             raise ValueError(
-                "v0.15 only admits information_resolution policy candidates"
+                "only information_resolution policy candidates are admitted"
             )
         # 持久化前装配实际纯策略进行配置校验，拒绝无法装配的候选。
         resolution_controller_from_config(config)

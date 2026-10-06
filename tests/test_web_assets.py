@@ -30,8 +30,8 @@ class WebAssetTests(unittest.TestCase):
 
     def test_every_declared_asset_serves_exact_packaged_bytes(self):
         """新 Logo 与其他所有声明资源一样必须端到端可达。"""
-        self.assertIn('/myth-mark.svg', PUBLIC_ASSETS)
-        self.assertIn('/myth-mark-mono.svg', PUBLIC_ASSETS)
+        for logo in ('/logo.svg', '/logo-dark.svg', '/logo-mono.svg', '/logo-16.svg', '/logo-32.svg', '/favicon.svg'):
+            self.assertIn(logo, PUBLIC_ASSETS)
         for url, (filename, content_type) in PUBLIC_ASSETS.items():
             with self.subTest(url=url):
                 with urlopen(self.base + url, timeout=3) as response:
@@ -57,7 +57,7 @@ class WebAssetTests(unittest.TestCase):
 
     def test_unknown_traversal_and_license_paths_are_not_public(self):
         """端点仍为封闭白名单，不变成字体或项目文件的通用服务器。"""
-        for url in ('/myth-mark.svg/extra', '/web.py', '/fonts/unknown.woff2',
+        for url in ('/logo.svg/extra', '/myth-mark.svg', '/ink-taiji.png', '/taiji.svg', '/web.py', '/fonts/unknown.woff2',
                     '/fonts/%2e%2e/web.py', '/%2e%2e/web.py', '/fonts/OFL-NotoSansSC.txt'):
             with self.subTest(url=url), self.assertRaises(HTTPError) as error:
                 urlopen(self.base + url, timeout=3)
@@ -65,7 +65,7 @@ class WebAssetTests(unittest.TestCase):
 
     def test_asset_dispatch_preserves_same_origin_checks(self):
         """登记 Logo 不能放宽 Host/Origin 入站合同。"""
-        req = Request(self.base + '/myth-mark.svg', headers={'Origin': 'https://untrusted.invalid'})
+        req = Request(self.base + '/logo.svg', headers={'Origin': 'https://untrusted.invalid'})
         with self.assertRaises(HTTPError) as error:
             urlopen(req, timeout=3)
         self.assertEqual(error.exception.code, 403)

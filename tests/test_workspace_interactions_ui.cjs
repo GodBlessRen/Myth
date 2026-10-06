@@ -122,6 +122,75 @@ function compose(h, id = "s1", text = "测试消息") {
   h.context.saveDraft();
 }
 
+// 请求归并必须保留四个命名空间；JSON null也是显式POST，不能被误判为只读请求。
+test("JSON requests retain namespaces and explicit POST values", async () => {
+  const h = boot(), calls = [], cleared = [];
+  let timer = 0;
+  h.context.setTimeout = (_, delay) => { assert.equal(delay, 20000); return ++timer; };
+  h.context.clearTimeout = id => cleared.push(id);
+  h.context.fetch = async (url, options) => { calls.push({url, ...options}); return {ok:true, json:async()=>({ok:true})}; };
+  await h.context.api("/sessions");
+  await h.context.authApi("/status");
+  await h.context.claudeAuthApi("/start", {});
+  await h.context.providerAuthApi("/connect", null);
+  assert.deepEqual(calls.map(call=>call.url), ["/api/workspace/sessions", "/api/auth/chatgpt/status", "/api/auth/claude/start", "/api/auth/providers/connect"]);
+  assert.deepEqual(calls.map(call=>call.method), ["GET", "GET", "POST", "POST"]);
+  assert.equal(calls[2].body, "{}"); assert.equal(calls[3].body, "null");
+  assert.equal(calls[0].body, undefined);
+  assert.ok(calls.every(call=>call.signal instanceof AbortSignal));
+  assert.deepEqual(cleared, [1,2,3,4]);
+});
+
+// HTTP拒绝与JSON解析失败都释放计时器；不把未成功解析的响应当业务成功。
+test("HTTP and malformed JSON failures always release request timers", async () => {
+  const h = boot(), cleared = [];
+  h.context.setTimeout = () => 71;
+  h.context.clearTimeout = id => cleared.push(id);
+  h.context.fetch = async () => ({ok:false, status:409, json:async()=>({error:"UNKNOWN requires reconcile"})});
+  await assert.rejects(h.context.api("/turns", {}), /UNKNOWN requires reconcile/);
+  h.context.fetch = async () => ({ok:true, json:async()=>{throw new SyntaxError("invalid JSON");}});
+  await assert.rejects(h.context.api("/status"), /invalid JSON/);
+  assert.deepEqual(cleared, [71,71]);
+});
+
+// 本地超时不能重放副作用：Abort只结束一次浏览器等待，稳定request_id和草稿仍由调用者保存。
+test("request timeout aborts one wait without replaying a command", async () => {
+  const h = boot(), cleared = [];
+  h.state.pending = {request_id:"same-request", text:"保留草稿"};
+  let expire, calls = 0;
+  h.context.setTimeout = (callback, delay) => { assert.equal(delay, 20000); expire=callback; return 17; };
+  h.context.clearTimeout = id => cleared.push(id);
+  h.context.fetch = (_, options) => new Promise((_, reject) => {
+    calls++;
+    options.signal.addEventListener("abort", ()=>reject(new DOMException("wait aborted", "AbortError")));
+  });
+  const pending = h.context.api("/turns", {request_id:"same-request"});
+  expire();
+  await assert.rejects(pending, error=>error.name==="AbortError");
+  assert.equal(calls,1); assert.equal(h.state.pending.request_id,"same-request");
+  assert.equal(h.state.pending.text,"保留草稿"); assert.deepEqual(cleared,[17]);
+});
+
+// 未测量的时间不能伪造成0秒；明确0、有效测量与整轮wall-clock格式分别保留。
+test("reply elapsed time keeps invalid and measured zero distinct", () => {
+  const h=boot();
+  for (const value of [undefined,null,"4",NaN,Infinity,-1]) assert.equal(h.context.workedTime(value),"用时未报告");
+  assert.equal(h.context.workedTime(0),"用时 0秒");
+  assert.equal(h.context.workedTime(3661.8),"用时 1小时 1分 1秒");
+});
+
+// 索引重建仍按消息顺序附着产物；没有对应消息的真实产物仍保留，不因优化丢失证据。
+test("render indexes preserve artifact identity order and unmatched delivery", () => {
+  const h=boot(), s=session("indexed");
+  s.turns=["r2","r1"].map(run_id=>({run_id,status:"COMPLETED",current_step:1,activities:[],snapshot:{knowledge:[]}}));
+  s.messages=[{id:"m1",run_id:"r1",role:"assistant",content:"先显示第一轮"},{id:"m2",run_id:"r2",role:"assistant",content:"再显示第二轮"},{id:"m3",run_id:"r1",role:"assistant",content:"第一轮补充"}];
+  s.artifacts=[{decision_id:"a2",run_id:"r2",name:"second.txt",bytes:2},{decision_id:"a1",run_id:"r1",name:"first.txt",bytes:1},{decision_id:"a3",run_id:"orphan",name:"independent.txt",bytes:3}];
+  h.context.renderThread(s);
+  const cards=h.$("thread").children.filter(node=>node.className==="artifact-card");
+  assert.deepEqual(cards.map(node=>node.href),["/api/workspace/artifacts/a1","/api/workspace/artifacts/a2","/api/workspace/artifacts/a3"]);
+  assert.equal(h.$("thread").children.filter(node=>node.dataset.messageId).length,3);
+});
+
 test("a live elapsed-time refresh preserves historical message nodes", () => {
   const h = boot();
   const s = session("live");

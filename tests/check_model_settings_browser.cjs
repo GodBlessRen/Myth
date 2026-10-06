@@ -51,6 +51,11 @@ async function main() {
     const suggestions = page.locator(".choice-menu:popover-open");
     await suggestions.waitFor();
     assert.equal(await suggestions.locator('[role="option"]').count(), 2);
+    const beforeComposition = await page.locator('#model').inputValue();
+    await page.locator('#model').dispatchEvent('keydown', {key: 'Enter', code: 'Enter', isComposing: true, keyCode: 229});
+    assert.equal(await page.locator('#model').inputValue(), beforeComposition);
+    assert.equal(await suggestions.isVisible(), true, 'IME confirmation must not choose or close the menu');
+    report.checks.push('Chinese IME candidate confirmation preserves editable model suggestions');
     await page.locator("#model").press("ArrowDown"); await page.locator("#model").press("Enter");
     assert.ok(["review-model", "review-reasoning"].includes(await page.locator("#model").inputValue()));
     report.checks.push("editable model suggestions use themed listbox");
@@ -89,7 +94,7 @@ async function main() {
         const bounds = await popup.boundingBox();
         assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= size.width + 1 && bounds.y + bounds.height <= size.height + 1);
         const ground = await popup.evaluate(node => getComputedStyle(node).backgroundColor);
-        assert.equal(ground, mode === "light" ? "rgb(248, 244, 237)" : "rgb(14, 16, 15)");
+        assert.equal(ground, mode === "light" ? "rgb(255, 254, 248)" : "rgb(14, 16, 15)");
         assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
         if (size.width !== 320) await capture(page, `settings-${size.width}-${mode}`);
         await provider.press("Escape"); assert.equal(await provider.getAttribute("aria-expanded"), "false");
@@ -110,7 +115,7 @@ async function main() {
     for (const mode of ["light", "dark"]) {
       if (await page.locator("html").getAttribute("data-theme") !== mode) await page.locator("#themeToggle").click();
       await capture(page, `home-${mode}`);
-      assert.equal(await page.locator(".brand-symbol .ink-mark").evaluate(img => img.complete && img.naturalWidth > 0), true);
+      assert.equal(await page.locator(".brand-symbol .brand-mark").evaluate(img => img.complete && img.naturalWidth > 0), true);
     }
     const composerChoice = page.locator("#chatProject + .choice-trigger");
     await composerChoice.click(); await composerChoice.press("Escape");

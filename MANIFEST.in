@@ -5,14 +5,19 @@ recursive-include .impeccable/surfaces *.md
 recursive-include docs *.md *.json *.png
 recursive-include evals *.json
 recursive-include examples *.json *.txt
-recursive-include scripts *.py
-recursive-include tests *.py *.cjs
-recursive-include src *.py *.html *.css *.js *.svg
-include src/myth/webui/fonts/README.md
+# 完整当前代码/资源/门禁随源码发布，新增嵌套文件不再维护第二份扩展名清单。
+graft scripts
+graft tests
+graft src/myth
 prune .trash
+prune .work
+prune .venv
 prune output
 prune .runtime
+prune .myth
+prune secrets
 global-exclude __pycache__ *.py[cod]
+global-exclude .env .env.* *.pem *.key *.db *.db-shm *.db-wal *.sqlite *.sqlite3 *.sqlite*-shm *.sqlite*-wal
 # 长任务进度与孤儿分支工作树属于开发状态，不是发布输入。
 prune .work
 prune .work-notes

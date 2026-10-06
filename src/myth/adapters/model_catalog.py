@@ -56,6 +56,7 @@ class PublicModelCatalog:
 
     def info(self, provider, model, *, force=False):
         """返回精确匹配的标价和来源；零占位、未知模型、订阅/本地渠道均不伪造免费。"""
+        # 先区分无需报价渠道，再有界刷新公开目录，最后核对精确型号/数值；失败可保留带 stale 的旧报价。
         if provider not in (*PROVIDER_KEYS, "ollama", "chatgpt", "claude_oauth") or not isinstance(model, str) or len(model) > 200:
             raise ValueError("invalid model catalog selection")
         if type(force) is not bool:
