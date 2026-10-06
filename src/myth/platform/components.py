@@ -197,6 +197,14 @@ ADAPTERS: tuple[ArchitectureItem, ...] = (
         "Optional derived vector-index adapter; SQLite/object storage stays authoritative and lexical retrieval remains the safe fallback.",
     ),
     ArchitectureItem(
+        "local_skills", "Local Skills", "adapter", Maturity.CONNECTED,
+        "Bounded SKILL.md discovery and digest-bound reads wired to Conversation tools; first implementation, unvalidated.",
+    ),
+    ArchitectureItem(
+        "mcp_stdio", "MCP stdio", "adapter", Maturity.CONNECTED,
+        "Optional SDK v1 gateway wired to Ticket/Receipt; operator configuration required. Component wiring is not a live connection or validation result.",
+    ),
+    ArchitectureItem(
         "ollama", "Ollama", "adapter", Maturity.USABLE, "Local model provider adapter."
     ),
     ArchitectureItem(

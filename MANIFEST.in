@@ -4,7 +4,7 @@ include .impeccable/design.json
 recursive-include .impeccable/surfaces *.md
 recursive-include docs *.md *.json *.png
 recursive-include evals *.json
-recursive-include examples *.json *.txt
+recursive-include examples *.json *.txt *.py *.md
 # 完整当前代码/资源/门禁随源码发布，新增嵌套文件不再维护第二份扩展名清单。
 graft scripts
 graft tests

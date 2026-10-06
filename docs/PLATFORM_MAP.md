@@ -17,9 +17,11 @@
 | 模型/认证 | `providers/`、`auth/` | Ollama、OpenAI、DeepSeek、Myth 自有 ChatGPT OAuth、系统凭据库 |
 | 评测/演进 | `evaluation_runner.py`、`platform/evaluation*`、`platform/evolution*` | 固定集、Ledger、候选、显式 Promote/Rollback |
 | 入站 | `cli.py`、`web.py`、`web_workspace.py` | CLI、本机 HTTP 和工作台 |
+| Skill 资源 | `extension_ports.py`、`adapters/local_skills.py` | 元数据发现、全文摘要、分页加载；不执行脚本 |
+| MCP | `adapters/extension_config.py`、`adapters/mcp_stdio.py` | 本机配置、可选 SDK v1 stdio、工具发现/调用；先 Ticket，后连接，首版未验证 |
 
 实际策略包括 conservative Intent Pick、Direct、Agent Loop、Information Resolution、离线 Information Gain、Personal Agent 与 `agent.delegate` / `agent.parallel` 单层只读委派。独立子任务最多三路并发，调用仍经过原有准入、预算和证据边界。
 
-已移除无调用者的 Workflow/MCP/Skills 占位类、内存 MemoryCatalog、Kernel/ControlPlane 旧别名和虚假的 planned adapter 登记。当前没有任意 Shell、A2A、浏览器执行或通用远程 Managed Agent；后续需求见 [ROADMAP](ROADMAP.md)，不在快照中冒充连接。
+旧 Workflow/MCP/Skills 占位目录、内存 MemoryCatalog、Kernel/ControlPlane 旧别名已退役。当前 Skill/MCP 是经 Workspace 装配的新适配器，使用与限制见 [EXTENSIONS](EXTENSIONS.md)，不恢复旧空目录或把 configured 当作 connected。当前没有模型可自由指定的 Shell、A2A、浏览器执行或通用远程 Managed Agent；后续需求见 [ROADMAP](ROADMAP.md)。
 
 修改入口见 [CODE_GUIDE](CODE_GUIDE.md)，本次逐文件处置见 [FILE_REVIEW](FILE_REVIEW.md)。

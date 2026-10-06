@@ -14,6 +14,8 @@ authors = [{name = "GodBlessRen"}]
 dependencies = ["PyJWT[crypto]>=2.14.0,<3", "keyring>=25"]
 
 [project.optional-dependencies]
+# MCP 首版使用官方 SDK v1 的 stdio/会话 API；普通安装不导入或启动远端服务。
+mcp = ["mcp>=1.26.0,<2", "jsonschema>=4,<5"]
 # Milvus 保持可选 Adapter：普通安装不下载 embedding 栈；Lite 当前仅在非 Windows 平台声明。
 milvus = ["pymilvus[model]>=3.0.2,<4"]
 milvus-lite = ["pymilvus[model]>=3.0.2,<4; platform_system != 'Windows'"]

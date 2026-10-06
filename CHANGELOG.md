@@ -1,5 +1,12 @@
 # Changelog
 
+## 未发布 — Skill / MCP 首版接入
+
+- 新增 `skill.list / skill.load`：只读 `.myth/skills/<id>/SKILL.md`，元数据发现、全文摘要与有界分页；不执行技能脚本或扩张权限。
+- 新增 `mcp.servers / mcp.tools / mcp.call`：官方 SDK v1 的可选 stdio 适配器，固定本机配置/允许名单，本 Turn 的工具发现和输入 schema 核对；每次远端连接/调用先签 Ticket，收据缺失不自动重发。
+- Workspace 注入扩展端口；只读 `/api/workspace/extensions` 返回目录/依赖可用性，已有工具观测展示真实结果。提供配置、Skill 和本机 MCP 服务示例。
+- 按用户要求，本次没有新增或运行测试，也未运行语法、浏览器、构建或示例服务；后续验收与首版限制见 [扩展说明](docs/EXTENSIONS.md)。
+
 ## 未发布 — 22:56 续跑的事实与授权边界
 
 - Turn 上下文在写事务外准备，提交核对版本；Scheduler 保留机会/预算/Goal 同连接原子提交。委派复用固定父 Ticket。

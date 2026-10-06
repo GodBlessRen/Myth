@@ -5,6 +5,9 @@ from .adapters.workspace_store import SqliteWorkspaceRepository
 from .adapters.milvus_retrieval import create_milvus_vector_index
 from .adapters.conversation_execution import LocalConversationExecution
 from .adapters.personal_store import SqlitePersonalState
+from .adapters.extension_config import LocalExtensionConfig
+from .adapters.local_skills import LocalSkillLibrary
+from .adapters.mcp_stdio import StdioMCPGateway
 from .application.conversation_agent import ConversationAgent
 from .platform import MythComponents
 from .platform.control_store import SqliteControlService
@@ -75,6 +78,10 @@ class Workspace:
         self.mental_model_refresh = MentalModelRefreshScheduler(self)
         # delivery：回答终态、验收、Work item 与人工关注的持久交付账本。
         self.delivery = DeliveryLedger(runtime, sota_route=self.sota_route)
+        # 本机扩展配置和资源由操作者提供；构造不读取技能正文、不导入 SDK、不启动 MCP 进程。
+        self.extension_config = LocalExtensionConfig(runtime.root)
+        self.skills = LocalSkillLibrary(self.extension_config)
+        self.mcp = StdioMCPGateway(self.extension_config)
         # execution：用例执行端口/实现；外部效果须经过 Ticket 和收据协议。
         self.execution = LocalConversationExecution(
             runtime,
@@ -84,6 +91,8 @@ class Workspace:
             memory_store=self.memory,
             provider_factory=child_provider_factory or self._child_provider,
             parent_control=self.control,
+            skill_library=self.skills,
+            mcp_gateway=self.mcp,
         )
         # verification：与 execution 共用同一 profile 状态所有者，避免双写真相。
         self.verification = self.execution.verification
