@@ -26,6 +26,15 @@ function inspectorNumber(value, suffix = "") {
     ? value.toLocaleString("zh-CN") + suffix : "N/A";
 }
 
+// 覆盖分母来自服务端去重后的调用数；部分报告不能当作全部实测，未知覆盖也不能补零。
+function inspectorMeasurement(value, samples, attempts, suffix = "") {
+  const coverage = Number.isInteger(samples) && Number.isInteger(attempts) &&
+    samples >= 0 && attempts >= samples
+    ? `${inspectorNumber(samples)} / ${inspectorNumber(attempts)} 次报告`
+    : "覆盖未报告";
+  return `${inspectorNumber(value, suffix)} · ${coverage}`;
+}
+
 // 观测心跳只更新变化的区块；保留文本选择与折叠状态，不反复替换静态事实。
 function inspectorRegion(id, facts) {
   const box = $(id);
@@ -259,8 +268,9 @@ function inspectorFact(box, key, value) {
     Drift: "路线偏移", "Compare scope": "比较范围", Phase: "阶段", Cursor: "执行游标",
     Recovery: "恢复状态", Connection: "连接", "Next check": "下次检查",
     "Retry interval": "重试间隔", "Last progress": "最近进展", "Progress watch": "进展观察",
-    Detail: "详情", Lease: "租约", Generation: "代数", "Input settled": "输入 Tokens",
-    "Output settled": "输出 Tokens", "Cache hit": "Cache 命中", "Model wall": "模型用时",
+    Detail: "详情", Lease: "租约", Generation: "代数", "Input settled": "输入已结算",
+    "Output settled": "输出已结算", "Input reported": "输入实测", "Output reported": "输出实测",
+    "Cache hit": "Cache 命中", "Cache reported": "缓存实测", "Model wall": "模型用时",
     "First token": "首个 Token", "Model calls": "模型调用", "Unknown held": "UNKNOWN 占用",
     "Context window": "上下文窗口", "Token window": "Token 窗口",
     Continuity: "连续性", "Current facts": "当前事实",
@@ -648,7 +658,7 @@ async function loadProviderEvidence(details) {
 }
 $("providerEvidenceDetails")?.addEventListener("toggle", (event) => loadProviderEvidence(event.currentTarget));
 
-// 展示供应商实际报告的输入/输出/缓存计量；未报告缓存保留 N/A。
+// 预算结算与供应商实测分别显示；覆盖数沿用持久收据投影，缺测保留 N/A。
 function renderInspectorTokens(turn) {
   const box = inspectorRegion("inspectorTokens", [!!turn, turn?.settings?.num_ctx, turn?.budgets, turn?.model_usage]);
   if (!box) return;
@@ -680,11 +690,19 @@ function renderInspectorTokens(turn) {
     inspectorNumber(output.settled),
   );
   const modelUsage = turn.model_usage || {};
+  const samples = modelUsage.measurement_samples || {};
+  inspectorFact(box, "Input reported", inspectorMeasurement(modelUsage.input_tokens,
+    samples.input_tokens, modelUsage.model_calls));
+  inspectorFact(box, "Output reported", inspectorMeasurement(modelUsage.output_tokens,
+    samples.output_tokens, modelUsage.model_calls));
+  inspectorFact(box, "Cache reported", inspectorMeasurement(modelUsage.cached_input_tokens,
+    samples.cached_input_tokens, modelUsage.model_calls));
   if (modelUsage.cache_metrics_available) {
     const inputTotal = modelUsage.input_tokens;
     const cached = modelUsage.cached_input_tokens;
     const rate =
-      typeof modelUsage.cache_hit_rate !== "number" || !Number.isFinite(modelUsage.cache_hit_rate)
+      typeof modelUsage.cache_hit_rate !== "number" || !Number.isFinite(modelUsage.cache_hit_rate) ||
+        modelUsage.cache_hit_rate < 0 || modelUsage.cache_hit_rate > 1
         ? "N/A"
         : (Number(modelUsage.cache_hit_rate) * 100).toFixed(1) + "%";
     inspectorFact(
@@ -700,16 +718,9 @@ function renderInspectorTokens(turn) {
     // provider not reported：没有供应商计量时，不能按零命中解释。
     inspectorFact(box, "Cache hit", "N/A · 供应商未报告");
   }
-  if (modelUsage.provider_wall_available) {
-    // runtime measured：服务端实测墙钟毫秒，不是浏览器从心跳估算。
-    inspectorFact(
-      box,
-      "Model wall",
-      statisticsDuration(modelUsage.provider_wall_ms) + " · 实测",
-    );
-  } else {
-    inspectorFact(box, "Model wall", "N/A");
-  }
+  // 服务端实测墙钟毫秒及报告覆盖，不是浏览器从心跳估算。
+  inspectorFact(box, "Model wall", inspectorMeasurement(modelUsage.provider_wall_ms,
+    samples.provider_wall_ms, modelUsage.model_calls, " ms"));
   inspectorFact(box, "First token", modelUsage.first_token_ms == null
     ? "N/A · 供应商未报告"
     : inspectorNumber(modelUsage.first_token_ms, " ms") + " · 首个非空增量");

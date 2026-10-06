@@ -80,7 +80,7 @@
       panel.open = true;
       if (active && animate && !reduced.matches) {
         panel.getAnimations().forEach(animation => animation.cancel());
-        panel.animate([{ opacity: .65, transform: "translateY(5px)" }, { opacity: 1, transform: "translateY(0)" }],
+        panel.animate([{ transform: "translateY(5px)" }, { transform: "translateY(0)" }],
           { duration: 180, easing: "cubic-bezier(.16,1,.3,1)" });
       }
     });
@@ -137,6 +137,7 @@
   tabs.forEach((tab, index) => {
     tab.addEventListener("click", () => selectLens(tab.dataset.inspectorLens, true));
     tab.addEventListener("keydown", event => {
+      if (event.isComposing || event.keyCode === 229) return;
       if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
       event.preventDefault();
       const next = event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1 :
@@ -156,6 +157,7 @@
     syncNavigation();
   });
   document.addEventListener("keydown", event => {
+    if (event.isComposing || event.keyCode === 229) return;
     if (event.key === "Escape" && !event.defaultPrevented && focused && !document.querySelector("dialog[open]")) focus(false);
   });
   desktop.addEventListener("change", () => { if (!desktop.matches) focus(false); });
