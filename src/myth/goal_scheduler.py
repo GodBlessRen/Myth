@@ -232,7 +232,7 @@ class GoalScheduler:
         try:
             prepared = self.workspace.repository.prepare_turn(
                 row["session_id"], row["prompt"], request_id,
-                goal_id=row["goal_id"], _settings=settings,
+                goal_id=row["goal_id"], _settings=settings, _recall_memory=True,
             )
         except (IdentityConflict, ValueError):
             current = self.store.db.execute(

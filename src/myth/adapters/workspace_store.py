@@ -483,7 +483,7 @@ class SqliteWorkspaceRepository:
 
     def prepare_turn(self, sid, text, request_id, document_ids=None, memory_records=None,
                      goal_id=None, goal_context=None, memory_retrieval_report=None, *,
-                     _settings=None, _memory_revision=None):
+                     _settings=None, _memory_revision=None, _recall_memory=False):
         """在写事务外准备上下文；外部服务失败没有 Run，稳定入口可以重新准备。
 
         先读 SQL basis，再做知识/对象/文件读取，最后重读 basis；提交仍会再次 CAS。
@@ -502,7 +502,7 @@ class SqliteWorkspaceRepository:
         current_facts, goal_context = inputs["current_facts"], inputs["goal"]
         # Memory 与知识召回共用准入前后版本核对；HTTP/调度入口不能提前取一份无版本的召回。
         if memory_records is None:
-            if self.memory_state is not None:
+            if _recall_memory and self.memory_state is not None:
                 memory_report = self.memory_state.search_view_report(
                     text, limit=6, project_id=session["project_id"], session_id=sid)
                 memory_records = memory_report["memories"]
@@ -696,7 +696,7 @@ class SqliteWorkspaceRepository:
 
     def create_turn(self, sid, text, request_id, document_ids=None, memory_records=None,
                     goal_id=None, goal_context=None, memory_retrieval_report=None, *,
-                    _db=None, _settings=None, _prepared=None, _memory_revision=None):
+                    _db=None, _settings=None, _prepared=None, _memory_revision=None, _recall_memory=False):
         """稳定请求去重后准备，再用同连接短事务准入 Turn/预算/Goal/游标。
 
         仓储拥有准入事实：准备失败不留 Run；SQL basis 变化拒绝整份快照，不能半采用。
@@ -718,7 +718,8 @@ class SqliteWorkspaceRepository:
             if _db is not None:
                 raise RuntimeError("shared admission requires a prepared turn")
             _prepared = self.prepare_turn(sid, text, request_id, document_ids, memory_records,
-                goal_id, goal_context, memory_retrieval_report, _settings=_settings, _memory_revision=_memory_revision)
+                goal_id, goal_context, memory_retrieval_report, _settings=_settings,
+                _memory_revision=_memory_revision, _recall_memory=_recall_memory)
         if _prepared["identity"] != identity:
             raise IdentityConflict("prepared turn belongs to a different entry")
         with self.store.tx() if _db is None else nullcontext(_db) as db:

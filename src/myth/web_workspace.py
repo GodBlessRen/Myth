@@ -605,6 +605,7 @@ class ConversationWebService:
                 value.get("document_ids"),
                 goal_id=goal_id,
                 _settings=settings,
+                _recall_memory=True,
             )
             workspace.control.ensure(turn["run_id"])
         if turn["status"] == "RUNNING":

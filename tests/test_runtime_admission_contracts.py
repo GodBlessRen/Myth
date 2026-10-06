@@ -152,7 +152,7 @@ class RuntimeAdmissionContracts(unittest.TestCase):
 
         with patch.object(self.workspace.memory, "search_view_report", side_effect=recall):
             with self.assertRaises(IdentityConflict):
-                self.repo.create_turn(sid, "context", "racing-memory")
+                self.repo.create_turn(sid, "context", "racing-memory", _recall_memory=True)
         self.assertEqual(self.repo.session(sid)["turns"], [])
 
     def test_same_entry_retry_reuses_run_after_memory_changes(self):
