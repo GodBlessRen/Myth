@@ -76,10 +76,13 @@ def main():
     parser.add_argument("--root", required=True)
     parser.add_argument("--port", type=int, default=8770)
     parser.add_argument("--model-delay", type=float, default=0.35)
+    parser.add_argument("--standard", action="store_true", help="Use production providers for read-only startup checks")
     args = parser.parse_args()
     BrowserFixtureProvider.delay_seconds = args.model_delay
     service = AgentWebService(Path(args.root))
-    service.workspace = BrowserFixtureWorkspace(service.root)
+    # 标准空工作区只做页面读取；业务交互必须使用固定 Provider 的另一个根目录。
+    if not args.standard:
+        service.workspace = BrowserFixtureWorkspace(service.root)
     server = ThreadingHTTPServer(("127.0.0.1", args.port), make_handler(service))
     print(f"UI regression fixture: http://127.0.0.1:{args.port}/", flush=True)
     try:
