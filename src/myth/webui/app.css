@@ -46,7 +46,9 @@ body { font: 400 15px/1.65 var(--sans); overflow: hidden; -webkit-font-smoothing
 button, input, textarea, select { font: inherit; color: inherit; }
 button, a, input, textarea, select, summary { -webkit-tap-highlight-color: transparent; }
 button, a { touch-action: manipulation; }
-button { min-width: 40px; border: 0; background: transparent; cursor: pointer; transition: background-color 150ms var(--ease), color 150ms var(--ease), border-color 150ms var(--ease), transform 120ms var(--ease); }
+button { min-width: 40px; min-height: 40px; border: 0; background: transparent; cursor: pointer; transition: background-color 150ms var(--ease), color 150ms var(--ease), border-color 150ms var(--ease), transform 120ms var(--ease); }
+/* 最小触控框属于控件基线；新增诊断或工具展开不必各自重复声明。 */
+summary { min-width: 40px; min-height: 40px; cursor: pointer; }
 button:active:not(:disabled) { transform: translateY(1px); }
 button:disabled { opacity: .42; cursor: not-allowed; }
 a { color: inherit; text-decoration: none; text-underline-offset: 4px; }
@@ -200,7 +202,7 @@ details[open] > summary > .fold-chevron { transform: rotate(90deg); }
 .artifact-card { display: flex; align-items: center; gap: 13px; margin-top: 14px; padding: 15px; border: 1px solid var(--line); border-left: 3px solid var(--success); border-radius: 6px; background: var(--surface); }
 .artifact-card > div { min-width: 0; }
 .artifact-icon { color: var(--success); }
-.artifact-card strong { display: block; overflow-wrap: anywhere; font-size: 13px; font-weight: 600; }
+.artifact-card strong { display: block; font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
 .artifact-card small { display: block; font-size: 12px; color: var(--muted); }
 .artifact-card .download { display: flex; align-items: center; gap: 8px; min-height: 40px; margin-left: auto; white-space: nowrap; font-size: 12px; }
 /* 输入上下文：项目、Goal、附件都由用户显式选择；发送才申请业务准入。 */
@@ -232,6 +234,9 @@ details[open] > summary > .fold-chevron { transform: rotate(90deg); }
 .turn-notice { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; padding: 11px 13px; font-size: 12px; border: 1px solid var(--line-soft); border-radius: 9px; background: var(--surface-2); color: var(--ink-2); }
 .turn-notice.error { color: var(--danger); background: var(--danger-soft); border-left: 3px solid var(--danger); }
 .turn-notice.warning { color: var(--unknown); background: var(--unknown-soft); border-left: 3px solid var(--unknown); }
+.notice-detail { min-width: 0; max-width: 100%; }
+.notice-detail > summary { padding: 10px 4px; font-weight: 500; }
+.notice-detail pre { margin: 4px 0 0; max-height: 160px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.7 var(--mono); }
 .turn-notice button { min-height: 40px; text-decoration: underline; padding: 2px 4px; }
 .scroll-latest { position: absolute; bottom: 170px; left: calc(50% - 20px); background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: 50%; }
 .turn-controls { display: flex; gap: 3px; align-items: center; }
