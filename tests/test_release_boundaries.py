@@ -37,7 +37,26 @@ class ReleaseBoundaryTests(unittest.TestCase):
         self.assets = {
             "index.html": b"<html></html>", "app.js": b"'use strict';", "app.css": b"body {}",
             "icons/mark.svg": b"<svg></svg>", "licenses/NOTICE.txt": b"test fixture",
+            "ink.png.json": b'{"source": "fixture"}', "fonts/README.md": b"fixture license notes",
+            "fonts/font.woff2": b"wOF2\x00\r\nfixture",
         }
+        self.modules = {
+            "__init__.py": b"# fixture package\n", "cli.py": b"# fixture cli\n",
+            "web.py": b"# fixture web\n", "adapters/knowledge_store.py": b"# fixture\n",
+            "model_capabilities.py": b"# fixture\n", "core/deep/current.py": b"# nested current source\n",
+        }
+        self.support = {
+            "pyproject.toml": b"[build-system]\nrequires = ['setuptools>=68']\n",
+            "MANIFEST.in": b"recursive-include scripts *.py *.cjs\n",
+            "scripts/validate_release.py": b"# fixture checker\n",
+            "scripts/check_web.cjs": b"// fixture web gate\n",
+            "tests/test_current.py": b"# fixture regression\n",
+            "tests/test_current_ui.cjs": b"// fixture ui contract\n",
+        }
+        for name, data in {**{"src/myth/" + key: value for key, value in self.modules.items()}, **self.support}.items():
+            path = self.root / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data)
         for name, data in self.assets.items():
             path = self.source / name
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -48,8 +67,10 @@ class ReleaseBoundaryTests(unittest.TestCase):
 
     def entries(self, prefix: str = "myth") -> dict[str, bytes]:
         """生成一种合法包根下的完整最小文件集；不包含真实应用或第三方字体。"""
-        values = {prefix + "/adapters/knowledge_store.py": b"# fixture", prefix + "/model_capabilities.py": b"# fixture"}
+        values = {prefix + "/" + name: data for name, data in self.modules.items()}
         values.update({prefix + "/webui/" + name: data for name, data in self.assets.items()})
+        if prefix.endswith("src/myth"):
+            values.update({prefix[:-len("src/myth")] + name: data for name, data in self.support.items()})
         return values
 
     def archive(self, name: str, entries: dict[str, bytes]) -> Path:
@@ -99,7 +120,7 @@ class ReleaseBoundaryTests(unittest.TestCase):
     def test_similar_directory_names_are_not_overblocked(self) -> None:
         """按路径段而非子串排除；普通 .work-notes 文件不被误伤。"""
         entries = self.entries()
-        entries["docs/.work-notes.md"] = b"public fixture"
+        entries["myth_fixture-1.dist-info/docs/.work-notes.md"] = b"public fixture"
         self.assertEqual(VALIDATOR.inspect_archive(self.archive("ok.whl", entries))["status"], "PASS")
 
     def test_missing_source_directory_cannot_shrink_manifest_to_zero(self) -> None:
@@ -128,6 +149,120 @@ class ReleaseBoundaryTests(unittest.TestCase):
         entries["myth/webui/images/old.png"] = b"stale fixture"
         with self.assertRaisesRegex(ValueError, "stale static assets"):
             VALIDATOR.inspect_archive(self.archive("bad.whl", entries))
+
+    def test_every_current_module_is_required_in_each_format(self) -> None:
+        """删除非旧硬编码清单内的深层模块，三种格式都必须拒绝。"""
+        for name, prefix in (("bad.whl", "myth"), ("bad.zip", "src/myth"), ("bad.tar.gz", "source/src/myth")):
+            with self.subTest(name=name):
+                entries = self.entries(prefix)
+                del entries[prefix + "/core/deep/current.py"]
+                with self.assertRaisesRegex(ValueError, "missing current files.*current.py"):
+                    VALIDATOR.inspect_archive(self.archive(name, entries))
+
+    def test_same_names_with_changed_bytes_are_rejected_in_each_format(self) -> None:
+        """源码、入口、嵌套字体、JSON 与 README 同名同长度变字节仍不可通过。"""
+        for name, prefix in (("bad.whl", "myth"), ("bad.zip", "src/myth"), ("bad.tar.gz", "source/src/myth")):
+            for relative in ("core/deep/current.py", "webui/app.js", "webui/ink.png.json", "webui/fonts/font.woff2", "webui/fonts/README.md"):
+                with self.subTest(name=name, relative=relative):
+                    entries = self.entries(prefix)
+                    target = prefix + "/" + relative
+                    entries[target] = bytes([entries[target][0] ^ 1]) + entries[target][1:]
+                    with self.assertRaisesRegex(ValueError, "content mismatch"):
+                        VALIDATOR.inspect_archive(self.archive(name, entries))
+
+    def test_missing_new_asset_types_are_rejected(self) -> None:
+        """资源合同覆盖整个 webui，不能只维护一份会漏掉 JSON/说明的新后缀表。"""
+        for relative in ("ink.png.json", "fonts/README.md"):
+            with self.subTest(relative=relative):
+                entries = self.entries()
+                del entries["myth/webui/" + relative]
+                with self.assertRaisesRegex(ValueError, "missing current files"):
+                    VALIDATOR.inspect_archive(self.archive("bad.whl", entries))
+
+    def test_unknown_stale_package_payload_is_rejected(self) -> None:
+        """不在当前源码树中的模块和任意资源后缀均不能混入旧构建缓存。"""
+        for relative, error in (("core/old.py", "stale package files"), ("webui/old.bin", "stale static assets"), ("webui/old.png.json", "stale static assets")):
+            with self.subTest(relative=relative):
+                entries = self.entries()
+                entries["myth/" + relative] = b"retired cache"
+                with self.assertRaisesRegex(ValueError, error):
+                    VALIDATOR.inspect_archive(self.archive("bad.whl", entries))
+
+    def test_source_gates_and_tests_must_share_the_package_root(self) -> None:
+        """sdist/Git 缺 check_web、测试或把它们放到另一棵树，不能冒充可复验源码。"""
+        for name, prefix in (("bad.zip", "src/myth"), ("bad.tar.gz", "source/src/myth")):
+            for relative in ("scripts/check_web.cjs", "scripts/validate_release.py", "tests/test_current.py", "tests/test_current_ui.cjs", "pyproject.toml", "MANIFEST.in"):
+                with self.subTest(name=name, relative=relative):
+                    entries = self.entries(prefix)
+                    target = prefix[:-len("src/myth")] + relative
+                    entries["elsewhere/" + relative] = entries.pop(target)
+                    with self.assertRaisesRegex(ValueError, "missing current files"):
+                        VALIDATOR.inspect_archive(self.archive(name, entries))
+
+    def test_source_gate_bytes_are_checked(self) -> None:
+        """check_web 名称补进 sdist 还不够，执行的字节也必须来自本次源码。"""
+        entries = self.entries("source/src/myth")
+        entries["source/scripts/check_web.cjs"] = b"// obsolete gate\n"
+        with self.assertRaisesRegex(ValueError, "content mismatch.*check_web.cjs"):
+            VALIDATOR.inspect_archive(self.archive("bad.tar.gz", entries))
+
+    def test_extra_wheel_install_locations_cannot_shadow_checked_package(self) -> None:
+        """wheel 的 purelib 重定位或额外顶层模块不能绕过唯一包根的完整性检查。"""
+        for extra in ("myth_fixture-1.data/purelib/myth/cli.py", "myth_fixture-1.data/platlib/myth/cli.py", "src/myth/cli.py", "injected.py", "startup.pth"):
+            with self.subTest(extra=extra):
+                entries = self.entries()
+                entries[extra] = b"fixed unexpected payload"
+                with self.assertRaisesRegex(ValueError, "unexpected wheel payload"):
+                    VALIDATOR.inspect_archive(self.archive("bad.whl", entries))
+
+    def test_extra_source_build_inputs_are_rejected(self) -> None:
+        """sdist/git 中旧 setup 文件或第二个 src 包会影响构建，必须在当前源码清单之外拒绝。"""
+        for name, prefix in (("bad.zip", "src/myth"), ("bad.tar.gz", "source/src/myth")):
+            for relative in ("setup.py", "setup.cfg", "src/another/__init__.py", "src/another.pth", "scripts/old_gate.cjs"):
+                with self.subTest(name=name, relative=relative):
+                    entries = self.entries(prefix)
+                    entries[prefix[:-len("src/myth")] + relative] = b"fixed unexpected payload"
+                    with self.assertRaisesRegex(ValueError, "stale source files|unexpected source build path"):
+                        VALIDATOR.inspect_archive(self.archive(name, entries))
+
+    def test_package_source_entrypoints_cannot_disappear_from_baseline(self) -> None:
+        """缺包入口的当前树不是可信基准，不能因基准与归档同时漏文件就判通过。"""
+        (self.root / "src/myth/__init__.py").unlink()
+        entries = self.entries()
+        del entries["myth/__init__.py"]
+        with self.assertRaisesRegex(ValueError, "current package source"):
+            VALIDATOR.inspect_archive(self.archive("bad.whl", entries))
+
+    def test_new_current_files_are_required_without_a_validator_edit(self) -> None:
+        """新增深层 Python 或未知扩展资源后，验证器自动要求同名真实内容。"""
+        for relative in ("new/deep/feature.py", "webui/new/data.bin"):
+            with self.subTest(relative=relative):
+                source = self.root / "src/myth" / relative
+                source.parent.mkdir(parents=True, exist_ok=True)
+                source.write_bytes(b"new source fixture\x00")
+                with self.assertRaisesRegex(ValueError, "missing current files"):
+                    VALIDATOR.inspect_archive(self.archive("bad.whl", self.entries()))
+                source.unlink()
+
+    def test_private_file_names_are_rejected_outside_package_too(self) -> None:
+        """私有文件即使放到归档元数据旁也拒绝；样本只含固定非秘密字节。"""
+        for name, prefix in (("bad.whl", "myth"), ("bad.zip", "src/myth"), ("bad.tar.gz", "source/src/myth")):
+            for relative in (".env", "docs/.env.local", "docs/SECRETS/example.txt", "cache/session.sqlite3", "cache/state.db-wal", "config/example.pem", ".myth/state.json", ".git/config"):
+                with self.subTest(name=name, relative=relative):
+                    entries = self.entries(prefix)
+                    entries[relative] = b"fixed non-secret fixture"
+                    with self.assertRaisesRegex(ValueError, "excluded content"):
+                        VALIDATOR.inspect_archive(self.archive(name, entries))
+
+    def test_line_endings_are_exact_without_git_export_evidence(self) -> None:
+        """wheel/sdist 和无 Git 基准的 ZIP 不自动容忍文本换行变化。"""
+        for name, prefix in (("bad.whl", "myth"), ("bad.zip", "src/myth"), ("bad.tar.gz", "source/src/myth")):
+            with self.subTest(name=name):
+                entries = self.entries(prefix)
+                target = prefix + "/core/deep/current.py"
+                entries[target] = entries[target].replace(b"\n", b"\r\n")
+                with self.assertRaisesRegex(ValueError, "content mismatch"):
+                    VALIDATOR.inspect_archive(self.archive(name, entries))
 
     def test_retired_module_remains_rejected(self) -> None:
         """旧模块排除仍按真实路径段识别。"""
@@ -273,5 +408,5 @@ class ReleaseBoundaryTests(unittest.TestCase):
     def test_ordinary_unicode_names_and_explicit_directories_remain_valid(self) -> None:
         """限制危险名称不等于只准 ASCII；中文文件和显式目录仍允许。"""
         entries = self.entries()
-        entries.update({"docs/": b"", "docs/说明.md": b"public fixture", "docs/COM10.txt": b"ordinary name"})
+        entries.update({"myth_fixture-1.dist-info/docs/": b"", "myth_fixture-1.dist-info/docs/说明.md": b"public fixture", "myth_fixture-1.dist-info/docs/COM10.txt": b"ordinary name"})
         self.assertEqual(VALIDATOR.inspect_archive(self.archive("ok.whl", entries))["status"], "PASS")
