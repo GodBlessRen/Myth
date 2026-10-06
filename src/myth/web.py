@@ -19,6 +19,7 @@ from .auth import ChatGPTAuthManager, ClaudeOAuthManager, ProviderApiKeyVault
 from .providers import create_provider
 from .runtime import MythRuntime
 from .web_workspace import ConversationWebService
+from .web_assets import PUBLIC_ASSETS
 
 
 # ASSET_DIR：已打包静态资源的固定目录；HTTP 不接受任意本机路径。
@@ -467,58 +468,9 @@ def make_handler(service: AgentWebService):
                         ),
                     )
                     return
-                if path == "/":
-                    self._asset("index.html", "text/html; charset=utf-8")
-                    return
-                if path == "/app.css":
-                    self._asset("app.css", "text/css; charset=utf-8")
-                    return
-                # 离线字体属于封闭静态白名单；请求路径不参与文件系统拼接，防止目录穿越。
-                font_assets = {
-                    "/fonts/myth-sans.woff2": "fonts/myth-sans.woff2",
-                    "/fonts/myth-serif.woff2": "fonts/myth-serif.woff2",
-                    "/fonts/myth-latin.woff2": "fonts/myth-latin.woff2",
-                }
-                if path in font_assets:
-                    self._asset(font_assets[path], "font/woff2")
-                    return
-                if path == "/app.js":
-                    self._asset("app.js", "text/javascript; charset=utf-8")
-                    return
-                # 工作台偏好与原创图像也是封闭静态资产，不接收用户提供的文件路径。
-                if path == "/studio.js":
-                    self._asset("studio.js", "text/javascript; charset=utf-8")
-                    return
-                if path == "/choices.js":
-                    self._asset("choices.js", "text/javascript; charset=utf-8")
-                    return
-                if path == "/taiji.svg":
-                    self._asset("taiji.svg", "image/svg+xml")
-                    return
-                if path == "/ink-taiji.png":
-                    self._asset("ink-taiji.png", "image/png")
-                    return
-                # 主题引导只读取浏览器偏好；静态白名单保持封闭，CSP 不开放内联脚本。
-                if path == "/theme.js":
-                    self._asset("theme.js", "text/javascript; charset=utf-8")
-                    return
-                if path == "/favicon.svg":
-                    self._asset("favicon.svg", "image/svg+xml")
-                    return
-                if path == "/reconnect.js":
-                    self._asset("reconnect.js", "text/javascript; charset=utf-8")
-                    return
-                if path == "/model-pool.js":
-                    self._asset("model-pool.js", "text/javascript; charset=utf-8")
-                    return
-                if path == "/inspector.js":
-                    self._asset("inspector.js", "text/javascript; charset=utf-8")
-                    return
-                if path == "/statistics.js":
-                    self._asset("statistics.js", "text/javascript; charset=utf-8")
-                    return
-                if path == "/goals.js":
-                    self._asset("goals.js", "text/javascript; charset=utf-8")
+                # 仅从封闭清单取包内路径；URL 不参与文件系统拼接。
+                if path in PUBLIC_ASSETS:
+                    self._asset(*PUBLIC_ASSETS[path])
                     return
                 if path == "/api/runs":
                     self._json(HTTPStatus.OK, {"runs": service.list_runs()})
