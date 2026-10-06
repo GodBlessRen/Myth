@@ -31,10 +31,12 @@ def _archive_entries(path: Path) -> list[tuple[str, bool]]:
     if path.suffix in {".whl", ".zip"}:
         with zipfile.ZipFile(path) as archive:
             for info in archive.infolist():
+                # 使用原始目录名；ZipInfo.filename 会截断 NUL 并在 Windows 改写反斜杠。
+                name = info.orig_filename
                 kind = stat.S_IFMT(info.external_attr >> 16)
                 if kind not in {0, stat.S_IFREG, stat.S_IFDIR}:
-                    raise ValueError(f"non-regular archive entry in {path.name}: {info.filename}")
-                entries.append((info.filename, not info.is_dir() and kind != stat.S_IFDIR))
+                    raise ValueError(f"non-regular archive entry in {path.name}: {name}")
+                entries.append((name, not info.is_dir() and kind != stat.S_IFDIR))
     else:
         with tarfile.open(path) as archive:
             for info in archive.getmembers():
