@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import logging
 import threading
 import time
 import uuid
@@ -517,18 +518,31 @@ class ConversationWebService:
                 self.active.discard(rid)
             raise
 
-        stop_heartbeat = threading.Event()
-
-        # 后台生命周期函数；独立连接按固定 Turn 设置运行，同步可见错误并在 finally 释放自己的租约/active。
-        def work():
-            heartbeat = threading.Thread(
-                target=self._heartbeat_loop,
-                args=(rid, owner_id, stop_heartbeat),
-                name=f"heartbeat-{rid[:12]}",
-                daemon=True,
-            )
-            heartbeat.start()
+        # 只在成功取得租约后使用；未启动与正常退出共用一个 owner 清理规则。
+        def release_claim():
             try:
+                with MythRuntime(self.root) as runtime:
+                    Workspace(runtime).repository.release_driver(rid, owner_id)
+            except Exception:
+                # 不伪报持久释放；租约仍由 TTL 与恢复核对约束，日志不附可能含秘密的异常正文。
+                logging.getLogger(__name__).warning("Driver lease cleanup failed; durable lease remains until expiry.")
+            finally:
+                with self.lock:
+                    self.active.discard(rid)
+
+        # 启动心跳后才调用 Provider；心跳构造或 start 失败也进入同一恢复和清理路径。
+        def work():
+            heartbeat = None
+            heartbeat_started = False
+            try:
+                heartbeat = threading.Thread(
+                    target=self._heartbeat_loop,
+                    args=(rid, owner_id, stop_heartbeat),
+                    name=f"heartbeat-{rid[:12]}",
+                    daemon=True,
+                )
+                heartbeat.start()
+                heartbeat_started = True
                 with MythRuntime(self.root) as runtime:
                     workspace = Workspace(runtime)
                     turn = workspace.repository.turn(rid)
@@ -560,16 +574,19 @@ class ConversationWebService:
                         )
             finally:
                 stop_heartbeat.set()
-                heartbeat.join(timeout=1)
                 try:
-                    with MythRuntime(self.root) as runtime:
-                        Workspace(runtime).repository.release_driver(rid, owner_id)
-                except Exception:
-                    pass
-                with self.lock:
-                    self.active.discard(rid)
+                    if heartbeat_started:
+                        heartbeat.join(timeout=1)
+                finally:
+                    release_claim()
 
-        threading.Thread(target=work, name=f"chat-{rid[:12]}", daemon=True).start()
+        try:
+            stop_heartbeat = threading.Event()
+            threading.Thread(target=work, name=f"chat-{rid[:12]}", daemon=True).start()
+        except Exception:
+            # 只处理普通启动失败；BaseException 中断不能证明线程一定未启动。
+            release_claim()
+            raise
 
     # 校验明确用户消息与固定设置，读取作用域 Memory 后调用原子 Turn admission；提交后才启动 Driver。
     def send(self, sid, value):
