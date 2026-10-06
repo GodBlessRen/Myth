@@ -504,7 +504,47 @@ class RuntimeStore:
             ).fetchone()
             return dict(ticket)
 
-    # 在当前事务调整 reserved/settled/unknown_held；未知用量保持占用而非按零释放。
+    def _issued_attempt(self, db: sqlite3.Connection, attempt_id: str) -> sqlite3.Row:
+        """三种结算入口共同核对真实 Ticket；机会名字不是授权。"""
+        row = db.execute("SELECT * FROM attempts WHERE attempt_id=?", (attempt_id,)).fetchone()
+        if row is None:
+            raise KeyError(attempt_id)
+        ticket = db.execute(
+            "SELECT 1 FROM tickets WHERE attempt_id=? AND envelope_digest=?",
+            (attempt_id, row["envelope_digest"]),
+        ).fetchone()
+        if ticket is None or row["state"] not in {
+            AttemptState.TICKETED.value, AttemptState.UNKNOWN.value, AttemptState.RESOLVED.value
+        }:
+            raise InvalidTransition("settlement requires an issued Attempt")
+        return row
+
+    def _recorded_usage(self, db: sqlite3.Connection, attempt_id: str) -> dict[str, int]:
+        """从已提交事件和收据还原已测量 meter，不新建第二套真相。
+
+        unknown_amount=0 也可能只是原预留为零，不能据此猜测已测零。
+        只有已关闭预留的恢复路径需此回读，正常首次结算不扫事件。
+        """
+        known = {}
+        events = db.execute(
+            "SELECT e.kind,e.payload_json FROM events e JOIN attempts a ON a.run_id=e.run_id "
+            "WHERE a.attempt_id=? AND e.kind IN ('AttemptSettled','UsageResolved') ORDER BY e.sequence",
+            (attempt_id,),
+        )
+        for event in events:
+            payload = json.loads(event["payload_json"])
+            if payload.get("attempt_id") != attempt_id:
+                continue
+            if event["kind"] == "UsageResolved":
+                known.update(payload["usage"])
+            elif payload.get("usage_known"):
+                receipt = db.execute(
+                    "SELECT usage_json FROM receipts WHERE attempt_id=?", (attempt_id,)
+                ).fetchone()
+                if receipt is not None:
+                    known.update(json.loads(receipt["usage_json"]))
+        return known
+
     def _settle_reservations(
         self,
         db: sqlite3.Connection,
@@ -512,68 +552,62 @@ class RuntimeStore:
         attempt_id: str,
         usage: dict[str, int] | None,
         usage_known: bool,
-    ) -> None:
-        rows = db.execute(
-            "SELECT * FROM reservations WHERE attempt_id=? ORDER BY meter",
-            (attempt_id,),
-        ).fetchall()
-        for row in rows:
-            meter = str(row["meter"])
-            reserved = int(row["reserved_amount"])
-            unknown_amount = int(row["unknown_amount"])
-            if row["closed"]:
-                if usage_known and unknown_amount > 0:
-                    actual = int((usage or {}).get(meter, 0))
-                    if actual < 0:
-                        raise ValueError("usage cannot be negative")
-                    db.execute(
-                        "UPDATE accounts SET unknown_held=unknown_held-?, settled=settled+? "
-                        "WHERE run_id=? AND meter=?",
-                        (unknown_amount, actual, row["run_id"], meter),
-                    )
-                    db.execute(
-                        "UPDATE reservations SET settled_amount=?, unknown_amount=0 "
-                        "WHERE attempt_id=? AND meter=?",
-                        (actual, attempt_id, meter),
-                    )
-                continue
+    ) -> dict[str, int]:
+        """按 meter 原子结算；缺报保留 UNKNOWN，显式零才释放对应占用。
 
-            if usage_known:
-                actual = int((usage or {}).get(meter, 0))
-                if actual < 0:
-                    raise ValueError("usage cannot be negative")
+        返回本次新接受的计量，供调用方同事务记事件。已测量重复是 no-op，
+        冲突则整个事务回滚，不把更正金额伪装成幂等重试。
+        """
+        rows = db.execute(
+            "SELECT * FROM reservations WHERE attempt_id=? ORDER BY meter", (attempt_id,)
+        ).fetchall()
+        reported = {} if usage is None else usage
+        if not isinstance(reported, dict) or type(usage_known) is not bool:
+            raise ValueError("usage must be a meter mapping and usage_known a boolean")
+        meters = {row["meter"] for row in rows}
+        for meter, actual in reported.items():
+            # 不用 int() 容错：True、1.5、"1" 都不是原合同的整数计量。
+            if meter not in meters or type(actual) is not int or not 0 <= actual < 2**63:
+                raise ValueError("usage requires admitted meters and non-negative SQLite integers")
+        known = self._recorded_usage(db, attempt_id) if any(row["closed"] for row in rows) else {}
+        observed = reported if usage_known else {}
+        for meter, actual in observed.items():
+            if meter in known and known[meter] != actual:
+                raise IdentityConflict("measured usage cannot be changed by a retry")
+        changed = {meter: actual for meter, actual in observed.items() if meter not in known}
+        for row in rows:
+            meter = row["meter"]
+            reserved, unknown = row["reserved_amount"], row["unknown_amount"]
+            if meter in changed:
+                actual = changed[meter]
+                # 预留与未知占用二者只扣一处；真实用量超估也不截断。
                 db.execute(
-                    "UPDATE accounts SET reserved=reserved-?, settled=settled+? "
+                    "UPDATE accounts SET reserved=reserved-?, unknown_held=unknown_held-?, settled=settled+? "
                     "WHERE run_id=? AND meter=?",
-                    (reserved, actual, row["run_id"], meter),
+                    (0 if row["closed"] else reserved, unknown, actual, row["run_id"], meter),
                 )
                 db.execute(
                     "UPDATE reservations SET settled_amount=?, unknown_amount=0, closed=1 "
-                    "WHERE attempt_id=? AND meter=?",
-                    (actual, attempt_id, meter),
+                    "WHERE attempt_id=? AND meter=?", (actual, attempt_id, meter),
                 )
-            else:
+            elif not row["closed"]:
+                # 效果可以已解决，缺报的每一项成本仍保留待核对占用。
                 db.execute(
                     "UPDATE accounts SET reserved=reserved-?, unknown_held=unknown_held+? "
-                    "WHERE run_id=? AND meter=?",
-                    (reserved, reserved, row["run_id"], meter),
+                    "WHERE run_id=? AND meter=?", (reserved, reserved, row["run_id"], meter),
                 )
                 db.execute(
-                    "UPDATE reservations SET unknown_amount=?, closed=1 "
-                    "WHERE attempt_id=? AND meter=?",
+                    "UPDATE reservations SET unknown_amount=?, closed=1 WHERE attempt_id=? AND meter=?",
                     (reserved, attempt_id, meter),
                 )
+        return changed
 
     def settle_receipt(self, receipt: ReceiptData, *, usage_known: bool = True) -> None:
         """核验 Attempt/envelope 后原子记录效果收据与资源结算；幂等重用不得重复扣费。"""
 
         # 本地事务边界：下列写入一起提交，异常整体回滚；文件/网络效果须在事务外另行核对。
         with self.tx() as db:
-            attempt = db.execute(
-                "SELECT * FROM attempts WHERE attempt_id=?", (receipt.attempt_id,)
-            ).fetchone()
-            if attempt is None:
-                raise KeyError(receipt.attempt_id)
+            attempt = self._issued_attempt(db, receipt.attempt_id)
             if attempt["envelope_digest"] != receipt.envelope_digest:
                 raise IdentityConflict(
                     "receipt does not belong to the frozen Attempt envelope"
@@ -643,34 +677,23 @@ class RuntimeStore:
                 },
             )
 
-    # 依据明确用量关闭 unknown_held；不修改已记录效果 outcome，也不凭推测清占用。
     def resolve_unknown_usage(self, attempt_id: str, usage: dict[str, int]) -> None:
-        # 本地事务边界：下列写入一起提交，异常整体回滚；文件/网络效果须在事务外另行核对。
+        """只补成本证据，不改变效果；不能提前解除未开始/在途预留。"""
         with self.tx() as db:
-            row = db.execute(
-                "SELECT * FROM attempts WHERE attempt_id=?", (attempt_id,)
-            ).fetchone()
-            if row is None:
-                raise KeyError(attempt_id)
-            self._settle_reservations(
+            row = self._issued_attempt(db, attempt_id)
+            if row["state"] not in {AttemptState.UNKNOWN.value, AttemptState.RESOLVED.value}:
+                raise InvalidTransition("usage resolution requires an uncertain or resolved Attempt")
+            changed = self._settle_reservations(
                 db, attempt_id=attempt_id, usage=usage, usage_known=True
             )
-            self._event(
-                db,
-                row["run_id"],
-                "UsageResolved",
-                {"attempt_id": attempt_id, "usage": usage},
-            )
+            if changed:
+                self._event(db, row["run_id"], "UsageResolved", {"attempt_id": attempt_id, "usage": changed})
 
     # 把已派发不明机会及其资源预留转入 UNKNOWN；保留核对所需身份。
     def mark_attempt_unknown(self, attempt_id: str, reason: str) -> None:
         # 本地事务边界：下列写入一起提交，异常整体回滚；文件/网络效果须在事务外另行核对。
         with self.tx() as db:
-            row = db.execute(
-                "SELECT * FROM attempts WHERE attempt_id=?", (attempt_id,)
-            ).fetchone()
-            if row is None:
-                raise KeyError(attempt_id)
+            row = self._issued_attempt(db, attempt_id)
             if row["state"] == AttemptState.RESOLVED.value:
                 return
             db.execute(
@@ -708,6 +731,18 @@ class RuntimeStore:
                 raise IdentityConflict(
                     "verification report uses the wrong acceptance version"
                 )
+            action = db.execute("SELECT run_id FROM actions WHERE action_id=?", (action_id,)).fetchone()
+            if action is None or action["run_id"] != run_id:
+                raise IdentityConflict("verification Action does not belong to this Run")
+            if run["state"] not in {RunState.RUNNING.value, RunState.RECOVERING.value, RunState.VERIFYING.value}:
+                raise InvalidTransition("Run state forbids new verification")
+            attempt = db.execute(
+                "SELECT state,outcome FROM attempts WHERE action_id=? ORDER BY attempt_no DESC LIMIT 1",
+                (action_id,),
+            ).fetchone()
+            if attempt is None or attempt["state"] != AttemptState.RESOLVED.value or attempt["outcome"] != Outcome.SUCCEEDED.value:
+                raise InvalidTransition("verification requires a resolved successful effect")
+            # 同一短写事务中重查终态与主体，避免验收前的 Stop 被跳过。
             db.execute(
                 "INSERT INTO verification_reports(report_id,run_id,action_id,candidate_digest,"
                 "acceptance_version,verdict,evidence_ref) VALUES (?,?,?,?,?,?,?)",
