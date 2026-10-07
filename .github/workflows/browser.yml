@@ -2,7 +2,7 @@
 name: Browser
 on:
   push:
-    branches: ["evolve/**"]
+    branches: [main, "evolve/**"]
   pull_request:
 permissions:
   contents: read
