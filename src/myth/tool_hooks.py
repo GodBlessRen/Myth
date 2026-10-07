@@ -35,11 +35,13 @@ def readonly_json(value):
 class ToolHookContext:
     """单次阶段的只读投影；不暴露 Runtime、仓储、Provider 或异常对象。"""
 
-    # run_id/decision_id：固定调用身份；没有 Ticket 的拒绝也可追溯。
+    # run_id：固定 Run 身份；没有 Ticket 的前置拒绝也可追溯。
     run_id: str
+    # decision_id：稳定模型决定身份；Hook 不得生成或替换它。
     decision_id: str
-    # capability_id/phase：匹配目标及当前阶段，不能由回调更改。
+    # capability_id：当前工具能力身份；仅用于匹配，不授予权限。
     capability_id: str
+    # phase：固定 Hook 阶段；回调不能跨阶段重派发。
     phase: str
     # arguments/result：递归冻结的独立快照；观察不是执行授权。
     # arguments：工具参数的递归只读副本；回调不能修改原调用。
@@ -75,9 +77,11 @@ class ToolHookDecision:
 class ToolHook:
     """可注册回调的稳定描述；优先级较小者先运行，同级按身份排序。"""
 
-    # hook_id/phase/callback：唯一身份、单一阶段及受信同步回调。
+    # hook_id：注册表中的稳定唯一身份。
     hook_id: str
+    # phase：单一生命周期阶段，禁止一个回调隐式跨阶段。
     phase: str
+    # callback：受信同步回调；只收到只读 Context，不拿 Runtime/仓储。
     callback: Callable[[ToolHookContext], ToolHookDecision | None]
     # tools：能力名或 glob；不会扩大 Capability/项目/预算权限。
     tools: tuple[str, ...] = ("*",)
