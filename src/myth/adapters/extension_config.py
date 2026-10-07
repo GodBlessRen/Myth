@@ -16,8 +16,10 @@ class LocalExtensionConfig:
     """每次准备重新读取当前配置；实例不缓存可变权限或宣称服务已连接。"""
 
     def __init__(self, root):
+        """绑定唯一 Runtime 根；扩展配置只允许落在该根的 .myth 受保护目录。"""
         # root：明确 Runtime 根；扩展固定放在项目工具排除的 .myth 内。
         self.root = Path(root).resolve()
+        # directory：统一承载扩展配置、Skill 与 Hook；路径边界由 checked_path 再次核对。
         self.directory = self.root / ".myth"
 
     def checked_path(self, relative: str) -> Path:
@@ -36,6 +38,7 @@ class LocalExtensionConfig:
 
     def read(self) -> tuple[dict, str]:
         """读取最多 64 KiB 的 v1 配置；不存在时保持空目录，损坏配置明确拒绝。"""
+        # 先固定路径与字节上限，再解析结构/逐项校验；任一异常都在启动 MCP 进程前失败关闭。
         path = self.checked_path("extensions.json")
         if not path.exists():
             return {"version": 1, "mcp_servers": []}, sha256_bytes(b"")
