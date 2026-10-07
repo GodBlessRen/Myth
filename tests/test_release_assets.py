@@ -19,12 +19,10 @@ class ReleaseAssetTests(unittest.TestCase):
     def archive(self, path: Path, *, stale: bool) -> None:
         """资源来自当前源码；仅额外 PNG 是模拟已删除缓存，不运行归档内代码。"""
         with zipfile.ZipFile(path, "w") as archive:
-            for name in ("adapters/knowledge_store.py", "model_capabilities.py"):
-                archive.write(ROOT / "src/myth" / name, "myth/" + name)
-            source = ROOT / "src/myth/webui"
-            for asset in source.rglob("*"):
-                if asset.is_file():
-                    archive.write(asset, "myth/webui/" + asset.relative_to(source).as_posix())
+            # 与发布校验器共享“当前源码树”定义，避免新增模块后测试夹具悄悄退化成不完整 wheel。
+            source = ROOT / "src/myth"
+            for name, item in VALIDATOR._current_tree(source).items():
+                archive.write(item, "myth/" + name)
             if stale:
                 archive.writestr("myth/webui/images/paper-study.png", b"retired build cache")
 
