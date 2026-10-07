@@ -153,8 +153,8 @@ class ConversationContextTests(unittest.TestCase):
             "explicit_user_control",
         )
 
-    # 回归断言：高窗口压力且已有持久语义边界时，Context 自动选择紧凑投影；这不是用户 Compact 命令。
-    def test_context_auto_compacts_only_after_settled_boundary_under_pressure(self):
+    # 回归断言：已有语义边界但 Compact 未减少真实投影字节时保持 normal，不能把“执行优化动作”冒充 Token 节省。
+    def test_context_does_not_compact_without_provider_visible_saving(self):
         snapshot = {
             "turn_message_start": 18,
             "messages": [
@@ -179,19 +179,15 @@ class ConversationContextTests(unittest.TestCase):
             activities,
             settings={**SETTINGS, "num_ctx": 8192},
         )
-        self.assertEqual(request.context_report["context_mode"], "compact")
-        self.assertTrue(request.context_report["compact_applied"])
+        self.assertEqual(request.context_report["context_mode"], "normal")
+        self.assertFalse(request.context_report["compact_applied"])
         self.assertFalse(request.context_report["compact_requested"])
         self.assertEqual(
             request.context_report["context_decision"]["reason_code"],
-            "context_pressure",
+            "no_provider_visible_saving",
         )
-        self.assertGreater(
+        self.assertEqual(
             request.context_report["context_decision"]["provider_visible_saving_bytes"],
-            0,
-        )
-        self.assertGreater(
-            request.context_report["compaction_seed"]["semantic_boundaries"],
             0,
         )
 

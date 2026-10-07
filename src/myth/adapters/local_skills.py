@@ -11,6 +11,7 @@ class LocalSkillLibrary:
     """固定根内的只读资源库；摘要绑定完整文件，模型只拿到有界元数据和分页正文。"""
 
     def __init__(self, config: LocalExtensionConfig):
+        """绑定只读扩展配置边界；构造阶段不读取 Skill 正文或扩大任何能力。"""
         # config：目录边界的唯一协作者；不借用项目路径或用户可编辑的会话字段。
         self.config = config
 

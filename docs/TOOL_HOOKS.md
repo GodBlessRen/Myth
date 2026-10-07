@@ -60,4 +60,4 @@ workspace.tool_hooks.register(ToolHook(
 
 Python 回调是同步、受信、进程内代码，应只做快速纯判断/观察；本版没有进程隔离、强制超时、外部 Hook 命令或 Hook 专项 Evaluation。Python 宿主代码本身有进程权限，只读快照不是 OS 沙箱。Hook Trace 不是独立 Verification。
 
-按用户要求：未新增或运行测试，未执行语法检查、构建、浏览器验证或示例。后续模型需验收：优先级/匹配/注销、嵌套不可变性、前置拒绝无 Ticket/费用、回调/配置/审计故障、所有工具分支、MCP 错误返回与 UNKNOWN、结算后观察失败、崩溃/恢复不重发 Hook，以及已有工具的参数目录一致性。
+健康检查已新增声明式 Hook 的真实配置读取与 priority/id 稳定排序回归，并将 Hook 代码重新纳入中文说明、编译、跨平台 Runtime 与 Web/Browser 验证拓扑。仍需继续补齐：匹配/注销、嵌套不可变性、前置拒绝无 Ticket/费用、回调/配置/审计故障、所有工具分支、MCP 错误返回与 UNKNOWN、结算后观察失败、崩溃/恢复不重发 Hook，以及已有工具的参数目录一致性。

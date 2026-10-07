@@ -1,4 +1,4 @@
-# 四组合验证本机 SQLite/文件锁恢复语义；中文覆盖只检查说明存在，准确性仍靠审阅。
+# 验证拓扑分层：质量门禁、跨平台 Runtime 与可选 MCP 各自给出独立证据，任一失败都阻止发布。
 name: CI
 
 on:
@@ -14,6 +14,33 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install package
+        run: python -m pip install -e .
+      - name: Compile Python
+        run: python -m compileall -q src tests scripts
+      - name: Verify test discovery
+        run: python scripts/check_test_discovery.py
+      - name: Check Chinese guidance coverage
+        run: python scripts/check_annotations.py
+      - name: Check known secret patterns without printing values
+        run: python scripts/audit_secret_patterns.py
+      - name: Verify all Web scripts and discovered UI contracts
+        run: node scripts/check_web.cjs
+
   test:
     strategy:
       fail-fast: false
@@ -21,12 +48,11 @@ jobs:
         os: [ubuntu-latest, windows-latest]
         python: ["3.12", "3.13"]
     runs-on: ${{ matrix.os }}
-    # Windows 慢速 runner 的安装与恢复回归可能超过五分钟；用例数量由发现门禁实测。
+    # Runtime 回归与说明门禁解耦：即使文档/静态门禁失败，也必须留下真实执行证据。
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
@@ -35,19 +61,27 @@ jobs:
         run: python -m pip install -e .
       - name: Compile Python
         run: python -m compileall -q src tests scripts
-      - name: Verify test discovery before slow gates
-        run: python scripts/check_test_discovery.py
-      - name: Check Chinese guidance coverage
-        run: python scripts/check_annotations.py
-      - name: Check known secret patterns without printing values
-        run: python scripts/audit_secret_patterns.py
-      - name: Verify all Web scripts and discovered UI contracts
-        run: node scripts/check_web.cjs
       - name: Unit and crash-recovery tests
         run: python -m unittest discover -s tests -v
 
+  mcp-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install package with MCP v1 support
+        run: python -m pip install -e ".[mcp]"
+      # 真实启动仓库自带 stdio 服务；不是 mock，也不连接外部网络服务。
+      - name: Verify Skill Hook and real local MCP handshake
+        run: python -m unittest discover -s tests -p "test_extensions.py" -v
+
   release:
-    needs: test
+    needs: [quality, test, mcp-integration]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

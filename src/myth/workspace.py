@@ -82,7 +82,9 @@ class Workspace:
         self.delivery = DeliveryLedger(runtime, sota_route=self.sota_route)
         # 本机扩展配置和资源由操作者提供；构造不读取技能正文、不导入 SDK、不启动 MCP 进程。
         self.extension_config = LocalExtensionConfig(runtime.root)
+        # skills：只读本机 Skill 资源库；加载文本不会授予新能力。
         self.skills = LocalSkillLibrary(self.extension_config)
+        # mcp：受操作者配置约束的 stdio 网关；真实进程只能在 Ticket 后启动。
         self.mcp = StdioMCPGateway(self.extension_config)
         # tool_hooks：操作者可注入受信注册表；默认本机配置在新工具准入时读取，恢复不读。
         self.tool_hooks = tool_hooks if tool_hooks is not None else LocalToolHooks(self.extension_config)

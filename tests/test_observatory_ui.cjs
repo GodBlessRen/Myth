@@ -115,12 +115,12 @@ test("token observatory keeps missing, zero and unreported cache distinct", () =
   const {context, nodes} = controller(["inspectorTokens"]);
   context.renderInspectorTokens({settings: {}, budgets: [], model_usage: {}});
   const box = nodes.get("inspectorTokens");
-  assert.match(box.textContent, /输入 TokensN\/A/);
+  assert.match(box.textContent, /输入已结算N\/A/);
   assert.match(box.textContent, /Cache 命中N\/A · 供应商未报告/);
   context.renderInspectorTokens({budgets: [{meter: "input_tokens", settled: 0}], model_usage: {provider_wall_available: true, provider_wall_ms: 0}});
-  assert.match(box.textContent, /输入 Tokens0/);
-  assert.match(box.textContent, /输出 TokensN\/A/);
-  assert.match(box.textContent, /模型用时0毫秒 · 实测/);
+  assert.match(box.textContent, /输入已结算0/);
+  assert.match(box.textContent, /输出已结算N\/A/);
+  assert.match(box.textContent, /模型用时0 ms · 覆盖未报告/);
 });
 
 // Context 区同时展示实时信息控制事实；只读投影不能凭空造 Information Gain 分数。

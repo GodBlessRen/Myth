@@ -19,12 +19,14 @@ class LocalToolHooks(ToolHookRegistry):
     """把受信 Python 注册项与每次重新读取的本机规则合成固定调用计划。"""
 
     def __init__(self, config):
+        """绑定本机 Hook 配置根，并保留进程内受信注册表作为同一快照来源。"""
         super().__init__()
         # config：复用扩展固定根/链接拒绝边界；Hook 配置与 MCP 配置摘要分别拥有。
         self.config = config
 
     def snapshot(self):
         """配置缺失为空，损坏则拒绝新工具；工具已有 Ticket 时执行器不调用本方法。"""
+        # 先冻结进程内注册，再读取/校验文件规则，最后按优先级合并；中途损坏不返回半份策略。
         registered = super().snapshot()
         path = self.config.checked_path("hooks.json")
         if not path.exists():

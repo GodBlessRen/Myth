@@ -631,7 +631,7 @@ def build_context_request(settings, snapshot, messages, activities, control=None
     report["num_ctx"] = num_ctx
     report["max_output_tokens"] = max_output_tokens
     report["budget_formula"] = (
-        "(num_ctx-max_output_tokens-512)*2"
+        "(num_ctx-max_output_tokens-512)*3"
         if is_ollama
         else "remote-projection-cap=42000"
     )
