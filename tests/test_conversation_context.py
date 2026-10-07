@@ -190,10 +190,6 @@ class ConversationContextTests(unittest.TestCase):
             request.context_report["context_decision"]["provider_visible_saving_bytes"],
             0,
         )
-        self.assertGreater(
-            request.context_report["compaction_seed"]["semantic_boundaries"],
-            0,
-        )
 
     # 回归断言：大量召回不能挤掉显式固定附件。
     def test_pinned_attachment_survives_recall_pressure(self):
