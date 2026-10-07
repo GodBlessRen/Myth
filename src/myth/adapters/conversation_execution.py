@@ -114,7 +114,9 @@ class LocalConversationExecution:
         # memory_store：Memory 的权威读取协作者；渐进披露工具只读，不授予执行权限。
         self.memory_store = memory_store
         # skills/mcp：装配根注入的扩展端口；资源目录和远端发现不能修改 Runtime 执行白名单。
+        # skills：只读流程资源端口；内容进入 Observation，但不改变 Capability。
         self.skills = skill_library
+        # mcp：远端工具协作端口；准备与真实 invoke 由 Ticket 边界分隔。
         self.mcp = mcp_gateway
         # tool_hooks：只拥有回调目录；执行身份、Ticket、收据与审计写入仍归仓储。
         self.tool_hooks = tool_hooks if tool_hooks is not None else ToolHookRegistry()
