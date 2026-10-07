@@ -129,7 +129,7 @@ details[open] > summary > .fold-chevron { transform: rotate(90deg); }
 .topbar-left, .topbar-right { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .workspace-crumb { display: flex; align-items: center; gap: 11px; min-width: 0; color: var(--muted); font-size: 13px; }
 .workspace-crumb strong { color: var(--ink); font-weight: 600; max-width: 220px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.crumb-separator { opacity: .5; }
+.crumb-separator { opacity: 1; }
 .icon-button { display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; flex-shrink: 0; padding: 0; border-radius: 8px; color: var(--muted); }
 .icon-button:hover { color: var(--ink); background: var(--surface-2); }
 .model-pill { display: inline-flex; align-items: center; gap: 9px; min-height: 40px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 5px; font-size: 12px; background: transparent; }
