@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import argparse
+import configparser
 import hashlib
 import json
 from pathlib import Path
@@ -140,6 +141,32 @@ def _verify_contents(path: Path, archive: zipfile.ZipFile | tarfile.TarFile,
     return {"verified_files": len(required), "verified_bytes": total, "git_eol_files": normalized}
 
 
+def _validate_generated_setup_cfg(
+    path: Path,
+    archive: zipfile.ZipFile | tarfile.TarFile,
+    name: str,
+) -> None:
+    """只接受 Setuptools sdist 自动写入的无效应 egg_info 配置；其他构建配置继续失败关闭。"""
+    info = archive.getinfo(name) if isinstance(archive, zipfile.ZipFile) else archive.getmember(name)
+    size = info.file_size if isinstance(info, zipfile.ZipInfo) else info.size
+    if size > 1024:
+        raise ValueError(f"unexpected source build path in {path.name}: ['{name}']")
+    with (archive.open(info) if isinstance(archive, zipfile.ZipFile) else archive.extractfile(info)) as stream:
+        raw = stream.read(size + 1)
+    if len(raw) != size:
+        raise ValueError(f"unexpected source build path in {path.name}: ['{name}']")
+    try:
+        parser = configparser.ConfigParser(interpolation=None)
+        parser.read_string(raw.decode("utf-8"))
+    except (UnicodeDecodeError, configparser.Error) as exc:
+        raise ValueError(f"unexpected source build path in {path.name}: ['{name}']") from exc
+    if parser.sections() != ["egg_info"]:
+        raise ValueError(f"unexpected source build path in {path.name}: ['{name}']")
+    values = {key: value.strip() for key, value in parser.items("egg_info")}
+    if values != {"tag_build": "", "tag_date": "0"}:
+        raise ValueError(f"unexpected source build path in {path.name}: ['{name}']")
+
+
 def _inspect_archive(path: Path, archive: zipfile.ZipFile | tarfile.TarFile, root: Path) -> dict:
     """名称/类型先通过，再核对唯一包根、完整文件集合及内容；归档不能提供自己的可信清单。"""
     source = root / "src/myth/webui"
@@ -230,17 +257,24 @@ def _inspect_archive(path: Path, archive: zipfile.ZipFile | tarfile.TarFile, roo
         source_root = package_root[:-1]
         required.update({"/".join((*source_root, name)): item for name, item in support.items()})
         prefix = "/".join(source_root) + "/" if source_root else ""
+        generated_setup_cfg = None
         for name, regular in entries:
             if not regular:
                 continue
             relative = name.removeprefix(prefix)
             parts = relative.split("/")
+            # Setuptools sdist 会自动写一个仅固定 egg_info 标签的 setup.cfg；必须逐项验证后才允许。
+            if (relative == "setup.cfg" and relative not in support and path.name.endswith(".tar.gz")):
+                generated_setup_cfg = name
+                continue
             # 当前构建从 src 寻包；额外的包或旧 setup 配置同样能改变安装结果。
             if (not name.startswith(prefix)
                     or (relative in {"setup.py", "setup.cfg"} and relative not in support)
                     or (parts[0] == "src" and len(parts) > 1 and parts[1] != "myth"
                         and not parts[1].endswith(".egg-info"))):
                 unexpected_source.append(name)
+        if generated_setup_cfg is not None:
+            _validate_generated_setup_cfg(path, archive, generated_setup_cfg)
         for folder in ("scripts", "tests"):
             prefix = "/".join((*source_root, folder)) + "/"
             stale_support = sorted(name for name, regular in entries if regular and name.startswith(prefix) and name not in required)
