@@ -99,6 +99,30 @@ class ReleaseBoundaryTests(unittest.TestCase):
             with self.subTest(name=name):
                 self.assertEqual(VALIDATOR.inspect_archive(self.archive(name, self.entries(prefix)))["status"], "PASS")
 
+    def test_setuptools_generated_setup_cfg_is_accepted_but_cannot_gain_build_effects(self) -> None:
+        """sdist 允许 Setuptools 固定版本标签的自动配置；新增 section/key/value 仍按构建输入拒绝。"""
+        prefix = "myth-runtime-0.27.0/src/myth"
+        base = self.entries(prefix)
+        setup_name = "myth-runtime-0.27.0/setup.cfg"
+
+        valid = dict(base)
+        valid[setup_name] = b"[egg_info]\ntag_build = \ntag_date = 0\n"
+        self.assertEqual(
+            VALIDATOR.inspect_archive(self.archive("generated.tar.gz", valid))["status"],
+            "PASS",
+        )
+
+        for payload in (
+            b"[egg_info]\ntag_build = .dev\ntag_date = 0\n",
+            b"[egg_info]\ntag_build = \ntag_date = 0\n[options]\nzip_safe = true\n",
+            b"[egg_info]\ntag_build = \ntag_date = 1\n",
+        ):
+            with self.subTest(payload=payload):
+                bad = dict(base)
+                bad[setup_name] = payload
+                with self.assertRaisesRegex(ValueError, "unexpected source build path"):
+                    VALIDATOR.inspect_archive(self.archive("generated.tar.gz", bad))
+
     def test_work_directory_is_excluded_from_every_archive_format(self) -> None:
         """开发进度目录即使藏在包根内部，也不能进入三种发布归档。"""
         for name, prefix in (("bad.whl", "myth"), ("bad.zip", "src/myth"), ("bad.tar.gz", "source/src/myth")):
