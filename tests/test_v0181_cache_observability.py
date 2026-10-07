@@ -64,8 +64,8 @@ class CacheObservabilityTests(unittest.TestCase):
         webui = Path(__file__).resolve().parents[1] / "src" / "myth" / "webui"
         inspector = (webui / "inspector.js").read_text(encoding="utf-8")
         self.assertIn('"Model wall"', inspector)
-        self.assertIn("provider_wall_available", inspector)
-        self.assertIn("runtime measured", inspector)
+        self.assertIn("modelUsage.provider_wall_ms", inspector)
+        self.assertIn("samples.provider_wall_ms", inspector)
 
     # 回归断言：第三栏缓存事实入口存在，缺测状态也可见。
     def test_runtime_observatory_keeps_cache_hit_visible(self):
