@@ -74,6 +74,7 @@ class StdioMCPGateway:
     """外圈 MCP Gateway；准备只读本机配置，invoke 的进程与网络效果必须位于 Ticket 之后。"""
 
     def __init__(self, config: LocalExtensionConfig):
+        """绑定操作者拥有的 MCP 配置；构造阶段不导入 SDK、不启动进程、不探测服务。"""
         # config：操作者的唯一权限来源；服务描述和远端 annotations 不能修改白名单。
         self.config = config
 
@@ -103,6 +104,7 @@ class StdioMCPGateway:
     def prepare(self, server_id: str, *, tool_name: str | None = None, arguments: dict | None = None,
                 cursor: str | None = None, discovery: dict | None = None) -> MCPPlan:
         """在派发前核对当前配置和本 Turn 的发现证据；argv 始终来自操作者，参数只描述远端工具输入。"""
+        # 先核对本机配置/可执行文件，再校验发现证据与 JSON Schema，最后才产出可签 Ticket 的固定计划。
         configuration, digest = self.config.read()
         item = next((row for row in configuration.get("mcp_servers", []) if row["id"] == server_id), None)
         if item is None or not item.get("enabled", False):
