@@ -17,8 +17,8 @@ from myth.workspace import Workspace
 class ProviderContextBudgetTests(unittest.TestCase):
     # 回归断言：Ollama 窗口、输出和协议预留共同决定保守字节预算。
     def test_budget_is_derived_from_num_ctx_output_and_reserve(self):
-        self.assertEqual(conversation_budget_bytes(4096, 1024), 5120)
-        self.assertEqual(conversation_budget_bytes(8192, 2048), 11264)
+        self.assertEqual(conversation_budget_bytes(4096, 1024), 7680)
+        self.assertEqual(conversation_budget_bytes(8192, 2048), 16896)
         with self.assertRaises(ContextBudgetError):
             conversation_budget_bytes(2048, 1800)
 
