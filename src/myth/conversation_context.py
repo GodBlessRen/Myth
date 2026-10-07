@@ -16,8 +16,8 @@ from .platform.context_anchor import render_context_anchor
 DEFAULT_NUM_CTX = 8192
 # CONTEXT_RESERVE_TOKENS：上下文留给协议及控制修订的 Token 预留；与输出预留同时扣除。
 CONTEXT_RESERVE_TOKENS = 512
-# BYTES_PER_TOKEN_BUDGET：本地字节预算的保守换算系数；不是准确 tokenizer 测量。
-BYTES_PER_TOKEN_BUDGET = 2
+# BYTES_PER_TOKEN_BUDGET：混合中英/JSON 的保守 UTF-8 近似；2 会让中文系统指令在默认 8k 窗口产生假溢出。
+BYTES_PER_TOKEN_BUDGET = 3
 
 
 # 按 num_ctx/output/reserve 推导保守 UTF-8 字节上限；近似系数不是精确 tokenizer。
