@@ -26,11 +26,13 @@ class MCPPlan:
     # timeout_seconds：包含握手、请求与清理的有界调用时间，单位秒。
     # timeout_seconds：握手、请求与清理共享的总时限。
     timeout_seconds: int
-    # tool_name/arguments_json：空工具名表示 tools/list；参数 JSON 已在 Ticket 前校验。
+    # tool_name：空值表示 tools/list；非空工具名必须经过操作者白名单。
     tool_name: str | None = None
+    # arguments_json：参数 JSON 已在 Ticket 前完成有界编码与 schema 校验。
     arguments_json: str = "{}"
-    # cursor/schema_digest：发现页身份和本次工具定义摘要，执行前再次核对。
+    # cursor：发现分页身份；只由服务返回并受长度限制。
     cursor: str | None = None
+    # schema_digest：本次工具定义摘要，执行前用于检测发现证据漂移。
     schema_digest: str | None = None
 
 
