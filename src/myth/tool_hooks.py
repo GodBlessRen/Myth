@@ -42,11 +42,15 @@ class ToolHookContext:
     capability_id: str
     phase: str
     # arguments/result：递归冻结的独立快照；观察不是执行授权。
+    # arguments：工具参数的递归只读副本；回调不能修改原调用。
     arguments: Mapping
+    # result：仅观察阶段提供的递归只读结果；前置阶段固定为空。
     result: Mapping | None = None
     # operation_state：当前持久状态，空值表示尚无工具 Ticket。
+    # operation_state：当前 Ticket/收据状态；无 Ticket 时为空，不能据此补签授权。
     operation_state: str | None = None
     # error_type：稳定类别标识，不包含可能携带凭据的异常正文。
+    # error_type：稳定错误类别；不保存可能含凭据的异常正文。
     error_type: str | None = None
 
 
@@ -55,8 +59,10 @@ class ToolHookDecision:
     """前置回调的唯一有效返回合同；None 也表示继续既有准入流程。"""
 
     # denied：仅能缩小执行范围，False 不签发授权。
+    # denied：只允许前置 Hook 缩小执行范围；False 不代表授权成功。
     denied: bool = False
     # reason_code：受限机器码，禁止携带参数、凭据或任意说明。
+    # reason_code：稳定机器码，供审计/恢复判断；禁止塞入自由文本。
     reason_code: str = "policy_denied"
 
     def __post_init__(self):
@@ -77,6 +83,7 @@ class ToolHook:
     tools: tuple[str, ...] = ("*",)
     # priority/enabled：顺序和开关；注册描述冻结，替换须先注销。
     priority: int = 0
+    # enabled：仅控制当前注册项是否参与未来快照；不影响已冻结调用。
     enabled: bool = True
 
     def __post_init__(self):
@@ -102,6 +109,7 @@ class ToolHookDenied(PermissionError):
     """Ticket 前的已知策略拒绝；由 Conversation 作为 Observation 消费。"""
 
     def __init__(self, hook_id: str, code: str, reason_code: str = "policy_denied"):
+        """保存稳定拒绝分类；异常消息只由受限身份和机器码组成。"""
         # code/reason_code：由管线固定的错误分类，异常正文不包含回调输出。
         self.code, self.reason_code = code, reason_code
         super().__init__(f"tool hook denied: {hook_id}; {code}; {reason_code}")
@@ -111,8 +119,11 @@ class ToolHookRegistry:
     """装配根持有的注册表；每次工具调用取得一份固定阶段计划。"""
 
     def __init__(self):
+        """创建空受信 Hook 目录；注册元数据与回调执行严格分离。"""
         # _hooks/_lock：只保护注册元数据；执行回调时不持锁，也不持数据库事务。
+        # _hooks：按稳定身份保存受信回调描述；模型没有注册入口。
         self._hooks: dict[str, ToolHook] = {}
+        # _lock：仅保护目录快照/增删，绝不包住用户回调。
         self._lock = RLock()
 
     def register(self, hook: ToolHook) -> None:
