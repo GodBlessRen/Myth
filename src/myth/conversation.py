@@ -479,6 +479,24 @@ def conversation_request(settings, snapshot, messages, activities, control=None)
             )
     visible_catalog = {tool_id: TOOL_CATALOG[tool_id] for tool_id in visible_ids}
     deferred_ids = [tool_id for tool_id in TOOL_CATALOG if tool_id not in visible_catalog]
+    # 确定的普通通识问答不需要整套 Tool/Agent 协议；仍走相同 Context、Ticket 和决策校验。
+    # 仅首步启用，后续若出现活动须恢复完整 Agent 路径。
+    pick = snapshot.get("intent_pick") or {}
+    if pick.get("route") == "direct" and not activities:
+        system = (
+            "你是 Myth。请使用用户的语言直接回答常识、概念和文学等一般问题。"
+            "优先利用已有知识，不要因为没有附件或本地文件就要求用户提供材料。"
+            "不得编造当前实时信息。仅当缺少用户独有的必要条件时才提问。"
+            "必须严格返回 JSON：普通回答使用 action=reply、reason=direct、claim=完整答案；"
+            "必要澄清使用 action=ask、reason=missing_input、question=问题。"
+            "不要输出 XML、参数标签、工具协议或不完整的句子。"
+        )
+        schema = conversation_schema(()) if settings["provider"] == "ollama" else STEP_DECISION_SCHEMA
+        if settings["provider"] != "ollama":
+            system += ("远端 StepDecision 使用 decision_type=request_completion、goal_coverage=answer、claim=答案；"
+                       "仅必要澄清使用 ask_user；其余字段按 schema 填空。")
+        return build_context_request(settings, snapshot, messages, activities, control,
+            system=system, schema=schema, visible_ids=(), deferred_ids=tuple(TOOL_CATALOG))
     system = (
         "你是 Myth，一个能聊天、阅读资料、处理项目的助手。用用户的语言简明回答。每次只返回一个符合 schema 的 JSON 对象。\n"
         '普通回答：{"action":"reply","reason":"直接回答","claim":"完整的自然语言回答"}。\n'
