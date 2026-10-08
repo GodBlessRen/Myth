@@ -35,14 +35,14 @@ _WEAK_KNOWLEDGE_CUE = re.compile(
 # 极保守的通识入口：仅无附件、无本地资料指向的简短介绍/定义问题。
 # 这只是减少工具暴露的路由提案，不代表模型知识已经核实。
 _GENERAL_QA = re.compile(
-    r"^\\s*(?:介绍(?:一下|下)?|简(?:单)?述|什么是|解释(?:一下)?|"
-    r"introduce|what\\s+is|explain)\\s*[:：]?\\s*[^\\n]{2,100}[?？。.!！]?\\s*$",
+    r"^\s*(?:介绍(?:一下|下)?|简(?:单)?述|什么是|解释(?:一下)?|"
+    r"introduce|what\s+is|explain)\s*[:：]?\s*[^\n]{2,100}[?？。.!！]?\s*$",
     re.IGNORECASE,
 )
 _LOCAL_REFERENCE = re.compile(
     r"(?:我(?:的|们的)|这个|这份|上述|上面|刚才|之前|文件|代码|仓库|项目|"
     r"附件|网页|链接|最新|今天|现在|昨天|目录|截图|文档|资料|"
-    r"https?://|\\.(?:pdf|docx?|xlsx?|md|py|js)\\b)", re.IGNORECASE,
+    r"https?://|\.(?:pdf|docx?|xlsx?|md|py|js)\b)", re.IGNORECASE,
 )
 
 
