@@ -192,9 +192,11 @@ class SqliteWorkspaceRepository:
             raise ValueError("invalid step or token limit")
         if type(num_ctx) is not int or not 2048 <= num_ctx <= 262144:
             raise ValueError("num_ctx must be between 2048 and 262144")
-        if provider == "ollama" and num_ctx <= min(tokens, 261632) + 512:
+        # 保护完整输入预算：只有正数余额仍可能无法容纳基础系统指令。
+        # 保留至少 2048 输入 token 的保守空间；实际逐轮仍由 ContextCompiler 验证。
+        if provider == "ollama" and num_ctx - tokens - 512 < 2048:
             raise ValueError(
-                "num_ctx must leave room for output tokens and context reserve"
+                "num_ctx must leave at least 2048 input tokens after output and protocol reserve"
             )
         ceiling = 1 if provider == "anthropic" else 2
         if type(temperature) not in {int, float} or not 0 <= float(temperature) <= ceiling:
