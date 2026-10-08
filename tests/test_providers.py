@@ -126,6 +126,7 @@ class OllamaProviderTests(unittest.TestCase):
         self.assertEqual(caught.exception.usage["output_tokens"], 2)
         self.assertEqual(caught.exception.raw["prompt_eval_count"], 4090)
 
+    # 回归断言：供应商明确输出达到长度上限时保留计量并拒绝半截答案作为完成结果。
     def test_length_stop_is_known_failure_and_preserves_usage(self):
         payload = {
             "message": {"role": "assistant", "content": '{"action":"reply","reason":"ok","claim":"半截"}'},
@@ -138,6 +139,7 @@ class OllamaProviderTests(unittest.TestCase):
         self.assertEqual(caught.exception.usage["output_tokens"], 128)
         self.assertEqual(caught.exception.raw["done_reason"], "length")
 
+    # 回归断言：供应商明确正常结束时应保留完整模型返回结果。
     def test_completed_generation_is_accepted(self):
         payload = {"message": {"role": "assistant", "content": "{}"},
                    "done": True, "done_reason": "stop", "eval_count": 8}
@@ -145,6 +147,7 @@ class OllamaProviderTests(unittest.TestCase):
             result = OllamaProvider().invoke(request_obj())
         self.assertEqual(result.text, "{}")
 
+    # 回归断言：供应商报告 done=false 时必须拒绝未完成结果。
     def test_explicit_incomplete_generation_is_rejected(self):
         payload = {"message": {"role": "assistant", "content": "partial"},
                    "done": False, "eval_count": 2}
