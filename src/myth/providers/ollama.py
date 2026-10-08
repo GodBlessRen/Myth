@@ -6,7 +6,7 @@ from __future__ import annotations
 import json
 from urllib import error, request, parse
 
-from ..models import ContextTruncated, ModelRequest, ModelResult, ProviderStatus, ProviderKnownFailure, ProviderUnavailable
+from ..models import ContextTruncated, OutputTruncated, ModelRequest, ModelResult, ProviderStatus, ProviderKnownFailure, ProviderUnavailable
 from ..network_recovery import is_pre_dispatch_disconnect
 from ..auth.transport import open_credential_request, read_bounded
 
@@ -137,6 +137,22 @@ class OllamaProvider:
         ):
             raise ContextTruncated(
                 f"prompt_eval_count={used} reached configured num_ctx={model_request.num_ctx}",
+                usage=usage,
+                raw=value,
+            )
+        # Ollama 的 length 表示输出预算耗尽，即使正文是合法 JSON 也不能证明自然语言完整。
+        # 模型已返回结果与计量，属于已知失败；不能内部盲目重发同一 Ticket。
+        done_reason = value.get("done_reason")
+        if done_reason == "length":
+            raise OutputTruncated(
+                "Ollama output truncated: generation reached max_output_tokens; "
+                "increase the output limit or reduce prompt/response complexity",
+                usage=usage,
+                raw=value,
+            )
+        if value.get("done") is False:
+            raise OutputTruncated(
+                "Ollama returned an incomplete generation (done=false)",
                 usage=usage,
                 raw=value,
             )
