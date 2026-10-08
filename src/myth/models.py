@@ -48,6 +48,10 @@ class ContextTruncated(ProviderKnownFailure):
     """已准入提示达到供应商窗口上限的已知失败；不能信任被截断上下文产生的决定。"""
 
 
+class OutputTruncated(ProviderKnownFailure):
+    """供应商已明确报告输出未完成；保留用量，不把局部正文提交为完成决定。"""
+
+
 # 发给模型的不可变角色/文本投影；文本不携带额外执行权限。
 @dataclass(frozen=True)
 class ModelMessage:
