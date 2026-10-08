@@ -38,6 +38,19 @@ class ConversationContextTests(unittest.TestCase):
             control=control,
         )
 
+    # 通识题不暴露工具目录，但仍经过 Context 编译与冻结模型请求。
+    def test_direct_general_qa_uses_small_reply_schema(self):
+        snapshot = {
+            "intent_pick": {"route": "direct", "metadata": {"kind": "general_qa"}},
+            "messages": [{"role": "user", "content": "介绍一下《红楼梦》"}],
+        }
+        request = self.compile(snapshot)
+        self.assertEqual(request.context_report["visible_tools"], [])
+        self.assertIn("reply", str(request.response_schema))
+        self.assertNotIn("project.read", str(request.response_schema))
+        self.assertNotIn("agent.delegate", request.messages[0].content)
+        self.assertIn("介绍一下《红楼梦》", "\\n".join(m.content for m in request.messages))
+
     # 回归断言：可选旧记忆不能挤掉当前任务和硬约束。
     def test_optional_memory_cannot_crowd_out_current_task(self):
         snapshot = {

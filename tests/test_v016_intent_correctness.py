@@ -63,6 +63,17 @@ class IntentCorrectnessTests(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertEqual(picker.pick(text, {}).route.value, "agent")
 
+    # 通识入口不携带项目/文件权限；对相关依赖与旧反例保持保守回退。
+    def test_standalone_general_question_uses_direct_route(self):
+        picker = RuleIntentPicker()
+        for text in ("介绍一下《红楼梦》", "什么是牛顿第二定律？", "解释一下熵"):
+            with self.subTest(text=text):
+                self.assertEqual(picker.pick(text, {}).route.value, "direct")
+        for text in ("介绍一下我的项目", "介绍一下这份文档", "解释一下昨天的新闻"):
+            with self.subTest(text=text):
+                self.assertEqual(picker.pick(text, {}).route.value, "agent")
+        self.assertEqual(picker.pick("介绍一下《红楼梦》", {"attached_document_ids": ["doc"]}).route.value, "agent")
+
     # 回归断言：明确算术请求允许白名单运算，仍拒绝任意 AST。
     def test_explicit_arithmetic_prefix_admits_ambiguous_operators(self):
         picker = RuleIntentPicker()
