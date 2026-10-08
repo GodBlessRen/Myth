@@ -32,6 +32,20 @@ _WEAK_KNOWLEDGE_CUE = re.compile(
     re.IGNORECASE,
 )
 
+# 极保守的通识入口：仅无附件、无本地资料指向的简短介绍/定义问题。
+# 这只是减少工具暴露的路由提案，不代表模型知识已经核实。
+_GENERAL_QA = re.compile(
+    r"^\\s*(?:介绍(?:一下|下)?|简(?:单)?述|什么是|解释(?:一下)?|"
+    r"introduce|what\\s+is|explain)\\s*[:：]?\\s*[^\\n]{2,100}[?？。.!！]?\\s*$",
+    re.IGNORECASE,
+)
+_LOCAL_REFERENCE = re.compile(
+    r"(?:我(?:的|们的)|这个|这份|上述|上面|刚才|之前|文件|代码|仓库|项目|"
+    r"附件|网页|链接|最新|今天|现在|昨天|目录|截图|文档|资料|"
+    r"https?://|\\.(?:pdf|docx?|xlsx?|md|py|js)\\b)", re.IGNORECASE,
+)
+
+
 # 词面阈值由 foundation-v4 固定反例约束；改规则先提供评测证据，不能凭直觉调参。
 # _WEAK_CUE_SCORE_THRESHOLD：词面召回阈值；这是规则尺度，不是任务价值或模型概率。
 _WEAK_CUE_SCORE_THRESHOLD = 1.25
@@ -93,6 +107,14 @@ class RuleIntentPicker:
             or top_score >= _WEAK_CUE_SCORE_THRESHOLD
             or (weak and top_score >= _WEAK_CUE_SCORE_THRESHOLD)
         )
+        if not attached and not strong and not sources and _GENERAL_QA.fullmatch(text) and not _LOCAL_REFERENCE.search(text):
+            return IntentPick(
+                route=IntentRoute.DIRECT,
+                objective="answer short general-knowledge question without tool discovery",
+                reason="conservative standalone general-QA wording with no source-dependent cues",
+                metadata={"kind": "general_qa"},
+            )
+
         if local_evidence:
             return IntentPick(
                 route=IntentRoute.LOCAL_RETRIEVAL,
