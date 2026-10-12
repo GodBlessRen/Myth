@@ -1,13 +1,14 @@
 import {FormEvent,useEffect,useState} from "react";
 import {Button} from "@heroui/react";
-import {CheckCircle2,ChevronDown,Cpu,KeyRound,Link2,Plus,ShieldCheck,Trash2} from "lucide-react";
+import {CheckCircle2,Cpu,KeyRound,Link2,ShieldCheck} from "lucide-react";
+import {ModelPool,PricingEditor,poolProviders} from "./ModelPool";
 import {auth,workspace} from "../api";
 import {useRefresh} from "../workspace";
 import {asRecord,displayValue} from "../types";
 import type {Bootstrap,Settings,UnknownRecord} from "../types";
 
 type Props={data:Bootstrap;notify:(message:string)=>void};
-const providers=[["ollama","Ollama 本地"],["openai","OpenAI API"],["deepseek","DeepSeek"],["anthropic","Anthropic API"],["claude_oauth","Claude OAuth"],["kimi","Kimi"],["chatgpt","ChatGPT OAuth"]] as const;
+const providers=poolProviders;
 const keyProviders=new Set(["openai","deepseek","anthropic","kimi"]);
 function updateForm<K extends keyof Settings>(set:(f:(value:Settings)=>Settings)=>void,key:K,value:Settings[K]){
   set(old=>({...old,[key]:value}));
@@ -66,36 +67,6 @@ function AuthPanel({provider,notify}:{provider:string;notify:(message:string)=>v
     <button className="ghost-button" disabled={busy} onClick={()=>void check()}>刷新认证状态</button>
   </div>;
 }
-function ModelPool({pool,setPool}:{pool:UnknownRecord;setPool:(p:UnknownRecord)=>void}){
-  const children=Array.isArray(pool.children)?pool.children.map(asRecord):[];
-  const updateChild=(index:number,key:string,value:unknown)=>{
-    const next=children.map((child,i)=>i===index?{...child,[key]:value}:child);setPool({...pool,children:next});
-  };
-  const add=()=>{if(children.length>=3)return;setPool({...pool,children:[...children,{
-    id:"child-"+crypto.randomUUID().slice(0,8),label:"",provider:"ollama",model:"",enabled:true,tier:1,task_types:[],
-    max_steps:4,max_output_tokens:2048,num_ctx:8192,ollama_url:"http://127.0.0.1:11434",temperature:0,thinking:null,pricing:null
-  }]});};
-  return <div className="panel">
-    <div className="panel-top"><Cpu size={18}/><div><h2>模型池 · Model Pool</h2><p>主模型可决定是否委派最多三个子模型；所有能力由后端校验。</p></div></div>
-    <div className="button-row"><label className="inline-check"><input type="checkbox" checked={pool.enabled!==false} onChange={e=>setPool({...pool,enabled:e.target.checked})}/>启用模型池</label>
-      <label className="inline-check"><input type="checkbox" checked={pool.adaptive!==false} onChange={e=>setPool({...pool,adaptive:e.target.checked})}/>自适应</label></div>
-    {children.map((child,i)=><fieldset className="child-model" key={String(child.id||i)}><legend>子模型 {i+1}</legend>
-      <div className="form-grid"><label>Provider<select value={String(child.provider||"ollama")} onChange={e=>updateChild(i,"provider",e.target.value)}>{providers.map(([value,label])=><option key={value} value={value}>{label}</option>)}</select></label>
-      <label>模型<input value={String(child.model||"")} onChange={e=>updateChild(i,"model",e.target.value)}/></label>
-      <label>能力层级<select value={String(child.tier??1)} onChange={e=>updateChild(i,"tier",Number(e.target.value))}><option value="1">基础</option><option value="2">较强</option><option value="3">很强</option></select></label>
-      <label className="inline-check"><input type="checkbox" checked={child.enabled!==false} onChange={e=>updateChild(i,"enabled",e.target.checked)}/>已启用</label></div>
-      <details className="advanced-settings"><summary>高级参数 <ChevronDown size={15}/></summary>
-      <div className="form-grid"><label>备注名称<input value={String(child.label||"")} onChange={e=>updateChild(i,"label",e.target.value)}/></label>
-        <label>最大步骤<input type="number" min={1} value={Number(child.max_steps??4)} onChange={e=>updateChild(i,"max_steps",Number(e.target.value))}/></label>
-        <label>输出 Token<input type="number" min={128} value={Number(child.max_output_tokens??2048)} onChange={e=>updateChild(i,"max_output_tokens",Number(e.target.value))}/></label>
-        <label>上下文<input type="number" min={2048} value={Number(child.num_ctx??8192)} onChange={e=>updateChild(i,"num_ctx",Number(e.target.value))}/></label>
-        <label>服务地址<input value={String(child.ollama_url||"")} onChange={e=>updateChild(i,"ollama_url",e.target.value)}/></label>
-        <label>Thinking<input value={String(child.thinking??"")} onChange={e=>updateChild(i,"thinking",e.target.value||null)}/></label></div></details>
-      <button className="danger-action" onClick={()=>setPool({...pool,children:children.filter((_,j)=>j!==i)})}><Trash2 size={14}/>移除子模型</button>
-    </fieldset>)}
-    <button className="subtle-button" disabled={children.length>=3} onClick={add}><Plus size={15}/>添加子模型（{children.length}/3）</button>
-  </div>;
-}
 export function SettingsPage({data,notify}:Props){
   const [form,setForm]=useState<Settings>(()=>({...data.settings}));
   const [pool,setPool]=useState<UnknownRecord>(()=>({...asRecord(data.settings.model_pool)}));
@@ -146,7 +117,8 @@ export function SettingsPage({data,notify}:Props){
         </div>
         <button type="submit" className="solid-action" disabled={busy||!form.model.trim()}>保存模型配置</button>
       </form>
-      <ModelPool pool={pool} setPool={setPool}/>
+      <PricingEditor provider={form.provider} model={form.model} value={pool.main_pricing} notify={notify} onChange={value=>setPool(old=>({...old,main_pricing:value}))}/>
+      <ModelPool pool={pool} setPool={setPool} notify={notify}/>
     </div>
     <AuthPanel key={form.provider} provider={form.provider||"ollama"} notify={notify}/></div>
   </section>;
