@@ -1,6 +1,6 @@
 import {FormEvent,useEffect,useState} from "react";
 import {useQuery} from "@tanstack/react-query";
-import {Archive,ArrowLeft,ArrowRight,BookOpen,Download,FileText,Folder,FolderPlus,History,Plus,Search,Upload} from "lucide-react";
+import {Archive,ArrowLeft,ArrowRight,Download,FileText,Folder,FolderPlus,History,Plus,Search,Upload} from "lucide-react";
 import {workspace} from "../api";
 import {navigate,useRefresh} from "../workspace";
 import {asRecord,displayValue} from "../types";
