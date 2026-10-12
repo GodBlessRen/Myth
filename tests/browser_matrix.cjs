@@ -56,7 +56,8 @@ async function main(){
           entry.accessibility=await page.evaluate(source+'\nauditSurface()');
           assert.ok(entry.scrollWidth<=width+1,'horizontal overflow');assert.deepEqual(entry.imageFailures,[]);assert.deepEqual(errors,[]);assert.deepEqual(external,[]);
           assert.ok(entry.fonts.filter(font=>['"Myth Sans"','"Myth Serif"','"Myth Latin"'].includes(font.family)).every(font=>font.status==='loaded'),'offline fonts');
-          assert.equal(entry.background,theme==='light'?'rgb(255, 254, 248)':'rgb(14, 16, 15)');
+          // 工作台底色属于精确视觉合同；设计 Token 变更须同步更新此断言并复核截图。
+          assert.equal(entry.background,theme==='light'?'rgb(250, 249, 246)':'rgb(18, 21, 21)');
           if(!baseline)for(const key of ['contrast_failures','weight_failures','target_failures','boundary_failures','icon_failures','unmeasured'])assert.deepEqual(entry.accessibility[key],[],key);
           entry.status='PASS';
         }catch(error){entry.status='FAIL';entry.error=error.message;report.errors.push({case:`${width}/${theme}/${name}`,error:error.message});console.error('FAIL',width,theme,name,error.message);try{await page.screenshot({path:path.join(out,`failure-${width}-${theme}-${name}.png`)});}catch{}}
