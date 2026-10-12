@@ -30,4 +30,4 @@ package-dir = {"" = "src"}
 where = ["src"]
 
 [tool.setuptools.package-data]
-myth = ["webui/*.html", "webui/*.css", "webui/*.js", "webui/*.svg", "webui/fonts/*.woff2", "webui/fonts/*.txt"]
+myth = ["webui/*.html", "webui/*.css", "webui/*.js", "webui/*.svg", "webui/fonts/*.woff2", "webui/fonts/*.txt", "webui/react/*.html", "webui/react/*.js", "webui/react/*.css", "webui/react/*.json"]
