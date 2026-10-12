@@ -69,8 +69,8 @@ export function PricingEditor({provider,model,value,onChange,notify}:PriceProps)
     {isManual?<div className="form-grid">
       <label>币种<select value={valueText(rates.currency)||"USD"} onChange={e=>update("currency",e.target.value)}>
         <option value="USD">USD</option><option value="CNY">CNY</option></select></label>
-      <label>输入单价<input type="number" min={0} max={100000} step="any" value={rates.input??""} onChange={e=>update("input",e.target.value)}/></label>
-      <label>输出单价<input type="number" min={0} max={100000} step="any" value={rates.output??""} onChange={e=>update("output",e.target.value)}/></label>
+      <label>输入单价<input type="number" min={0} max={100000} step="any" value={typeof rates.input==="number"?rates.input:""} onChange={e=>update("input",e.target.value)}/></label>
+      <label>输出单价<input type="number" min={0} max={100000} step="any" value={typeof rates.output==="number"?rates.output:""} onChange={e=>update("output",e.target.value)}/></label>
       {(rates.input==null||rates.output==null)?<small className="subtext">两项单价须同时填写；不完整时服务端拒绝保存。</small>:null}
     </div>:null}
   </div>;
