@@ -69,7 +69,7 @@ export function Goals({data,notify}:Props){
     {newOpen?<div className="modal-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget)setNewOpen(false);}}><form className="dialog-card" role="dialog" aria-modal="true" aria-label="新建长期目标" onSubmit={e=>void newGoal(e)}>
       <h2>新建长期目标</h2><label>目标<input required maxLength={200} value={title} onChange={e=>setTitle(e.target.value)}/></label>
       <label>完成标准与约束<textarea rows={4} value={description} onChange={e=>setDescription(e.target.value)}/></label>
-      <div className="dialog-actions"><button type="button" onClick={()=>setNewOpen(false)}>取消</button><button className="solid-action" disabled={busy||!title.trim()}>创建目标</button></div>
+      <div className="dialog-actions"><button data-dialog-close type="button" onClick={()=>setNewOpen(false)}>取消</button><button className="solid-action" disabled={busy||!title.trim()}>创建目标</button></div>
     </form></div>:null}
     {scheduleFor?<div className="modal-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget)setScheduleFor(null);}}><form className="dialog-card" role="dialog" aria-modal="true" aria-label="安排下一次工作" onSubmit={e=>void saveSchedule(e)}>
       <h2>安排下一次工作</h2><p>{scheduleFor.title}</p>
@@ -80,7 +80,7 @@ export function Goals({data,notify}:Props){
       <label>首次开始（本地时间）<input required type="datetime-local" value={due} onChange={e=>setDue(e.target.value)}/></label>
       <label>重复<select value={interval} onChange={e=>setIntervalValue(e.target.value)}><option value="">仅一次</option><option value="600">每10分钟</option><option value="3600">每小时</option><option value="86400">每天</option></select></label>
       <p className="subtext">执行设置由当前 Python Runtime 校验，失败后原 Request ID 保留。</p>
-      <div className="dialog-actions"><button type="button" onClick={()=>setScheduleFor(null)}>取消</button><button className="solid-action" disabled={busy||!scheduleSession||!schedulePrompt||!due}>保存计划</button></div>
+      <div className="dialog-actions"><button data-dialog-close type="button" onClick={()=>setScheduleFor(null)}>取消</button><button className="solid-action" disabled={busy||!scheduleSession||!schedulePrompt||!due}>保存计划</button></div>
     </form></div>:null}
   </section>;
 }
