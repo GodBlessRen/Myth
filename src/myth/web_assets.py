@@ -9,6 +9,11 @@ from types import MappingProxyType
 # 元组与只读映射避免调用方运行时扩大静态路由；新资源在此显式登记。
 PUBLIC_ASSETS = MappingProxyType({
     "/": ("index.html", "text/html; charset=utf-8"),
+    # 生产源站仍使用旧版 /，React 位于独立的可回退预览入口。
+    "/next": ("react/index.html", "text/html; charset=utf-8"),
+    "/next/": ("react/index.html", "text/html; charset=utf-8"),
+    "/next/workbench.js": ("react/workbench.js", "text/javascript; charset=utf-8"),
+    "/next/workbench.css": ("react/workbench.css", "text/css; charset=utf-8"),
     "/app.css": ("app.css", "text/css; charset=utf-8"),
     "/atelier.css": ("atelier.css", "text/css; charset=utf-8"),
     "/atelier.js": ("atelier.js", "text/javascript; charset=utf-8"),
