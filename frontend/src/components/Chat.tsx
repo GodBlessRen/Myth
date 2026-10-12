@@ -228,7 +228,7 @@ export function Chat({bootstrap,session,sessionId,loading,loadError,notify}:Prop
         <button disabled={!controlModel.trim()||controlBusy} onClick={async()=>{await control("switch_model",{model:controlModel});setSteering(false);}}>切换模型</button>
         <label>Thinking<input value={controlThinking} placeholder={String(latest?.settings?.thinking??"default")} onChange={e=>setControlThinking(e.target.value)}/></label>
         <button disabled={!controlThinking.trim()||controlBusy} onClick={async()=>{await control("switch_thinking",{thinking:controlThinking});setSteering(false);}}>切换 Thinking</button>
-        <button className="ghost-button" onClick={()=>setSteering(false)}>关闭</button>
+        <button className="ghost-button" data-dialog-close onClick={()=>setSteering(false)}>关闭</button>
       </div></div>:null}
   </section>;
 }
