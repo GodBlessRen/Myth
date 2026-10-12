@@ -28,7 +28,7 @@ jobs:
           node-version: '22'
       - name: Install frontend dependencies
         working-directory: frontend
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
       - name: TypeScript static verification
         working-directory: frontend
         run: npm run typecheck
@@ -38,6 +38,12 @@ jobs:
       - name: Build self-contained React workbench
         working-directory: frontend
         run: npm run build
+      - name: Match wheel-vendored React bytes to clean npm-ci build
+        run: |
+          python scripts/stage_react_preview.py --dist frontend/dist --out .work/react-build-verify
+          for name in index.html workbench.js workbench.css manifest.json; do
+            cmp ".work/react-build-verify/$name" "src/myth/webui/react/$name"
+          done
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -65,7 +71,8 @@ jobs:
             sleep 0.25
           done
           curl -fsS http://127.0.0.1:5173/next/ >/dev/null
-          cd frontend && npm run test:browser
+          cd frontend && npm run test:browser && npm run test:workflows
+          MYTH_FRONTEND_URL="$BACKEND/next/" MYTH_FRONTEND_MODE=packaged npm run test:browser && MYTH_FRONTEND_URL="$BACKEND/next/" MYTH_FRONTEND_MODE=packaged npm run test:workflows
       - name: Retain React browser screenshots and test facts
         if: always()
         uses: actions/upload-artifact@v4

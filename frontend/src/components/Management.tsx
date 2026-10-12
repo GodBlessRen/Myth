@@ -2,7 +2,8 @@ import {FormEvent,useEffect,useState} from "react";
 import {useQuery} from "@tanstack/react-query";
 import {Archive,ArrowLeft,ArrowRight,Download,FileText,Folder,FolderPlus,History,Plus,Search,Upload} from "lucide-react";
 import {workspace} from "../api";
-import {navigate,useRefresh} from "../workspace";
+import {patchDraft} from "../drafts";
+import {beginNewChat,navigate,useRefresh} from "../workspace";
 import {asRecord,displayValue} from "../types";
 import type {Bootstrap,Document,Project,SessionListItem,UnknownRecord} from "../types";
 
@@ -27,7 +28,7 @@ export function Sessions({data,notify}:Props){
     try{await workspace.post("/sessions/"+encodeURIComponent(edit.id),value);await refresh();await archiveQuery.refetch();setEdit(null);notify("会话资料已更新");}
     catch(error){displayError(error,notify);}finally{setBusy(false);}
   };
-  return <Frame title="会话" description="查看、整理并继续之前的工作。" action={<button className="solid-action" onClick={()=>navigate("chat")}><Plus size={17}/>新建对话</button>}>
+  return <Frame title="会话" description="查看、整理并继续之前的工作。" action={<button className="solid-action" onClick={beginNewChat}><Plus size={17}/>新建对话</button>}>
     <div className="toolbar"><div className="segment"><button className={!archived?"active":""} onClick={()=>setArchived(false)}>最近会话</button><button className={archived?"active":""} onClick={()=>setArchived(true)}>已归档</button></div>
       <label className="searchbox"><Search size={16}/><input aria-label="查找会话" value={search} onChange={e=>setSearch(e.target.value)} placeholder="搜索会话"/></label></div>
     {archiveQuery.isError&&archived?<p className="inline-error">归档列表读取失败</p>:null}
@@ -52,7 +53,7 @@ export function Projects({data,id,notify}:{data:Bootstrap;id:string|null;notify:
   const [busy,setBusy]=useState(false);
   const [folder,setFolder]=useState(".");
   const project=data.projects.find(p=>p.id===id);
-  const files=useQuery({queryKey:["workspace","files",id,folder],queryFn:()=>workspace.read<UnknownRecord>("/projects/"+encodeURIComponent(id!)+"/files?path="+encodeURIComponent(folder)),enabled:!!id});
+  const files=useQuery({queryKey:["workspace","files",id,folder],queryFn:()=>workspace.read<{files:Array<{path:string;type:string;bytes?:number}>}>("/projects/"+encodeURIComponent(id!)+"/files?path="+encodeURIComponent(folder)),enabled:!!id&&!!project?.root});
   useEffect(()=>setFolder("."),[id]);
   const openForm=(p?:Project)=>{setEditing(p||null);setName(p?.name||"");setDescription(p?.description||"");setRoot(String(p?.root||""));setInstructions(p?.instructions||"");setShowForm(true);};
   const save=async(e:FormEvent)=>{
@@ -72,9 +73,19 @@ export function Projects({data,id,notify}:{data:Bootstrap;id:string|null;notify:
     <div className="panels-grid"><div className="panel"><h2>项目指令</h2><p className="preserved-text">{String(project.instructions||"尚未设置项目指令")}</p><h2>项目会话</h2>
       {data.sessions.filter(s=>s.project_id===id).map(s=><button className="text-row" key={s.id} onClick={()=>navigate("chat",s.id)}>{s.title}<ArrowRight size={15}/></button>)}</div>
       <div className="panel"><h2>本地文件</h2><p className="subtext">路径：{folder}</p>
-      {files.isLoading?<p>正在读取文件…</p>:files.isError?<p className="inline-error">文件读取失败，检查项目根目录权限</p>:
-        <pre className="evidence-raw">{JSON.stringify(files.data,null,2)}</pre>}
-      <p className="subtext">文件读取受 Python 工作区权限边界约束，前端没有新增目录访问权限。</p></div></div>
+      {!project.root?<p className="subtext">该项目未设置受信任的本地目录。编辑项目后可浏览文件。</p>:<>
+        {folder!=="."?<button className="text-row" onClick={()=>setFolder(folder.includes("/")?folder.slice(0,folder.lastIndexOf("/")):".")}>
+          <ArrowLeft size={16}/>返回上一级</button>:null}
+        {files.isLoading?<p>正在读取文件…</p>:files.isError?<p className="inline-error">文件读取失败，检查项目根目录权限</p>:
+          (files.data?.files||[]).length?files.data!.files.map(entry=><button key={entry.path} className="text-row"
+            onClick={()=>{if(entry.type==="directory"){setFolder(entry.path);return;}
+              patchDraft("new",{text:"请读取项目文件 "+entry.path+"，概括内容并说明关键点。",projectId:project.id});
+              navigate("chat");
+            }}>
+            <span><strong>{entry.type==="directory"?"📁":"📄"} {entry.path.split("/").at(-1)}</strong><small>{entry.type==="directory"?"文件夹":displayValue(entry.bytes)+" bytes"}</small></span>
+            <ArrowRight size={15}/></button>):<p className="subtext">目录为空</p>}
+      </>}
+      <p className="subtext">文件目录由 Python 限权读取；点击文件仅准备 Agent 阅读草稿，不直接执行文件。</p></div></div>
     {formDialog}
   </Frame>;
   return <Frame title="项目" description="工作目录、指令、资料与会话，属于同一上下文。" action={<button className="solid-action" onClick={()=>openForm()}><FolderPlus size={17}/>新建项目</button>}>

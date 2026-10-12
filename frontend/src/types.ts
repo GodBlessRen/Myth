@@ -26,7 +26,7 @@ export type Artifact = {decision_id: string; run_id?: string; title?: string; na
 export type Session = {id: string;title: string;project_id?: string | null; pinned?: boolean; archived?: boolean;
   updated_at?: string; messages: Message[]; turns: Turn[]; artifacts: Artifact[]; statistics?: UnknownRecord};
 export type SessionListItem = Pick<Session, "id" | "title" | "project_id" | "pinned" | "archived" | "updated_at">;
-export type Project = {id:string;name:string;description?:string;root_path?:string;instructions?:string;[key:string]:unknown};
+export type Project = {id:string;name:string;description?:string;root?:string|null;instructions?:string;[key:string]:unknown};
 export type Document = {id:string;title:string;project_id?:string|null;archived?:boolean;content?:string;[key:string]:unknown};
 export type Goal = {goal_id:string;title:string;description?:string;state?:string;work?:UnknownRecord;[key:string]:unknown};
 export type Settings = {provider:string;model:string;ollama_url?:string;max_steps?:number;max_output_tokens?:number;
