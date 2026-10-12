@@ -1,0 +1,83 @@
+# Isolated React 19 workbench gate. Preview only: never changes Python's production / route.
+name: React Workbench
+on:
+  pull_request:
+    paths:
+      - 'frontend/**'
+      - 'docs/FRONTEND_REWRITE_PLAN.md'
+      - '.github/workflows/react-workbench.yml'
+  push:
+    branches: [main, 'feat/react19-*']
+    paths:
+      - 'frontend/**'
+      - 'docs/FRONTEND_REWRITE_PLAN.md'
+      - '.github/workflows/react-workbench.yml'
+concurrency:
+  group: react-workbench-${{ github.ref }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+jobs:
+  react-workbench:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm install --no-audit --no-fund
+      - name: TypeScript static verification
+        working-directory: frontend
+        run: npm run typecheck
+      - name: API adapter tests
+        working-directory: frontend
+        run: npm test
+      - name: Build self-contained React workbench
+        working-directory: frontend
+        run: npm run build
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install offline fixture and Chromium
+        run: |
+          python -m pip install -e .
+          cd frontend && npx playwright install --with-deps chromium
+      - name: Verify React workbench in real Chromium against Python fixture
+        run: |
+          mkdir -p .work
+          PYTHONPATH=src:tests python tests/browser_fixture.py --dynamic-ports > .work/react-fixture.log 2>&1 &
+          FIXTURE_PID=$!
+          VITE_PID=""
+          trap 'kill "$VITE_PID" "$FIXTURE_PID" 2>/dev/null || true' EXIT
+          for i in $(seq 1 80); do
+            if test -f .work/browser-fixture.json; then break; fi
+            sleep 0.25
+          done
+          test -f .work/browser-fixture.json
+          BACKEND=$(python -c 'import json; print(json.load(open(".work/browser-fixture.json"))["base"])')
+          MYTH_BACKEND="$BACKEND" npm --prefix frontend run dev -- --port 5173 > .work/react-vite.log 2>&1 &
+          VITE_PID=$!
+          for i in $(seq 1 80); do
+            if curl -fsS http://127.0.0.1:5173/next/ >/dev/null; then break; fi
+            sleep 0.25
+          done
+          curl -fsS http://127.0.0.1:5173/next/ >/dev/null
+          cd frontend && npm run test:browser
+      - name: Retain React browser screenshots and test facts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: myth-react19-browser-evidence
+          path: .work/react-browser-evidence/
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Preserve preview artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: myth-react19-preview
+          path: frontend/dist/
+          retention-days: 7
+          if-no-files-found: error
