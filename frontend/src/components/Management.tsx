@@ -61,6 +61,13 @@ export function Projects({data,id,notify}:{data:Bootstrap;id:string|null;notify:
       setShowForm(false);await refresh();navigate("projects",result.id);notify("项目已保存。");}
     catch(error){displayError(error,notify);}finally{setBusy(false);}
   };
+  const formDialog=showForm?<div className="modal-backdrop"><form className="dialog-card" role="dialog" aria-modal="true" aria-label="编辑项目" onSubmit={e=>void save(e)}>
+      <h2>{editing?"编辑项目":"新建项目"}</h2><label>项目名称<input required maxLength={100} value={name} onChange={e=>setName(e.target.value)}/></label>
+      <label>项目说明<input value={description} onChange={e=>setDescription(e.target.value)}/></label>
+      <label>本地根目录<input value={root} onChange={e=>setRoot(e.target.value)} placeholder="C:\\projects\\myth"/></label>
+      <label>项目指令<textarea rows={5} value={instructions} onChange={e=>setInstructions(e.target.value)}/></label>
+      <div className="dialog-actions"><button type="button" onClick={()=>setShowForm(false)}>取消</button><button className="solid-action" disabled={busy||!name.trim()}>保存</button></div>
+    </form></div>:null;
   if(id&&project)return <Frame title={project.name} description={project.description||"集中管理任务、会话与知识资料。"} action={<div className="button-row"><button className="subtle-button" onClick={()=>navigate("projects")}><ArrowLeft size={15}/>返回</button><button className="solid-action" onClick={()=>openForm(project)}>编辑项目</button></div>}>
     <div className="panels-grid"><div className="panel"><h2>项目指令</h2><p className="preserved-text">{String(project.instructions||"尚未设置项目指令")}</p><h2>项目会话</h2>
       {data.sessions.filter(s=>s.project_id===id).map(s=><button className="text-row" key={s.id} onClick={()=>navigate("chat",s.id)}>{s.title}<ArrowRight size={15}/></button>)}</div>
@@ -68,18 +75,13 @@ export function Projects({data,id,notify}:{data:Bootstrap;id:string|null;notify:
       {files.isLoading?<p>正在读取文件…</p>:files.isError?<p className="inline-error">文件读取失败，检查项目根目录权限</p>:
         <pre className="evidence-raw">{JSON.stringify(files.data,null,2)}</pre>}
       <p className="subtext">文件读取受 Python 工作区权限边界约束，前端没有新增目录访问权限。</p></div></div>
+    {formDialog}
   </Frame>;
   return <Frame title="项目" description="工作目录、指令、资料与会话，属于同一上下文。" action={<button className="solid-action" onClick={()=>openForm()}><FolderPlus size={17}/>新建项目</button>}>
     <div className="project-grid">{data.projects.map(p=><button className="project-card" key={p.id} onClick={()=>navigate("projects",p.id)}>
       <Folder size={20}/><strong>{p.name}</strong><p>{p.description||"本地工作空间"}</p><small>{data.sessions.filter(s=>s.project_id===p.id).length} 个会话</small><ArrowRight size={15}/></button>)}
     {!data.projects.length?<div className="list-empty">尚无项目。从一个目标开始，关联资料与会话。</div>:null}</div>
-    {showForm?<div className="modal-backdrop"><form className="dialog-card" role="dialog" aria-modal="true" aria-label="编辑项目" onSubmit={e=>void save(e)}>
-      <h2>{editing?"编辑项目":"新建项目"}</h2><label>项目名称<input required maxLength={100} value={name} onChange={e=>setName(e.target.value)}/></label>
-      <label>项目说明<input value={description} onChange={e=>setDescription(e.target.value)}/></label>
-      <label>本地根目录<input value={root} onChange={e=>setRoot(e.target.value)} placeholder="C:\\projects\\myth"/></label>
-      <label>项目指令<textarea rows={5} value={instructions} onChange={e=>setInstructions(e.target.value)}/></label>
-      <div className="dialog-actions"><button type="button" onClick={()=>setShowForm(false)}>取消</button><button className="solid-action" disabled={busy||!name.trim()}>保存</button></div>
-    </form></div>:null}
+    {formDialog}
   </Frame>;
 }
 export function Knowledge({data,notify}:Props){
