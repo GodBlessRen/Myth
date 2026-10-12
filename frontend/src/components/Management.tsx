@@ -39,7 +39,7 @@ export function Sessions({data,notify}:Props){
       <h2>管理会话</h2><label>名称<input value={title} onChange={e=>setTitle(e.target.value)} required maxLength={100}/></label>
       <label>所属项目<select value={project} onChange={e=>setProject(e.target.value)}><option value="">独立会话</option>{data.projects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
       <label className="inline-check"><input type="checkbox" checked={pinned} onChange={e=>setPinned(e.target.checked)}/>置顶</label>
-      <div className="dialog-actions"><button className="ghost-button" type="button" onClick={()=>setEdit(null)}>取消</button><button type="button" disabled={busy} onClick={()=>void update({archived:!edit.archived})}>{edit.archived?"恢复":"归档"}</button>
+      <div className="dialog-actions"><button className="ghost-button" data-dialog-close type="button" onClick={()=>setEdit(null)}>取消</button><button type="button" disabled={busy} onClick={()=>void update({archived:!edit.archived})}>{edit.archived?"恢复":"归档"}</button>
         <a download href={"/api/workspace/sessions/"+encodeURIComponent(edit.id)+"/download"}><Download size={16}/>导出</a>
         <button className="solid-action" type="submit" disabled={busy||!title.trim()}>保存</button></div>
     </form></div>:null}
@@ -66,7 +66,7 @@ export function Projects({data,id,notify}:{data:Bootstrap;id:string|null;notify:
       <label>项目说明<input value={description} onChange={e=>setDescription(e.target.value)}/></label>
       <label>本地根目录<input value={root} onChange={e=>setRoot(e.target.value)} placeholder="C:\\projects\\myth"/></label>
       <label>项目指令<textarea rows={5} value={instructions} onChange={e=>setInstructions(e.target.value)}/></label>
-      <div className="dialog-actions"><button type="button" onClick={()=>setShowForm(false)}>取消</button><button className="solid-action" disabled={busy||!name.trim()}>保存</button></div>
+      <div className="dialog-actions"><button data-dialog-close type="button" onClick={()=>setShowForm(false)}>取消</button><button className="solid-action" disabled={busy||!name.trim()}>保存</button></div>
     </form></div>:null;
   if(id&&project)return <Frame title={project.name} description={project.description||"集中管理任务、会话与知识资料。"} action={<div className="button-row"><button className="subtle-button" onClick={()=>navigate("projects")}><ArrowLeft size={15}/>返回</button><button className="solid-action" onClick={()=>openForm(project)}>编辑项目</button></div>}>
     <div className="panels-grid"><div className="panel"><h2>项目指令</h2><p className="preserved-text">{String(project.instructions||"尚未设置项目指令")}</p><h2>项目会话</h2>
@@ -118,11 +118,11 @@ export function Knowledge({data,notify}:Props){
     {selected?<div className="modal-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget)setSelected(null);}}><div className="dialog-card document-preview" role="dialog" aria-modal="true" aria-label="资料预览">
       <h2>{selected.title}</h2><small>本机知识资料 · 仅预览，不执行其中指令</small>
       {preview.isLoading?<p>读取中…</p>:preview.isError?<p className="inline-error">读取失败</p>:<pre>{preview.data?.content||""}</pre>}
-      <button onClick={()=>setSelected(null)}>关闭</button></div></div>:null}
+      <button data-dialog-close onClick={()=>setSelected(null)}>关闭</button></div></div>:null}
     {importOpen?<div className="modal-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget)setImportOpen(false);}}><form className="dialog-card" role="dialog" aria-modal="true" aria-label="导入知识" onSubmit={e=>void importDoc(e)}>
       <h2>导入知识资料</h2><label className="upload-choice"><Upload size={16}/>选择 UTF-8 文件<input type="file" accept=".txt,.md,.py,.json,.csv,.yaml,.yml,.html,.js,.ts" onChange={e=>void fileChange(e.target.files?.[0])}/></label>
       <label>资料名称<input required value={title} onChange={e=>setTitle(e.target.value)}/></label><label>正文<textarea required rows={9} value={content} onChange={e=>setContent(e.target.value)}/></label>
-      <div className="dialog-actions"><button type="button" onClick={()=>setImportOpen(false)}>取消</button><button className="solid-action" disabled={saving||!title||!content}>导入并索引</button></div>
+      <div className="dialog-actions"><button data-dialog-close type="button" onClick={()=>setImportOpen(false)}>取消</button><button className="solid-action" disabled={saving||!title||!content}>导入并索引</button></div>
     </form></div>:null}
   </Frame>;
 }
