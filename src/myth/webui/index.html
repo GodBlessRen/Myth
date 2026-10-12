@@ -12,6 +12,7 @@
 <title>Myth · 工作空间</title>
 <link href="/fonts/myth-sans.woff2" rel="preload" as="font" type="font/woff2" crossorigin="anonymous"/>
 <link href="/app.css" rel="stylesheet"/>
+<link href="/atelier.css" rel="stylesheet"/>
 <link href="/favicon.svg" rel="icon" type="image/svg+xml"/>
 </head>
 <body><a class="skip-link" href="#mainContent">跳至主要内容</a>
@@ -23,6 +24,7 @@
 <button class="command-trigger" id="commandToggle" title="搜索与快捷操作"><span data-icon="search"></span><span class="nav-text">搜索与快捷操作</span><kbd>Ctrl K</kbd></button>
 <div class="sidebar-library"><details class="nav-group" data-nav-group="work" open><summary>工作<svg aria-hidden="true" class="icon fold-chevron" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"></path></svg></summary><nav aria-label="工作" class="navigation primary-nav"><a data-page="chat" href="#chat" title="对话"><span data-icon="chat"></span><span class="nav-text">对话</span></a><a data-page="goals" href="#goals" title="目标与计划"><span data-icon="target"></span><span class="nav-text">目标与计划</span></a></nav></details><details class="nav-group" data-nav-group="library" open><summary>资料<svg aria-hidden="true" class="icon fold-chevron" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"></path></svg></summary><nav aria-label="资料" class="navigation primary-nav"><a data-page="projects" href="#projects" title="项目"><span data-icon="folder"></span><span class="nav-text">项目</span></a><a data-page="knowledge" href="#knowledge" title="知识库"><span data-icon="book"></span><span class="nav-text">知识库</span></a><a data-page="sessions" href="#sessions" title="会话"><span data-icon="history"></span><span class="nav-text">会话</span></a></nav></details><details class="nav-group recent-group" data-nav-group="recent" open><summary>最近对话<span class="nav-count" id="recentCount"></span><svg aria-hidden="true" class="icon fold-chevron" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"></path></svg></summary><div class="recent-sessions" id="recentSessions"></div><a class="all-sessions" href="#sessions">查看全部会话<span aria-hidden="true">↗</span></a></details></div>
 <div class="sidebar-bottom"><nav aria-label="系统" class="navigation secondary-nav"><a data-page="runtime" href="#runtime" title="Runtime"><span data-icon="activity"></span><span class="nav-text">Runtime</span></a><a data-page="settings" href="#settings" title="设置"><span data-icon="settings"></span><span class="nav-text">设置</span></a></nav><div class="local-profile"><span aria-hidden="true" class="workspace-avatar"><img class="brand-mark" data-brand="main" src="/logo.svg" alt="" width="48" height="30"/></span><div><strong>个人工作空间</strong><small>本地工作区</small></div></div></div>
+<div class="split-handle split-handle-left" id="sidebarResize" role="separator" aria-orientation="vertical" aria-label="调整导航宽度" aria-valuemin="210" aria-valuemax="370" aria-valuenow="248" tabindex="0"></div>
 </aside>
 <button aria-label="关闭导航" class="sidebar-shade hidden" id="sidebarShade"></button>
 <main class="main" id="mainContent" tabindex="-1">
@@ -33,7 +35,8 @@
 </button>
 <div class="workspace-crumb"><span>工作空间</span><span class="crumb-separator">/</span><strong id="pageTitle">对话</strong></div>
 </div>
-<div class="topbar-right"><button aria-pressed="false" class="studio-focus" id="focusMode" title="展开专注工作区" type="button"><svg aria-hidden="true" class="icon" viewBox="0 0 24 24"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5"></path></svg><span>专注</span></button>
+<div class="topbar-right"><button aria-label="查看当前运行观测" class="run-indicator" id="runIndicator" type="button"><span aria-hidden="true" class="run-indicator-dot"></span><span class="run-indicator-label">空闲</span></button><button aria-pressed="false" class="studio-focus" id="focusMode" title="展开专注工作区" type="button"><svg aria-hidden="true" class="icon" viewBox="0 0 24 24"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5"></path></svg><span>专注</span></button>
+<button aria-pressed="false" aria-label="切换紧凑阅读密度" class="icon-button density-toggle" id="densityToggle" title="切换紧凑阅读密度" type="button"><svg aria-hidden="true" class="icon" viewBox="0 0 24 24"><path d="M5 5h14M5 9h9M5 13h14M5 17h9M5 21h14"/></svg></button>
 <button aria-label="切换到墨黑" aria-pressed="false" class="icon-button theme-toggle" id="themeToggle" title="切换主题" type="button">
 <span data-icon="moon"></span>
 </button>
@@ -354,7 +357,7 @@
 </div>
 </section>
 </main>
-<aside aria-label="Runtime Observatory" class="inspector" id="runtimeInspector">
+<aside aria-label="Runtime Observatory" class="inspector" id="runtimeInspector"><div class="split-handle split-handle-right" id="inspectorResize" role="separator" aria-orientation="vertical" aria-label="调整观测宽度" aria-valuemin="285" aria-valuemax="480" aria-valuenow="340" tabindex="0"></div>
 <div class="inspector-head"><span class="inspector-title">运行观测</span><button aria-expanded="true" aria-label="收起观测栏" class="icon-button inspector-dock" id="inspectorDock" title="收起观测栏" type="button"><svg aria-hidden="true" class="icon" viewBox="0 0 24 24"><path d="M4 4h16v16H4Zm11 0v16M8 8l4 4-4 4"></path></svg></button><div class="inspector-status"><span class="inspector-pulse" id="inspectorPulse"></span><div class="inspector-status-copy"><strong id="inspectorState">空闲</strong><span class="inspector-acceptance hidden" id="inspectorAcceptance"></span></div></div></div>
 <div aria-label="观测角度" class="inspector-lenses" id="inspectorLenses" role="tablist"><button aria-controls="lens-overview" aria-selected="false" id="lens-tab-overview" data-inspector-lens="overview" role="tab" type="button">概览</button><button aria-controls="lens-execution" aria-selected="false" id="lens-tab-execution" data-inspector-lens="execution" role="tab" type="button">执行</button><button aria-controls="lens-resources" aria-selected="false" id="lens-tab-resources" data-inspector-lens="resources" role="tab" type="button">资源</button></div><div class="inspector-scroll"><details class="observatory-group" id="lens-overview" data-lens-panel="overview" aria-labelledby="lens-tab-overview" open><summary><span>概览</span><svg aria-hidden="true" class="icon" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"></path></svg></summary><details class="inspector-section session-statistics" data-evidence-section="1" open><summary class="inspector-section-heading"><h2 class="inspector-label">会话统计</h2><svg aria-hidden="true" class="icon fold-chevron" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"></path></svg></summary><div class="inspector-section-body"><div aria-live="polite" class="context-facts" id="sessionStatistics">
 <div class="inspector-empty">选择会话后显示统计</div>
@@ -516,5 +519,6 @@
 <script src="/goals.js"></script>
 <script src="/studio.js"></script>
 <script src="/choices.js"></script>
+<script src="/atelier.js"></script>
 </body>
 </html>
