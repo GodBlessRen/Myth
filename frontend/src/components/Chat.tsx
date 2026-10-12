@@ -3,6 +3,7 @@ import {ArrowDown,ArrowUp,BookOpen,Check,ClipboardCopy,FileText,MessageSquarePlu
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {workspace,pendingRequestId,clearPending,ApiError} from "../api";
+import {draftFor,saveDraft,transferDraft,clearDraft} from "../drafts";
 import {navigate,useRefresh} from "../workspace";
 import {activeStatus,finalStatus,statusText,displayValue} from "../types";
 import type {Artifact,Bootstrap,Message,Session,Turn,UnknownRecord} from "../types";
@@ -82,7 +83,7 @@ function Thread({session}:{session:Session}){
   </div>;
 }
 export function Chat({bootstrap,session,sessionId,loading,loadError,notify}:Props){
-  const [text,setText]=useState("");
+  const [text,setText]=useState(()=>draftFor(sessionId||"new"));
   const [projectId,setProjectId]=useState("");
   const [goalId,setGoalId]=useState("");
   const [docs,setDocs]=useState<string[]>([]);
@@ -93,7 +94,6 @@ export function Chat({bootstrap,session,sessionId,loading,loadError,notify}:Prop
   const [controlModel,setControlModel]=useState("");
   const [controlThinking,setControlThinking]=useState("");
   const [attachOpen,setAttachOpen]=useState(false);
-  const drafts=useRef(new Map<string,string>());
   const prevKey=useRef(sessionId||"new");
   const composing=useRef(false);
   const inputRef=useRef<HTMLTextAreaElement>(null);
@@ -105,8 +105,7 @@ export function Chat({bootstrap,session,sessionId,loading,loadError,notify}:Prop
 
   useEffect(()=>{
     if(prevKey.current!==currentKey){
-      drafts.current.set(prevKey.current,text);
-      setText(drafts.current.get(currentKey)||"");
+      setText(draftFor(currentKey));
       setDocs([]);
       prevKey.current=currentKey;
     }
@@ -114,7 +113,7 @@ export function Chat({bootstrap,session,sessionId,loading,loadError,notify}:Prop
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[currentKey]);
   useEffect(()=>{if(session?.project_id)setProjectId(session.project_id);},[session?.project_id]);
-  const edit=(value:string)=>{setText(value);drafts.current.set(currentKey,value);};
+  const edit=(value:string)=>{setText(value);saveDraft(currentKey,value);};
 
   const control=async(action:"pause"|"resume"|"stop"|"continue"|"steer"|"compact"|"switch_model"|"switch_thinking",payload:UnknownRecord={})=>{
     if(!latest||controlBusy)return;
@@ -135,6 +134,9 @@ export function Chat({bootstrap,session,sessionId,loading,loadError,notify}:Prop
         // 创建会话接口不支持幂等；超时后绝不自动重发创建请求。
         const result=await workspace.post<{id:string}>("/sessions",{project_id:projectId||null});
         sid=result.id;
+        // 一旦服务端确认新 Session 身份，立即绑定草稿和路由；后续消息超时不能再创建重复 Session。
+        transferDraft(currentKey,sid);
+        navigate("chat",sid);
       }
       if(latest?.status==="WAITING_USER"){
         await workspace.control(latest.run_id,"answer",{text:message,question_id:latest.question_id});
@@ -148,9 +150,10 @@ export function Chat({bootstrap,session,sessionId,loading,loadError,notify}:Prop
           {text:full,request_id:requestId,document_ids:attached,goal_id:goal});
         clearPending(sid);
       }
-      edit("");setDocs([]);
+      clearDraft(sid);
+      if(sid!==currentKey)clearDraft(currentKey);
+      setText("");setDocs([]);
       await refresh(sid);
-      if(sid!==sessionId)navigate("chat",sid);
     }catch(error){
       const message=error instanceof Error?error.message:"发送失败";
       notify(error instanceof ApiError&&error.uncertain?message+" 请在会话中核对是否已创建，不要重复发送。":message);
