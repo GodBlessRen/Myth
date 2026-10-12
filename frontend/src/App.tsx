@@ -65,23 +65,29 @@ export function App(){
       if(e.isComposing||e.keyCode===229)return;
       if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="k"){e.preventDefault();setCommandOpen(!commandOpen);}
       else if((e.ctrlKey||e.metaKey)&&e.shiftKey&&e.key.toLowerCase()==="o"){e.preventDefault();navigate("chat");}
-      else if(e.key==="Escape"){setCommandOpen(false);}
+      else if(e.key==="Escape"){
+        if(document.querySelector('[role="dialog"][aria-modal="true"]'))return;
+        if(commandOpen)setCommandOpen(false);
+        else if(window.innerWidth<=1120&&inspector)setInspector(false);
+        else if(window.innerWidth<=800&&sidebar)setSidebar(false);
+      }
     };
     document.addEventListener("keydown",shortcut);
     return ()=>document.removeEventListener("keydown",shortcut);
-  },[commandOpen,setCommandOpen]);
+  },[commandOpen,setCommandOpen,inspector,setInspector,sidebar,setSidebar]);
   // React 是独立页面的唯一 DOM owner；Python 响应是唯一持久状态来源。
   if(bootstrap.isLoading&&!data)return <div className="boot-loading"><div className="brand-monogram">M</div><p>正在连接 Myth 工作空间…</p></div>;
   if(!data)return <ConnectionNotice onRetry={()=>void bootstrap.refetch()} message={bootstrap.error instanceof Error?bootstrap.error.message:"本地 Python 服务未响应"}/>;
   const nav=(target:string,id?:string)=>{navigate(target,id);if(window.innerWidth<=800)setSidebar(false);};
   return <div className={"app-shell "+(!sidebar?"sidebar-closed ":"")+(!inspector?"inspector-closed":"")}>
+    {sidebar?<button className="sidebar-screen" aria-label="关闭导航" onClick={()=>setSidebar(false)}/>:null}
     {sidebar?<aside className="sidebar" aria-label="主导航">
       <header className="sidebar-head"><button className="brand" onClick={()=>nav("chat")} aria-label="Myth 新对话">
         <img src={theme==="dark"?"/logo-dark.svg":"/logo.svg"} alt=""/><strong>Myth</strong><small>WORKBENCH</small></button>
         <button className="icon-action" onClick={()=>setSidebar(false)} aria-label="收起导航"><PanelLeftClose size={18}/></button>
       </header>
-      <button className="new-conversation" onClick={()=>nav("chat")}><Plus size={18}/>新建对话 <kbd>⌘⇧O</kbd></button>
-      <button className="command-entry" onClick={()=>{setCommandOpen(true);setCommandText("");}}><Search size={16}/>搜索与快捷操作 <kbd>⌘K</kbd></button>
+      <button className="new-conversation" onClick={()=>nav("chat")}><Plus size={18}/>新建对话 <kbd>Ctrl ⇧ O</kbd></button>
+      <button className="command-entry" onClick={()=>{setCommandOpen(true);setCommandText("");}}><Search size={16}/>搜索与快捷操作 <kbd>Ctrl K</kbd></button>
       <div className="sidebar-scroll"><p className="nav-caption">WORKSPACE</p>
         <nav className="nav-items">{primary.slice(0,5).map(item=><button key={item.page} aria-current={page===item.page?"page":undefined}
           onClick={()=>nav(item.page)} className={page===item.page?"selected":""}><item.icon size={17}/>{item.label}</button>)}</nav>
@@ -120,6 +126,7 @@ export function App(){
         {page==="settings"?<SettingsPage data={data} notify={notify}/>:null}
       </main>
     </div>
+    {inspector?<button className="inspector-screen" aria-label="关闭运行观测" onClick={()=>setInspector(false)}/>:null}
     <Observatory session={session}/>
     {commandOpen?<div className="palette-mask" onMouseDown={e=>{if(e.target===e.currentTarget)setCommandOpen(false);}}>
       <div className="command-palette" role="dialog" aria-modal="true" aria-label="搜索与快捷操作">
