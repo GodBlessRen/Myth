@@ -3,7 +3,7 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 
 // 仅本地开发启用受控代理；正式发布的 API 请求直接进入同源 Python HTTP。
-const backend = process.env.MYTH_BACKEND || "http://127.0.0.1:8000";
+const backend = process.env.MYTH_BACKEND || "http://127.0.0.1:8765";
 const proxy = {
   target: backend,
   changeOrigin: true,
