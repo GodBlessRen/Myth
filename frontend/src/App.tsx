@@ -8,6 +8,7 @@ import {Observatory} from "./components/Observatory";
 import {Sessions,Projects,Knowledge} from "./components/Management";
 import {Goals} from "./components/Goals";
 import {SettingsPage} from "./components/Settings";
+import {useDialogAccessibility} from "./components/useDialogAccessibility";
 
 const primary=[
   {page:"chat",label:"对话",icon:TextQuote},
@@ -31,6 +32,7 @@ function ConnectionNotice({onRetry,message}:{onRetry:()=>void;message:string}){
     <button className="solid-action" onClick={onRetry}>重新连接</button><a href="/" className="subtle-button">返回旧版工作台</a></div>;
 }
 export function App(){
+  useDialogAccessibility();
   const {page,id}=useRoute();
   const {sidebar,setSidebar,inspector,setInspector,theme,toggleTheme,density,toggleDensity,commandOpen,setCommandOpen}=useUi();
   const bootstrap=useBootstrap();
@@ -132,7 +134,7 @@ export function App(){
       <div className="command-palette" role="dialog" aria-modal="true" aria-label="搜索与快捷操作">
         <div className="palette-input"><Command size={19}/><input autoFocus value={commandText} onChange={e=>setCommandText(e.target.value)} placeholder="搜索页面与会话…" onKeyDown={e=>{
           if(e.key==="Enter"&&commands[0]){navigate(...(commands[0].href.split("/") as [string,string?]));setCommandOpen(false);}
-        }}/><button className="icon-action" aria-label="关闭搜索" onClick={()=>setCommandOpen(false)}><X size={17}/></button></div>
+        }}/><button className="icon-action" data-dialog-close aria-label="关闭搜索" onClick={()=>setCommandOpen(false)}><X size={17}/></button></div>
         <div className="palette-items">{commands.length?commands.map(c=><button key={c.href} onClick={()=>{const [p,...parts]=c.href.split("/");navigate(p,parts.join("/")||undefined);setCommandOpen(false);}}><Search size={15}/>{c.label}</button>):<p>没有匹配结果</p>}</div>
         <footer>Enter 打开 · Esc 关闭</footer>
       </div>
