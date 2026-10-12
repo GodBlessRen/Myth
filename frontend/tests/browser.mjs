@@ -32,6 +32,21 @@ try{
       assert.equal(initial.theme,theme,"initial theme mismatch");
       await page.screenshot({path:path.join(out,`${width}-${theme}-home.png`)});
       current.states.push("home");
+      if(width===1440&&theme==="light"){
+        await page.keyboard.press("Control+k");
+        await page.locator(".command-palette").waitFor({state:"visible"});
+        await page.keyboard.press("Shift+Tab");
+        assert.equal(await page.locator(".command-palette").evaluate(node=>node.contains(document.activeElement)),true,"dialog focus must remain trapped");
+        await page.keyboard.press("Escape");
+        assert.equal(await page.locator(".command-palette").count(),0,"Escape must close command palette");
+        current.states.push("palette-escape-focus");
+        await page.goto(base+"#goals");
+        await page.getByRole("button",{name:"新建目标"}).click();
+        await page.locator('.dialog-card[role="dialog"]').waitFor({state:"visible"});
+        await page.keyboard.press("Escape");
+        assert.equal(await page.locator('.dialog-card[role="dialog"]').count(),0,"Escape must close Goal dialog");
+        current.states.push("goal-dialog-escape");
+      }
 
       // A completed conversation exercises Markdown, tool facts, metadata and third-column navigation.
       await page.goto(base+"#chat/"+encodeURIComponent(fixture.ids.completed));
