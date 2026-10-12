@@ -12,6 +12,9 @@ on:
       - 'frontend/**'
       - 'docs/FRONTEND_REWRITE_PLAN.md'
       - '.github/workflows/react-workbench.yml'
+concurrency:
+  group: react-workbench-${{ github.ref }}
+  cancel-in-progress: true
 permissions:
   contents: read
 jobs:
