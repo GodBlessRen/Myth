@@ -27,6 +27,8 @@ Open **http://127.0.0.1:5173/next/**. Development Vite proxies `/api`, `/logo*.s
 npm run typecheck
 npm test
 npm run build
+# Browser Matrix prerequisites: Playwright Chromium + running Python fixture and Vite proxy
+npm run test:browser
 ```
 
 React and Python must never mutate the same DOM. `/` continues to serve the old workbench. The build currently produces an isolated `dist/` artifact for validation; it is not packaged or served by Python until the explicit cutover gates are met. No schema changes or credentials are required to experiment.
@@ -40,6 +42,7 @@ The preview currently implements the main conversation, raw tool facts and artif
 ## Current known limitations
 
 - Current Python service exposes HTTP snapshot polling, not a cursor-based SSE protocol. Never describe this UI as token streaming.
-- This is a source preview; wheel packaging of Vite output and offline Browser Matrix integration require a later explicit allowlist and build reproducibility PR.
+- CI now verifies 5 viewport widths × light/dark themes × (home, completed transcript, UNKNOWN) with the real local Python/SQLite fixture, retains exact-revision screenshots, and checks no passive POST writes. This is **30 visual states, not 130 full legacy states**, and does not prove full feature parity.
+- This is a source preview; wheel packaging of Vite output, a committed npm lockfile and the production /next/ static allowlist require a later reproducibility / release PR.
 - A network timeout after creating a new session has uncertain outcome; read back sessions before creating another. Run message submissions reuse an idempotency identity.
 - Do not claim current visual acceptance based on type checks; compare real screenshots at all gate widths and both themes.
