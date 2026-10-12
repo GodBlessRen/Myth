@@ -352,3 +352,9 @@ a{color:inherit;text-decoration:none}
  .attachment-popover{left:14px;right:14px}
 }
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
+
+/* 不把原生文件选择框视觉占位暴露给弹出工具栏。 */
+.visually-hidden{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;overflow:hidden!important;clip:rect(0 0 0 0)!important;white-space:nowrap!important;border:0!important}
+.operation-tickets{border-top:1px solid var(--border);margin-top:7px;padding:7px 0}
+.operation-tickets>summary{cursor:pointer;font-size:11px;color:var(--muted)}
+.operation-output{white-space:pre-wrap;overflow-wrap:anywhere;max-height:480px}
