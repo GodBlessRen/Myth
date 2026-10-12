@@ -122,7 +122,7 @@ export function SettingsPage({data,notify}:Props){
   };
   return <section className="content-page">
     <header className="page-header"><div><span className="micro-label">MYTH / CONFIGURATION</span><h1>模型与连接</h1><p>选择模型、配置推理能力和子模型池。更改不修改正在运行的历史调用。</p></div>
-      <Button variant="primary" isDisabled={busy} onPress={()=>document.getElementById("modelSettingsForm")?.requestSubmit()}>{busy?"保存中…":"保存设置"}</Button>
+      <Button variant="primary" isDisabled={busy} onPress={()=>document.querySelector<HTMLFormElement>("#modelSettingsForm")?.requestSubmit()}>{busy?"保存中…":"保存设置"}</Button>
     </header>
     <div className="settings-grid"><div className="settings-stack">
       <form id="modelSettingsForm" className="panel" onSubmit={e=>void save(e)}>
