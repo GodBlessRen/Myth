@@ -71,8 +71,8 @@ jobs:
             sleep 0.25
           done
           curl -fsS http://127.0.0.1:5173/next/ >/dev/null
-          cd frontend && npm run test:browser
-          MYTH_FRONTEND_URL="$BACKEND/next/" MYTH_FRONTEND_MODE=packaged npm run test:browser
+          cd frontend && npm run test:browser && npm run test:workflows
+          MYTH_FRONTEND_URL="$BACKEND/next/" MYTH_FRONTEND_MODE=packaged npm run test:browser && MYTH_FRONTEND_URL="$BACKEND/next/" MYTH_FRONTEND_MODE=packaged npm run test:workflows
       - name: Retain React browser screenshots and test facts
         if: always()
         uses: actions/upload-artifact@v4
