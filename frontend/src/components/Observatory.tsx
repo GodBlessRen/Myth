@@ -29,8 +29,10 @@ function TokenMetrics({turn}:{turn:Turn}){
   const settled=(key:string)=>budgets.find(r=>r.meter===key)?.settled;
   const coverage=(name:string,value:unknown)=>
     `${displayValue(value)} · ${displayValue(samples[name])} / ${displayValue(usage.model_calls)} 次报告`;
-  const cacheRate=typeof usage.cache_hit_rate==="number"&&usage.cache_hit_rate>=0&&usage.cache_hit_rate<=1
-    ?(usage.cache_hit_rate*100).toFixed(1)+"%":"N/A · 供应商未报告";
+  const cacheRate=usage.cache_metrics_available===true&&typeof usage.cache_hit_rate==="number"&&
+    Number.isFinite(usage.cache_hit_rate)&&usage.cache_hit_rate>=0&&usage.cache_hit_rate<=1
+    ?(usage.cache_hit_rate*100).toFixed(1)+"% · "+displayValue(usage.cached_input_tokens)+" / "+displayValue(usage.input_tokens)
+    :"N/A · 供应商未报告";
   return <>
     <Fact label="Context window" value={turn.settings?.num_ctx??"供应商管理"}/>
     <Fact label="Input settled" value={settled("input_tokens")}/>
@@ -41,6 +43,7 @@ function TokenMetrics({turn}:{turn:Turn}){
     <Fact label="Cache hit" value={cacheRate}/>
     <Fact label="First token" value={usage.first_token_ms==null?"N/A · 未报告":displayValue(usage.first_token_ms)+" ms"}/>
     <Fact label="Model wall" value={coverage("provider_wall_ms",usage.provider_wall_ms)}/>
+    <Fact label="Model calls" value={displayValue(settled("model_calls"))+" / "+displayValue(budgets.find(r=>r.meter==="model_calls")?.limit_units)}/>
   </>;
 }
 function BudgetList({turn}:{turn:Turn}){
