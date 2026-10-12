@@ -3,6 +3,7 @@ import {ArrowDown,ArrowUp,BookOpen,Check,ClipboardCopy,FileText,MessageSquarePlu
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {workspace,pendingRequestId,clearPending,ApiError} from "../api";
+import {DiffEvidence} from "./EvidenceViews";
 import {draftFor,saveDraft,readDraft,patchDraft,transferDraft,clearDraft} from "../drafts";
 import {beginNewChat,navigate,useRefresh} from "../workspace";
 import {activeStatus,finalStatus,statusText,displayValue,asRecord} from "../types";
@@ -33,6 +34,7 @@ function OperationGroup({turn}:{turn:Turn}){
           <pre className="operation-output">{raw}</pre>
         </details>;
       })}
+      <DiffEvidence turn={turn} compact/>
       {operations.length?<details className="operation-tickets"><summary>Ticket / Receipt 持久对象（{operations.length}）</summary>
         {operations.map((op,i)=><details key={String(op.ticket_id||op.decision_id||i)} className="operation-line">
           <summary><strong>{displayValue(op.capability||"Operation")}</strong><small>{statusText(String(op.state||"UNKNOWN"))}</small></summary>

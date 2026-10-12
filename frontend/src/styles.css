@@ -358,3 +358,17 @@ a{color:inherit;text-decoration:none}
 .operation-tickets{border-top:1px solid var(--border);margin-top:7px;padding:7px 0}
 .operation-tickets>summary{cursor:pointer;font-size:11px;color:var(--muted)}
 .operation-output{white-space:pre-wrap;overflow-wrap:anywhere;max-height:480px}
+
+/* 运行事实展开与只读 Diff：不会改变 Python 票据或执行状态。 */
+.graph-node-detail {flex:1;min-width:0;display:flex;flex-direction:column;gap:4px;text-align:left;background:transparent;border:0;color:inherit;padding:6px 2px;cursor:pointer}
+.graph-node-detail:focus-visible,.diff-entry summary:focus-visible {outline:2px solid currentColor;outline-offset:3px}
+.graph-details {padding:12px;border:1px solid var(--border, #9995);border-radius:10px;overflow-wrap:anywhere}
+.graph-summary {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-bottom:12px}
+.diff-entry {margin:8px 0;border:1px solid var(--border, #9995);border-radius:9px;overflow:hidden}
+.diff-entry summary {display:flex;align-items:center;gap:7px;cursor:pointer;padding:10px;overflow-wrap:anywhere}
+.diff-code {margin:0;padding:12px;max-height:460px;overflow:auto;white-space:pre;tab-size:2;font-size:12px;line-height:1.5;background:rgba(127,127,127,.07)}
+.diff-code span {display:block;min-height:1.5em}
+.diff-added {background:rgba(45,160,90,.15)} .diff-removed {background:rgba(195,62,68,.15)}
+.diff-hunk {color:#728fc6} .diff-meta {font-weight:600}
+.pricing-editor {border-top:1px solid var(--border,#9995);padding:12px 0}
+.task-kinds {margin:12px 0} .task-kinds .button-row {flex-wrap:wrap}

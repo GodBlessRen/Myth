@@ -1,4 +1,5 @@
 import {useMemo,useState,type ReactNode} from "react";
+import {DiffEvidence,ExecutionGraph} from "./EvidenceViews";
 import {Activity, Bot, CheckCircle2, CircleHelp, GitBranch, Layers, Terminal, Wallet, X} from "lucide-react";
 import type {Session,Turn,UnknownRecord} from "../types";
 import {asRecord,displayValue,statusText} from "../types";
@@ -12,16 +13,6 @@ function Empty({children}:{children:string}){return <p className="empty-fact">{c
 function Part({title,children,opened=true}:{title:string;children:ReactNode;opened?:boolean}){
   const [expanded,setExpanded]=useState(opened);
   return <details className="inspector-part" open={expanded} onToggle={e=>setExpanded(e.currentTarget.open)}><summary>{title}<span className="fold-visual">⌄</span></summary><div>{children}</div></details>;
-}
-function Graph({turn}:{turn:Turn|null}){
-  const graph=asRecord(turn?.execution_graph);
-  const nodes=records(graph.nodes);
-  return nodes.length?<div className="graph-list">{nodes.map((node,i)=><div className="graph-node" key={String(node.id||i)} style={{paddingLeft:Math.max(0,Math.min(4,Number(node.depth)||0))*12}}>
-    <span className="graph-mark">{i===0?"●":node.kind==="subagent"?"↳":"↓"}</span>
-    <div><strong>{displayValue(node.label||node.kind||"节点")}</strong><small>{displayValue(node.detail)}</small>
-      {node.model?<small>{displayValue(node.provider)} · {displayValue(node.model)}</small>:null}</div>
-    <span className={"state-text state-"+String(node.state||"UNKNOWN").toLowerCase()}>{statusText(String(node.state||"UNKNOWN"))}</span>
-  </div>)}</div>:<Empty>暂无可投影的执行图</Empty>;
 }
 function TokenMetrics({turn}:{turn:Turn}){
   const usage=asRecord(turn.model_usage), samples=asRecord(usage.measurement_samples);
@@ -97,7 +88,8 @@ export function Observatory({session}:{session:Session|null}){
           <pre className="evidence-raw">{JSON.stringify(turn.delivery,null,2)}</pre>:<Empty>尚无交付验收事实</Empty>}</Part>
         <Part title="恢复提示"><Fact label="Driver active" value={turn.driver_active}/><Fact label="持久状态" value={turn.status}/><Fact label="控制修订" value={turn.control?.revision}/>{turn.error?<pre className="evidence-raw">{turn.error}</pre>:null}</Part>
       </>:lens==="execution"?<>
-        <Part title="执行图 · Execution Graph"><Graph turn={turn}/></Part>
+        <Part title="执行图 · Execution Graph"><ExecutionGraph turn={turn}/></Part>
+        <Part title="文件差异 · Diff"><DiffEvidence turn={turn}/></Part>
         <Part title="持久执行轨迹"><Timeline turn={turn}/></Part>
         <Part title="工具调用"><Tools turn={turn}/></Part>
         <Part title="控制快照" opened={false}><pre className="evidence-raw">{JSON.stringify(turn.control||{},null,2)}</pre></Part>
