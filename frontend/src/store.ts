@@ -17,7 +17,7 @@ function remember(key:string,value:string){
 }
 const prefersDark = typeof window !== "undefined" && matchMedia("(prefers-color-scheme: dark)").matches;
 export const useUi = create<UiState>(set=>({
-  sidebar:true, inspector:true,
+  sidebar:typeof window !== "undefined" && window.innerWidth > 800, inspector:typeof window !== "undefined" && window.innerWidth > 1120,
   theme:preference("theme",prefersDark?"dark":"light") === "dark" ? "dark" : "light",
   density:preference("density","comfortable") === "compact"?"compact":"comfortable",
   lens:"overview",commandOpen:false,
