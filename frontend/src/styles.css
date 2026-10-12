@@ -311,6 +311,10 @@ a{color:inherit;text-decoration:none}
  .sidebar{position:fixed;z-index:70;top:0;bottom:0;left:0;width:min(285px,calc(100vw - 45px));box-shadow:var(--shadow)}
  .sidebar-rail{display:none}.mobile-nav{display:inline-flex}
  .topbar{height:59px;min-height:59px;padding-inline:9px}.topbar-title strong{max-width:142px}
+ .topbar .icon-action,.topbar .top-model,.composer-tools button,.composer-tools select,.send-action,.obs-tabs button{min-height:44px;height:44px}
+ .topbar .icon-action,.composer-tools button,.send-action{min-width:44px;width:44px}
+ .obs-tabs button{font-size:12px}
+ .sidebar .nav-items button,.sidebar .recent-items button,.sidebar .sidebar-foot>button{min-height:44px}
  .top-model span:nth-child(2){max-width:120px}.optional-control{display:none}
  .chat-welcome{padding-inline:26px;transform:none}.chat-welcome h1{font-size:29px}
  .chat-thread{padding:23px 24px 20px}.composer-zone{padding:9px 20px max(15px,env(safe-area-inset-bottom))}
