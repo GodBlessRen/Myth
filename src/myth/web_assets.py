@@ -10,6 +10,8 @@ from types import MappingProxyType
 PUBLIC_ASSETS = MappingProxyType({
     "/": ("index.html", "text/html; charset=utf-8"),
     "/app.css": ("app.css", "text/css; charset=utf-8"),
+    "/atelier.css": ("atelier.css", "text/css; charset=utf-8"),
+    "/atelier.js": ("atelier.js", "text/javascript; charset=utf-8"),
     "/app.js": ("app.js", "text/javascript; charset=utf-8"),
     "/inspector.js": ("inspector.js", "text/javascript; charset=utf-8"),
     "/goals.js": ("goals.js", "text/javascript; charset=utf-8"),
