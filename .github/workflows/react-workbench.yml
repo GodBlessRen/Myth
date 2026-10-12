@@ -1,0 +1,44 @@
+# Isolated React 19 workbench gate. Preview only: never changes Python's production / route.
+name: React Workbench
+on:
+  pull_request:
+    paths:
+      - 'frontend/**'
+      - 'docs/FRONTEND_REWRITE_PLAN.md'
+      - '.github/workflows/react-workbench.yml'
+  push:
+    branches: [main, 'feat/react19-*']
+    paths:
+      - 'frontend/**'
+      - 'docs/FRONTEND_REWRITE_PLAN.md'
+      - '.github/workflows/react-workbench.yml'
+permissions:
+  contents: read
+jobs:
+  react-workbench:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm install --no-audit --no-fund
+      - name: TypeScript static verification
+        working-directory: frontend
+        run: npm run typecheck
+      - name: API adapter tests
+        working-directory: frontend
+        run: npm test
+      - name: Build self-contained React workbench
+        working-directory: frontend
+        run: npm run build
+      - name: Preserve preview artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: myth-react19-preview
+          path: frontend/dist/
+          retention-days: 7
+          if-no-files-found: error
