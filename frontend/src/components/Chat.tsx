@@ -4,7 +4,7 @@ import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {workspace,pendingRequestId,clearPending,ApiError} from "../api";
 import {navigate,useRefresh} from "../workspace";
-import {activeStatus,finalStatus,statusText,asRecord,displayValue} from "../types";
+import {activeStatus,finalStatus,statusText,displayValue} from "../types";
 import type {Artifact,Bootstrap,Message,Session,Turn,UnknownRecord} from "../types";
 
 type Props={
