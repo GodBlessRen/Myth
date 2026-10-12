@@ -54,7 +54,7 @@ try{
 
   await input.fill("请解释本轮 React 迁移并给出一个回答。");
   await input.press("Enter");
-  await page.waitForURL(url=>/^#chat\/.test(url.hash)&&url.hash.length>12,{timeout:30000});
+  await page.waitForURL(url=>url.hash.startsWith("#chat/")&&url.hash.length>12,{timeout:30000});
   const sid=decodeURIComponent(new URL(page.url()).hash.slice("#chat/".length));
   facts.serverSession=sid;
   await page.locator(".message-row.from-user").waitFor({state:"visible",timeout:30000});
