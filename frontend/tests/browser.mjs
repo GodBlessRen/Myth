@@ -54,6 +54,11 @@ try{
       await page.locator(".run-alert strong").filter({hasText:"UNKNOWN"}).waitFor({state:"visible",timeout:10000});
       await page.screenshot({path:path.join(out,`${width}-${theme}-unknown.png`)});
       current.states.push("UNKNOWN");
+      if(width<=1120){
+        await page.locator(".inspector-screen").click({position:{x:8,y:80}});
+        assert.equal(await page.locator(".observatory").count(),0,"overlay must dismiss without modifying Runtime");
+        current.states.push("drawer-dismiss");
+      }
       assert.deepEqual(writes,[],"Passive navigation posted an unsafe command");
       assert.deepEqual(problems,[],"Browser JavaScript exceptions");
       const overflow=await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1);
