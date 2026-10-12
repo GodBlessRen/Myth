@@ -51,7 +51,7 @@ try{
       // UNKNOWN stays explicit; opening the app must not automatically issue control commands.
       await page.goto(base+"#chat/"+encodeURIComponent(fixture.ids.unknown));
       await page.locator(".message-row").first().waitFor({state:"visible",timeout:20000});
-      await page.getByText("UNKNOWN · 待核对").first().waitFor({state:"visible",timeout:10000});
+      await page.locator(".run-alert strong").filter({hasText:"UNKNOWN"}).waitFor({state:"visible",timeout:10000});
       await page.screenshot({path:path.join(out,`${width}-${theme}-unknown.png`)});
       current.states.push("UNKNOWN");
       assert.deepEqual(writes,[],"Passive navigation posted an unsafe command");
