@@ -1,5 +1,5 @@
 import {useMemo,useState,type ReactNode} from "react";
-import {Activity, Bot, CheckCircle2, CircleHelp, GitBranch, Layers, Terminal, Wallet} from "lucide-react";
+import {Activity, Bot, CheckCircle2, CircleHelp, GitBranch, Layers, Terminal, Wallet, X} from "lucide-react";
 import type {Session,Turn,UnknownRecord} from "../types";
 import {asRecord,displayValue,statusText} from "../types";
 import {useUi} from "../store";
@@ -80,7 +80,7 @@ export function Observatory({session}:{session:Session|null}){
   return <aside className="observatory" aria-label="Runtime Observatory">
     <header className="obs-header"><div><span className="micro-label">RUNTIME / OBSERVATORY</span><h2>运行观测</h2>
       <p><span className={"status-indicator state-"+(turn?.status||"IDLE").toLowerCase()}/>{statusText(turn?.status)}</p></div>
-      <button className="icon-action" aria-label="收起观测栏" onClick={()=>setInspector(false)}><Layers size={17}/></button>
+      <button className="icon-action" aria-label="收起观测栏" onClick={()=>setInspector(false)}><Layers className="dock-icon" size={17}/><X className="drawer-close-icon" size={19}/></button>
     </header>
     <div className="obs-tabs" role="tablist" aria-label="运行观测视图">{tabs.map(t=><button key={t.id} role="tab" aria-selected={lens===t.id} className={lens===t.id?"active":""} onClick={()=>setLens(t.id)}><t.icon size={14}/>{t.name}</button>)}</div>
     <div className="obs-scroll" role="tabpanel" aria-label={tabs.find(t=>t.id===lens)?.name}>
