@@ -284,3 +284,30 @@ dialog { border-radius: 17px; box-shadow: var(--shadow); }
   .suggestions button:hover { transform: none; }
   .split-handle, .split-handle::before { transition: none; }
 }
+
+/* Rollback-gate fixes (Browser Matrix): targets are real 40px+ hit areas at every width.
+ * Borders on semantic controls must be visible independently from low-contrast paper surfaces.
+ * Keep theme-specific tokens; NEVER relax the accessibility audit. */
+.nav-group > summary,
+.model-pill,
+.run-indicator { min-height: 44px; }
+#inspectorToggle,
+#inspectorClose,
+button.choice-trigger,
+.command-trigger { border-color: var(--muted); }
+#inspectorToggle,
+#inspectorClose { color: var(--ink-2); }
+
+/* 对具有真实可见边框的操作区提供可测 3:1 边界：不是把低对比度边框藏起来。 */
+#runIndicator,
+#modelPill,
+#composer,
+#composer button,
+#settingsPage input,
+#settingsPage button,
+#settingsPage select,
+#settingsPage textarea,
+#poolChildren :is(input,button,select),
+a.artifact-card {
+  border-color: var(--muted);
+}
