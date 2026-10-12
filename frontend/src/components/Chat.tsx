@@ -161,7 +161,7 @@ export function Chat({bootstrap,session,sessionId,loading,loadError,notify}:Prop
     try{
       for(const file of chosen){
         if(file.size>1_000_000)throw new Error(file.name+" 超过 1MB");
-        if(!/\\.(txt|md|py|json|csv|yaml|yml|html|js|ts)$/i.test(file.name))throw new Error("不支持的文件类型："+file.name);
+        if(!/\.(txt|md|py|json|csv|yaml|yml|html|js|ts)$/i.test(file.name))throw new Error("不支持的文件类型："+file.name);
         const body=new TextDecoder("utf-8",{fatal:true}).decode(await file.arrayBuffer());
         const created=await workspace.post<{id:string}>("/documents",{title:file.name,content:body,
           project_id:session?.project_id||projectId||null});
