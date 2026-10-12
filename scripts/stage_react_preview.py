@@ -15,6 +15,7 @@ FILES = ("index.html", "workbench.js", "workbench.css")
 
 
 def stage(dist: Path, dest: Path) -> dict:
+    """仅允许三个固定构建输出，计算文件摘要后写入预览包，拒绝其他资源。"""
     dist = dist.resolve()
     actual = {
         item.relative_to(dist).as_posix()
