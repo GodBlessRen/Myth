@@ -14,7 +14,9 @@ WEB = ROOT / "src" / "myth" / "webui"
 
 
 class ReactPreviewAssetsTest(unittest.TestCase):
+    """校验旧版根目录回退与 React 离线预览拥有不同的资源身份。"""
     def test_legacy_root_and_preview_are_distinct(self):
+        """禁止未声明路径公开，旧入口必须保持原生工作台。"""
         self.assertEqual(PUBLIC_ASSETS["/"][0], "index.html")
         self.assertEqual(PUBLIC_ASSETS["/next/"][0], "react/index.html")
         self.assertEqual(PUBLIC_ASSETS["/next"][0], "react/index.html")
@@ -24,6 +26,7 @@ class ReactPreviewAssetsTest(unittest.TestCase):
         self.assertNotIn("/next/other.js", PUBLIC_ASSETS)
 
     def test_vendored_output_matches_manifest(self):
+        """核对安装前 React 三份构建资源与不可变 SHA256 清单一致。"""
         directory = WEB / "react"
         manifest = json.loads((directory / "manifest.json").read_text("utf-8"))
         self.assertEqual(manifest["format"], 1)
