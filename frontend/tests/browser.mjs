@@ -7,9 +7,9 @@ import path from "node:path";
 
 const root=path.resolve(process.cwd(),"..");
 const fixture=JSON.parse(fs.readFileSync(path.join(root,".work/browser-fixture.json"),"utf-8"));
-const out=path.join(root,".work/react-browser-evidence");
+const out=path.join(root,".work/react-browser-evidence",process.env.MYTH_FRONTEND_MODE||"dev");
 fs.mkdirSync(out,{recursive:true});
-const base="http://127.0.0.1:5173/next/";
+const base=process.env.MYTH_FRONTEND_URL||"http://127.0.0.1:5173/next/";
 const widths=[1440,1280,1024,768,390], themes=["light","dark"];
 const report={revision:process.env.GITHUB_SHA||"local",fixture:"real Python HTTP/SQLite; fixed Provider",cases:[],errors:[]};
 const browser=await chromium.launch({headless:true});
@@ -18,6 +18,10 @@ try{
     const context=await browser.newContext({viewport:{width,height:width>=1024?900:844},colorScheme:theme});
     const page=await context.newPage(),problems=[],writes=[];
     page.on("pageerror",error=>problems.push(error.message));
+    page.on("request",request=>{
+      const host=new URL(request.url()).hostname;
+      if(host!=="127.0.0.1"&&host!=="localhost")problems.push("external request: "+request.url());
+    });
     page.on("request",request=>{
       if(request.url().includes("/api/")&&request.method()!=="GET")writes.push(request.method()+" "+request.url());
     });
@@ -53,6 +57,10 @@ try{
       await page.locator(".message-row").first().waitFor({state:"visible",timeout:20000});
       assert.equal(await page.locator(".conversation").count(),1);
       assert.equal(await page.locator(".message-row.from-user").count()>0,true);
+      await page.locator(".operation-group").first().waitFor({state:"visible",timeout:10000});
+      await page.locator(".operation-group").first().evaluate(node=>(node).open=true);
+      assert.equal(await page.locator(".operation-line").count()>0,true,"durable tool facts must appear");
+      current.states.push("tool-observation");
       if(width<=1120){
         await page.locator(".inspector-control").click();
       }
