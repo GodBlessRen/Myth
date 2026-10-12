@@ -1,4 +1,4 @@
-import {useMemo,type ReactNode} from "react";
+import {useMemo,useState,type ReactNode} from "react";
 import {Activity, Bot, CheckCircle2, CircleHelp, GitBranch, Layers, Terminal, Wallet} from "lucide-react";
 import type {Session,Turn,UnknownRecord} from "../types";
 import {asRecord,displayValue,statusText} from "../types";
@@ -10,7 +10,8 @@ function Fact({label,value}:{label:string;value:unknown}){
 }
 function Empty({children}:{children:string}){return <p className="empty-fact">{children}</p>;}
 function Part({title,children,opened=true}:{title:string;children:ReactNode;opened?:boolean}){
-  return <details className="inspector-part" defaultOpen={opened}><summary>{title}<span className="fold-visual">⌄</span></summary><div>{children}</div></details>;
+  const [expanded,setExpanded]=useState(opened);
+  return <details className="inspector-part" open={expanded} onToggle={e=>setExpanded(e.currentTarget.open)}><summary>{title}<span className="fold-visual">⌄</span></summary><div>{children}</div></details>;
 }
 function Graph({turn}:{turn:Turn|null}){
   const graph=asRecord(turn?.execution_graph);
