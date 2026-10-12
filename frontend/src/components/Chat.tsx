@@ -1,11 +1,11 @@
-import {FormEvent,useEffect,useRef,useState} from "react";
-import {ArrowDown,ArrowUp,BookOpen,Check,ClipboardCopy,FileText,MessageSquarePlus,Pause,Play,Send,Square,StepForward,Target,Workflow} from "lucide-react";
+import {ChangeEvent,FormEvent,useEffect,useRef,useState} from "react";
+import {ArrowDown,ArrowUp,BookOpen,Check,ClipboardCopy,FileText,MessageSquarePlus,Pause,Play,Send,Square,StepForward,Target,Upload,Workflow} from "lucide-react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {workspace,pendingRequestId,clearPending,ApiError} from "../api";
-import {draftFor,saveDraft,transferDraft,clearDraft} from "../drafts";
-import {navigate,useRefresh} from "../workspace";
-import {activeStatus,finalStatus,statusText,displayValue} from "../types";
+import {draftFor,saveDraft,readDraft,patchDraft,transferDraft,clearDraft} from "../drafts";
+import {beginNewChat,navigate,useRefresh} from "../workspace";
+import {activeStatus,finalStatus,statusText,displayValue,asRecord} from "../types";
 import type {Artifact,Bootstrap,Message,Session,Turn,UnknownRecord} from "../types";
 
 type Props={
@@ -14,13 +14,32 @@ type Props={
 };
 function OperationGroup({turn}:{turn:Turn}){
   const operations=turn.operations||[];
-  if(!operations.length && !turn.activities?.length)return null;
+  const activities=(turn.activities||[]).filter(step=>{
+    const decision=asRecord(step.decision),result=asRecord(step.result);
+    return decision.decision_type==="tool_call"||typeof result.error==="string";
+  });
+  if(!operations.length&&!activities.length)return null;
   return <details className="operation-group">
-    <summary><Workflow size={15}/><span>{operations.length} 次工具调用 · {turn.activities?.length||0} 个决策步骤</span><span className="operation-state">{statusText(turn.status)}</span></summary>
-    <div className="operation-body">{operations.map((op,i)=><details key={String(op.ticket_id||op.decision_id||i)} className="operation-line">
-      <summary><strong>{displayValue(op.capability||"工具")}</strong><small>{statusText(String(op.state||"UNKNOWN"))}</small></summary>
-      <pre>{JSON.stringify(op,null,2)}</pre>
-    </details>)}</div>
+    <summary><Workflow size={15}/><span>{activities.length} 个工具决策 · {operations.length} 个持久操作</span>
+      <span className="operation-state">{statusText(turn.status)}</span></summary>
+    <div className="operation-body">
+      {activities.map((step,i)=>{
+        const d=asRecord(step.decision),result=asRecord(step.result);
+        const raw=step.result==null?"结果未记录":Object.keys(result).length===1&&typeof Object.values(result)[0]==="string"
+          ?String(Object.values(result)[0]):JSON.stringify(step.result,null,2);
+        return <details className="operation-line" key={String(step.step??i)}>
+          <summary><strong>{String(step.step??i+1).padStart(2,"0")} · {displayValue(d.capability_id||"工具步骤")}</strong>
+            <small>{displayValue(step.state||"UNKNOWN")}{result.error?" · ERROR":""}</small></summary>
+          <pre className="operation-output">{raw}</pre>
+        </details>;
+      })}
+      {operations.length?<details className="operation-tickets"><summary>Ticket / Receipt 持久对象（{operations.length}）</summary>
+        {operations.map((op,i)=><details key={String(op.ticket_id||op.decision_id||i)} className="operation-line">
+          <summary><strong>{displayValue(op.capability||"Operation")}</strong><small>{statusText(String(op.state||"UNKNOWN"))}</small></summary>
+          <pre className="operation-output">{JSON.stringify(op,null,2)}</pre>
+        </details>)}
+      </details>:null}
+    </div>
   </details>;
 }
 function ArtifactRow({artifact}:{artifact:Artifact}) {
@@ -84,9 +103,9 @@ function Thread({session}:{session:Session}){
 }
 export function Chat({bootstrap,session,sessionId,loading,loadError,notify}:Props){
   const [text,setText]=useState(()=>draftFor(sessionId||"new"));
-  const [projectId,setProjectId]=useState("");
-  const [goalId,setGoalId]=useState("");
-  const [docs,setDocs]=useState<string[]>([]);
+  const [projectId,setProjectId]=useState(()=>readDraft(sessionId||"new").projectId);
+  const [goalId,setGoalId]=useState(()=>readDraft(sessionId||"new").goalId);
+  const [docs,setDocs]=useState<string[]>(()=>readDraft(sessionId||"new").documentIds);
   const [busy,setBusy]=useState(false);
   const [controlBusy,setControlBusy]=useState(false);
   const [steering,setSteering]=useState(false);
@@ -94,6 +113,8 @@ export function Chat({bootstrap,session,sessionId,loading,loadError,notify}:Prop
   const [controlModel,setControlModel]=useState("");
   const [controlThinking,setControlThinking]=useState("");
   const [attachOpen,setAttachOpen]=useState(false);
+  const [importing,setImporting]=useState(false);
+  const filePicker=useRef<HTMLInputElement>(null);
   const prevKey=useRef(sessionId||"new");
   const composing=useRef(false);
   const inputRef=useRef<HTMLTextAreaElement>(null);
@@ -105,8 +126,9 @@ export function Chat({bootstrap,session,sessionId,loading,loadError,notify}:Prop
 
   useEffect(()=>{
     if(prevKey.current!==currentKey){
-      setText(draftFor(currentKey));
-      setDocs([]);
+      const restored=readDraft(currentKey);
+      setText(restored.text);setDocs(restored.documentIds);setGoalId(restored.goalId);
+      setProjectId(restored.projectId);setAttachOpen(false);
       prevKey.current=currentKey;
     }
   // Switching session must not import a draft belonging to a different identity.
@@ -114,6 +136,47 @@ export function Chat({bootstrap,session,sessionId,loading,loadError,notify}:Prop
   },[currentKey]);
   useEffect(()=>{if(session?.project_id)setProjectId(session.project_id);},[session?.project_id]);
   const edit=(value:string)=>{setText(value);saveDraft(currentKey,value);};
+  const updateDocs=(next:string[])=>{
+    if(next.length>4){notify("一条消息最多附加 4 份资料");return;}
+    setDocs(next);patchDraft(currentKey,{documentIds:next});
+  };
+  const changeProject=(value:string)=>{setProjectId(value);patchDraft(currentKey,{projectId:value});};
+  const changeGoal=(value:string)=>{setGoalId(value);patchDraft(currentKey,{goalId:value});};
+  useEffect(()=>{
+    const reset=()=>{
+      if(prevKey.current!=="new")return;
+      setText("");setDocs([]);setProjectId("");setGoalId("");setAttachOpen(false);
+    };
+    window.addEventListener("myth:new-chat",reset);
+    return ()=>window.removeEventListener("myth:new-chat",reset);
+  },[]);
+  const importFiles=async(event:ChangeEvent<HTMLInputElement>)=>{
+    const chosen=Array.from(event.target.files||[]);
+    event.target.value="";
+    if(!chosen.length)return;
+    const identity=currentKey;
+    if(readDraft(identity).documentIds.length+chosen.length>4){notify("一条消息最多附加 4 份资料");return;}
+    setImporting(true);
+    const accepted:string[]=[];
+    try{
+      for(const file of chosen){
+        if(file.size>1_000_000)throw new Error(file.name+" 超过 1MB");
+        if(!/\\.(txt|md|py|json|csv|yaml|yml|html|js|ts)$/i.test(file.name))throw new Error("不支持的文件类型："+file.name);
+        const body=new TextDecoder("utf-8",{fatal:true}).decode(await file.arrayBuffer());
+        const created=await workspace.post<{id:string}>("/documents",{title:file.name,content:body,
+          project_id:session?.project_id||projectId||null});
+        accepted.push(created.id);
+      }
+      notify("资料已建立索引，并附加到此会话草稿");
+    }catch(error){notify((error instanceof Error?error.message:"导入失败")+(accepted.length?"；已成功导入 "+accepted.length+" 份，结果保留":""));}
+    finally{
+      const merged=[...new Set([...readDraft(identity).documentIds,...accepted])];
+      patchDraft(identity,{documentIds:merged});
+      if(prevKey.current===identity)setDocs(merged);
+      if(accepted.length)await refresh(sessionId);
+      setImporting(false);
+    }
+  };
 
   const control=async(action:"pause"|"resume"|"stop"|"continue"|"steer"|"compact"|"switch_model"|"switch_thinking",payload:UnknownRecord={})=>{
     if(!latest||controlBusy)return;
@@ -192,7 +255,7 @@ export function Chat({bootstrap,session,sessionId,loading,loadError,notify}:Prop
         {!latest.control?.stopped?<button disabled={controlBusy} onClick={()=>setSteering(true)}><StepForward size={14}/>调整</button>:null}
         {!latest.control?.stopped&&!finalStatus.has(latest.status)?<button className="danger-action" disabled={controlBusy} onClick={()=>void control("stop")}><Square size={14}/>停止</button>:null}
       </div>:null}
-      {docs.length?<div className="attachment-strip">{docs.map(id=><button key={id} onClick={()=>setDocs(x=>x.filter(d=>d!==id))}><FileText size={14}/>{bootstrap.documents.find(d=>d.id===id)?.title||id} ×</button>)}</div>:null}
+      {docs.length?<div className="attachment-strip">{docs.map(id=><button key={id} onClick={()=>updateDocs(docs.filter(d=>d!==id))}><FileText size={14}/>{bootstrap.documents.find(d=>d.id===id)?.title||id} ×</button>)}</div>:null}
       <form className="composer" onSubmit={e=>void send(e)}>
         <textarea ref={inputRef} value={text} disabled={busy||busyRun&&latest?.status!=="WAITING_USER"}
           placeholder={latest?.status==="WAITING_USER"?"回答 Agent 的问题…":"告诉 Myth 你想完成什么…"}
@@ -201,21 +264,25 @@ export function Chat({bootstrap,session,sessionId,loading,loadError,notify}:Prop
           onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey&&!e.nativeEvent.isComposing&&!composing.current){e.preventDefault();void send();}}}/>
         <div className="composer-footer">
           <div className="composer-tools">
-            <button type="button" title="新对话" aria-label="新对话" onClick={()=>navigate("chat")}><MessageSquarePlus size={17}/></button>
+            <button type="button" title="新对话" aria-label="新对话" onClick={()=>beginNewChat()}><MessageSquarePlus size={17}/></button>
             <button type="button" title="添加知识资料" aria-label="添加知识资料" onClick={()=>setAttachOpen(x=>!x)}><FileText size={17}/></button>
-            <select aria-label="关联项目" value={session?.project_id||projectId} disabled={!!session} onChange={e=>setProjectId(e.target.value)}>
+            <select aria-label="关联项目" value={session?.project_id||projectId} disabled={!!session} onChange={e=>changeProject(e.target.value)}>
               <option value="">独立对话</option>{bootstrap.projects.map(p=><option value={p.id} key={p.id}>{p.name}</option>)}
             </select>
-            <select aria-label="长期 Goal" value={goalId} disabled={busyRun} onChange={e=>setGoalId(e.target.value)}>
+            <select aria-label="长期 Goal" value={goalId} disabled={busyRun} onChange={e=>changeGoal(e.target.value)}>
               <option value="">未关联 Goal</option>{bootstrap.goals.filter(g=>g.state!=="ARCHIVED").map(g=><option value={g.goal_id} key={g.goal_id}>{g.title}</option>)}
             </select>
           </div>
           <button className="send-action" type="submit" disabled={!canSend} title="Enter 发送 · Shift Enter 换行">{busy?"…":<Send size={17}/>}</button>
         </div>
       </form>
-      {attachOpen?<div className="attachment-popover"><strong>从知识库添加</strong>
+      <input ref={filePicker} className="visually-hidden" aria-label="本地文本文件" type="file" multiple accept=".txt,.md,.py,.json,.csv,.yaml,.yml,.html,.js,.ts" onChange={e=>void importFiles(e)}/>
+      {attachOpen?<div className="attachment-popover"><strong>添加知识资料</strong>
+        <button type="button" className="subtle-button" disabled={importing||busy} onClick={()=>filePicker.current?.click()}>
+          <Upload size={15}/>{importing?"导入中…":"选择本地 UTF-8 文本（最多四份）"}
+        </button><p className="subtext">也可从已有知识库选择。</p>
         {bootstrap.documents.filter(d=>!d.archived).length?bootstrap.documents.filter(d=>!d.archived).map(d=>
-          <label key={d.id}><input type="checkbox" checked={docs.includes(d.id)} onChange={e=>setDocs(old=>e.target.checked?[...old,d.id]:old.filter(x=>x!==d.id))}/>{d.title}</label>):
+          <label key={d.id}><input type="checkbox" checked={docs.includes(d.id)} onChange={e=>updateDocs(e.target.checked?[...docs,d.id]:docs.filter(x=>x!==d.id))}/>{d.title}</label>):
           <p>暂无资料，请前往知识库导入。</p>}</div>:null}
       <div className="composer-caption">执行事实保留在 Runtime · Enter 发送 / Shift+Enter 换行</div>
     </div>
