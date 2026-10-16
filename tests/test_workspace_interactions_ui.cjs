@@ -445,6 +445,34 @@ test("changed message after full reload does not reuse a pending request identit
   assert.ok(Object.values(storage).every(value => !/第一次请求|另一条正文/.test(String(value))));
 });
 
+// 未确认的写入不能显示成普通读取错误；真实 POST 没有响应时只保存旧身份并等待用户核对。
+test("uncertain message POST shows outcome uncertainty and retains one request identity", async () => {
+  const h = boot();
+  compose(h);
+  let writes = 0;
+  h.context.api = async () => {writes++;throw new TypeError("Failed to fetch");};
+  await h.context.sendMessage();
+  assert.equal(writes, 1);
+  assert.equal(h.state.pending.id, "request-1");
+  assert.equal(h.$("prompt").value, "测试消息");
+  assert.match(h.$("toast").textContent, /结果未确认|可能已提交/);
+});
+
+// 写入已收到权威确认后，后续刷新失败只能报告展示滞后，不能误报提交失败或再次 POST。
+test("acknowledged message POST remains success when subsequent refresh fails", async () => {
+  const h = boot();
+  compose(h);
+  const writes = [];
+  h.context.api = async (url, value) => {writes.push({url, value});return {run_id:"acknowledged-run"};};
+  h.context.refresh = async () => {throw new Error("refresh disconnected");};
+  await h.context.sendMessage();
+  assert.equal(writes.length, 1);
+  assert.match(writes[0].url, /\/messages$/);
+  assert.equal(h.state.pending, null);
+  assert.equal(h.$("prompt").value, "");
+  assert.match(h.$("toast").textContent, /已提交.*刷新|已提交.*展示/);
+});
+
 test("network failure preserves request_id and successful retry clears only submitted content", async () => {
   const h = boot();
   compose(h);
