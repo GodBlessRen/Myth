@@ -279,6 +279,47 @@ class GoalSchedulerTests(unittest.TestCase):
         self.assertIn("not connected", current["last_error"])
         self.assertEqual(self.scheduler.due(), [])
 
+    # scheduled/send/control 对同一模型能力必须执行相同的硬拒绝；计划仍由 Scheduler 持有重试与准入身份。
+    def _assert_scheduled_capability_rejected(self, extra_settings, model_profile, expected_error):
+        """仅模拟公开 Provider 能力目录；使用真实 Goal/SQLite 验证无 phantom Run 或误消费机会。"""
+        self.repo.save_settings({**SETTINGS, **extra_settings})
+        schedule = self.schedule(
+            due_at=datetime.fromtimestamp(self.now - 1, timezone.utc).isoformat()
+        )
+        service = ConversationWebService(self.root)
+        service.connection = lambda settings: {
+            "ready": True,
+            "details": {
+                "models": ["test"],
+                "model_capabilities": {"test": model_profile},
+            },
+        }
+        with patch.object(service, "_spawn") as spawn:
+            service.scheduler_tick()
+        actual = self.scheduler.get(schedule["schedule_id"])
+        self.assertEqual(actual["wakeups"], [])
+        self.assertTrue(actual["enabled"])
+        self.assertEqual(actual["sequence"], 1)
+        self.assertIn(expected_error, actual["last_error"])
+        self.assertEqual(self.runtime.store.db.execute("SELECT count(*) FROM runs").fetchone()[0], 0)
+        spawn.assert_not_called()
+
+    def test_scheduled_goal_rejects_model_output_limit_before_admission(self):
+        """模型可连接且已安装，仍不能绕过显式输出 Token 能力上限。"""
+        self._assert_scheduled_capability_rejected(
+            {"max_output_tokens": 512},
+            {"max_output_tokens": 128},
+            "每步输出 Token 超过该模型上限",
+        )
+
+    def test_scheduled_goal_rejects_unsupported_thinking_before_admission(self):
+        """定时任务的原生 Thinking 档位必须与普通发送和运行中 Control 一样核对。"""
+        self._assert_scheduled_capability_rejected(
+            {"thinking": "max"},
+            {"reasoning": {"kind": "levels", "levels": ["low", "high"], "off": None}},
+            "当前模型不支持所选 Thinking 档位",
+        )
+
     # 回归断言：计划工作共用正常 Driver/Control，而非绕开授权的快捷执行路径。
     def test_timer_runs_through_normal_driver_and_control(self):
         schedule = self.schedule(
