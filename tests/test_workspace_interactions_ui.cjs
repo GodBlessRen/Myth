@@ -425,6 +425,26 @@ test("full reload reuses uncertain POST identity without persisting message text
   assert.equal(storage["session:myth-legacy-pending-s1"], undefined);
 });
 
+// 相同会话但正文变化不能沿用旧的未知 POST；存储中始终只有 hash/UUID。
+test("changed message after full reload does not reuse a pending request identity", async () => {
+  const storage = {};
+  const first = boot(storage);
+  compose(first, "s1", "第一次请求");
+  let oldId;
+  first.context.api = async (_, payload) => { oldId = payload.request_id; throw new Error("lost response"); };
+  await first.context.sendMessage();
+
+  const second = boot(storage);
+  second.context.crypto.randomUUID = () => "new-task-uuid";
+  compose(second, "s1", "另一条正文");
+  let newId;
+  second.context.api = async (_, payload) => { newId = payload.request_id; throw new Error("lost response"); };
+  await second.context.sendMessage();
+  assert.notEqual(newId, oldId);
+  assert.equal(newId, "new-task-uuid");
+  assert.ok(Object.values(storage).every(value => !/第一次请求|另一条正文/.test(String(value))));
+});
+
 test("network failure preserves request_id and successful retry clears only submitted content", async () => {
   const h = boot();
   compose(h);
