@@ -32,6 +32,8 @@ Web / CLI / 到期计划
 
 共享 SQLite 连接不等于共享写权限。跨聚合业务入口让各所有者加入同连接的 `transaction_scope`；外部连接或非活动事务明确拒绝。
 
+**入口准入与只读性能边界。** Web 的 Send、Control 切换模型、Scheduled Goal 使用 `ConversationWebService._require_model_preflight` 同一 Provider 能力合同；旧 `request_id` 的幂等重放先由 `SqliteWorkspaceRepository.replay_turn` 核对原始持久消息和作用域，不取当前设置/网络状态伪造新身份。会话刷新已经装载的 Turn/Cursor/Lease 可直接供 `run_liveness` 做只读投影，避免对每个历史 Turn 重复装配；独立 Durable Executor 仍通过仓储读取，不因页面缓存授予派发许可。
+
 ## 一次工作怎样推进
 
 1. 准入事务核对入口身份、Session/Goal 占用，保存 Run、预算、Turn、用户消息、冻结快照和游标。相同身份重试复用事实，冲突内容拒绝。

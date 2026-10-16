@@ -1,16 +1,21 @@
 # 验证入口
 
-当前版本结果见 [REFINEMENT_REVIEW](REFINEMENT_REVIEW.md)；历史证据只用于比较，不能充当当前通过记录。完整命令以根目录 [AGENTS.md](../AGENTS.md#验证与交付) 为准。
+五轮工程治理、精确 CI 链接与未测范围见 [OPTIMIZATION_REPORT](../OPTIMIZATION_REPORT.md)；此前专题见 [REFINEMENT_REVIEW](REFINEMENT_REVIEW.md)。旧版本绿灯不能替代最终发布 SHA 的独立验收。完整命令以根目录 [AGENTS.md](../AGENTS.md#验证与交付) 为准。
 
 ## 每次提交
 
 1. Python 编译、中文说明覆盖、已知秘钥模式扫描。
 2. 全量 `unittest discover -s tests -v`；不能只运行新增测试。
-3. 六个前端 JS 语法检查，以及 Observatory / reconnect / statistics / interactions 四组 Node 测试。
+3. `node scripts/check_web.cjs` 自动发现所有 Legacy Web JS、`tests/test_*_ui.cjs` 语法与行为合同，不再依赖旧的固定数量。
 4. wheel、sdist、`git archive` 源码包排除 `.trash`、运行库、秘钥和开发缓存。
 5. wheel 安装至独立目录，运行 `scripts/validate_package.py --package-dir <目录>`，通过真实 HTTP 核对导入、静态资源与基本 API。
 
 中文检查只证明说明存在，不能证明注释准确。涉及界面的改动再运行真实浏览器交互、桌面/窄屏、双主题、焦点与溢出检查。
+
+React `/next/` 还必须经 [React Workbench Workflow](https://github.com/GodBlessRen/Myth/actions/workflows/react-workbench.yml) 验证 TypeScript、Vitest、锁定依赖构建、打包预览字节身份和开发/安装后两条 Chromium 路径；它与 Legacy 的 130 场景是**两项不同门禁**。涉及关键后端 Web/API 入口的修改会触发 React 工作流；其他后端变更可用 `workflow_dispatch` 手动重验。整合发布时要求主线 **CI + Browser + React 的 `head_sha` 三者完全相等且全部 success**，否则仅标记 PARTIAL。React 预览不得因此修改生产 `/`。
+
+发布的 Release job 另从 wheel 安装目录与 fresh offline venv 调用 `scripts/validate_package.py`，逐字节核对 `PUBLIC_ASSETS` 并通过实际 loopback HTTP 建立 Session/Goal/Schedule；真实模型、第三方认证与 2–3 小时浸泡未运行时一律标为未测。
+
 
 ## 按变更选择故障窗口
 

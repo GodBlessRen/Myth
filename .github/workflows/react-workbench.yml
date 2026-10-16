@@ -1,15 +1,31 @@
 # Isolated React 19 workbench gate. Preview only: never changes Python's production / route.
 name: React Workbench
 on:
+  # 允许在任意已发布 HEAD 上重新做 React/packaged 真实浏览器验收。
+  workflow_dispatch:
   pull_request:
     paths:
       - 'frontend/**'
+      - 'src/myth/web*.py'
+      - 'src/myth/adapters/workspace_store.py'
+      - 'src/myth/platform/control.py'
+      - 'src/myth/goal_scheduler.py'
+      - 'scripts/stage_react_preview.py'
+      - 'pyproject.toml'
+      - 'tests/browser_fixture.py'
       - 'docs/FRONTEND_REWRITE_PLAN.md'
       - '.github/workflows/react-workbench.yml'
   push:
     branches: [main, 'feat/react19-*']
     paths:
       - 'frontend/**'
+      - 'src/myth/web*.py'
+      - 'src/myth/adapters/workspace_store.py'
+      - 'src/myth/platform/control.py'
+      - 'src/myth/goal_scheduler.py'
+      - 'scripts/stage_react_preview.py'
+      - 'pyproject.toml'
+      - 'tests/browser_fixture.py'
       - 'docs/FRONTEND_REWRITE_PLAN.md'
       - '.github/workflows/react-workbench.yml'
 concurrency:
@@ -23,6 +39,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
