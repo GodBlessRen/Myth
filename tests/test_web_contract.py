@@ -336,6 +336,44 @@ class WebContractTests(unittest.TestCase):
         self.workspace_json(f"/sessions/{sid}", {"title": "重要会话", "pinned": True})
         self.assertEqual(self.workspace_json("")["sessions"][0]["title"], "重要会话")
 
+    # 回归：请求已入库却丢失 HTTP 响应时，重发同身份不能依赖当前 Provider/设置。
+    def test_workspace_replay_survives_outage_and_settings_change(self):
+        """旧请求先按原冻结设置核对身份；连接离线也只读回原 Run，冲突正文拒绝。"""
+        self.workspace_json("/settings", {"provider": "ollama", "model": "test"})
+        sid = self.workspace_json("/sessions", {})["id"]
+        body = {"text": "请解释这份结果", "request_id": "lost-response-replay"}
+        provider = ChatProvider()
+        with (
+            patch.object(self.service.workspace, "provider", return_value=provider),
+            patch.object(
+                self.service.workspace, "connection",
+                return_value={"ready": True, "details": {"models": ["test"]}},
+            ),
+        ):
+            first = self.workspace_json(f"/sessions/{sid}/messages", body)
+            self.wait_conversation(sid)
+
+        # 旧请求已固定在 test 模型；另一个设置提交不能改变它的幂等身份。
+        self.workspace_json("/settings", {"provider": "ollama", "model": "other-test"})
+        with patch.object(
+            self.service.workspace, "connection",
+            return_value={"ready": False, "details": {}},
+        ) as check:
+            self.assertEqual(self.workspace_json(f"/sessions/{sid}/messages", body), first)
+            with self.assertRaises(error.HTTPError) as conflict:
+                self.workspace_json(
+                    f"/sessions/{sid}/messages",
+                    {"text": "不同的消息", "request_id": body["request_id"]},
+                )
+            self.assertEqual(conflict.exception.code, 409)
+            check.assert_not_called()
+
+        session = self.workspace_json(f"/sessions/{sid}")
+        self.assertEqual(len(session["turns"]), 1)
+        self.assertEqual(len(session["messages"]), 2)
+        self.assertEqual(session["turns"][0]["settings"]["model"], "test")
+        self.assertEqual(len(provider.calls), 1)
+
     # 回归断言：经项目/知识/工具路径下载不可变对象，而非后续可变受管文件。
     def test_workspace_http_project_knowledge_and_fixed_artifact_download(self):
         self.workspace_json("/settings", {"provider": "ollama", "model": "test"})
