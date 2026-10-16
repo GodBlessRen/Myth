@@ -3,16 +3,21 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 from datetime import datetime, timezone
+import json
+import statistics
 from pathlib import Path
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 
 from myth.durable_executor import DurableExecutor, executor_snapshot, run_liveness
 from myth.goal_scheduler import GoalScheduler
 from myth.runtime import MythRuntime
 from myth.workspace import Workspace
+from myth.web_workspace import ConversationWebService
 from test_workspace import ChatProvider
 
 
@@ -132,6 +137,50 @@ class DurableExecutorTests(unittest.TestCase):
         finally:
             executor.wait_for_idle(3.0)
             executor.release()
+
+    # 固定 6 个已完成 Turn 与 5 次会话轮询，SQL trace 量测读取负担而非猜测真实 Token 节省。
+    def test_web_session_poll_reuses_turn_cursor_and_liveness_facts(self):
+        """完整会话返回同样的游标/活性事实；读取时不能为每个 Turn 重复装配历史。"""
+        with MythRuntime(self.root) as runtime:
+            repository = Workspace(runtime).repository
+            for index in range(6):
+                rid = repository.create_turn(
+                    self.sid, f"question {index}", f"poll-history-{index}"
+                )["run_id"]
+                step = repository.begin_step(rid)["step"]
+                repository.finish_reply(rid, step, f"answer {index}")
+
+            service = ConversationWebService(self.root)
+            elapsed_ms, cursor_reads = [], []
+            # 仍使用真实 SQLite/Workspace/会话投影；仅让 Web 复用本例数据库连接以观测 SQL。
+            with patch("myth.web_workspace.MythRuntime", return_value=nullcontext(runtime)):
+                for _ in range(5):
+                    statements = []
+                    runtime.store.db.set_trace_callback(statements.append)
+                    try:
+                        started = time.perf_counter()
+                        result = service.session(self.sid)
+                        elapsed_ms.append(round((time.perf_counter() - started) * 1000, 3))
+                    finally:
+                        runtime.store.db.set_trace_callback(None)
+                    cursor_reads.append(sum(
+                        statement.strip().upper().startswith(
+                            "SELECT * FROM WORKSPACE_EXECUTION_CURSORS WHERE RUN_ID="
+                        )
+                        for statement in statements
+                    ))
+                    self.assertEqual(len(result["turns"]), 6)
+                    self.assertEqual(len(result["messages"]), 12)
+                    for turn in result["turns"]:
+                        self.assertEqual(turn["status"], "COMPLETED")
+                        self.assertEqual(turn["execution_cursor"]["run_id"], turn["run_id"])
+                        self.assertEqual(turn["liveness"]["phase"], turn["execution_cursor"]["phase"])
+            print("SESSION_POLL_BENCH " + json.dumps({
+                "turns": 6, "polls": 5, "cursor_selects_per_poll": cursor_reads,
+                "median_wall_ms": statistics.median(elapsed_ms),
+                "fixture": "6 historical completed turns, real SQLite, no model network",
+            }, ensure_ascii=False))
+            self.assertEqual(cursor_reads, [6] * 5)
 
     # 回归断言：Driver 心跳存活但 checkpoint 长时间不动时只标记疑似无进展，不擅自失败/重试。
     def test_live_heartbeat_does_not_fake_progress(self):
