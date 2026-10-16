@@ -186,6 +186,19 @@ class ControlAtomicityTests(unittest.TestCase):
         work = self.workspace.personal.work_state(self.goal["goal_id"])
         self.assertEqual((work["current_state"], work["waiting_for"]), ("WAITING", "使用哪个目录？"))
 
+    def test_admitted_request_replay_survives_control_model_switch(self):
+        """Control 可以修改未来模型，但旧 request_id 仍只能定位原 Turn，不发生第二次准入。"""
+        repository = self.workspace.repository
+        sid = repository.turn(self.rid)["session_id"]
+        self.workspace.control.command(self.rid, "switch_model", "fixture-next")
+        self.assertEqual(repository.turn(self.rid)["settings"]["model"], "fixture-next")
+        replay = repository.replay_turn(
+            sid, "review this task", "control-atomic", goal_id=self.goal["goal_id"]
+        )
+        self.assertEqual(replay["run_id"], self.rid)
+        self.assertEqual(len(repository.session(sid)["turns"]), 1)
+
+    # 更新未来模型不允许篡改已准入消息；仍须检查旧 revision。
     def test_stale_model_preflight_cannot_commit_unvalidated_combination(self):
         """模型目录检查期间有新控制，旧 revision 的结果不得覆盖更新后的设置。"""
         revision = self.workspace.control.view(self.rid)["revision"]
