@@ -96,10 +96,16 @@ def executor_snapshot(runtime) -> dict:
 
 
 # 从真实 Execution Cursor 与 Driver Lease 派生无进展观察；心跳活着不等于任务进度。
-def run_liveness(repository, run_id: str, threshold_seconds=NO_PROGRESS_SECONDS) -> dict:
-    turn = repository.turn(run_id)
-    cursor = repository.execution_cursor(run_id)
-    lease = repository.driver_lease(run_id)
+def run_liveness(repository, run_id: str, threshold_seconds=NO_PROGRESS_SECONDS, *, facts=None) -> dict:
+    """复用同次会话投影已读取的事实；独立 Executor 仍从仓储取权威状态。"""
+    if facts is None:
+        turn = repository.turn(run_id)
+        cursor = repository.execution_cursor(run_id)
+        lease = repository.driver_lease(run_id)
+    else:
+        turn, cursor, lease = facts
+        if turn["run_id"] != run_id or cursor["run_id"] != run_id:
+            raise ValueError("liveness facts belong to another run")
     updated = _sqlite_timestamp(cursor.get("updated_at"))
     now = time.time()
     age = None if updated is None else max(0.0, now - updated)
