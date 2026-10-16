@@ -68,13 +68,7 @@ class ConversationWebService:
                 if len(self.active) >= 4:
                     break
             try:
-                check = self.connection(schedule["settings"])
-                if not check["ready"]:
-                    raise ValueError("scheduled provider is not connected")
-                if schedule["settings"]["provider"] == "ollama" and schedule[
-                    "settings"
-                ]["model"] not in check["details"].get("models", []):
-                    raise ValueError("scheduled model is not installed")
+                self._require_model_preflight(schedule["settings"], entry="schedule")
                 with MythRuntime(self.root) as runtime:
                     rid = GoalScheduler(Workspace(runtime)).admit(
                         schedule["schedule_id"]
@@ -308,6 +302,30 @@ class ConversationWebService:
             "provider": status.provider_id,
             "details": status.details or {},
         }
+
+    # 三条真实准入路径共用同一目录验证；网络与能力检查严格位于 SQLite 短事务外。
+    def _require_model_preflight(self, settings, *, entry):
+        """检查 Provider ready 与固定模型能力；不创建 Turn/Goal、Ticket 或外部执行机会。
+
+        entry 只选择产品入口的错误语义；schedule 继续要求 Ollama 确实列出已安装模型。
+        缺失模型能力不能凭空补造；若 Provider 明确报告上限或推理档位，统一严格核对。
+        """
+        unavailable = {
+            "send": "模型服务未连接，请在设置中检查模型连接。",
+            "switch": "模型服务未连接，不能切换未来模型设置。",
+            "schedule": "scheduled provider is not connected",
+        }
+        check = self.connection(settings)
+        if not check["ready"]:
+            raise ValueError(unavailable[entry])
+        details = check.get("details") or {}
+        if (
+            entry == "schedule"
+            and settings.get("provider") == "ollama"
+            and settings.get("model") not in details.get("models", [])
+        ):
+            raise ValueError("scheduled model is not installed")
+        validate_model_selection(settings, details)
 
     # 从持久模型收据聚合输入/输出/缓存及调用量；无缓存报告保留 N/A，不伪造命中率。
     @staticmethod
@@ -616,10 +634,7 @@ class ConversationWebService:
         settings = self.model_catalog.quote_settings(current_settings)
         pick = RuleIntentPicker().pick(str(text or ""), {})
         if pick.route.value != "deterministic":
-            check = self.connection(settings)
-            if not check["ready"]:
-                raise ValueError("模型服务未连接，请在设置中检查模型连接。")
-            validate_model_selection(settings, check.get("details"))
+            self._require_model_preflight(settings, entry="send")
 
         with MythRuntime(self.root) as runtime:
             workspace = Workspace(runtime)
@@ -686,10 +701,7 @@ class ConversationWebService:
                 "model": payload if action == "switch_model" else current_model,
                 "thinking": payload if action == "switch_thinking" else current_thinking,
             }
-            check = self.connection(future_settings)
-            if not check["ready"]:
-                raise ValueError("模型服务未连接，不能切换未来模型设置。")
-            validate_model_selection(future_settings, check.get("details"))
+            self._require_model_preflight(future_settings, entry="switch")
         else:
             payload = None
 
