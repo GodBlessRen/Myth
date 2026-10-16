@@ -470,11 +470,12 @@ class ConversationWebService:
                 turn["driver_local"] = bool(turn["run_id"] in active)
                 turn["driver_lease"] = lease
                 turn["reply_timing"] = reply_timings.get(turn["run_id"])
-                turn["execution_cursor"] = workspace.repository.execution_cursor(
-                    turn["run_id"]
-                )
+                # turn() 已在同次会话读取中取出 Cursor；不能为活性观测重复装载整个历史 Turn。
+                cursor = turn["execution_cursor"]
+                if cursor is None:
+                    raise RuntimeError(f"execution cursor missing for {turn['run_id']}")
                 turn["liveness"] = run_liveness(
-                    workspace.repository, turn["run_id"]
+                    workspace.repository, turn["run_id"], facts=(turn, cursor, lease)
                 )
                 turn["control"] = workspace.control.view(turn["run_id"])
                 turn["operations"] = workspace.repository.operations(turn["run_id"])
