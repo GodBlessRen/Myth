@@ -1516,6 +1516,30 @@ function renderAttachments() {
     $("attachmentChips").append(chip);
   });
 }
+// 页面刷新会丢失内存草稿；标签页只保存正文指纹的 SHA-256 和请求 UUID，不保存原文。
+async function pendingMessageId(sessionId, fingerprint) {
+  const key = "myth-legacy-pending-" + sessionId;
+  let hash = null;
+  try {
+    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(fingerprint));
+    hash = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
+    const old = JSON.parse(sessionStorage.getItem(key) || "null");
+    if (old?.hash === hash && typeof old.id === "string" && old.id) return old.id;
+  } catch (_) {
+    // 无 WebCrypto 或存储受限时仍可提交；不会把原文当作持久化降级方案。
+  }
+  const id = crypto.randomUUID();
+  if (hash) try { sessionStorage.setItem(key, JSON.stringify({hash, id})); } catch (_) {}
+  return id;
+}
+// 晚到成功不能清除同会话后来提交的身份；只删除与本次请求相同的缓存记录。
+function clearPendingMessageId(sessionId, requestId) {
+  const key = "myth-legacy-pending-" + sessionId;
+  try {
+    if (JSON.parse(sessionStorage.getItem(key) || "null")?.id === requestId)
+      sessionStorage.removeItem(key);
+  } catch (_) {}
+}
 // 冻结正文/附件/设置指纹并复用稳定 request_id；回答匹配 question_id，成功后才清本轮输入。
 async function sendMessage(event) {
   event?.preventDefault();
@@ -1573,7 +1597,7 @@ async function sendMessage(event) {
         goalId,
       ]);
       if (draft.pending?.fingerprint !== fingerprint)
-        draft.pending = { fingerprint, id: crypto.randomUUID() };
+        draft.pending = { fingerprint, id: await pendingMessageId(sid, fingerprint) };
       if (state.composerKey === draftKey) state.pending = draft.pending;
       const requestId = draft.pending.id;
       await api(`/sessions/${sid}/messages`, {
@@ -1582,7 +1606,10 @@ async function sendMessage(event) {
         document_ids: attachments.map((d) => d.id),
         goal_id: goalId,
       });
-      if (draft.pending?.id === requestId) draft.pending = null;
+      if (draft.pending?.id === requestId) {
+        draft.pending = null;
+        clearPendingMessageId(sid, requestId);
+      }
       if (state.composerKey === draftKey) state.pending = draft.pending;
     }
     // 清除已经成功发送的内容；发送期间新增的正文或附件继续保留。
