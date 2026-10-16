@@ -409,6 +409,37 @@ class SqliteWorkspaceRepository:
         return self.session(sid)
 
 
+    # Web 重连只读核对已准入消息；旧请求不因当前模型离线、设置变化或控制换模型而改换身份。
+    def replay_turn(self, sid, text, request_id, document_ids=None, goal_id=None):
+        """仅返回原 Run 或拒绝身份冲突；未找到请求时返回 None，不分配预算或执行外部效果。"""
+        if not isinstance(request_id, str) or not 1 <= len(request_id) <= 200:
+            return None
+        existing = self.store.db.execute(
+            "SELECT run_id,session_id,snapshot_json,settings_json FROM workspace_turns WHERE request_id=?",
+            (request_id,),
+        ).fetchone()
+        if existing is None:
+            return None
+        # 使用持久设置只做参数类型与长度校验；Control 可能已经修改设置，不能以其重算旧 entry_digest。
+        _, documents, _, _ = self._turn_entry(
+            sid, text, request_id, document_ids, None, goal_id,
+            json.loads(existing["settings_json"]),
+        )
+        snapshot = json.loads(existing["snapshot_json"])
+        initial_message = self.store.db.execute(
+            "SELECT content FROM workspace_messages WHERE run_id=? AND role='user' ORDER BY rowid LIMIT 1",
+            (existing["run_id"],),
+        ).fetchone()
+        if (
+            existing["session_id"] != sid
+            or initial_message is None
+            or initial_message["content"] != text
+            or snapshot.get("attached_document_ids", []) != documents
+            or (snapshot.get("goal") or {}).get("goal_id") != goal_id
+        ):
+            raise IdentityConflict("request_id reused with different message or scope")
+        return self.turn(existing["run_id"])
+
     def _turn_entry(self, sid, text, request_id, document_ids, memory_records, goal_id, _settings):
         """验证入口并计算稳定意图身份；召回、时间和环境版本不改变 request_id 的含义。"""
         if (

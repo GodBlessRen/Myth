@@ -599,9 +599,21 @@ class ConversationWebService:
 
     # 校验明确用户消息与固定设置，由仓储在写事务外准备带版本的召回；提交后才启动 Driver。
     def send(self, sid, value):
-        settings = self.model_catalog.quote_settings(self._use("settings"))
         text = value.get("text")
         goal_id = value.get("goal_id") or None
+        # 先从持久事实恢复旧请求，避免断线重试被当前供应商预检查或设置变更错误阻断。
+        with MythRuntime(self.root) as runtime:
+            repository = Workspace(runtime).repository
+            previous = repository.replay_turn(
+                sid, text, value.get("request_id"), value.get("document_ids"), goal_id
+            )
+            if previous is None:
+                current_settings = repository.settings()
+        if previous is not None:
+            if previous["status"] == "RUNNING":
+                self._spawn(previous["run_id"])
+            return {"run_id": previous["run_id"], "session_id": sid}
+        settings = self.model_catalog.quote_settings(current_settings)
         pick = RuleIntentPicker().pick(str(text or ""), {})
         if pick.route.value != "deterministic":
             check = self.connection(settings)
