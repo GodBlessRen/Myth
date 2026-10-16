@@ -132,7 +132,7 @@ body { letter-spacing: -.006em; }
 .suggestions button {
   min-height: 63px; padding: 12px 13px; text-align: left;
   justify-content: flex-start; background: var(--surface);
-  border: 1px solid var(--line-soft); border-radius: 12px;
+  border: 1px solid var(--muted); border-radius: 12px;
   color: var(--ink-2); line-height: 1.3; font-weight: 550;
   transition: border-color 160ms var(--ease), background-color 160ms var(--ease), transform 160ms var(--ease);
 }
