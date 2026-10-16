@@ -1,5 +1,14 @@
 # Changelog
 
+## 未发布 — 2026-10-16 · 五轮稳定性、性能与发布验收
+
+- 修复 Windows 打包资源 CRLF、Legacy 按钮边框对比度：[#78](https://github.com/GodBlessRen/Myth/pull/78)。
+- 断线已准入消息优先凭原身份恢复；Legacy 刷新保留同请求 SHA-256 指纹/UUID，不重发未知效果：[#79](https://github.com/GodBlessRen/Myth/pull/79)、[#80](https://github.com/GodBlessRen/Myth/pull/80)。
+- Send/Control/Scheduler 共用模型能力预检，Scheduler 不会为无效档位分配新 Run：[#81](https://github.com/GodBlessRen/Myth/pull/81)。
+- 历史 6-Turn/5-Poll SQLite 游标查询每轮 36→6；Legacy 分离未知 POST 与已确认提交后刷新失败的反馈：[#82](https://github.com/GodBlessRen/Myth/pull/82)、[#83](https://github.com/GodBlessRen/Myth/pull/83)。
+- React Preview 保持 `/next/` 而非默认主页；Release 治理为 React 增加相关 Web/API 变更触发与按提交重验，完整量化证据、回滚及未测项见 [OPTIMIZATION_REPORT](OPTIMIZATION_REPORT.md)。真实 Provider Token/费用及多小时长跑仍未验证。
+
+
 ## 未发布 — 工具 Hook 首版
 
 - 接入 `before_tool / after_tool / on_tool_error`：受信 Python 注册与固定 `.myth/hooks.json` 规则，按能力 glob/优先级运行，同次调用冻结计划与只读参数/结果。
