@@ -1,6 +1,6 @@
 # Myth
 
-本轮准入、认证、缺测计量与工作台改动的实际证据和未完成验收见 [续跑交付记录](docs/CONTINUATION_REVIEW.md)。
+五轮工程治理的修复、实测收益、最终发布门禁与未测边界见 [OPTIMIZATION_REPORT](OPTIMIZATION_REPORT.md)；此前准入、认证及工作台的专题证据见 [续跑交付记录](docs/CONTINUATION_REVIEW.md)。
 
 **一个可持续推进真实工作的本地 Agent Runtime。**
 
