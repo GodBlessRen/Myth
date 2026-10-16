@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const vm = require("node:vm");
 const path = require("node:path");
+const {webcrypto} = require("node:crypto");
 
 class Element {
   constructor(tag = "div") {
@@ -90,13 +91,14 @@ function boot(storage = {}) {
     document, location,
     window: { matchMedia: () => ({ matches: false, addEventListener() {} }), addEventListener: (type, callback) => (listeners[type] ||= []).push(callback) },
     localStorage: { getItem: (key) => storage[key] || null, setItem: (key, value) => { storage[key] = value; }, removeItem: (key) => { delete storage[key]; } },
+    sessionStorage: { getItem: (key) => storage["session:"+key] || null, setItem: (key, value) => { storage["session:"+key] = value; }, removeItem: (key) => { delete storage["session:"+key]; } },
     history: { replaceState: (_, __, value) => { location.hash = value; } },
-    crypto: { randomUUID: () => "request-" + ++uuid },
+    crypto: { randomUUID: () => "request-" + ++uuid, subtle: webcrypto.subtle },
     navigator: { clipboard: { writeText: async () => {} } },
     createReadReconnector: () => ({ start() {} }),
     // 本单元固定对话交互；模型目录与菜单的真实行为另由浏览器回归覆盖。
     poolRefreshPrices: () => {},
-    setTimeout: () => 1, clearTimeout() {}, AbortController, TextDecoder,
+    setTimeout: () => 1, clearTimeout() {}, AbortController, TextDecoder, TextEncoder,
     fetch: async () => { throw new Error("unexpected network request"); }, console,
   });
   vm.runInContext(fs.readFileSync(path.join(__dirname, "../src/myth/webui/app.js"), "utf8"), context);
@@ -394,6 +396,53 @@ test("route changes keep text, attachments, Goal and request identity in their o
   assert.equal(h.state.pending.id, "retry-a");
   assert.equal(h.$("chatGoal").value, "goal-a");
   assert.equal(h.state.drafts.get("b").text, "会话 B 草稿");
+});
+
+// 故障注入：页面完全重载后没有内存草稿；仅靠同标签页哈希+UUID 保留未确认 POST 的请求身份。
+test("full reload reuses uncertain POST identity without persisting message text", async () => {
+  const storage = {}, text = "本轮私人任务正文不得写入存储";
+  const initial = boot(storage);
+  compose(initial, "s1", text);
+  let firstId;
+  initial.context.api = async (_, payload) => {
+    firstId = payload.request_id;
+    throw new Error("lost response after possible admission");
+  };
+  await initial.context.sendMessage();
+  assert.ok(firstId);
+
+  // 第二个 VM 模拟浏览器刷新；强制不同 UUID 证明没有依赖临时内存的计数器巧合。
+  const reloaded = boot(storage);
+  reloaded.context.crypto.randomUUID = () => "fresh-uuid-after-reload";
+  compose(reloaded, "s1", text);
+  let replayId;
+  reloaded.context.api = async (_, payload) => { replayId = payload.request_id; return {}; };
+  reloaded.context.refresh = async () => {};
+  reloaded.context.openSession = async () => {};
+  await reloaded.context.sendMessage();
+  assert.equal(replayId, firstId);
+  assert.ok(Object.values(storage).every(value => !String(value).includes(text)));
+  assert.equal(storage["session:myth-legacy-pending-s1"], undefined);
+});
+
+// 相同会话但正文变化不能沿用旧的未知 POST；存储中始终只有 hash/UUID。
+test("changed message after full reload does not reuse a pending request identity", async () => {
+  const storage = {};
+  const first = boot(storage);
+  compose(first, "s1", "第一次请求");
+  let oldId;
+  first.context.api = async (_, payload) => { oldId = payload.request_id; throw new Error("lost response"); };
+  await first.context.sendMessage();
+
+  const second = boot(storage);
+  second.context.crypto.randomUUID = () => "new-task-uuid";
+  compose(second, "s1", "另一条正文");
+  let newId;
+  second.context.api = async (_, payload) => { newId = payload.request_id; throw new Error("lost response"); };
+  await second.context.sendMessage();
+  assert.notEqual(newId, oldId);
+  assert.equal(newId, "new-task-uuid");
+  assert.ok(Object.values(storage).every(value => !/第一次请求|另一条正文/.test(String(value))));
 });
 
 test("network failure preserves request_id and successful retry clears only submitted content", async () => {
