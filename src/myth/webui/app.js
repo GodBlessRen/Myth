@@ -1554,6 +1554,7 @@ async function sendMessage(event) {
   let draftKey = state.composerKey;
   let sid = state.id,
     session = state.session;
+  let creatingSession = false, writeAttempted = false, writeAcknowledged = false;
   state.busy = true;
   updateComposer();
   try {
@@ -1562,7 +1563,9 @@ async function sendMessage(event) {
       throw new Error("先检查模型连接并选择一个可用模型。");
     }
     if (!sid) {
+      creatingSession = true;
       session = await api("/sessions", { project_id: projectId });
+      creatingSession = false;
       sid = session.id;
       // 新会话身份得到服务端确认后迁移草稿；即使用户切页，失败重试仍绑定原会话。
       const ownsDraft = state.drafts.get(draftKey) === draft;
@@ -1577,12 +1580,14 @@ async function sendMessage(event) {
       }
     }
     const turn = session?.turns.at(-1);
-    if (turn?.status === "WAITING_USER")
+    if (turn?.status === "WAITING_USER") {
+      writeAttempted = true;
       await api(`/turns/${turn.run_id}/answer`, {
         text,
         question_id: turn.question_id,
       });
-    else {
+      writeAcknowledged = true;
+    } else {
       const message = attachments.length
         ? text +
           "\n\n本轮附加资料：\n" +
@@ -1600,12 +1605,14 @@ async function sendMessage(event) {
         draft.pending = { fingerprint, id: await pendingMessageId(sid, fingerprint) };
       if (state.composerKey === draftKey) state.pending = draft.pending;
       const requestId = draft.pending.id;
+      writeAttempted = true;
       await api(`/sessions/${sid}/messages`, {
         text: message,
         request_id: requestId,
         document_ids: attachments.map((d) => d.id),
         goal_id: goalId,
       });
+      writeAcknowledged = true;
       if (draft.pending?.id === requestId) {
         draft.pending = null;
         clearPendingMessageId(sid, requestId);
@@ -1634,7 +1641,15 @@ async function sendMessage(event) {
       renderAttachments();
     }
   } catch (e) {
-    toast(e.message);
+    // POST 已确认与结果未知是两种事实；只读刷新失败不能倒写成发送失败。
+    const uncertainTransport = ["AbortError", "TypeError", "SyntaxError"].includes(e?.name);
+    if (writeAcknowledged)
+      toast("消息已提交，但会话刷新暂不可用；连接恢复后将展示最新状态。");
+    else if (uncertainTransport && writeAttempted)
+      toast("发送结果未确认，可能已提交。已保留草稿与请求身份，请先核对会话状态。");
+    else if (uncertainTransport && creatingSession)
+      toast("新会话创建结果未确认；请先核对会话列表，避免重复创建。");
+    else toast(e.message);
   } finally {
     state.busy = false;
     updateComposer();
