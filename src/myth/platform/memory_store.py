@@ -23,6 +23,7 @@ from .memory_lifecycle import (
     normalize_evidence_set,
     normalize_memory_actions,
 )
+from .support_paths import evaluate_alternative_closure, normalize_proof_paths
 from .retrieval import reciprocal_rank_scores
 from .memory_recall import build_recall_plan, parse_memory_ref, rank_probe_rows
 
@@ -106,6 +107,21 @@ CREATE TRIGGER IF NOT EXISTS trg_memory_terms_delete_dirty
 AFTER DELETE ON workspace_memories BEGIN
     UPDATE workspace_memory_terms_state SET last_change_seq=-1 WHERE singleton=1;
 END;
+
+-- 只有显式受信任准入的 Memory 才拥有可替代的 AND 证明组；原有 Memory 保持严格 All-of。
+CREATE TABLE IF NOT EXISTS workspace_memory_proof_paths(
+    memory_id TEXT PRIMARY KEY REFERENCES workspace_memories(memory_id),
+    owner_revision INTEGER NOT NULL CHECK(owner_revision>=1),
+    evidence_digest TEXT NOT NULL,
+    paths_json TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS workspace_memory_proof_path_revisions(
+    memory_id TEXT NOT NULL,
+    revision INTEGER NOT NULL,
+    paths_json TEXT NOT NULL,
+    PRIMARY KEY(memory_id,revision),
+    FOREIGN KEY(memory_id,revision) REFERENCES workspace_memory_revisions(memory_id,revision)
+);
 """
 
 
@@ -235,6 +251,8 @@ class SqliteMemoryStore:
                 prepared,
             )
             if row:
+                # 正文或 Evidence 一旦演化，旧 Proof 声明不得无声继承到新 Revision。
+                db.execute("DELETE FROM workspace_memory_proof_paths WHERE memory_id=?", (memory_id,))
                 db.execute(
                     "UPDATE workspace_memories SET text=?,scope_type=?,scope_id=?,fact_level=?,"
                     "revision=?,active=1,updated_at=CURRENT_TIMESTAMP WHERE memory_id=?",
@@ -332,6 +350,26 @@ class SqliteMemoryStore:
                 ),
             )
 
+    # _proof_paths_for：只接受与当前 revision 和整套 Evidence 完全一致的组声明，手工 SQL 篡改 fail closed。
+    def _proof_paths_for(self, db, memory_id: str, row, evidence) -> tuple[object | None, str | None]:
+        stored = db.execute(
+            "SELECT owner_revision,evidence_digest,paths_json "
+            "FROM workspace_memory_proof_paths WHERE memory_id=?",
+            (memory_id,),
+        ).fetchone()
+        if stored is None:
+            return None, None
+        if int(stored["owner_revision"]) != int(row["revision"]):
+            return None, "proof_paths_revision_changed"
+        if stored["evidence_digest"] != digest_json(list(evidence)):
+            return None, "proof_paths_evidence_changed"
+        try:
+            paths = json.loads(stored["paths_json"])
+            normalize_proof_paths(paths, evidence)
+        except (ValueError, TypeError, MemoryDeltaError):
+            return None, "proof_paths_invalid"
+        return paths, None
+
     # _snapshot_revision：把当前正文/事实等级/active/evidence 固化为不可变 revision 行；同 revision 不覆盖。
     def _snapshot_revision(self, db, memory_id: str) -> None:
         row = db.execute(
@@ -354,6 +392,17 @@ class SqliteMemoryStore:
                 evidence_json(evidence),
             ),
         )
+        proof = db.execute(
+            "SELECT paths_json FROM workspace_memory_proof_paths "
+            "WHERE memory_id=? AND owner_revision=?",
+            (memory_id, int(row["revision"])),
+        ).fetchone()
+        if proof is not None:
+            db.execute(
+                "INSERT OR IGNORE INTO workspace_memory_proof_path_revisions("
+                "memory_id,revision,paths_json) VALUES (?,?,?)",
+                (memory_id, int(row["revision"]), str(proof["paths_json"])),
+            )
 
     # _record_change：每次已提交 revision 追加单调水位；派生 Mental Model 用它判断 scope 是否出现新变化。
     def _record_change(
@@ -467,7 +516,57 @@ class SqliteMemoryStore:
             raise KeyError(f"{memory_id}@{revision}")
         value = dict(row)
         value["evidence"] = json.loads(value.pop("evidence_json"))
+        history = self.store.db.execute(
+            "SELECT paths_json FROM workspace_memory_proof_path_revisions "
+            "WHERE memory_id=? AND revision=?",
+            (memory_id, int(revision)),
+        ).fetchone()
+        if history is not None:
+            value["proof_paths"] = json.loads(history["paths_json"])
         return value
+
+    # declare_proof_paths：只允许可信操作者将多个完整 AND 组登记为可替代的 OR，拒绝模型自行认证。
+    def declare_proof_paths(
+        self, memory_id: str, paths: list[list[str]] | tuple[tuple[str, ...], ...],
+        *, expected_revision: int,
+    ) -> dict[str, Any]:
+        """组的变更就是 Memory 新 Revision；更新、证明与水位均在同一 SQLite 事务提交。"""
+        if type(expected_revision) is not int or expected_revision < 1:
+            raise MemoryDeltaError("proof paths require positive expected_revision")
+        with self.store.tx() as db:
+            row = db.execute(
+                "SELECT * FROM workspace_memories WHERE memory_id=?", (memory_id,),
+            ).fetchone()
+            if row is None:
+                raise KeyError(memory_id)
+            if int(row["revision"]) != expected_revision:
+                raise MemoryDeltaError("proof paths expected_revision mismatch")
+            if not bool(row["active"]):
+                raise MemoryDeltaError("cannot declare proof paths on revoked memory")
+            evidence = self._evidence_rows(db, memory_id)
+            groups = normalize_proof_paths(paths, evidence)
+            previous, error = self._proof_paths_for(db, memory_id, row, evidence)
+            if error is None and previous is not None and tuple(map(tuple, previous)) == groups:
+                return dict(row)
+            updated_revision = int(row["revision"]) + 1
+            db.execute(
+                "UPDATE workspace_memories SET revision=?,updated_at=CURRENT_TIMESTAMP WHERE memory_id=?",
+                (updated_revision, memory_id),
+            )
+            db.execute(
+                "INSERT INTO workspace_memory_proof_paths(memory_id,owner_revision,evidence_digest,paths_json) "
+                "VALUES (?,?,?,?) ON CONFLICT(memory_id) DO UPDATE SET "
+                "owner_revision=excluded.owner_revision,evidence_digest=excluded.evidence_digest,"
+                "paths_json=excluded.paths_json",
+                (memory_id, updated_revision, digest_json(evidence), json.dumps(groups, separators=(",", ":"))),
+            )
+            if self.freshness(memory_id)["is_stale"]:
+                raise MemoryDeltaError("proof paths do not establish a valid support closure")
+            self._snapshot_revision(db, memory_id)
+            self._record_change(db, memory_id)
+        result = self.get(memory_id)
+        self._sync_vector_record(result)
+        return result
 
     # freshness：只对 Memory-linked evidence 比较当前 source revision/active；外部 provenance 无水位时保持 untracked。
     def freshness(self, memory_id: str) -> dict[str, Any]:
@@ -571,6 +670,8 @@ class SqliteMemoryStore:
                 (new_text, revision, memory_id),
             )
             self._replace_evidence(db, memory_id, [by_ref[key] for key in sorted(by_ref)])
+            # 新正文/证据不得重用旧版本的替代证明准入；回到默认 All-of。
+            db.execute("DELETE FROM workspace_memory_proof_paths WHERE memory_id=?", (memory_id,))
             # 统一复核多跳依赖；在同一 SQLite 事务内完成，不会留下半次 Delta。
             if self.freshness(memory_id)["is_stale"]:
                 raise MemoryDeltaError("memory evidence support closure is invalid")
@@ -1425,6 +1526,7 @@ class SqliteMemoryStore:
                 if expected_revision is not None:
                     raise MemoryDeltaError("memory was already revoked; reconcile before retry")
                 return dict(row)
+            db.execute("DELETE FROM workspace_memory_proof_paths WHERE memory_id=?", (memory_id,))
             db.execute(
                 "UPDATE workspace_memories SET active=0,revision=revision+1,"
                 "updated_at=CURRENT_TIMESTAMP WHERE memory_id=?",
