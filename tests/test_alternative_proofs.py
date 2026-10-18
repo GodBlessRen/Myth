@@ -65,13 +65,19 @@ class AlternativeProofTests(unittest.TestCase):
 
     # 两条完整 OR 路径之一仍成立，则只失效旧路径，不撤销原 Conclusion。
     def test_revoked_one_path_keeps_other_complete_path(self):
-        sources, root, _ = self.alternative()
+        sources, root, refs = self.alternative()
         self.assertEqual(root["revision"], 2)
         self.memory.revoke(sources["B"]["memory_id"])
         fresh = self.memory.freshness(root["memory_id"])
         self.assertEqual(fresh["status"], "fresh")
         self.assertFalse(fresh["is_stale"])
-        self.assertEqual(fresh["proof_paths"]["valid_path_indices"], [1])
+        # Proof Paths 按稳定 Evidence 身份规范排序，不能把位置当业务上的路径身份。
+        persisted = self.memory.revision_snapshot(root["memory_id"], 2)["proof_paths"]
+        surviving = {
+            frozenset(persisted[index])
+            for index in fresh["proof_paths"]["valid_path_indices"]
+        }
+        self.assertEqual(surviving, {frozenset({refs["C"], refs["E"]})})
         self.assertTrue(fresh["proof_paths"]["failed_paths"])
         self.assertEqual(self.memory.resolve(root["memory_id"], resolution="L0")["freshness"], "fresh")
         # 另一条路径被打断后，任何 OR 分支都不能继续保留结论。
