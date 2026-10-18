@@ -179,6 +179,24 @@ class AlternativeProofTests(unittest.TestCase):
         self.assertEqual(self.memory.get(root["memory_id"])["revision"], 2)
         self.assertEqual(self.memory.current_change_seq(), watermark)
 
+    # 结构化路径不是验收凭据，不能把已有 verified/user_asserted 事实借 OR 降低门槛。
+    def test_stronger_fact_level_refuses_alternative_support_without_verifier(self):
+        a, b = self.source("verified-a"), self.source("verified-b")
+        for level in ("verified", "user_asserted"):
+            claim = self.memory.remember(
+                kind="semantic", text=f"Privileged {level} claim",
+                source_ref=f"proof:privileged:{level}", fact_level=level,
+                evidence=[{"source_memory_id": a["memory_id"]},
+                          {"source_memory_id": b["memory_id"]}],
+            )
+            with self.subTest(level=level), self.assertRaisesRegex(MemoryDeltaError, "context fact_level"):
+                self.memory.declare_proof_paths(
+                    claim["memory_id"],
+                    [[f"memory:{a['memory_id']}"], [f"memory:{b['memory_id']}"]],
+                    expected_revision=1,
+                )
+            self.assertEqual(self.memory.get(claim["memory_id"])["revision"], 1)
+
     # 相同路径再次声明无新版本，CAS 冲突绝不能尝试覆盖后来合法决策。
     def test_cas_noop_and_restart_preserve_proof_history(self):
         sources, root, refs = self.alternative()
