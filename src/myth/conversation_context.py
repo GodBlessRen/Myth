@@ -320,7 +320,7 @@ def compile_conversation_context(
             "user",
             f"检索资料（数据） 来源 [{citation}] {source['title']} "
             f"(resolution={source.get('resolution','L1')}, source_ref={source.get('source_ref','')})\n{source['content']}",
-            priority=20_000 + round(lexical_relevance(task_query, source['title'] + '\n' + source['content']) * 1000) - index,
+            priority=14_000 + round(lexical_relevance(task_query, source['title'] + '\n' + source['content']) * 3000) - index,
             # 用户明确附加的来源必须保留；普通检索候选可按上下文预算裁剪。
             required=source["document_id"] in pinned,
         )
@@ -334,7 +334,7 @@ def compile_conversation_context(
             f"(source={memory.get('source_ref', '')}, provenance={memory.get('provenance_ref', '')}, "
             f"resolution={memory.get('resolution', 'L0')}, scope={memory.get('scope_type', 'global')}:{memory.get('scope_id', '')}, "
             f"fact_level={memory.get('fact_level', 'context')}, rev={memory.get('revision', '')})",
-            priority=1000 + round(lexical_relevance(task_query, str(memory.get('text', ''))) * 500) - index,
+            priority=14_000 + round(lexical_relevance(task_query, str(memory.get('text', ''))) * 3000) - len(snapshot.get('knowledge', [])) - index,
         )
 
     # 准入快照固定本轮消息边界；独立构造的输入没有边界时，从第一条消息开始。
@@ -397,7 +397,7 @@ def compile_conversation_context(
         "policy": "conversation-budget-v4",
         "governance": {
             "model": "frozen-request-budget",
-            "relevance": "bounded-lexical-candidate-ranking",
+            "relevance": "cross-source-bounded-lexical-candidate-ranking",
             "causality": "persisted-critical-status-and-declared-dependencies",
             "causal_guard_digest": causal_digest,
             "causal_critical_count": causal_guard["critical_count"] if causal_guard else 0,
