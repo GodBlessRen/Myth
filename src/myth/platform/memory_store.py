@@ -1057,57 +1057,60 @@ class SqliteMemoryStore:
         project_id: str | None = None,
         session_id: str | None = None,
     ) -> dict:
-        item = self.get(str(memory_id))
-        if not item.get("active") or not self._visible(item, project_id, session_id):
-            raise PermissionError("memory is not visible in the admitted scope")
-        level = str(resolution or "L2").upper()
-        if level not in {"L0", "L1", "L2"}:
-            raise ValueError("resolution must be L0/L1/L2")
-        text = str(item.get("text") or "")
-        stable_ref = f"memory:{item['memory_id']}@{item['revision']}"
-        evidence = self.evidence(str(item["memory_id"]))
-        freshness = self.freshness(str(item["memory_id"]))
-        # 旧库坏引用仍可报告为 stale，但不能通过显式 resolve 泄露不允许的私有血缘。
-        if any(
-            entry["reason"] in {"scope_violation", "missing"}
-            for entry in freshness["stale_sources"]
-        ):
-            raise PermissionError("memory provenance is not visible in the admitted scope")
-        base = {
-            "memory_id": item["memory_id"],
-            "kind": item["kind"],
-            "source_ref": stable_ref,
-            "provenance_ref": item["source_ref"],
-            "scope_type": item.get("scope_type") or "global",
-            "scope_id": item.get("scope_id"),
-            "fact_level": item.get("fact_level") or "context",
-            "revision": item["revision"],
-            "resolution": level,
-            "proof_count": len(evidence),
-            "freshness": freshness["status"],
-            "is_stale": freshness["is_stale"],
-        }
-        if level == "L0":
-            return {**base, "text": text[:360], "bytes": len(text.encode("utf-8"))}
-        if level == "L1":
-            segments = [text[start : start + 800] for start in range(0, len(text), 800)]
+        # 显式 L0/L1/L2 解析同样必须冻结当前行、证据与支持闭包，不许跨提交拼接正文。
+        snapshot = nullcontext(self.store.db) if self.store.db.in_transaction else self.store.read_snapshot()
+        with snapshot:
+            item = self.get(str(memory_id))
+            if not item.get("active") or not self._visible(item, project_id, session_id):
+                raise PermissionError("memory is not visible in the admitted scope")
+            level = str(resolution or "L2").upper()
+            if level not in {"L0", "L1", "L2"}:
+                raise ValueError("resolution must be L0/L1/L2")
+            text = str(item.get("text") or "")
+            stable_ref = f"memory:{item['memory_id']}@{item['revision']}"
+            evidence = self.evidence(str(item["memory_id"]))
+            freshness = self.freshness(str(item["memory_id"]))
+            # 旧库坏引用仍可报告为 stale，但不能通过显式 resolve 泄露不允许的私有血缘。
+            if any(
+                entry["reason"] in {"scope_violation", "missing"}
+                for entry in freshness["stale_sources"]
+            ):
+                raise PermissionError("memory provenance is not visible in the admitted scope")
+            base = {
+                "memory_id": item["memory_id"],
+                "kind": item["kind"],
+                "source_ref": stable_ref,
+                "provenance_ref": item["source_ref"],
+                "scope_type": item.get("scope_type") or "global",
+                "scope_id": item.get("scope_id"),
+                "fact_level": item.get("fact_level") or "context",
+                "revision": item["revision"],
+                "resolution": level,
+                "proof_count": len(evidence),
+                "freshness": freshness["status"],
+                "is_stale": freshness["is_stale"],
+            }
+            if level == "L0":
+                return {**base, "text": text[:360], "bytes": len(text.encode("utf-8"))}
+            if level == "L1":
+                segments = [text[start : start + 800] for start in range(0, len(text), 800)]
+                return {
+                    **base,
+                    "text": text[:1200],
+                    "segments": [
+                        {"index": index, "preview": segment[:240]}
+                        for index, segment in enumerate(segments[:12])
+                    ],
+                    "segment_count": len(segments),
+                    "bytes": len(text.encode("utf-8")),
+                }
             return {
                 **base,
-                "text": text[:1200],
-                "segments": [
-                    {"index": index, "preview": segment[:240]}
-                    for index, segment in enumerate(segments[:12])
-                ],
-                "segment_count": len(segments),
+                "text": text,
                 "bytes": len(text.encode("utf-8")),
+                "evidence": evidence,
+                "freshness_report": freshness,
             }
-        return {
-            **base,
-            "text": text,
-            "bytes": len(text.encode("utf-8")),
-            "evidence": evidence,
-            "freshness_report": freshness,
-        }
 
     # 模型上下文只接纳复核过的 L0 Memory；原始 search_report 可保留候选供诊断。
     def search_view_report(
