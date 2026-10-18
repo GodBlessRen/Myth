@@ -79,7 +79,9 @@ python -m myth.cli eval --suite evals/context-governance-v1.json
 
 全关/单项/全开受控对照：
 ```bash
-python -c "from myth.evaluation_runner import run_controlled_harness_experiment as run; import json; print(json.dumps(run('evals/context-governance-v1.json', ('context_causal_guard', 'context_relevance_ranking')), ensure_ascii=False, indent=2))"
+python -m myth.cli eval-controlled --suite evals/context-governance-v1.json --mechanism context_causal_guard --mechanism context_relevance_ranking
 ```
 
 对照结果的 `prompt_bytes` 仅是实际编译的 UTF-8 字节，不是 Provider 报告的 Token；针对缺测或明确预算拒绝不填入伪造的 token 数。发布前仍必须在多模型真实 Provider 上运行固定 Task/held-out 集并配对比较成功率、总计费、时延和无盲重试不变量。
+
+使用 `--record` 可以将四组 Discovery 结果写入本机 Evaluation Ledger 并生成逐题机制归因；未指定时只标准输出 JSON，不产生业务 Run、Ticket 或外部模型调用。命令不能把这个固定 Harness Fixture 升级成真实 Provider SOTA 证据。
