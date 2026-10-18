@@ -89,8 +89,23 @@ CREATE INDEX IF NOT EXISTS idx_workspace_memory_terms_term
     ON workspace_memory_terms(term,memory_id);
 CREATE TABLE IF NOT EXISTS workspace_memory_terms_state(
     singleton INTEGER PRIMARY KEY CHECK(singleton=1),
-    last_change_seq INTEGER NOT NULL CHECK(last_change_seq>=0)
+    last_change_seq INTEGER NOT NULL CHECK(last_change_seq>=-1)
 );
+
+-- 非 Myth 写路径一旦直接修改 Memory 行，立即使派生索引失效。
+-- 正常 Memory Store 在同一事务的 _record_change() 之后恢复为已覆盖水位。
+CREATE TRIGGER IF NOT EXISTS trg_memory_terms_insert_dirty
+AFTER INSERT ON workspace_memories BEGIN
+    UPDATE workspace_memory_terms_state SET last_change_seq=-1 WHERE singleton=1;
+END;
+CREATE TRIGGER IF NOT EXISTS trg_memory_terms_update_dirty
+AFTER UPDATE ON workspace_memories BEGIN
+    UPDATE workspace_memory_terms_state SET last_change_seq=-1 WHERE singleton=1;
+END;
+CREATE TRIGGER IF NOT EXISTS trg_memory_terms_delete_dirty
+AFTER DELETE ON workspace_memories BEGIN
+    UPDATE workspace_memory_terms_state SET last_change_seq=-1 WHERE singleton=1;
+END;
 """
 
 
