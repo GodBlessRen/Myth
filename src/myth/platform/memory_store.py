@@ -1067,6 +1067,12 @@ class SqliteMemoryStore:
         stable_ref = f"memory:{item['memory_id']}@{item['revision']}"
         evidence = self.evidence(str(item["memory_id"]))
         freshness = self.freshness(str(item["memory_id"]))
+        # 旧库坏引用仍可报告为 stale，但不能通过显式 resolve 泄露不允许的私有血缘。
+        if any(
+            entry["reason"] in {"scope_violation", "missing"}
+            for entry in freshness["stale_sources"]
+        ):
+            raise PermissionError("memory provenance is not visible in the admitted scope")
         base = {
             "memory_id": item["memory_id"],
             "kind": item["kind"],
@@ -1144,10 +1150,14 @@ class SqliteMemoryStore:
                 ):
                     rejected += 1
                     continue
-                view = self.resolve(
-                    memory_id, resolution="L0",
-                    project_id=project_id, session_id=session_id,
-                )
+                try:
+                    view = self.resolve(
+                        memory_id, resolution="L0",
+                        project_id=project_id, session_id=session_id,
+                    )
+                except (KeyError, PermissionError):
+                    rejected += 1
+                    continue
                 if view["is_stale"]:
                     rejected += 1
                     continue
