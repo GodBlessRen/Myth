@@ -9,6 +9,7 @@ import tempfile
 import unittest
 
 from myth.decision_runtime import DecisionRuntime, MAX_SERIALIZED_REQUEST_BYTES
+from myth.conversation import conversation_request
 from myth.session_statistics import context_cost_calibration
 from myth.acceptance import ContextBudgetError
 from myth.models import (
@@ -225,15 +226,23 @@ class DecisionRuntimeTests(unittest.TestCase):
                 model_id="fake-model", max_output_tokens=100,
             )
             large = "L" * 90_000
-            request = ModelRequest(
-                model="fake-model",
-                messages=(ModelMessage("system", "system"), ModelMessage("user", large)),
-                response_schema=STEP_DECISION_SCHEMA, max_output_tokens=100,
-                context_report={
-                    "bytes_used": len(large) + len("system"),
-                    "max_bytes": 256_000,
-                    "model_budget_source": "provider-preflight-frozen-conservative",
+            # 经过真正的三维 Context Engine，不以伪造报告绕过软预算投影。
+            snapshot = {"messages": [{"role": "user", "content": large}]}
+            request = conversation_request(
+                {
+                    "provider": "openai", "model": "fake-model",
+                    "max_output_tokens": 100,
+                    "admitted_model_profile": {
+                        "provider": "openai", "id": "fake-model",
+                        "source": "provider-preflight", "context_window": 262_144,
+                    },
                 },
+                snapshot, snapshot["messages"], [],
+            )
+            self.assertEqual(request.context_report["max_bytes"], 256_000)
+            self.assertEqual(
+                request.context_report["model_budget_source"],
+                "provider-preflight-frozen-conservative",
             )
             decisions.request_decision(
                 run_id=rid, provider=FakeProvider(), model="fake-model",
