@@ -1,0 +1,342 @@
+{
+  "suite_id": "context-governance-v1",
+  "version": 1,
+  "principle": "Deterministic, provider-free Context selection and causality-preservation probes; NOT real-model SOTA validation.",
+  "cases": [
+    {
+      "case_id": "causal-open-ledger",
+      "category": "context_governance",
+      "safety_critical": true,
+      "input": {
+        "max_bytes": 8000,
+        "system": "Preserve durable unresolved effects",
+        "snapshot": {
+          "messages": [
+            {
+              "role": "user",
+              "content": "check whether payment succeeded"
+            }
+          ],
+          "runtime_liabilities": {
+            "source": "same-run-durable-ledgers",
+            "operations": [
+              {
+                "decision_id": "pay-req-1",
+                "capability": "mcp.call",
+                "state": "UNKNOWN",
+                "ticket_id": "ctkt-pay"
+              }
+            ],
+            "models": [],
+            "cursor": {
+              "phase": "OUTCOME_UNKNOWN",
+              "recovery_state": "RECONCILE",
+              "checkpoint_step": 1
+            },
+            "unknown_held": [
+              {
+                "meter": "tool_calls",
+                "units": 1
+              }
+            ]
+          }
+        }
+      },
+      "expected": {
+        "required_sources": [
+          "causal-guard"
+        ],
+        "required_text": [
+          "runtime-tool:pay-req-1",
+          "runtime-cursor",
+          "runtime-budget:tool_calls",
+          "UNKNOWN"
+        ]
+      }
+    },
+    {
+      "case_id": "causal-predecessor",
+      "category": "context_governance",
+      "safety_critical": true,
+      "input": {
+        "max_bytes": 9000,
+        "system": "Preserve explicit predecessor links",
+        "snapshot": {
+          "messages": [
+            {
+              "role": "user",
+              "content": "inspect pending work"
+            }
+          ]
+        },
+        "activities": [
+          {
+            "step": 1,
+            "decision_id": "prepare",
+            "capability": "project.read",
+            "result": {
+              "content": "observed"
+            }
+          },
+          {
+            "step": 2,
+            "decision_id": "effect",
+            "capability": "artifact.write",
+            "declared_dependencies": [
+              "prepare"
+            ],
+            "result": {
+              "status": "UNKNOWN"
+            }
+          }
+        ]
+      },
+      "expected": {
+        "required_sources": [
+          "causal-guard"
+        ],
+        "required_text": [
+          "activity:1",
+          "activity:2",
+          "prepare",
+          "UNKNOWN"
+        ]
+      }
+    },
+    {
+      "case_id": "context-cross-source-relevance",
+      "category": "context_governance",
+      "safety_critical": false,
+      "input": {
+        "max_bytes": 15000,
+        "system": "Select task-relevant admitted recall",
+        "snapshot": {
+          "messages": [
+            {
+              "role": "user",
+              "content": "payment timeout"
+            }
+          ],
+          "knowledge": [
+            {
+              "document_id": "unrelated",
+              "citation": "doc:u:0",
+              "title": "astronomy",
+              "content": "astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy astronomy "
+            }
+          ],
+          "memory": [
+            {
+              "memory_id": "memory-hit",
+              "revision": 1,
+              "kind": "semantic",
+              "text": "payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout payment timeout "
+            }
+          ]
+        }
+      },
+      "expected": {
+        "required_sources": [
+          "memory:memory-hit@1"
+        ],
+        "excluded_sources": [
+          "knowledge:doc:u:0"
+        ],
+        "budget_error": false
+      }
+    },
+    {
+      "case_id": "context-no-false-positive",
+      "category": "context_governance",
+      "safety_critical": true,
+      "input": {
+        "max_bytes": 6000,
+        "system": "No unsupported causal inference",
+        "snapshot": {
+          "messages": [
+            {
+              "role": "user",
+              "content": "hello"
+            }
+          ],
+          "runtime_liabilities": {
+            "source": "same-run-durable-ledgers",
+            "operations": [],
+            "models": [],
+            "cursor": {
+              "phase": "ADMITTED",
+              "recovery_state": "NONE",
+              "checkpoint_step": 0
+            },
+            "unknown_held": []
+          }
+        }
+      },
+      "expected": {
+        "required_sources": [
+          "message:0"
+        ],
+        "excluded_sources": [
+          "causal-guard"
+        ],
+        "budget_error": false
+      }
+    },
+    {
+      "case_id": "context-guard-fail-closed",
+      "category": "context_governance",
+      "safety_critical": true,
+      "input": {
+        "max_bytes": 1800,
+        "system": "Do not drop unresolved Runtime evidence",
+        "snapshot": {
+          "messages": [
+            {
+              "role": "user",
+              "content": "inspect"
+            }
+          ],
+          "runtime_liabilities": {
+            "source": "same-run-durable-ledgers",
+            "models": [
+              {
+                "model_attempt_id": "attempt-000",
+                "state": "UNKNOWN"
+              },
+              {
+                "model_attempt_id": "attempt-001",
+                "state": "UNKNOWN"
+              },
+              {
+                "model_attempt_id": "attempt-002",
+                "state": "UNKNOWN"
+              },
+              {
+                "model_attempt_id": "attempt-003",
+                "state": "UNKNOWN"
+              },
+              {
+                "model_attempt_id": "attempt-004",
+                "state": "UNKNOWN"
+              },
+              {
+                "model_attempt_id": "attempt-005",
+                "state": "UNKNOWN"
+              },
+              {
+                "model_attempt_id": "attempt-006",
+                "state": "UNKNOWN"
+              },
+              {
+                "model_attempt_id": "attempt-007",
+                "state": "UNKNOWN"
+              },
+              {
+                "model_attempt_id": "attempt-008",
+                "state": "UNKNOWN"
+              },
+              {
+                "model_attempt_id": "attempt-009",
+                "state": "UNKNOWN"
+              },
+              {
+                "model_attempt_id": "attempt-010",
+                "state": "UNKNOWN"
+              },
+              {
+                "model_attempt_id": "attempt-011",
+                "state": "UNKNOWN"
+              },
+              {
+                "model_attempt_id": "attempt-012",
+                "state": "UNKNOWN"
+              },
+              {
+                "model_attempt_id": "attempt-013",
+                "state": "UNKNOWN"
+              },
+              {
+                "model_attempt_id": "attempt-014",
+                "state": "UNKNOWN"
+              },
+              {
+                "model_attempt_id": "attempt-015",
+                "state": "UNKNOWN"
+              },
+              {
+                "model_attempt_id": "attempt-016",
+                "state": "UNKNOWN"
+              },
+              {
+                "model_attempt_id": "attempt-017",
+                "state": "UNKNOWN"
+              },
+              {
+                "model_attempt_id": "attempt-018",
+                "state": "UNKNOWN"
+              },
+              {
+                "model_attempt_id": "attempt-019",
+                "state": "UNKNOWN"
+              },
+              {
+                "model_attempt_id": "attempt-020",
+                "state": "UNKNOWN"
+              },
+              {
+                "model_attempt_id": "attempt-021",
+                "state": "UNKNOWN"
+              },
+              {
+                "model_attempt_id": "attempt-022",
+                "state": "UNKNOWN"
+              },
+              {
+                "model_attempt_id": "attempt-023",
+                "state": "UNKNOWN"
+              },
+              {
+                "model_attempt_id": "attempt-024",
+                "state": "UNKNOWN"
+              },
+              {
+                "model_attempt_id": "attempt-025",
+                "state": "UNKNOWN"
+              },
+              {
+                "model_attempt_id": "attempt-026",
+                "state": "UNKNOWN"
+              },
+              {
+                "model_attempt_id": "attempt-027",
+                "state": "UNKNOWN"
+              },
+              {
+                "model_attempt_id": "attempt-028",
+                "state": "UNKNOWN"
+              },
+              {
+                "model_attempt_id": "attempt-029",
+                "state": "UNKNOWN"
+              },
+              {
+                "model_attempt_id": "attempt-030",
+                "state": "UNKNOWN"
+              },
+              {
+                "model_attempt_id": "attempt-031",
+                "state": "UNKNOWN"
+              }
+            ],
+            "operations": [],
+            "cursor": null,
+            "unknown_held": []
+          }
+        }
+      },
+      "expected": {
+        "budget_error": true
+      }
+    }
+  ]
+}

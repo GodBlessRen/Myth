@@ -156,6 +156,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     evaluate.add_argument("--record", action="store_true")
 
+    # 固定任务 × 真机制组合：全关、全开、单机制和 leave-one-out 复用同一套验收/持久账本。
+    controlled = sub.add_parser("eval-controlled", help="run explicit controlled Harness variants")
+    controlled.add_argument("--suite", default="evals/context-governance-v1.json")
+    controlled.add_argument("--mechanism", action="append", required=True, dest="mechanisms")
+    controlled.add_argument("--case", action="append", default=[], dest="case_ids")
+    controlled.add_argument("--policy-id", default="context-governance-fixture-v1")
+    controlled.add_argument("--prefix", default="context-fixture-v1")
+    controlled.add_argument("--record", action="store_true",
+                            help="persist discovery-only evidence to the configured Runtime ledger")
+
     tasks = sub.add_parser(
         "task-benchmark",
         help="run fixed daily tasks and persist every trial, including failures",
@@ -362,6 +372,30 @@ def main() -> None:
                     result, policy_id=args.policy_id
                 )
             result["recorded_eval_run_id"] = saved["eval_run_id"]
+        _print(result)
+        return
+    if args.command == "eval-controlled":
+        from .evaluation_runner import (
+            run_controlled_harness_experiment, run_record_controlled_harness_experiment,
+        )
+        kwargs = {
+            "policy_id": args.policy_id,
+            "case_ids": args.case_ids,
+            "prefix": args.prefix,
+        }
+        if args.record:
+            with MythRuntime(args.root) as runtime:
+                result = run_record_controlled_harness_experiment(
+                    runtime, args.suite, args.mechanisms, **kwargs,
+                )
+        else:
+            result = {
+                "evaluation_partition": "discovery",
+                "evidence_level": "fixed-harness-fixture-not-provider-quality",
+                "runs": run_controlled_harness_experiment(
+                    args.suite, args.mechanisms, **kwargs,
+                ),
+            }
         _print(result)
         return
     if args.command == "eval-history":

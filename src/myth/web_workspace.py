@@ -68,10 +68,10 @@ class ConversationWebService:
                 if len(self.active) >= 4:
                     break
             try:
-                self._require_model_preflight(schedule["settings"], entry="schedule")
+                model_profile = self._require_model_preflight(schedule["settings"], entry="schedule")
                 with MythRuntime(self.root) as runtime:
                     rid = GoalScheduler(Workspace(runtime)).admit(
-                        schedule["schedule_id"]
+                        schedule["schedule_id"], model_capability=model_profile
                     )
                 if rid:
                     self._spawn(rid)
@@ -326,6 +326,23 @@ class ConversationWebService:
         ):
             raise ValueError("scheduled model is not installed")
         validate_model_selection(settings, details)
+        # 只冻结公开窗口、模型/提供方身份与来源标签；不保存完整目录或认证信息。
+        profiles = details.get("model_capabilities")
+        profile = profiles.get(str(settings.get("model"))) if isinstance(profiles, dict) else None
+        window = profile.get("context_window") if isinstance(profile, dict) else None
+        if (
+            details.get("capability_source") == "provider"
+            and isinstance(profile, dict)
+            and profile.get("source") == "provider"
+            and type(window) is int and 2048 <= window <= 8_000_000
+        ):
+            return {
+                "provider": str(settings.get("provider")),
+                "id": str(settings.get("model")),
+                "context_window": window,
+                "source": "provider-preflight",
+            }
+        return None
 
     # 从持久模型收据聚合输入/输出/缓存及调用量；无缓存报告保留 N/A，不伪造命中率。
     @staticmethod
@@ -634,8 +651,11 @@ class ConversationWebService:
             return {"run_id": previous["run_id"], "session_id": sid}
         settings = self.model_catalog.quote_settings(current_settings)
         pick = RuleIntentPicker().pick(str(text or ""), {})
+        model_profile = None
         if pick.route.value != "deterministic":
-            self._require_model_preflight(settings, entry="send")
+            model_profile = self._require_model_preflight(settings, entry="send")
+        if isinstance(model_profile, dict):
+            settings = {**settings, "admitted_model_profile": model_profile}
 
         with MythRuntime(self.root) as runtime:
             workspace = Workspace(runtime)

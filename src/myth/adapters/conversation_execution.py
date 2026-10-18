@@ -141,9 +141,15 @@ class LocalConversationExecution:
             activities.append(
                 {
                     "step": item["step"],
+                    "state": item.get("state"),
                     "decision_id": item.get("decision_id"),
                     "capability": decision.get("capability_id"),
                     "question": decision.get("question"),
+                    # 仅从已持久决策的参数提取明确依赖，不凭执行先后补造因果边。
+                    "declared_dependencies": (
+                        (decision.get("arguments") or {}).get("depends_on", [])
+                        if isinstance(decision.get("arguments"), dict) else []
+                    ),
                     "result": result,
                 }
             )
@@ -177,6 +183,8 @@ class LocalConversationExecution:
         from ..platform.handoff import project_handoffs
         activities = project_handoffs(activities)
         snapshot = dict(turn["snapshot"])
+        # 必须在本 Run 的短只读查询中取得未结算工具/模型/预算；聊天步骤不是它们的权威来源。
+        snapshot["runtime_liabilities"] = self.repository.context_liabilities(turn["run_id"])
         snapshot["model_pool_feedback"] = self.repository.model_feedback()[:20]
         # 复用上一真实模型请求的 Context mode 作为滞回事实；只影响本次投影选择，不倒写 Turn Snapshot。
         previous_context = next(

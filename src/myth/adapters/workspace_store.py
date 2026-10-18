@@ -1723,6 +1723,43 @@ class SqliteWorkspaceRepository:
             )
         ]
 
+    # 为下一次 Context 读取未结算的权威 Runtime 事实；只返回最小公开身份/状态，不取私有请求正文。
+    def context_liabilities(self, rid):
+        """从本 Run 的 Tool/Model/预算/游标账本构造只读风险导航，不授予新执行机会。"""
+        # 只查询未结算项；未知结果与已知失败分开，不用无结果的步骤投影推断工具已成功。
+        operations = [
+            dict(row) for row in self.store.db.execute(
+                "SELECT decision_id,capability,state,ticket_id FROM workspace_operations "
+                "WHERE run_id=? AND state IN ('TICKETED','UNKNOWN') ORDER BY rowid",
+                (rid,),
+            ).fetchall()
+        ]
+        models = [
+            dict(row) for row in self.store.db.execute(
+                "SELECT model_attempt_id,state FROM model_invocations "
+                "WHERE run_id=? AND state IN ('TICKETED','UNKNOWN') ORDER BY rowid",
+                (rid,),
+            ).fetchall()
+        ]
+        cursor = self.store.db.execute(
+            "SELECT phase,recovery_state,checkpoint_step FROM workspace_execution_cursors "
+            "WHERE run_id=?", (rid,),
+        ).fetchone()
+        budget_holds = [
+            {"meter": str(row["meter"]), "units": int(row["unknown_held"])}
+            for row in self.store.db.execute(
+                "SELECT meter,unknown_held FROM accounts WHERE run_id=? AND unknown_held>0 ORDER BY meter",
+                (rid,),
+            ).fetchall()
+        ]
+        return {
+            "source": "same-run-durable-ledgers",
+            "operations": operations,
+            "models": models,
+            "cursor": dict(cursor) if cursor else None,
+            "unknown_held": budget_holds,
+        }
+
     # 按 Run 读取工具状态与参数/结果投影；用于观测，不再次派发。
     def operations(self, rid):
         rows = self.store.db.execute(
