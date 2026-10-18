@@ -986,6 +986,17 @@ function renderInspectorContext(session, turn) {
           : governance.causality === "disabled-for-controlled-evaluation"
             ? "Evaluation disabled" : "本次无关键状态",
       );
+      // 历史故障折叠不是已解决：明确区分未结算 Runtime 负债与仅供参考的已知失败。
+      if (governance.causality !== "disabled-for-controlled-evaluation") {
+        inspectorFact(box, "Active causal risk",
+          inspectorNumber(governance.causal_active_risk_count) + " open");
+        inspectorFact(box, "Known issue trail",
+          inspectorNumber(governance.causal_recent_issue_count) + " recent · " +
+          inspectorNumber(governance.causal_archived_issue_count) + " archived" +
+          (governance.causal_archived_issue_digest
+            ? " · " + String(governance.causal_archived_issue_digest).slice(0, 12) + "…"
+            : ""));
+      }
       if ((governance.causal_missing_dependencies || []).length) {
         inspectorFact(
           box,
