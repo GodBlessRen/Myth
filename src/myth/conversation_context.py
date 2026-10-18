@@ -359,6 +359,8 @@ def compile_conversation_context(
         )
 
     folded = []
+    # Guard 的历史归档仅降低旧已知故障预览的优先级；真实执行事实和来源绝不删除。
+    archived_activity_refs = set(causal_guard.get("archived_issue_sources") or ()) if causal_guard else set()
     for index, activity in enumerate(activities):
         ref = f"activity:{activity['step']}"
         latest = index == len(activities) - 1
@@ -372,7 +374,7 @@ def compile_conversation_context(
             "工具处理记录（数据）：\n"
             + canonical_json(projected)
             + ("\n请基于这些结果继续完成用户的问题。" if latest else ""),
-            priority=30_000 + index,
+            priority=(500 + min(index, 1000)) if ref in archived_activity_refs else 30_000 + index,
             # 即使折叠旧预览，仍保留已生成文件的身份事实，避免上下文诱导模型无谓再生成。
             required=latest or bool((activity.get("result") or {}).get("artifact")),
         )
@@ -410,6 +412,7 @@ def compile_conversation_context(
             "causal_active_risk_count": causal_guard["active_risk_count"] if causal_guard else 0,
             "causal_recent_issue_count": causal_guard["recent_issue_count"] if causal_guard else 0,
             "causal_archived_issue_count": causal_guard["archived_issue_count"] if causal_guard else 0,
+            "causal_archived_activity_demoted": len(archived_activity_refs),
             "causal_archived_issue_digest": causal_guard["archived_issue_digest"] if causal_guard else None,
             "causal_runtime_protected": sum(
                 ref["source"].startswith("runtime-")
