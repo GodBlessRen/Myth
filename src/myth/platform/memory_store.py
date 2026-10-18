@@ -534,6 +534,7 @@ class SqliteMemoryStore:
         if type(expected_revision) is not int or expected_revision < 1:
             raise MemoryDeltaError("proof paths require positive expected_revision")
         with self.store.tx() as db:
+            # 步骤一：在写锁内核对 CAS 与 active 身份，任何旧调用不能覆盖当前证明。
             row = db.execute(
                 "SELECT * FROM workspace_memories WHERE memory_id=?", (memory_id,),
             ).fetchone()
