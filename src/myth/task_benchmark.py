@@ -18,7 +18,22 @@ from .domains.information import IntentPick, IntentRoute
 from .models import ModelResult
 from .providers import create_provider
 from .runtime import MythRuntime
+from .session_statistics import usage_measurements
 from .workspace import Workspace
+
+
+# 四种 Context 受控组保留同一组基础 Harness 能力，只消融因果和相关性。
+# 命名属于 disposable Benchmark，不进入产品设置或授予新的执行许可。
+_COMMON_CONTEXT_MECHANISMS = (
+    "action_fusion", "context_compaction", "observation_recall",
+)
+CONTEXT_BENCHMARK_ARMS = {
+    "context-baseline": _COMMON_CONTEXT_MECHANISMS,
+    "context-causal": _COMMON_CONTEXT_MECHANISMS + ("context_causal_guard",),
+    "context-relevance": _COMMON_CONTEXT_MECHANISMS + ("context_relevance_ranking",),
+    "context-full": _COMMON_CONTEXT_MECHANISMS
+    + ("context_causal_guard", "context_relevance_ranking"),
+}
 
 
 # 路由消融策略；所有任务选择 Agent，其他 Runtime、工具和预算保持相同。
@@ -186,11 +201,13 @@ def _arm_summary(trials, arm, case_ids, repeats):
 
 
 # 在独立持久 root 执行固定任务，并实际重开 Goal 数据库；记录所有 Run、状态、计量与独立 checks。
-def _trial(root, case, arm, settings, provider):
+def _trial(root, case, arm, settings, provider, *, context_mechanisms=None):
     started = time.perf_counter()
     with MythRuntime(root) as runtime:
         workspace = Workspace(
-            runtime, intent_picker=SimpleLoopPicker() if arm == "simple-loop" else None
+            runtime,
+            intent_picker=SimpleLoopPicker() if arm == "simple-loop" else None,
+            evaluation_harness_mechanisms=context_mechanisms,
         )
         repo = workspace.repository
         repo.save_settings(settings)
@@ -238,6 +255,7 @@ def _trial(root, case, arm, settings, provider):
             workspace = Workspace(
                 runtime,
                 intent_picker=SimpleLoopPicker() if arm == "simple-loop" else None,
+                evaluation_harness_mechanisms=context_mechanisms,
             )
             repo = workspace.repository
         try:
@@ -261,16 +279,35 @@ def _trial(root, case, arm, settings, provider):
             turns = [repo.turn(r) for r in run_ids]
             usage = Counter()
             context = Counter()
+            # 原始 usage 保持旧报告兼容，但新比较只能使用所有 Attempt 均实测的字段。
+            measurement = usage_measurements(
+                model_facts,
+                ("input_tokens", "output_tokens", "cached_input_tokens", "provider_wall_ms"),
+            )
+            context_bytes = serialized_request_bytes = 0
+            context_activation = []
             signatures = []
             for model in model_facts:
                 usage.update(model.get("usage") or {})
-                request = json.loads(runtime.objects.get(model["request_ref"]))
+                raw_request = runtime.objects.get(model["request_ref"])
+                request = json.loads(raw_request)
                 report = request.get("context_report") or {}
+                context_bytes += int(report.get("bytes_used") or 0)
+                serialized_request_bytes += len(raw_request)
                 for key in ("selected", "folded", "dropped"):
                     value = report.get(key, [])
                     context[key] += (
                         len(value) if isinstance(value, list) else int(value or 0)
                     )
+                governance = report.get("governance") or {}
+                context_activation.append({
+                    "model_attempt_id": model["model_attempt_id"],
+                    "causality": governance.get("causality"),
+                    "relevance": governance.get("relevance"),
+                    "context_mode": report.get("context_mode"),
+                    "selected": len(report.get("selected") or []),
+                    "bytes_used": report.get("bytes_used"),
+                })
             for t in turns:
                 for activity in t["activities"]:
                     decision = activity.get("decision") or {}
@@ -321,6 +358,13 @@ def _trial(root, case, arm, settings, provider):
                 "elapsed_ms": round((time.perf_counter() - started) * 1000, 2),
                 "model_calls": len(model_facts),
                 "usage": dict(usage),
+                "usage_measured": measurement["totals"],
+                "usage_samples": measurement["samples"],
+                "measured_model_attempts": measurement["attempts"],
+                "context_bytes": context_bytes,
+                "serialized_request_bytes": serialized_request_bytes,
+                "harness_mechanisms": list(context_mechanisms) if context_mechanisms is not None else None,
+                "context_activation": context_activation,
                 "tool_calls": len(signatures),
                 "repeated_tool_calls": sum(n - 1 for n in Counter(signatures).values()),
                 "context": dict(context),
@@ -349,11 +393,18 @@ def run_task_benchmark(
     if (
         not arms
         or len(set(arms)) != len(arms)
-        or any(a not in {"myth", "simple-loop"} for a in arms)
+        or any(a not in {"myth", "simple-loop", *CONTEXT_BENCHMARK_ARMS} for a in arms)
     ):
-        raise ValueError("arms must be myth and/or simple-loop without duplicates")
+        raise ValueError("unknown or duplicate benchmark arm")
+    if any(arm in CONTEXT_BENCHMARK_ARMS for arm in arms) and any(
+        arm not in CONTEXT_BENCHMARK_ARMS for arm in arms
+    ):
+        raise ValueError("context ablation cannot mix with routing arms")
     suite = json.loads(Path(suite_path).read_text(encoding="utf-8"))
     cases = suite["cases"]
+    partition = suite.get("partition", "discovery")
+    if partition not in {"discovery", "heldout"}:
+        raise ValueError("suite partition must be discovery or heldout")
     ids = [c["id"] for c in cases]
     if (
         not ids
@@ -388,8 +439,17 @@ def run_task_benchmark(
         "repeats": repeats,
         "arms": list(arms),
         "kind": "harness_fixture" if provider_name == "scripted" else "real_provider",
+        "partition": "declared_heldout" if partition == "heldout" else "discovery",
         "oracle_scope": "exact artifact bytes, required tools, answer tokens, unchanged originals; no broad semantic score",
-        "comparison": "intent routing ablation; same durable runtime and tools",
+        "comparison": (
+            "context causal/relevance controlled ablation; same frozen base mechanisms and durable Runtime"
+            if all(arm in CONTEXT_BENCHMARK_ARMS for arm in arms)
+            else "intent routing ablation; same durable runtime and tools"
+        ),
+        "harness_mechanisms": {
+            arm: list(CONTEXT_BENCHMARK_ARMS[arm])
+            for arm in arms if arm in CONTEXT_BENCHMARK_ARMS
+        },
         "complete_suite": False,
         "planned_trials": len(cases) * repeats * len(arms),
         "trials": [],
@@ -437,14 +497,27 @@ def run_task_benchmark(
         report["summary"] = {
             arm: _arm_summary(trials, arm, selected_case_ids, repeats) for arm in arms
         }
+        if all(arm in CONTEXT_BENCHMARK_ARMS for arm in arms):
+            report["context_ablation"] = summarize_context_ablation(
+                trials, arms, selected_case_ids, repeats,
+                kind=report["kind"],
+                complete_suite=(len(trials) == report["planned_trials"]
+                                and len(selected) == len(cases)),
+            )
         atomic_write(
             path, json.dumps(report, ensure_ascii=False, indent=2).encode("utf-8")
         )
 
     save()
     for repeat in range(1, repeats + 1):
-        for case in selected:
-            for arm in arms:
+        for case_index, case in enumerate(selected):
+            # 受控变体在各 case/repeat 间轮换顺序；减弱 Provider 排队与缓存的固定先后偏差。
+            rotated = (
+                (case_index + repeat - 1) % len(arms)
+                if all(arm in CONTEXT_BENCHMARK_ARMS for arm in arms) else 0
+            )
+            case_arms = tuple(arms[rotated:]) + tuple(arms[:rotated])
+            for order, arm in enumerate(case_arms):
                 provider = (
                     FixtureProvider(case["steps"])
                     if provider_name == "scripted"
@@ -456,7 +529,10 @@ def run_task_benchmark(
                 )
                 trial_root = output / f"{repeat}-{case['id']}-{arm}"
                 try:
-                    trial = _trial(trial_root, case, arm, settings, provider)
+                    trial = _trial(
+                        trial_root, case, arm, settings, provider,
+                        context_mechanisms=CONTEXT_BENCHMARK_ARMS.get(arm),
+                    )
                 except Exception as exc:
                     # 前置条件、夹具或 Runner 失败仍计入完整分母；中断前已保存的增量报告继续保留。
                     trial = {
@@ -474,6 +550,9 @@ def run_task_benchmark(
                         "evidence_root": str(trial_root / ".runtime"),
                     }
                 trial["repeat"] = repeat
+                trial["block_order"] = order
+                if arm in CONTEXT_BENCHMARK_ARMS:
+                    trial.setdefault("harness_mechanisms", list(CONTEXT_BENCHMARK_ARMS[arm]))
                 report["trials"].append(trial)
                 save()
                 if on_trial:
