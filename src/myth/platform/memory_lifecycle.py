@@ -301,4 +301,25 @@ def normalize_memory_actions(actions: list[Mapping[str, Any]] | tuple[Mapping[st
             raise MemoryDeltaError(f"duplicate memory action identity at index {index}")
         touched.add(identity)
         normalized.append(payload)
+
+    # 步骤三：本批次被 UPDATE/DELETE 的来源不能又被新添为稳定证据。
+    # 否则同一提交的操作顺序会让派生 Memory 刚创建就 stale，制造无效的“已更新”假象。
+    modified_ids = {
+        item["memory_id"]
+        for item in normalized
+        if item["op"] in {"UPDATE", "DELETE"}
+    }
+    for item in normalized:
+        additions = (
+            item["evidence"]
+            if item["op"] == "ADD" else [
+                change["evidence"]
+                for change in item.get("operations", ())
+                if change["op"] == "add_evidence"
+            ]
+        )
+        if any(link.get("source_memory_id") in modified_ids for link in additions):
+            raise MemoryDeltaError(
+                "memory action batch cannot cite a source mutated in the same batch"
+            )
     return tuple(normalized)
