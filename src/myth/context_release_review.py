@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+from contextlib import closing
 import hashlib
 import json
 from pathlib import Path
@@ -51,7 +52,7 @@ def _verify_trial_receipts(trial: dict[str, Any], evidence: Path, provider: str,
         raise ValueError("benchmark trial has invalid durable run identities")
     invocations = []
     # SQLite URI 使用只读模式，不创建表、策略、运行时或模型请求。
-    with sqlite3.connect(database.as_uri() + "?mode=ro", uri=True) as db:
+    with closing(sqlite3.connect(database.as_uri() + "?mode=ro", uri=True)) as db:
         db.row_factory = sqlite3.Row
         db.execute("PRAGMA query_only = ON")
         for run_id in run_ids:
