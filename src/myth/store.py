@@ -277,6 +277,19 @@ class RuntimeStore:
             self.db.rollback()
             raise
 
+    # read_snapshot：同连接的一组只读查询共享 WAL 快照；不争抢写锁，也绝不夹带外部网络/模型操作。
+    @contextmanager
+    def read_snapshot(self) -> Iterator[sqlite3.Connection]:
+        """为多次权威来源核验固定一个一致读取视图；有活动业务事务时显式拒绝嵌套。"""
+        if self.db.in_transaction:
+            raise RuntimeError("nested store read snapshots are not allowed")
+        self.db.execute("BEGIN")
+        try:
+            yield self.db
+        finally:
+            # 只读事务无待提交效果，用 rollback 关闭快照，异常原样传播。
+            self.db.rollback()
+
     # 将 SQLite 行转为普通数据副本；应用不获得游标或写权限。
     @staticmethod
     def _row(row: sqlite3.Row | None) -> dict[str, Any] | None:
