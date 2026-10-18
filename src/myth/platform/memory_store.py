@@ -544,6 +544,9 @@ class SqliteMemoryStore:
                 raise MemoryDeltaError("proof paths expected_revision mismatch")
             if not bool(row["active"]):
                 raise MemoryDeltaError("cannot declare proof paths on revoked memory")
+            # Proof 结构有效不等于完成独立验收；不能降低已验证/用户断言事实的证明门槛。
+            if str(row["fact_level"]) != "context":
+                raise MemoryDeltaError("proof paths require context fact_level; stronger facts need independent verification")
             evidence = self._evidence_rows(db, memory_id)
             groups = normalize_proof_paths(paths, evidence)
             previous, error = self._proof_paths_for(db, memory_id, row, evidence)
