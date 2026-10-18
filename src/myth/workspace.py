@@ -14,6 +14,7 @@ from .platform import MythComponents
 from .platform.control_store import SqliteControlService
 from .platform.memory_store import SqliteMemoryStore
 from .platform.knowledge_views import SqliteKnowledgeViews
+from .platform.semantic_catalog import SemanticCatalog
 from .platform.evolution_store import SqliteEvolutionControl
 from .delivery import DeliveryLedger
 from .mental_model_refresh import MentalModelRefreshScheduler
@@ -58,6 +59,8 @@ class Workspace:
         self.personal = SqlitePersonalState(runtime)
         # memory：有来源记忆协作对象；Current Facts 版本可供 Continuity 读取，但正文/revision 仍由 Memory 仓储拥有。
         self.memory = SqliteMemoryStore(runtime, vector_index=self.vector_index)
+        # semantics：复用 Memory 的证据/版本所有者；术语约束只解析结构化 JSON，不授予新事实等级。
+        self.semantics = SemanticCatalog(self.memory)
         # repository：用例仓储端口/实现；持久状态写入归此协作对象所有。
         self.repository = SqliteWorkspaceRepository(
             runtime,
@@ -95,6 +98,7 @@ class Workspace:
             capability_registry=self.components.capabilities,
             subagent_registry=self.components.subagents,
             memory_store=self.memory,
+            semantic_catalog=self.semantics,
             provider_factory=child_provider_factory or self._child_provider,
             parent_control=self.control,
             skill_library=self.skills,

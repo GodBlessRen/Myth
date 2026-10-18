@@ -82,6 +82,8 @@ class LiveInformationController:
     # _ACTIONS：只控制会把新信息带回模型的既有工具；写入/测试/Sub-Agent 不归本策略。
     _ACTIONS = {
         "knowledge.search": InformationControlAction.SEEK,
+        "semantics.browse": InformationControlAction.SEEK,
+        "semantics.resolve": InformationControlAction.EXPAND,
         "memory.search": InformationControlAction.SEEK,
         "project.search": InformationControlAction.SEEK,
         "project.list": InformationControlAction.SEEK,
@@ -101,11 +103,13 @@ class LiveInformationController:
         value = dict(args or {})
         # 先按实际工具合同固定默认查询、粒度和分页值，使重复请求可比较。
         # 归一化只服务去重/局部预算，不替代执行端参数校验；未登记能力保持原参数。
-        if capability in {"knowledge.search", "memory.search"}:
+        if capability in {"knowledge.search", "memory.search", "semantics.browse"}:
             return {
                 "query": str(value.get("query") or "").strip().casefold(),
                 "limit": value.get("limit", 5),
             }
+        if capability == "semantics.resolve":
+            return {"term_id": str(value.get("term_id") or "").strip()}
         if capability == "memory.timeline":
             return {
                 "memory_id": str(value.get("memory_id") or "").strip(),
@@ -147,6 +151,8 @@ class LiveInformationController:
     def _target_key(capability: str, normalized: dict[str, Any]) -> str:
         if capability in {"knowledge.search", "memory.search"}:
             return canonical_json({"kind": capability, "query": normalized["query"]})
+        if capability == "semantics.resolve":
+            return canonical_json({"kind": "semantics.resolve", "term_id": normalized["term_id"]})
         if capability in {"memory.timeline", "memory.resolve"}:
             return canonical_json(
                 {"kind": "memory", "memory_id": normalized["memory_id"]}

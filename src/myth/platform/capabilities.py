@@ -92,6 +92,18 @@ def default_capabilities() -> CapabilityRegistry:
             "read",
         ),
         (
+            "semantics.browse",
+            "knowledge",
+            "Find versioned and scope-admitted typed term mappings; discovery does not verify their claims.",
+            "read",
+        ),
+        (
+            "semantics.resolve",
+            "knowledge",
+            "Execute a bounded JSON term mapping with pinned Memory evidence, type/unit and constraint checks.",
+            "read",
+        ),
+        (
             "memory.search",
             "memory",
             "Search visible long-term memories and return compact L0 index views.",

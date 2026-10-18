@@ -86,6 +86,7 @@ class LocalConversationExecution:
         subagent_registry=None,
         information_controller=None,
         memory_store=None,
+        semantic_catalog=None,
         provider_factory=None,
         parent_control=None,
         skill_library: SkillLibrary | None = None,
@@ -113,6 +114,8 @@ class LocalConversationExecution:
         self.information_controller = information_controller or LiveInformationController()
         # memory_store：Memory 的权威读取协作者；渐进披露工具只读，不授予执行权限。
         self.memory_store = memory_store
+        # semantic_catalog：受限只读术语映射协作对象；模型不能通过该端口写入或发布知识。
+        self.semantic_catalog = semantic_catalog
         # skills/mcp：装配根注入的扩展端口；资源目录和远端发现不能修改 Runtime 执行白名单。
         # skills：只读流程资源端口；内容进入 Observation，但不改变 Capability。
         self.skills = skill_library
@@ -874,6 +877,22 @@ class LocalConversationExecution:
             result.update(report)
         elif capability == "knowledge.resolve":
             result.update(self._resolve_knowledge(turn, args))
+        elif capability == "semantics.browse":
+            if self.semantic_catalog is None:
+                raise RuntimeError("semantic catalog is unavailable")
+            result.update(self.semantic_catalog.browse(
+                args.get("query", ""), limit=args.get("limit", 6),
+                project_id=(turn["snapshot"].get("project") or {}).get("id"),
+                session_id=turn["session_id"],
+            ))
+        elif capability == "semantics.resolve":
+            if self.semantic_catalog is None:
+                raise RuntimeError("semantic catalog is unavailable")
+            result.update(self.semantic_catalog.evaluate(
+                args.get("term_id", ""),
+                project_id=(turn["snapshot"].get("project") or {}).get("id"),
+                session_id=turn["session_id"],
+            ))
         elif capability == "memory.search":
             if self.memory_store is None:
                 raise RuntimeError("memory store is unavailable")

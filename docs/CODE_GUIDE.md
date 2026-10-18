@@ -22,6 +22,7 @@ Myth 是共享 SQLite 的单机模块化应用。纯合同、策略和应用用�
 | `extension_ports.py`、`adapters/local_skills.py`、`adapters/extension_config.py`、`adapters/mcp_stdio.py` | 本地 Skill 与可选 MCP | 固定根配置/资源，发现不授予权限；MCP 连接在 Ticket 后，配置与输入 schema 绑定，无收据不重放 |
 | `tool_hooks.py`、`adapters/local_tool_hooks.py` | 主 Conversation 工具 Hook | 固定调用计划、只读快照、前置拒绝无 Ticket；观察不改写收据，恢复不重发；[使用与限制](TOOL_HOOKS.md) |
 | `evaluation_runner.py`、`task_benchmark.py`、`platform/evaluation*`、`platform/evolution*` | 固定测量、配对、发布资格与显式切换 | 完整分母、固定版本、真实字节 Oracle、partial 不发布、资格不自动 Promote |
+| `platform/semantic_contract.py`、`platform/semantic_catalog.py` | 纯 JSON 术语/约束规则与 Memory-backed 受限目录 | Term 仅为 context 提案；来源 Revision、Scope、CAS 和 Evaluation Gate 仍由原状态所有者控制；[语义合同](SEMANTIC_CONTRACT.md) |
 
 ## 一次 Conversation 的协作
 
