@@ -519,7 +519,7 @@ class ChatGPTPlanProvider(OpenAIResponsesProvider):
                 )
                 for item in models
             }
-            details["capability_source"] = "provider"
+            details["capability_source"] = "adapter-family-rule"
             return ProviderStatus(
                 self.provider_id, True, auth_type="oauth", details=details
             )
@@ -585,7 +585,7 @@ class OpenAIApiKeyProvider(OpenAIResponsesProvider):
                     details={
                         "models": models,
                         "model_capabilities": profiles,
-                        "capability_source": "provider",
+                        "capability_source": "adapter-family-rule",
                     },
                 )
             except Exception:
