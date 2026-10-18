@@ -31,6 +31,7 @@ Long-term Goal
 - Ollama，本地上下文窗口与 `num_ctx` 对齐；
 - [模型池](docs/MODEL_POOL.md)：1 主模型 + 最多 3 个子配置，主模型评判能力与内容、审核元数据；子流程共用运行引擎，完整交接对象可回读，拒收仍记花销；独立任务最多三路并发、按固定顺序汇合，仍只读、不可递归；
 - Knowledge / Memory 检索与 provenance；
+- [Semantic Contract 离线 Eval](docs/SEMANTIC_EVAL.md)：16 个固定 Oracle Case、同字段选择器配对、显式安全失败与零自动 Promote；真实 Provider/Token 收益仍待独立实测；
 - [Semantic Contract](docs/SEMANTIC_CONTRACT.md)：受信提案创建有 Evidence Revision 的 Term / JSON Pointer Mapping / 类型与单位约束；模型只读浏览/解析，不自动 verified 或 Promote；
 - 增量 Context Anchor + recent verbatim tail；长会话压缩不删除 durable history；
 - State / Context 分离：旧 Tool Observation 可折叠但通过 `observation.read` 精确回读；Compact 使用 durable evidence seed，不把表示变化冒充任务进度；
