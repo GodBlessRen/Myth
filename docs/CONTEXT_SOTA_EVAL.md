@@ -68,6 +68,30 @@ python -m myth.cli task-benchmark --context-ablation --suite evals/context-heldo
 
 `Provider` 的 `input_tokens` 是派发后计量，不是预调接口的精确 tokenizer。当前 Context 预算继续使用保守软字节预算；`context_cost_calibration` 是实测历史比例，不能据此无条件扩容。若真实 Token 窗口预检仍缺测，必须保持原 fallback。
 
+## The Last Mile：Case-Clustered 与双阶段复核
+
+单次 `input_tokens` 下降不再足以通过研究候选门槛。`context_ablation.paired_significance` 将同一 Case 的全部重复试次视作**一个**比较单元，事先指定 `input_tokens` 为唯一显著性主指标，使用单侧精确符号检验（Exact Sign Test）：
+
+- 每个 Case 必须有三次及以上完整的四 Arm 配对；至少六个非平手 Case；
+- 单侧 `p <= 0.05`，且候选在聚合成本向量上 Pareto 不劣；
+- 独立 Oracle 的 Full Arm 必须全部通过，不得出现新增 UNKNOWN / 接管 / 重复工具调用；
+- 同 Case 的多次重复**不能**冒充多个独立 Case；测试仅假设不同 Case 近似独立。若实际任务高度相关，显著性不能直接推断到新任务。
+
+完成两个真实 Provider 目录后，使用以下**只读**命令复核：
+
+```bash
+# 分别运行完整 Discovery 和声明的 held-out；推荐 repeats>=3
+python -m myth.cli task-benchmark --context-ablation --provider ollama --model YOUR_PINNED_MODEL --repeats 3 --output .runtime/benchmarks/discovery-real
+python -m myth.cli task-benchmark --context-ablation --suite evals/context-heldout-v1.json --provider ollama --model YOUR_PINNED_MODEL --repeats 3 --output .runtime/benchmarks/heldout-real
+
+# 只读取目录中的 suite.json、report.json、每个 Trial 的 .runtime 证据目录；不调用模型。
+python -m myth.cli task-benchmark-review --discovery .runtime/benchmarks/discovery-real --heldout .runtime/benchmarks/heldout-real
+```
+
+复核重新计算每组成本、逐次对照和统计量，核对 Suite 内容摘要、Case 全格覆盖、源码摘要、Provider/模型/设置、声明的分区以及两组 Case 不相交。它还以只读 SQLite 打开每个 Trial 的 `runtime.db`，核对 Run 状态、模型 Ticket、已结算模型 Attempt、`model-receipts/` 收据、请求/响应 SHA-256 对象、实际冻结的 Context 开关，以及 Token/耗时聚合；仅有一个空 `.runtime` 目录不足以通过。对于 Ollama，还要求两边模型权重 digest 可读取且相同。缺失、篡改或成本分母不完整时 `HOLD`（CLI 退出码 1）；条件全部满足时为 `READY_FOR_MANUAL_REVIEW`（退出码 0），**不执行 Promote，`promotion_eligible=false`**。
+
+公开 held-out 题不等于秘密盲测；现有报告目录可被拥有写权限者整体改写，SHA-256 不是数字签名。对 ChatGPT / OpenAI 等没有稳定权重 digest 的托管模型，复核会保持 `HOLD`，直至模型版本能通过独立可信证据确定。即便 Runtime 原始对象、Receipt 和 SQLite 彼此一致，也不等于外部 Provider 真实身份或计费记录已获第三方独立认证；拥有整个目录写权限的人仍可同时伪造这几份本地证据。此步骤只提升**工程可审查性**，不宣称已证实跨模型、跨任务或跨时间的 SOTA。
+
 ## SOTA-LEVEL 的真正晋级条件
 
 候选必须在多个真实 Provider/固定模型版本上，经过版本固定的 Discovery 与独立、未用于调参的 Final 数据集，提供每个 Case/Arm/Repeat 的原始证据、足够样本数量、置信区间或有解释的统计不确定性、任务质量不下降、成本/延迟 Pareto 不劣、缓存覆盖完整，以及故障注入后 UNKNOWN 无盲目重试的实测记录。

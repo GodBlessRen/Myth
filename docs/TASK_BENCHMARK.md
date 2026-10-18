@@ -75,6 +75,8 @@ Discovery/Search case 与 final held-out case 的身份必须不相交。Final �
 
 Historical Replay、SOTA Route 和单次漂亮轨迹可以产生 hypothesis，但不能替代新的固定评测。
 
+**重复实验统计边界（The Last Mile）**：Context 四组对照采用预先声明的主指标 `input_tokens`，每题至少三次，先把同题重复成本差归并为一个 Case 符号，再做 Exact Sign Test（单侧 `p<=0.05`、至少六个非平手 Case）。这个计算避免伪重复样本量，却仍需要不同 Case 近似独立。只有全量真实 Provider 和独立 held-out 原始证据才可运行 `myth task-benchmark-review --discovery … --heldout …` 获得人工复核建议；复核还会从每个试次的持久 SQLite、模型收据和内容寻址对象重算模型用量、组态与 Run 身份，而不是只信 `report.json`。该流程不会自动发布或覆盖生产策略。详见 [Context SOTA Evidence](CONTEXT_SOTA_EVAL.md)。
+
 ## Task × Harness × Mechanism attribution
 
 Outcome attribution 不允许从 aggregate score 猜原因。Evaluation 以固定 Task/case 为最小单位，分别保存：

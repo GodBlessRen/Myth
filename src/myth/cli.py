@@ -193,6 +193,14 @@ def build_parser() -> argparse.ArgumentParser:
                        help="run baseline/causal/relevance/full on identical cases and provider")
     tasks.add_argument("--case", action="append", default=[], dest="case_ids")
 
+    # 复核两个已完成的独立真实模型目录；不调用 Provider，不发出 Promote 指令。
+    review = sub.add_parser(
+        "task-benchmark-review",
+        help="review real-provider Context discovery and declared heldout evidence",
+    )
+    review.add_argument("--discovery", required=True, type=Path)
+    review.add_argument("--heldout", required=True, type=Path)
+
     history = sub.add_parser(
         "eval-history", help="show persisted local evaluation runs"
     )
@@ -343,6 +351,16 @@ def main() -> None:
             }
         )
         if any(not t["success"] for t in result["trials"]):
+            raise SystemExit(1)
+        return
+
+    if args.command == "task-benchmark-review":
+        from .context_release_review import review_context_release
+
+        # 仅基于已有两份可回读证据计算建议；HOLD 以非零退出码提示 CI/操作者。
+        review = review_context_release(args.discovery, args.heldout)
+        _print(review)
+        if review["status"] != "READY_FOR_MANUAL_REVIEW":
             raise SystemExit(1)
         return
 

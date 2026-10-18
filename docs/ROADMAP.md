@@ -18,7 +18,7 @@
 
 用相同任务比较 provider-visible Context、实测 token、模型/工具次数、耗时和 accepted outcome。Context 压缩同时核算预付成本、回读往返和缓存损失；SOTA Route 同时报 trajectory variance，检查能否稳定复现已验收的较省路线。
 
-验收：one-mechanism / leave-one-out 在 discovery 集中解释差异，独立 held-out final 守住能力下限。Historical Replay 的未观察分支不计为成功；参数通过后显式 Promote。
+验收：one-mechanism / leave-one-out 在 discovery 集中解释差异，独立 held-out final 守住能力下限。Context 对照现在具有 Case-clustered 配对精确检验和跨 Suite 只读复核入口；真实 Provider 原始收据、版本 pinning、统计独立性与多模型外部效度仍须实际执行和人工核查。Historical Replay 的未观察分支不计为成功；参数通过后显式 Promote。
 
 ## 4. 按改动压力继续拆职责
 
