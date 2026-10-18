@@ -54,7 +54,9 @@ def session_statistics(invocations, operations):
         usage = item.get("usage") if isinstance(item.get("usage"), dict) else {}
         wall = measured_integer(usage.get("provider_wall_ms"))
         first = measured_integer(usage.get("time_to_first_token_ms"))
-        tokens = measured_integer(usage.get("output_tokens"))
+        # TPS 只能使用已证明的可见输出；推理用量不冒充生成正文。
+        # 旧调用缺少 visible_output_tokens 时不提供速率，而非推断为零。
+        tokens = measured_integer(usage.get("visible_output_tokens"))
         if wall is not None:
             model_samples += 1
             model_ms += wall
