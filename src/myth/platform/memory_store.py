@@ -136,46 +136,49 @@ class SqliteMemoryStore:
         if level not in {"context", "user_asserted", "verified"}:
             raise ValueError("memory fact_level must be context/user_asserted/verified")
 
-        # 本地事务边界：正文、当前 evidence 与 immutable revision snapshot 一起提交；Memory Domain 内部可加入同连接活动事务。
+        # 所有 Memory 写入口共用此事务准入；不能只依赖模型批量 Action 的调用方校验。
         with self.store.transaction_scope(_db) as db:
             row = db.execute(
                 "SELECT * FROM workspace_memories WHERE kind=? AND source_ref=?",
                 (memory_kind.value, source),
             ).fetchone()
+            memory_id = str(row["memory_id"]) if row else f"mem_{uuid.uuid4().hex}"
+            revision = int(row["revision"]) + 1 if row else 1
+
+            # 修改作用域但未显式替换 Evidence 时，也要对仍保留的引用按目标范围复核。
+            prepared = (
+                self._prepare_evidence(db, evidence, default_ref=source)
+                if evidence is not None or row is None
+                else self._evidence_rows(db, memory_id)
+            )
+            self._check_action_evidence_scope(
+                db,
+                {"memory_id": memory_id, "scope_type": scope, "scope_id": scope_value},
+                prepared,
+            )
             if row:
-                revision = int(row["revision"]) + 1
-                memory_id = str(row["memory_id"])
                 db.execute(
                     "UPDATE workspace_memories SET text=?,scope_type=?,scope_id=?,fact_level=?,"
                     "revision=?,active=1,updated_at=CURRENT_TIMESTAMP WHERE memory_id=?",
                     (value, scope, scope_value, level, revision, memory_id),
                 )
                 if evidence is not None:
-                    prepared = self._prepare_evidence(db, evidence, default_ref=source)
                     self._replace_evidence(db, memory_id, prepared)
             else:
-                memory_id = f"mem_{uuid.uuid4().hex}"
-                revision = 1
                 db.execute(
                     "INSERT INTO workspace_memories(memory_id,kind,text,source_ref,scope_type,scope_id,fact_level) "
                     "VALUES (?,?,?,?,?,?,?)",
-                    (
-                        memory_id,
-                        memory_kind.value,
-                        value,
-                        source,
-                        scope,
-                        scope_value,
-                        level,
-                    ),
+                    (memory_id, memory_kind.value, value, source, scope, scope_value, level),
                 )
-                prepared = self._prepare_evidence(db, evidence, default_ref=source)
                 self._replace_evidence(db, memory_id, prepared)
 
+            # 持久提交前验证整个支持图；多跳循环、旧 revision 或深度超限统一回滚。
+            if self.freshness(memory_id)["is_stale"]:
+                raise MemoryDeltaError("memory evidence support closure is invalid")
             self._snapshot_revision(db, memory_id)
             self._record_change(db, memory_id)
-            # 迁移作用域既移入新范围，也移出旧范围；两边的派生视图都必须失效。
             if row and (row["scope_type"], row["scope_id"]) != (scope, scope_value):
+                # Scope 迁移同时通知旧范围，避免刷新只关注新范围而沿用旧派生结论。
                 self._record_change(
                     db, memory_id, scope=(str(row["scope_type"]), row["scope_id"])
                 )
@@ -470,6 +473,9 @@ class SqliteMemoryStore:
                         raise MemoryDeltaError(f"memory evidence does not exist: {ref}")
                     del by_ref[ref]
 
+            # Delta 的直接使用与 Action 批处理同一 Evidence 准入；旧引用不得隐式跨 scope。
+            self._check_action_evidence_scope(db, dict(row), by_ref.values())
+
             # 步骤三：正文、Evidence、immutable revision 和变化水位必须同生共死。
             revision = int(row["revision"]) + 1
             db.execute(
@@ -478,6 +484,9 @@ class SqliteMemoryStore:
                 (new_text, revision, memory_id),
             )
             self._replace_evidence(db, memory_id, [by_ref[key] for key in sorted(by_ref)])
+            # 统一复核多跳依赖；在同一 SQLite 事务内完成，不会留下半次 Delta。
+            if self.freshness(memory_id)["is_stale"]:
+                raise MemoryDeltaError("memory evidence support closure is invalid")
             self._snapshot_revision(db, memory_id)
             self._record_change(db, memory_id)
 
