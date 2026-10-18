@@ -27,9 +27,9 @@ class StatisticsRuleTests(unittest.TestCase):
     # TTFT 按每次调用平均，TPS 按总输出/对应总用时；失败时间可观察但不能参与成功输出速率。
     def test_call_weighted_ttft_and_paired_token_throughput(self):
         invocations = [{"model_attempt_id": str(i), "outcome": "SUCCEEDED", "usage": usage} for i, usage in enumerate([
-            {"provider_wall_ms": 1000, "output_tokens": 200, "time_to_first_token_ms": 100},
-            {"provider_wall_ms": 3000, "output_tokens": 100, "time_to_first_token_ms": 200},
-            {"provider_wall_ms": 6000, "output_tokens": 700, "time_to_first_token_ms": 900},
+            {"provider_wall_ms": 1000, "output_tokens": 200, "visible_output_tokens": 200, "time_to_first_token_ms": 100},
+            {"provider_wall_ms": 3000, "output_tokens": 100, "visible_output_tokens": 100, "time_to_first_token_ms": 200},
+            {"provider_wall_ms": 6000, "output_tokens": 700, "visible_output_tokens": 700, "time_to_first_token_ms": 900},
         ])]
         invocations.append({"outcome": "FAILED", "usage": {"provider_wall_ms": 5000, "output_tokens": 99999}})
         result = session_statistics(invocations, [])
@@ -38,6 +38,16 @@ class StatisticsRuleTests(unittest.TestCase):
         self.assertEqual(result["output_tps"], 100)
         self.assertEqual(result["tps_wall_ms"], 10000)
         self.assertEqual(result["tps_samples"], 3)
+
+    def test_reasoning_tokens_do_not_inflate_visible_throughput(self):
+        """供应商 output 包含隐藏思考时，TPS 必须使用独立的可见输出计量。"""
+        samples = [{"outcome": "SUCCEEDED", "model_attempt_id": "a", "usage": {
+            "provider_wall_ms": 1000, "output_tokens": 1000,
+            "reasoning_tokens": 900, "visible_output_tokens": 100}}]
+        result = session_statistics(samples, [])
+        self.assertEqual(result["output_tps"], 100)
+        samples[0]["usage"].pop("visible_output_tokens")
+        self.assertIsNone(session_statistics(samples, [])["output_tps"])
 
     # 没有输出的调用不能借另一调用的时长做除数，缺测应为未报告。
     def test_unpaired_output_and_time_do_not_make_a_rate(self):
@@ -65,7 +75,7 @@ class StatisticsRuleTests(unittest.TestCase):
     # 实测零耗时与缺测不同；零毫秒不能作为速度除数，空会话累计可以明确为零。
     def test_measured_zero_and_empty_session(self):
         result = session_statistics([{"outcome": "SUCCEEDED", "usage": {"provider_wall_ms": 0,
-            "output_tokens": 100, "time_to_first_token_ms": 0}}], [{"state": "RESOLVED", "tool_wall_ms": 0}])
+            "output_tokens": 100, "visible_output_tokens": 100, "time_to_first_token_ms": 0}}], [{"state": "RESOLVED", "tool_wall_ms": 0}])
         self.assertEqual(result["model_wall_ms"], 0)
         self.assertEqual(result["tool_wall_ms"], 0)
         self.assertEqual(result["average_ttft_ms"], 0)
@@ -77,7 +87,7 @@ class StatisticsRuleTests(unittest.TestCase):
 
     # 重复身份只能记一次，避免恢复/投影合并把同一个模型或工具收据重复计量。
     def test_stable_call_identities_are_deduplicated(self):
-        model = {"model_attempt_id": "m", "outcome": "SUCCEEDED", "usage": {"provider_wall_ms": 1000, "output_tokens": 20}}
+        model = {"model_attempt_id": "m", "outcome": "SUCCEEDED", "usage": {"provider_wall_ms": 1000, "output_tokens": 20, "visible_output_tokens": 20}}
         tool = {"decision_id": "t", "state": "RESOLVED", "tool_wall_ms": 1500}
         result = session_statistics([model, model], [tool, tool])
         self.assertEqual(result["model_attempts"], 1)
@@ -190,7 +200,7 @@ class SessionStatisticsTests(unittest.TestCase):
             provider.calls.append(request)
             clock[0] += walls[index]
             return ModelResult(outputs[index], {"model_calls": 1, "input_tokens": 10,
-                "output_tokens": tokens[index], "time_to_first_token_ms": ttfts[index]}, {})
+                "output_tokens": tokens[index], "visible_output_tokens": tokens[index], "time_to_first_token_ms": ttfts[index]}, {})
         provider.invoke = invoke
         with patch("time.monotonic", side_effect=lambda: clock[0]):
             rid = self.repo.create_turn(self.sid, "First statistics turn", "first")["run_id"]
