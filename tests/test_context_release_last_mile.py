@@ -6,8 +6,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
+import sqlite3
 import tempfile
 import unittest
 
@@ -29,6 +31,61 @@ class ContextReleaseLastMileTests(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
+    # 在临时 SQLite、不可变对象和模型收据中写入同一次虚拟调用，测试核对不依赖报告自述。
+    def synthetic_receipt(self, evidence, run_id, attempt, activation, usage):
+        request = {
+            "context_report": {
+                "governance": {
+                    "causality": activation["causality"],
+                    "relevance": activation["relevance"],
+                },
+                "context_mode": "normal", "selected": [], "bytes_used": 120,
+            }
+        }
+        objects = evidence / "objects"
+        def write_object(value):
+            payload = json.dumps(value, ensure_ascii=False).encode("utf-8")
+            digest = hashlib.sha256(payload).hexdigest()
+            dest = objects / digest[:2] / digest[2:]
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(payload)
+            return digest
+
+        request_ref = write_object(request)
+        response_ref = write_object({"status": "synthetic"})
+        request_digest = hashlib.sha256(attempt.encode("utf-8")).hexdigest()
+        with sqlite3.connect(evidence / "runtime.db") as db:
+            db.execute("CREATE TABLE workspace_turns(run_id TEXT PRIMARY KEY,status TEXT)")
+            db.execute(
+                "CREATE TABLE model_invocations("
+                "model_attempt_id TEXT,run_id TEXT,provider_id TEXT,model_id TEXT,"
+                "state TEXT,outcome TEXT,ticket_id TEXT,response_ref TEXT,"
+                "request_ref TEXT,request_digest TEXT,usage_json TEXT,response_id TEXT)"
+            )
+            db.execute(
+                "INSERT INTO workspace_turns(run_id,status) VALUES (?,?)", (run_id, "COMPLETED")
+            )
+            db.execute(
+                "INSERT INTO model_invocations VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    attempt, run_id, "ollama", "test-model:exact", "RESOLVED", "SUCCEEDED",
+                    "ticket_fixture", response_ref, request_ref, request_digest,
+                    json.dumps(usage), "synthetic_response",
+                ),
+            )
+        journal = evidence / "model-receipts"
+        journal.mkdir()
+        (journal / f"{attempt}.json").write_text(
+            json.dumps({
+                "model_attempt_id": attempt,
+                "request_digest": request_digest,
+                "response_ref": response_ref,
+                "response_id": "synthetic_response",
+                "usage": usage,
+            }),
+            encoding="utf-8",
+        )
+
     # 用 case×repeat×arm 原子格构造一致的合成报告，刻意固定所有环境身份。
     def bundle(self, name, partition, *, prefix=None, case_count=7, repeats=3,
                model_digest="ollama-test-pin", source_digest="a" * 64):
@@ -48,29 +105,39 @@ class ContextReleaseLastMileTests(unittest.TestCase):
                 for arm in arms:
                     evidence = root / f"{repeat}-{case_id}-{arm}" / ".runtime"
                     evidence.mkdir(parents=True)
+                    run_id = f"run_{repeat}_{case_id}_{arm}"
+                    attempt = f"model_{repeat}_{case_id}_{arm}"
+                    activation = {
+                        "model_attempt_id": attempt,
+                        "causality": (
+                            "causal-active-set-v2"
+                            if arm in {"context-causal", "context-full"}
+                            else "disabled-for-controlled-evaluation"
+                        ),
+                        "relevance": (
+                            "cross-source-bounded-lexical-candidate-ranking"
+                            if arm in {"context-relevance", "context-full"}
+                            else "disabled-for-controlled-evaluation"
+                        ),
+                        "context_mode": "normal", "selected": 0, "bytes_used": 120,
+                    }
+                    usage = {
+                        "input_tokens": 100 if arm == "context-full" else 150,
+                        "output_tokens": 20,
+                        "cached_input_tokens": 0,
+                        "provider_wall_ms": 300 if arm == "context-full" else 400,
+                    }
+                    self.synthetic_receipt(evidence, run_id, attempt, activation, usage)
                     trials.append({
                         "case_id": case_id, "repeat": repeat, "arm": arm,
                         "success": True, "status": "COMPLETED", "model_calls": 1,
                         "human_takeover": False, "repeated_tool_calls": 0,
-                        "run_ids": [f"{repeat}-{case_id}-{arm}"],
+                        "run_ids": [run_id],
                         "evidence_root": str(evidence),
-                        "context_activation": [{
-                            "causality": (
-                                "causal-active-set-v2"
-                                if arm in {"context-causal", "context-full"}
-                                else "disabled-for-controlled-evaluation"
-                            ),
-                            "relevance": (
-                                "cross-source-bounded-lexical-candidate-ranking"
-                                if arm in {"context-relevance", "context-full"}
-                                else "disabled-for-controlled-evaluation"
-                            ),
-                        }],
-                        "usage_measured": {
-                            "input_tokens": 100 if arm == "context-full" else 150,
-                            "output_tokens": 20,
-                            "provider_wall_ms": 300 if arm == "context-full" else 400,
-                        },
+                        "context_activation": [activation],
+                        "usage_measured": usage,
+                        "usage_samples": {key: 1 for key in usage},
+                        "measured_model_attempts": 1,
                     })
         report = {
             "suite_id": suite["suite_id"],
@@ -185,9 +252,39 @@ class ContextReleaseLastMileTests(unittest.TestCase):
         discovery = self.bundle("discovery", "discovery")
         final = self.bundle("heldout", "heldout")
         raw = json.loads((final / "report.json").read_text(encoding="utf-8"))
-        missing = Path(raw["trials"][0]["evidence_root"])
-        missing.rmdir()
-        with self.assertRaisesRegex(ValueError, "durable evidence is missing"):
+        missing = Path(raw["trials"][0]["evidence_root"]) / "runtime.db"
+        missing.unlink()
+        with self.assertRaisesRegex(ValueError, "SQLite receipt database is missing"):
+            review_context_release(discovery, final)
+
+    # 只改报告的实测 Token 即使连汇总一并改写，也不能绕过 SQLite Receipt 用量核对。
+    def test_report_cost_cannot_override_sqlite_receipt(self):
+        discovery = self.bundle("discovery", "discovery")
+        final = self.bundle("heldout", "heldout")
+        report = json.loads((final / "report.json").read_text(encoding="utf-8"))
+        report["trials"][0]["usage_measured"]["input_tokens"] = 1
+        self.save_report(final, report)
+        with self.assertRaisesRegex(ValueError, "usage totals differ"):
+            review_context_release(discovery, final)
+
+    # 删除原始模型收据使发布复核拒绝，目录本身存在不足以证明 Provider 返回结果。
+    def test_missing_original_model_receipt_blocks_review(self):
+        discovery = self.bundle("discovery", "discovery")
+        final = self.bundle("heldout", "heldout")
+        report = json.loads((final / "report.json").read_text(encoding="utf-8"))
+        evidence = Path(report["trials"][0]["evidence_root"])
+        next((evidence / "model-receipts").iterdir()).unlink()
+        with self.assertRaisesRegex(ValueError, "receipt journal is missing"):
+            review_context_release(discovery, final)
+
+    # Context 启用声明必须和保存的原始请求逐项一致，不能只伪造展示用 activation。
+    def test_context_activation_mismatch_blocks_review(self):
+        discovery = self.bundle("discovery", "discovery")
+        final = self.bundle("heldout", "heldout")
+        report = json.loads((final / "report.json").read_text(encoding="utf-8"))
+        report["trials"][0]["context_activation"][0]["causality"] = "forged-mode"
+        self.save_report(final, report)
+        with self.assertRaisesRegex(ValueError, "activation contradicts"):
             review_context_release(discovery, final)
 
     # 单次测试即使所有成本下降也不具备对照统计效力。
