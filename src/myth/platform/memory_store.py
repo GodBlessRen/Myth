@@ -590,8 +590,14 @@ class SqliteMemoryStore:
             direct = evaluate_freshness(evidence, current)
             # 统一 SQLite WAL 快照读完整关系；仅遇显式 Proof Paths 才切换到 OR-of-AND。
             root_row = self.get(memory_id)
-            root_paths, root_error = self._proof_paths_for(
-                self.store.db, memory_id, root_row, evidence,
+            # 常规工作区没有任何替代证明时，仅一条索引式 EXISTS 查询，保持旧闭包的热路径成本。
+            # 不缓存跨连接布尔值：其他 Writer 新增 Proof 时必须在本次 WAL 快照可见。
+            proof_enabled = self.store.db.execute(
+                "SELECT 1 FROM workspace_memory_proof_paths LIMIT 1"
+            ).fetchone() is not None
+            root_paths, root_error = (
+                self._proof_paths_for(self.store.db, memory_id, root_row, evidence)
+                if proof_enabled else (None, None)
             )
             if root_paths is not None:
                 root_row["_proof_paths"] = root_paths
@@ -610,8 +616,9 @@ class SqliteMemoryStore:
                     return None, ()
                 source = dict(row)
                 dependencies = self._evidence_rows(self.store.db, source_id)
-                paths, error = self._proof_paths_for(
-                    self.store.db, source_id, source, dependencies,
+                paths, error = (
+                    self._proof_paths_for(self.store.db, source_id, source, dependencies)
+                    if proof_enabled else (None, None)
                 )
                 if paths is not None:
                     source["_proof_paths"] = paths
