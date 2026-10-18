@@ -97,6 +97,20 @@ remove_evidence
 
 最小回归：`python -m unittest discover -s tests -p test_memory_action_batch.py -v`；真实 HTTP 回归：`python -m unittest discover -s tests -p test_web_contract.py -v`。
 
+## Opt-in Alternative Proof Paths（Semantica OR-of-AND，保守吸收）
+
+旧 Memory 的 Evidence 是默认 **All-of**：沿绑定版本的完整依赖闭包，任意失效均令该 Memory stale。增加显式可选的 **Proof Paths** 时，AND 路径内部必须全部成立；多条路径之间采用 OR。以 `D=(A ∧ B) ∨ (C ∧ E)` 为例：撤销 B 仍有 C/E 路径，则 D 保留；继续撤销 C 后，两条路径全失效，D 为 stale。共同前提 `(A ∧ B) ∨ (B ∧ C)` 中撤销 B，两条路径均失效。
+
+**State Owner 与准入：** 仅 `SqliteMemoryStore.declare_proof_paths(memory_id, paths, expected_revision=...)` 允许受信任的显式调用方选择 Proof 结构。它不暴露为 LLM 工具、不接受模型自报的 source revision、不授予 `verified`、授权或 Promotion。**首版仅允许 `fact_level=context`**，`verified/user_asserted` 不能通过变换 Proof Group 降低已有事实等级的支持门槛。每条路径必须引用已存在的、版本固定的 Memory Evidence；2-8 条不重复路径，每条 1-8 个引用，全部 Memory-linked Evidence 必须被路径覆盖。未声明的记忆永远使用既有严格 All-of。
+
+**持久性与更新：** 组定义由原 Memory Store 的同一 SQLite 事务和 CAS 管理。声明产生新 Revision、immutable proof-path history 与 `change_seq`；完全相同的声明是 no-op。正文/Evidence 一旦更新，旧路径自动撤销，恢复严格 All-of；避免历史证据悄悄认证新内容。撤销 Memory 后，只保留旧历史，不保留当前 Proof 路径。存储还固定 Evidence 摘要；绕开 Store 的直接 SQL 修改不会借原声明窃取信任。
+
+**读取与传播：** `freshness()/resolve()/search_view_report()/Recall` 仍是唯一入口，使用同一 WAL 快照检查所有上游支持。撤销和版本变化可以使某条路径失效而保留其他路径；越权、循环、缺失来源、已损坏定义或闭包深度/边数超限仍 fail closed。失效路径及胜出路径有界地列入 L2 `freshness_report.proof_paths`，L0 默认保持紧凑，`proof_count` 仍代表 Evidence 条目数而非独立证明数。
+
+**不声称：** Proof 路径的 AND/OR 是受约束的*结构有效性*，不是逻辑蕴含、来源可信度概率、语义等价、事实验收或自动修复证明。Semantica 的原始 TMS 是规则驱动的内存态推导；Myth 选择嵌入现有持久状态所有者，不复制一套规则库或可写真相。
+
+验证：`tests/test_alternative_proofs.py` 包含共享前提、替代路径撤销、传递祖先、Scope 注入、循环、历史、同版本 no-op、批次失败回滚和旧 All-of 兼容性。完整 Windows/Linux CI、固定 Eval 与生产负载性能数据仍是最终验收门槛。
+
 ## Transitive Truth Maintenance (Semantica-inspired)
 
 A Memory-linked Evidence edge is pinned to the authority Memory's exact revision. Freshness is now checked across **the complete linked support closure**, not only direct parents. If any ancestor was revoked, replaced, missing, crosses an inadmissible scope, or forms a cycle, derived Memory is stale. Traversal limits (32 hops / 256 edges) fail closed rather than silently accepting unchecked ancestors. The deterministic report contains the failing ancestry path; external Evidence without a version remains untracked, **never auto-verified**.
