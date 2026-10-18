@@ -272,6 +272,79 @@ class OpenAIProviderTests(unittest.TestCase):
         )
         self.assertNotIn("opaque-secret-state", json.dumps(result.raw))
 
+    # 完整供应商响应的本地格式错误属于已知失败，模型用量不能随解析失败丢失。
+    def test_terminal_missing_output_preserves_usage(self):
+        from myth.models import ProviderKnownFailure
+        provider = OpenAIResponsesProvider(
+            provider_id="openai", token_supplier=lambda: "token"
+        )
+        completed = {"status": "completed", "output": [],
+                     "usage": {"input_tokens": 20, "output_tokens": 10,
+                               "output_tokens_details": {"reasoning_tokens": 7}}}
+        with patch("myth.providers.openai.open_credential_request",
+                   return_value=FakeResponse(completed)):
+            with self.assertRaises(ProviderKnownFailure) as caught:
+                provider.invoke(request_obj())
+        self.assertEqual(caught.exception.usage["output_tokens"], 10)
+        self.assertEqual(caught.exception.usage["reasoning_tokens"], 7)
+        self.assertEqual(caught.exception.usage["visible_output_tokens"], 3)
+
+    # 供应商主动宣告失败仍是已知终态；Reasoning/Token 不能变成 UNKNOWN-held。
+    def test_terminal_incomplete_preserves_provider_usage(self):
+        from myth.models import ProviderKnownFailure
+        provider = OpenAIResponsesProvider(
+            provider_id="openai", token_supplier=lambda: "token"
+        )
+        completed = {"status": "incomplete", "output": [],
+                     "usage": {"input_tokens": 30, "output_tokens": 20}}
+        with patch("myth.providers.openai.open_credential_request",
+                   return_value=FakeResponse(completed)):
+            with self.assertRaises(ProviderKnownFailure) as caught:
+                provider.invoke(request_obj())
+        self.assertEqual(caught.exception.usage["output_tokens"], 20)
+
+    # Hindsight 有界算法：Folded/Unfolded 精确对应，漂移 Total 用区间估算而非报缺测。
+    def test_visible_usage_folded_unfolded_and_total_drift(self):
+        from myth.providers.openai import _usage
+        base = {"input_tokens": 30, "output_tokens": 100,
+                "output_tokens_details": {"reasoning_tokens": 70}}
+        folded = _usage({"usage": {**base, "total_tokens": 130}})
+        unfolded = _usage({"usage": {**base, "total_tokens": 200}})
+        drift = _usage({"usage": {**base, "total_tokens": 199}})
+        lower = _usage({"usage": {**base, "total_tokens": 20}})
+        upper = _usage({"usage": {**base, "total_tokens": 900}})
+        self.assertEqual(folded["visible_output_tokens"], 30)
+        self.assertEqual(unfolded["visible_output_tokens"], 100)
+        self.assertEqual(drift["estimated_visible_output_tokens"], 99)
+        self.assertEqual(lower["estimated_visible_output_tokens"], 30)
+        self.assertEqual(upper["estimated_visible_output_tokens"], 100)
+        self.assertNotIn("visible_output_tokens", drift)
+        for row in (folded, unfolded, drift, lower, upper):
+            self.assertEqual(row["output_tokens"], 100)
+
+        # 缺 total 的已知官方 Folded 可精确处理，第三方兼容协议只产出估算。
+        official = _usage({"usage": base}, provider_id="openai")
+        compatible = _usage({"usage": base}, provider_id="deepseek")
+        self.assertEqual(official["visible_output_tokens"], 30)
+        self.assertEqual(compatible["estimated_visible_output_tokens"], 30)
+        self.assertNotIn("visible_output_tokens", compatible)
+        no_reasoning = _usage({"usage": {"output_tokens": 100}})
+        self.assertEqual(no_reasoning["estimated_visible_output_tokens"], 100)
+        self.assertNotIn("visible_output_tokens", no_reasoning)
+
+    # Unfolded 可以 reasoning 多于 visible；自相矛盾总量不能伪造精确零输出。
+    def test_unfolded_reasoning_gt_output_and_ambiguous_total(self):
+        from myth.providers.openai import _usage
+        base = {"input_tokens": 30, "output_tokens": 10,
+                "output_tokens_details": {"reasoning_tokens": 70}}
+        exact_unfolded = _usage({"usage": {**base, "total_tokens": 110}})
+        inconsistent = _usage({"usage": {**base, "total_tokens": 40}})
+        drift = _usage({"usage": {**base, "total_tokens": 109}})
+        self.assertEqual(exact_unfolded["visible_output_tokens"], 10)
+        self.assertEqual(inconsistent["estimated_visible_output_tokens"], 10)
+        self.assertNotIn("visible_output_tokens", inconsistent)
+        self.assertEqual(drift["estimated_visible_output_tokens"], 9)
+
     # 回归断言：缺完整 SSE 终结事件不能把局部文本当成功。
     def test_chatgpt_plan_requires_completed_terminal_event(self) -> None:
         provider = OpenAIResponsesProvider(
