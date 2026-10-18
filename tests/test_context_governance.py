@@ -6,6 +6,7 @@ import tempfile
 import subprocess
 import sys
 import json
+from unittest.mock import patch
 
 from myth.runtime import MythRuntime
 from myth.workspace import Workspace
@@ -218,7 +219,8 @@ class ContextGovernanceTests(unittest.TestCase):
         """直接构造崩溃窗口的持久账本：无步骤结果时依然保护 UNKNOWN，结算后恢复为零风险。"""
         from myth.conversation_context import compile_conversation_context
         with tempfile.TemporaryDirectory() as tmp, MythRuntime(Path(tmp)) as runtime:
-            repo = Workspace(runtime).repository
+            workspace = Workspace(runtime)
+            repo = workspace.repository
             repo.save_settings(SETTINGS)
             sid = repo.create_session()["id"]
             rid = repo.create_turn(sid, "Explain what happened", "ledger-guard")["run_id"]
@@ -252,6 +254,19 @@ class ContextGovernanceTests(unittest.TestCase):
             self.assertIn("runtime-cursor", joined)
             self.assertIn("causal-guard", report["selected"])
             self.assertEqual(report["governance"]["causal_runtime_protected"], 3)
+            # 同一个真实 Execution.seam 编译模型请求，但替换 Ticket 协调器以防夹具制造新模型效果。
+            with patch.object(
+                repo.decisions, "request_decision",
+                side_effect=lambda **kwargs: kwargs["model_request_override"],
+            ) as request_dispatch:
+                request = workspace.execution.decide(repo.turn(rid), 1, object())
+            self.assertTrue(request_dispatch.called)
+            self.assertIn("runtime-tool:tool-pending", "\n".join(m.content for m in request.messages))
+            self.assertIn("causal-guard", request.context_report["selected"])
+            self.assertEqual(request.context_report["governance"]["causal_runtime_protected"], 3)
+            self.assertFalse(any(
+                event["kind"] == "ModelTicketGranted" for event in repo.events(rid)
+            ))
             with runtime.store.tx() as db:
                 db.execute(
                     "UPDATE workspace_operations SET state='RESOLVED',result_json='{}' "
