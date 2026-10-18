@@ -867,7 +867,7 @@ class SqliteMemoryStore:
                 for item in kinds
             }
         sql = (
-            "SELECT m.rowid AS candidate_cursor,m.*,COUNT(*) AS overlap "
+            "SELECT m.rowid AS candidate_cursor,m.*,COUNT(*) AS overlap,COUNT(*) OVER() AS matched_total "
             "FROM workspace_memory_terms AS t "
             "JOIN workspace_memories AS m ON m.memory_id=t.memory_id "
             f"WHERE t.term IN ({','.join('?' for _ in terms)}) AND m.active=1 "
@@ -887,23 +887,28 @@ class SqliteMemoryStore:
         params.append(limit)
         selected = self.store.db.execute(sql, params).fetchall()
         memories = []
+        matched_total = int(selected[0]["matched_total"]) if selected else 0
         for row in selected:
             value = dict(row)
             value.pop("candidate_cursor", None)
             value.pop("overlap", None)
+            value.pop("matched_total", None)
             memories.append(value)
         return {
             "memories": memories,
             "retrieval": {
                 "backend": "memory-term-index",
                 "candidate_policy": "indexed-lexical-exact-overlap-v1",
-                "scanned": len(selected),
-                "visible": None,
-                "matched": None,
+                # COUNT OVER 统计经权限筛选后真正匹配的 Memory 数量，非全部可见行；
+                # 查询仍须访问候选 posting，不能把 returned 伪装成总成本。
+                "scanned": matched_total,
+                "visible": matched_total,
+                "matched": matched_total,
                 "pages": 0,
                 "exhausted": True,
                 "truncated_before_ranking": False,
                 "index_terms": len(terms),
+                "matching_candidate_count": matched_total,
                 "returned": len(memories),
             },
         }
