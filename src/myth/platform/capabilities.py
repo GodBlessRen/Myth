@@ -98,6 +98,12 @@ def default_capabilities() -> CapabilityRegistry:
             "read",
         ),
         (
+            "memory.recall",
+            "memory",
+            "Bounded multi-query recall with exact Memory revision anchors and explicit evidence gate.",
+            "read",
+        ),
+        (
             "memory.timeline",
             "memory",
             "Navigate visible memories around one admitted anchor without changing source facts.",
