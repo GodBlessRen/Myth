@@ -227,8 +227,11 @@ class FoundationEvalRunner:
         if self.harness_id is not None:
             snapshot["evaluation_harness_mechanisms"] = list(self.harness_mechanisms)
         expected = case.expected
+        # 先核对用例具有独立验收条件，再编译真实投影；预算拒绝和选入来源分别判定，
+        # 最后报告同一次编译的风险计数与字节，不能用预期答案反向构造模型请求。
         if not any(key in expected for key in (
             "required_sources", "excluded_sources", "required_text", "budget_error",
+            "active_risk_count", "archived_issue_count",
         )):
             raise ValueError("context governance case has no acceptance criteria")
         try:
@@ -255,6 +258,13 @@ class FoundationEvalRunner:
         ]
         if "budget_error" in expected:
             checks.append(expected["budget_error"] is False)
+        governance = report["governance"]
+        for key, report_key in (
+            ("active_risk_count", "causal_active_risk_count"),
+            ("archived_issue_count", "causal_archived_issue_count"),
+        ):
+            if key in expected:
+                checks.append(type(expected[key]) is int and governance[report_key] == expected[key])
         ok = bool(checks) and all(checks)
         evidence = tuple(
             ["context:compiler"] + [
@@ -271,6 +281,8 @@ class FoundationEvalRunner:
                 "selected_items": len(selected),
                 "dropped_items": len(report["dropped"]),
                 "causal_critical": int(report["governance"]["causal_critical_count"]),
+                "causal_active_risks": int(governance["causal_active_risk_count"]),
+                "causal_archived_known_issues": int(governance["causal_archived_issue_count"]),
                 "model_calls": 0,
                 "budget_rejected": 0,
             },

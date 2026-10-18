@@ -281,8 +281,126 @@ class ContextGovernanceTests(unittest.TestCase):
                     (rid,),
                 )
             current = repo.context_liabilities(rid)
+            self.assertIn("tool-pending", current["settled_tool_decisions"])
             clean = build_causal_guard([], current)
             self.assertIsNone(clean)
+
+    def test_active_set_limits_historical_failures_but_never_drops_open_unknown(self):
+        """80 次已知失败只保留最近 8 次，未决 UNKNOWN 和它的旧前驱永远不能丢。"""
+        from myth.platform.context_governance import render_causal_guard
+        activities = [
+            {"step": i, "decision_id": f"done-{i}",
+             "capability": "test.run", "result": {"status": "FAILED"}}
+            for i in range(80)
+        ]
+        activities.append({
+            "step": 80, "decision_id": "open-tool",
+            "declared_dependencies": ["done-0"],
+            "capability": "artifact.write", "result": {"status": "UNKNOWN"},
+        })
+        guard = build_causal_guard(activities)
+        self.assertEqual(guard["active_risk_count"], 1)
+        self.assertEqual(guard["recent_issue_count"], 8)
+        self.assertEqual(guard["archived_issue_count"], 71)
+        self.assertEqual(guard["critical_count"], 9)
+        self.assertEqual(len(guard["records"]), 10)
+        self.assertEqual(guard["records"][0]["role"], "declared_predecessor")
+        self.assertEqual(guard["records"][-1]["role"], "active_risk")
+        self.assertEqual(guard["records"][0]["decision_id"], "done-0")
+        text, digest = render_causal_guard(guard)
+        self.assertIn("open-tool", text)
+        self.assertLess(len(text.encode("utf-8")), 6000)
+        self.assertEqual(len(digest), 64)
+        self.assertEqual(len(guard["archived_issue_digest"]), 64)
+
+    def test_archived_failures_cannot_outbid_relevant_memory_under_budget(self):
+        """长历史已知失败的预览退到可选低优先级，活跃风险与任务相关 Memory 先得到空间。"""
+        from myth.conversation_context import compile_conversation_context
+        snapshot = {
+            "messages": [{"role": "user", "content": "verification timeout"}],
+            "memory": [{"memory_id": "useful", "revision": 1,
+                        "text": "verification timeout " * 125}],
+        }
+        activities = [
+            {"step": i, "decision_id": f"failed-{i}",
+             "capability": "test.run", "result": {"status": "FAILED"}}
+            for i in range(45)
+        ]
+        activities.append({
+            "step": 45, "decision_id": "pending",
+            "capability": "artifact.write", "result": {"status": "UNKNOWN"},
+        })
+        _, report = compile_conversation_context(
+            "test", snapshot, snapshot["messages"], activities,
+            max_bytes=9000,
+        )
+        self.assertIn("causal-guard", report["selected"])
+        self.assertIn("memory:useful@1", report["selected"])
+        self.assertEqual(report["governance"]["causal_active_risk_count"], 1)
+        self.assertEqual(report["governance"]["causal_archived_activity_demoted"], 37)
+        self.assertIn("activity:0", report["dropped"])
+
+    def test_runtime_receipt_retires_stale_activity_unknown_not_child_unknown(self):
+        """同 Run RESOLVED 只校准原工具 UNKNOWN，不能凭父收据消除子委派风险。"""
+        activities = [
+            {"step": 1, "decision_id": "write-1", "result": {"status": "UNKNOWN"}},
+        ]
+        old = build_causal_guard(activities)
+        self.assertEqual(old["active_risk_count"], 1)
+        settled = build_causal_guard(
+            activities, {"settled_tool_decisions": ["write-1"]}
+        )
+        self.assertEqual(settled["active_risk_count"], 0)
+        self.assertEqual(settled["recent_issue_count"], 1)
+        self.assertIn("runtime_tool:RESOLVED", settled["records"][0]["reported_outcomes"])
+        self.assertIn("historical_tool_report:UNKNOWN", settled["records"][0]["reported_outcomes"])
+        child = build_causal_guard(
+            [{"step": 2, "decision_id": "parent",
+              "result": {"status": "UNKNOWN", "results": [
+                  {"delegation_id": "sub-1", "status": "UNKNOWN"}
+              ]}}],
+            {"settled_tool_decisions": ["parent"]},
+        )
+        self.assertEqual(child["active_risk_count"], 1)
+        self.assertIn("child_0:UNKNOWN", child["records"][0]["reported_outcomes"])
+
+    def test_resolved_row_with_unknown_receipt_cannot_close_ambiguity(self):
+        """SQL 状态 RESOLVED 但收据仍报 UNKNOWN 时不能解除风险；已知 FAILED 也不等于验收。"""
+        with tempfile.TemporaryDirectory() as tmp, MythRuntime(Path(tmp)) as runtime:
+            repo = Workspace(runtime).repository
+            repo.save_settings(SETTINGS)
+            sid = repo.create_session()["id"]
+            rid = repo.create_turn(sid, "check receipt", "ambiguous-receipt")["run_id"]
+            with runtime.store.tx() as db:
+                db.execute(
+                    "INSERT INTO workspace_operations "
+                    "(decision_id,run_id,capability,state,intent_json,result_json,ticket_id) "
+                    "VALUES(?,?,?,'RESOLVED','{}','{\"status\":\"UNKNOWN\"}',?)",
+                    ("tool-unknown", rid, "mcp.call", "ticket-unknown"),
+                )
+            activity = [{"step": 1, "decision_id": "tool-unknown",
+                         "result": {"status": "UNKNOWN"}}]
+            still_unknown = repo.context_liabilities(rid)
+            self.assertNotIn("tool-unknown", still_unknown["settled_tool_decisions"])
+            self.assertEqual(build_causal_guard(
+                activity, still_unknown,
+            )["active_risk_count"], 1)
+            with runtime.store.tx() as db:
+                db.execute(
+                    "UPDATE workspace_operations SET result_json=? WHERE decision_id=?",
+                    ('{"status":"RUNNING"}', "tool-unknown"),
+                )
+            self.assertNotIn("tool-unknown", repo.context_liabilities(rid)["settled_tool_decisions"])
+            with runtime.store.tx() as db:
+                db.execute(
+                    "UPDATE workspace_operations SET result_json=? WHERE decision_id=?",
+                    ('{"status":"FAILED"}', "tool-unknown"),
+                )
+            known = repo.context_liabilities(rid)
+            self.assertIn("tool-unknown", known["settled_tool_decisions"])
+            guard = build_causal_guard(activity, known)
+            self.assertEqual(guard["active_risk_count"], 0)
+            self.assertIn("runtime_tool:RESOLVED", guard["records"][0]["reported_outcomes"])
 
     def test_invalid_runtime_identity_fails_closed(self):
         """未结算状态身份无法安全表示时明确拒绝，不应为节省 Token 直接删除。"""

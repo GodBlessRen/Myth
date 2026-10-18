@@ -8,7 +8,7 @@ Myth 目前采用三个互补维度：
 
 1. **Model-Aware**：本地使用冻结的 `num_ctx`；远端 Web Send/Goal Schedule 只冻结有明确 Provider 来源、精确模型身份的公开窗口；adapter 按型号前缀推测的能力标记为 adapter-family-rule，不冒充供应商报告。仅来源通过双重核对时使用保守 UTF-8 预算 `min(256000,window-output-512-2048)`，否则退回 42,000 字节。Token/字节边界并非 Provider tokenizer 的精确计量，额外的协议包装仍可能增加 Token。
 2. **Relevance-Aware**：仅对已通过来源/作用域准入的 Knowledge 与 Memory 计算有限长度的任务词面覆盖率，并采用同一可比优先级；相关性只决定候选顺序，不改变 `fact_level`、来源真实性、权限和执行状态。显式附件仍为 required。
-3. **Causality-Aware**：从持久活动中提取已记录的 UNKNOWN、FAILED、已知失败、并行子任务失败/拒收和显式 `depends_on`；另从同 Run 未结算 Tool/Model Attempt、Recovery Cursor 与 UNKNOWN held 预算读取只读风险索引。模型自述与事件时序不能自行证明因果关系。关键导航以 required 装箱，预算不足则失败，不隐藏执行风险。
+3. **Causality-Aware**：Context 以 Causal Active Set（因果活跃集）为核心：同 Run 未结算的 Tool/Model Attempt、Recovery Cursor、UNKNOWN 资源占用和显式依赖链属于不可静默丢弃的工作集；已知终态失败只保留最近 8 项导航及其依赖闭包，较旧的历史提示写入带 digest 的归档计数，完整活动仍属于权威仓储。模型自述或事件先后不提供新的因果证明。
 
 ## 权威记录与投影关系
 
@@ -30,7 +30,8 @@ ModelRequest + Context Report   [bounded projection, not permission]
 
 - 来源明确：活动 `state`、`result.failure`、`result.status`、`result.results` 与委派 `handoff.depends_on` 来自本轮已持久化/已核对的步骤投影。
 - 显式依赖来自已记录的决定或交接合同。缺失的上游身份列在 `causal_missing_dependencies`，不据此编造前驱。
-- 失败或未知执行结果不会因较新的无关成功而静默消失；它们保留来源导航，但单靠本策略不能断言故障尚未恢复，仍须交 Runtime/Verification 判定。
+- TICKETED/UNKNOWN/PENDING/BLOCKED/INCONCLUSIVE 作为开放风险始终保留；已知 FAILED/ERROR/REJECTED/CANCELLED 作为历史问题只保留最近 8 条导航。较旧的问题不是“已修复”，只是离开 provider-visible 工作集，完整历史仍保存在原仓储。被活跃风险显式依赖的历史问题不会因为年代久远而退出闭包。
+- 若旧工具步骤的结果仍写着 UNKNOWN，但同 Run 的工具操作账本已具有 RESOLVED、持久结果，且结果状态被核对为已知终态（未知或不认识的状态不能用于解除警报），投影标记为 `historical_tool_report:UNKNOWN` 和 `runtime_tool:RESOLVED`；这只解除效果是否已结算的警报，**不代表语义验收成功**，也不用于清除并行子委派的独立 UNKNOWN。
 - 完整 Observation 继续使用现有 `observation.read` 只能按 decision_id 精确回读**已结算**的工具 Observation；未结算 UNKNOWN 必须依据原 Runtime Ticket/Receipt 核对，不能凭摘要触发回放。Context Guard 不重新保存大对象、不重放外部效果。
 - 无前端/供应商变化可以扩大 Capability、Ticket、作用域或完成验收。
 
@@ -70,7 +71,7 @@ ModelRequest + Context Report   [bounded projection, not permission]
 
 ## 固定机制消融：不以替身冒充真实模型实验
 
-`evals/context-governance-v1.json` 固定五项可执行 ContextCompiler 检查，涵盖：未结算 Tool/预算、显式依赖闭包、Knowledge/Memory 选择、清洁状态阴性对照、预算耗尽 fail-closed。它们都是确定性 `0 model_calls` 的 **Harness Fixture**，只验证架构不变量与选择差异；不测真实回答质量、长时间运行或真实节约成本。
+`evals/context-governance-v1.json` 现有七项可执行 ContextCompiler 检查，涵盖：未结算 Tool/预算、显式依赖闭包、Knowledge/Memory 选择、清洁状态阴性对照、预算耗尽 fail-closed。它们都是确定性 `0 model_calls` 的 **Harness Fixture**，只验证架构不变量与选择差异；不测真实回答质量、长时间运行或真实节约成本。
 
 完整 Suite：
 ```bash
@@ -85,3 +86,11 @@ python -m myth.cli eval-controlled --suite evals/context-governance-v1.json --me
 对照结果的 `prompt_bytes` 仅是实际编译的 UTF-8 字节，不是 Provider 报告的 Token；针对缺测或明确预算拒绝不填入伪造的 token 数。发布前仍必须在多模型真实 Provider 上运行固定 Task/held-out 集并配对比较成功率、总计费、时延和无盲重试不变量。
 
 使用 `--record` 可以将四组 Discovery 结果写入本机 Evaluation Ledger 并生成逐题机制归因；未指定时只标准输出 JSON，不产生业务 Run、Ticket 或外部模型调用。命令不能把这个固定 Harness Fixture 升级成真实 Provider SOTA 证据。
+
+## Causal Active Set v2：审计口径与停止条件
+
+Guard 与 Inspector 分别暴露 `causal_active_risk_count`（开放效果/审核）、`causal_recent_issue_count`（最多 8 条近期已知故障）、`causal_archived_issue_count` 和 `causal_archived_issue_digest`（不属于已解决证明）。Guard 的 `critical_count` 是活跃风险 + 近期已知故障；其 `records` 还包含所有可确认的显式依赖祖先，故可能大于该计数。
+
+硬约束不设置数量上限：当某 Run 的未结算执行状态超出 Context 预算时，编译失败并等待 Runtime 人工/自动核对，**绝不裁掉最老的 UNKNOWN 以腾出 Token**。归档只针对已知终态的历史提示，不能对没有受信运行收据的未知副作用使用时间窗口。
+
+当前上下文窗口仍为保守 UTF-8 字节估计，而非 tokenizer 精确计数。SOTA 判定必须额外包含真实 Provider 的 `input_tokens`、缓存字段覆盖率、任务成功率、Latency、UNKNOWN Reconcile 无重复效果的跨模型 A/B；仅七道确定性 Fixture 通过不可作为领先证据。

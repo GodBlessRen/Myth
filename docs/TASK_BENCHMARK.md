@@ -100,6 +100,6 @@ leave-one-out
 
 ### Context Governance 固定消融基线
 
-`evals/context-governance-v1.json` 是新增的五项**确定性 Context Compiler 探针**，可通过 `myth eval --suite evals/context-governance-v1.json` 检验同 Run 未结算风险、显式因果依赖、跨来源相关性、无假阳性及 fail-closed 预算。 `run_controlled_harness_experiment` 以 `context_causal_guard`、`context_relevance_ranking` 为真实开关执行全关/单机制/全开。在这组固定探针上实现差异，不代表真实多模型 Prompt 成功率或 Token 成本领先。
+`evals/context-governance-v1.json` 已扩展至七项**确定性 Context Compiler 探针**，可通过 `myth eval --suite evals/context-governance-v1.json` 检验同 Run 未结算风险、显式因果依赖、跨来源相关性、无假阳性、fail-closed 预算、长历史活跃集及历史 UNKNOWN 的权威结算。 `run_controlled_harness_experiment` 以 `context_causal_guard`、`context_relevance_ranking` 为真实开关执行全关/单机制/全开。在这组固定探针上实现差异，不代表真实多模型 Prompt 成功率或 Token 成本领先。
 
 更多实现语义见 [Context Governance](CONTEXT_GOVERNANCE.md)。
