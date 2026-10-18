@@ -8,6 +8,7 @@ from pathlib import Path
 import sqlite3
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from myth.runtime import MythRuntime
 from myth.workspace import Workspace
@@ -389,6 +390,89 @@ class KnowledgeViewTests(unittest.TestCase):
                 expected_model_revision=later["model_revision"],
                 observed_change_seq=later["observed_change_seq"],
             )
+
+
+    # 反事实故障注入：损坏 backing 当前证据、不追加 change_seq 时，Page 不能显示 fresh。
+    def test_model_exposes_backing_support_failure_even_without_new_watermark(self):
+        source = self.memory.remember(
+            kind="semantic", text="Auditable project ontology", source_ref="closure:tamper:source",
+        )
+        model = self.views.create_model(name="Evidence integrity", source_query="ontology")
+        prepared = self.views.prepare_refresh(model["model_id"])
+        materialized = self.views.commit_refresh(
+            model["model_id"], content="Ontology is evidence-bounded.",
+            evidence_memory_ids=[source["memory_id"]],
+            expected_model_revision=prepared["model_revision"],
+            observed_change_seq=prepared["observed_change_seq"],
+        )
+        watermark = self.memory.current_change_seq()
+        # 在独立测试数据库中模拟上游引用完整性损坏；生产正常修改仍必须经 CAS。
+        with self.runtime.store.tx() as db:
+            db.execute(
+                "UPDATE workspace_memory_evidence SET source_revision=0 WHERE memory_id=?",
+                (materialized["backing_memory_id"],),
+            )
+        self.assertEqual(self.memory.current_change_seq(), watermark)
+        checked = self.views.model(model["model_id"], resolution="L2")
+        self.assertTrue(checked["is_stale"])
+        self.assertEqual(checked["freshness"], "stale")
+        self.assertEqual(checked["content"]["freshness"], "stale")
+
+    # 模拟来源读取已结束、准备结果尚未返回时的真实 TOCTOU；必须保留读前水位。
+    def test_refresh_watermark_frozen_before_source_read(self):
+        source = self.memory.remember(
+            kind="semantic", text="Current ontology version alpha",
+            source_ref="closure:race:source",
+        )
+        model = self.views.create_model(name="Race guard", source_query="ontology version")
+        original_resolve = self.memory.resolve
+        changed = {"done": False}
+
+        # 在调用者拿到旧正文之后修改其权威 revision：不得让后读到的水位掩盖变化。
+        def resolving_with_race(memory_id, **kwargs):
+            result = original_resolve(memory_id, **kwargs)
+            if memory_id == source["memory_id"] and not changed["done"]:
+                changed["done"] = True
+                self.memory.apply_delta(
+                    memory_id,
+                    [{"op": "replace_text", "text": "Current ontology version beta"}],
+                    expected_revision=1,
+                )
+            return result
+
+        with patch.object(self.memory, "resolve", side_effect=resolving_with_race):
+            prepared = self.views.prepare_refresh(model["model_id"])
+
+        self.assertEqual(prepared["sources"][0]["text"], "Current ontology version alpha")
+        self.assertLess(prepared["observed_change_seq"], self.memory.current_change_seq())
+        with self.assertRaisesRegex(ValueError, "source scope changed"):
+            self.views.commit_refresh(
+                model["model_id"], content="Alpha was current.",
+                evidence_memory_ids=[source["memory_id"]],
+                expected_model_revision=prepared["model_revision"],
+                observed_change_seq=prepared["observed_change_seq"],
+            )
+        self.assertEqual(self.views.model(model["model_id"])["revision"], 1)
+
+    # Hindsight 式 materialization 在陈旧来源占据头部排名时，应有界地回填有效证据。
+    def test_refresh_replenishes_after_stale_top_ranked_candidates(self):
+        parent = self.memory.remember(
+            kind="episodic", text="Initial private assertion", source_ref="closure:rank:parent",
+        )
+        valid = self.memory.remember(
+            kind="semantic", text="Ontology mapping quality", source_ref="closure:rank:valid",
+        )
+        for index in range(10):
+            self.memory.remember(
+                kind="semantic", text=f"Ontology mapping quality obsolete {index}",
+                source_ref=f"closure:rank:obsolete:{index}",
+                evidence=[{"source_memory_id": parent["memory_id"]}],
+            )
+        self.memory.revoke(parent["memory_id"])
+        model = self.views.create_model(name="Ranked evidence", source_query="Ontology mapping")
+        prepared = self.views.prepare_refresh(model["model_id"], limit=3)
+        self.assertIn(valid["memory_id"], [row["memory_id"] for row in prepared["sources"]])
+        self.assertLessEqual(len(prepared["sources"]), 3)
 
 
 if __name__ == "__main__":
