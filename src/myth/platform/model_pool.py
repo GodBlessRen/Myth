@@ -54,6 +54,8 @@ def pricing_identity(settings):
     """入口去重不绑定公共标价的刷新时间；显式合同费率仍属于用户配置身份。"""
     import copy
     result = copy.deepcopy(settings)
+    # 连接目录是可变的公共环境事实，不属于用户重发时的稳定 Intent 身份。
+    result.pop("admitted_model_profile", None)
     pool = result.get("model_pool")
     if isinstance(pool, dict):
         for owner, key in [(pool, "main_pricing"), *((child, "pricing") for child in pool.get("children", []))]:
