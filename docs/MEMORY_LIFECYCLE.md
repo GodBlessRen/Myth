@@ -81,6 +81,22 @@ remove_evidence
 
 > LLM proposes delta; deterministic runtime validates and applies delta.
 
+## Atomic Memory Action Batch（Last Mile）
+
+允许明确的本机操作者调用 `POST /api/workspace/memories/actions`，请求体仅有 `{"actions":[...]}`。它复用唯一的 `SqliteMemoryStore.apply_actions()`，**不注册为 LLM 可自行调用的写权限工具**，也不接受模型提交 `verified` / `user_asserted` 事实等级。
+
+- `ADD`：`kind/text/source_ref` 必需，scope/evidence 可选；只有全新 `(kind,source_ref)` 身份可创建，默认 `fact_level=context`；同源历史不会被静默覆盖。
+- `UPDATE`：`memory_id/expected_revision/operations` 必需；仅支持现有 `replace_text/add_evidence/remove_evidence` 受约束 Delta，不改变事实等级/作用域/授权。
+- `DELETE`：`memory_id/expected_revision` 必需；产生可审计的 `active=0` tombstone revision，绝不物理删除历史证据。
+- 一次最多 16 个 Action；写入在同一 `BEGIN IMMEDIATE` 中完成。重复修改同一身份、版本不匹配、证据作用域越界或中途磁盘失败，**整批 rollback**。同一来源只能作为自身范围或更宽范围的证据，禁止私有 Memory 支撑全局陈述；显式禁止自证。
+- **Crash / Retry**：CAS 与唯一来源键使已经提交的动作不能被不明结果盲目重复执行；这不是“重复调用返回同一成功响应”的请求日志。若提交回包丢失，客户端必须读取当前 revision/证据/变更水位 **reconcile**，再决定是否形成新提案。本次没有新增数据库表或更改 `SCHEMA_VERSION`，因此不破坏现有用户 Memory。
+- **Projection**：SQLite 已提交后才同步 Milvus 等可重建向量索引，异常记录单独 `degraded`，不会把已成功的本地提交伪报为整体回滚。Recall 每次命中还要经权威状态 hydrate。
+- **Episode**：同 `run_id`、同问答、同作用域的重复交付补偿返回既有 revision，不追加水位；同 Run 内容冲突返回 `IdentityConflict`，不篡改历史。
+
+这是确定性事务和恢复合同；质量层面的真实性、回答证据充分性、远端 Milvus 召回率、模型 Token/时延与大规模并发吞吐仍需独立评测。不能用本地 unittest 或质量门禁通过宣称 SOTA。
+
+最小回归：`python -m unittest discover -s tests -p test_memory_action_batch.py -v`；真实 HTTP 回归：`python -m unittest discover -s tests -p test_web_contract.py -v`。
+
 ## Progressive disclosure
 
 首次 Recall 不展开完整 Evidence。
