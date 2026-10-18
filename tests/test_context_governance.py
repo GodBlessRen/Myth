@@ -111,8 +111,8 @@ class ContextGovernanceTests(unittest.TestCase):
         snapshot = {
             "messages": [{"role": "user", "content": "payment timeout"}],
             "memory": [
-                {"memory_id": "old", "text": "astronomy " * 2800},
-                {"memory_id": "important", "text": "payment timeout " * 1850},
+                {"memory_id": "old", "text": "astronomy " * 1600},
+                {"memory_id": "important", "text": "payment timeout " * 800},
             ],
         }
         request = conversation_request(SETTINGS, snapshot, snapshot["messages"], [])
