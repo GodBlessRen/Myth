@@ -49,6 +49,26 @@ def _critical_labels(activity: Mapping[str, Any]) -> tuple[str, ...]:
             labels.append("tool_report:" + status.upper())
         if result.get("error"):
             labels.append("tool_report:error_present")
+        failure = result.get("failure")
+        if isinstance(failure, Mapping):
+            code = _reference(failure.get("code"))
+            labels.append("known_failure:" + (code or "unspecified"))
+        if result.get("adoption") == "rejected":
+            labels.append("subagent_review:rejected")
+        if result.get("adoption") == "pending_review":
+            labels.append("subagent_review:pending")
+        # 并行批次的子结果保留在父步骤收据中，不能因外层 status=OK 丢掉失败的子项。
+        children = result.get("results")
+        if isinstance(children, list):
+            for index, child in enumerate(children[:3]):
+                if not isinstance(child, Mapping):
+                    continue
+                status = child.get("status")
+                if isinstance(status, str) and status.upper() in _CRITICAL:
+                    labels.append("child_" + str(index) + ":" + status.upper())
+                adoption = child.get("adoption")
+                if adoption in {"rejected", "pending_review"}:
+                    labels.append("child_" + str(index) + ":review_" + adoption)
         fused = result.get("fused_successor")
         if isinstance(fused, Mapping):
             successor_status = fused.get("status")
@@ -72,19 +92,40 @@ def build_causal_guard(
         ref = f"activity:{step}" if type(step) is int and step >= 0 else f"activity-index:{index}"
         decision_id = _reference(activity.get("decision_id"))
         labels = _critical_labels(activity)
-        declared = _dependencies(activity.get("declared_dependencies"))
+        declared = list(_dependencies(activity.get("declared_dependencies")))
+        handoff = result.get("handoff")
+        if isinstance(handoff, Mapping):
+            declared.extend(_dependencies(handoff.get("depends_on")))
+        children = result.get("results")
+        aliases: list[str] = []
+        if isinstance(children, list):
+            for child in children[:3]:
+                if isinstance(child, Mapping):
+                    alias = _reference(child.get("delegation_id"))
+                    if alias:
+                        aliases.append(alias)
+                    handoff = child.get("handoff")
+                    if isinstance(handoff, Mapping):
+                        declared.extend(_dependencies(handoff.get("depends_on")))
+        else:
+            alias = _reference(result.get("delegation_id"))
+            if alias:
+                aliases.append(alias)
+        declared = list(dict.fromkeys(declared))
         row: dict[str, Any] = {
             "source": ref,
             "decision_id": decision_id,
             "capability": _reference(activity.get("capability")),
             "reported_outcomes": list(labels),
-            "declared_dependencies": list(declared),
+            "declared_dependencies": declared,
             "evidence_ref": _reference(result.get("evidence_ref")),
+            "child_delegation_ids": aliases,
         }
         if labels:
             critical.add(index)
-        if decision_id and decision_id not in by_decision:
-            by_decision[decision_id] = index
+        for candidate in ([decision_id] if decision_id else []) + aliases:
+            if candidate not in by_decision:
+                by_decision[candidate] = index
         nodes.append(row)
     if not critical:
         return None
@@ -157,8 +198,9 @@ def lexical_relevance(query: str, content: str) -> float:
 # 提取本轮用户真实输入作为排序依据；避免让旧助手回复或历史检索重写用户目标。
 def current_task_query(messages: Sequence[Mapping[str, Any]], start: int) -> str:
     """最多两段当前 Turn 的用户原文，单段有界；空任务则保持原检索顺序。"""
-    return " ".join(
+    recent = [
         str(message.get("content") or "")[:1024]
         for message in reversed(messages[start:])
         if message.get("role") == "user"
-    )[:2048]
+    ][:2]
+    return " ".join(recent)[:2048]
