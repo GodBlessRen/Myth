@@ -404,9 +404,13 @@ def compile_conversation_context(
         "governance": {
             "model": "frozen-request-budget",
             "relevance": "cross-source-bounded-lexical-candidate-ranking" if relevance_enabled else "disabled-for-controlled-evaluation",
-            "causality": "persisted-critical-status-and-declared-dependencies" if causal_enabled else "disabled-for-controlled-evaluation",
+            "causality": "causal-active-set-v2" if causal_enabled else "disabled-for-controlled-evaluation",
             "causal_guard_digest": causal_digest,
             "causal_critical_count": causal_guard["critical_count"] if causal_guard else 0,
+            "causal_active_risk_count": causal_guard["active_risk_count"] if causal_guard else 0,
+            "causal_recent_issue_count": causal_guard["recent_issue_count"] if causal_guard else 0,
+            "causal_archived_issue_count": causal_guard["archived_issue_count"] if causal_guard else 0,
+            "causal_archived_issue_digest": causal_guard["archived_issue_digest"] if causal_guard else None,
             "causal_runtime_protected": sum(
                 ref["source"].startswith("runtime-")
                 for ref in causal_guard["records"]
