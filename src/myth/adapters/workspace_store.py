@@ -1760,7 +1760,8 @@ class SqliteWorkspaceRepository:
                 "SELECT decision_id FROM workspace_operations "
                 "WHERE run_id=? AND state='RESOLVED' AND result_json IS NOT NULL "
                 "AND COALESCE(UPPER(json_extract(result_json,'$.status')),'') "
-                "NOT IN ('UNKNOWN','TICKETED','PENDING','BLOCKED','INCONCLUSIVE') "
+                "IN ('','OK','SUCCESS','SUCCEEDED','COMPLETED','PASSED','FAILED',"
+                "'ERROR','REJECTED','CANCELLED','DONE') "
                 "ORDER BY rowid",
                 (rid,),
             ).fetchall()
