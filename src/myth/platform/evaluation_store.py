@@ -5,16 +5,21 @@ from __future__ import annotations
 
 import json
 import uuid
+from collections import Counter
+from math import isfinite
 from typing import Any
 
 from ..domain import canonical_json
 from .evaluation import (
+    EFFICIENCY_METERS,
     EvalObservation,
     EvalVerdict,
     HarnessVariant,
     attribution_matrix,
     compare_observations,
     controlled_attribution,
+    eval_report_from_dict,
+    release_gate,
 )
 
 
@@ -194,6 +199,81 @@ class SqliteEvaluationLedger:
             comparison_key=row.get("comparison_key") or row["case_id"],
             mechanism_events=tuple(row.get("mechanism_events") or ()),
         )
+
+    # 发布准入只认可落库的逐题事实：完整分母、报告计数与安全结论必须彼此一致。
+    # 这是一致性验证而非来源认证；真实固定 Suite 的题号清单仍由评测运行器负责绑定。
+    def require_complete_release_run(self, eval_run_id: str) -> dict[str, Any]:
+        run = self.run(eval_run_id)
+        rows = run["observations"]
+        count = len(rows)
+        if (
+            run["complete_suite"] != 1
+            or count == 0
+            or run["suite_case_count"] != count
+            or run["selected_case_count"] != count
+        ):
+            raise ValueError("promotion evidence has an incomplete or inconsistent fixed-suite denominator")
+        case_ids = [item["case_id"] for item in rows]
+        if any(not isinstance(case_id, str) or not case_id.strip() for case_id in case_ids):
+            raise ValueError("promotion evidence contains an empty case identity")
+        if len(set(case_ids)) != count:
+            raise ValueError("promotion evidence contains duplicate case identities")
+
+        # 报告是缓存投影；不能通过伪造 PASS 汇总绕过真实 FAIL/INCONCLUSIVE。
+        report = eval_report_from_dict(run["report"])
+        verdicts = Counter(EvalVerdict(item["verdict"]) for item in rows)
+        if report.suite_id != run["suite_id"] or report.total != count or any(
+            (
+                report.pass_count != verdicts[EvalVerdict.PASS],
+                report.fail_count != verdicts[EvalVerdict.FAIL],
+                report.inconclusive_count != verdicts[EvalVerdict.INCONCLUSIVE],
+                report.unsupported_count != verdicts[EvalVerdict.UNSUPPORTED],
+                report.safety_regressions != sum(bool(item["safety_regression"]) for item in rows),
+            )
+        ):
+            raise ValueError("promotion evidence report disagrees with persisted case verdicts")
+
+        # JSON 接受 NaN/Infinity 且 Python 的比较会让 NaN 绕过 >0 的回归检测；
+        # 成本必须是有限、非负的实测数，bool 和字符串都不是成本。
+        for item in rows:
+            metrics = item["metrics"]
+            if not isinstance(metrics, dict):
+                raise ValueError("promotion evidence has invalid case metrics")
+            for meter, value in metrics.items():
+                if meter in EFFICIENCY_METERS and value is not None:
+                    if type(value) not in (int, float) or not isfinite(value) or value < 0:
+                        raise ValueError("promotion evidence contains invalid or non-finite cost meter")
+
+        # 外部提交的 gate 不能宣布观测没有支持的 PASS；Runner 的最终门槛为 100%。
+        gate = run["release_gate"]
+        if not isinstance(gate, dict):
+            raise ValueError("promotion evidence has invalid release gate")
+        quality_ok, _ = release_gate(report, min_pass_rate=1.0)
+        if gate.get("passed") is True and not quality_ok:
+            raise ValueError("promotion evidence release gate contradicts persisted case verdicts")
+        return run
+
+    # 发布比较必须逐题一一对应；只取交集会让两边各缺一题时仍偶然取得晋升资格。
+    def require_promotion_pair(
+        self, baseline_eval_run_id: str, candidate_eval_run_id: str
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        baseline = self.require_complete_release_run(baseline_eval_run_id)
+        candidate = self.require_complete_release_run(candidate_eval_run_id)
+        if (
+            baseline["suite_id"] != candidate["suite_id"]
+            or baseline["suite_version"] != candidate["suite_version"]
+        ):
+            raise ValueError("promotion evidence requires the same suite id/version")
+        before = {row["case_id"]: row for row in baseline["observations"]}
+        after = {row["case_id"]: row for row in candidate["observations"]}
+        if before.keys() != after.keys():
+            raise ValueError("promotion evidence requires identical fixed case identities")
+        for case_id in before:
+            base_key = before[case_id]["comparison_key"] or case_id
+            candidate_key = after[case_id]["comparison_key"] or case_id
+            if base_key != candidate_key:
+                raise ValueError("promotion evidence requires the same comparison_key per case")
+        return baseline, candidate
 
     # 要求两个 run 的 suite/version 完全一致再按同题配对；不能跨版本比较刷分。
     def paired_comparisons(self, baseline_eval_run_id: str, candidate_eval_run_id: str):

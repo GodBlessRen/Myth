@@ -207,8 +207,7 @@ class SqliteEvolutionControl:
         if candidate["status"] == "PROMOTED":
             raise ValueError("promoted candidate evidence is immutable")
         ledger = SqliteEvaluationLedger(self.runtime)
-        baseline = ledger.run(baseline_eval_run_id)
-        tested = ledger.run(candidate_eval_run_id)
+        baseline, tested = ledger.require_promotion_pair(baseline_eval_run_id, candidate_eval_run_id)
         if baseline["policy_id"] != candidate["baseline_policy_id"]:
             raise ValueError("baseline eval policy does not match candidate baseline")
         if tested["policy_id"] != candidate_id:
@@ -282,6 +281,8 @@ class SqliteEvolutionControl:
             # 评测计算期间可能已经发布；写锁内复核，不能改写已发布候选的证据。
             if self.candidate(candidate_id)["status"] == "PROMOTED":
                 raise ValueError("promoted candidate evidence is immutable")
+            # 防止计算之后、落库之前评测行被另一路修改或补写。
+            ledger.require_promotion_pair(baseline_eval_run_id, candidate_eval_run_id)
             db.execute(
                 "UPDATE policy_candidates SET status=?,baseline_eval_run_id=?,candidate_eval_run_id=?,"
                 "cost_model_id=?,calibration_json=?,efficiency_gate_json=?,decision_reason=?,updated_at=CURRENT_TIMESTAMP WHERE candidate_id=?",
@@ -300,11 +301,23 @@ class SqliteEvolutionControl:
 
     # 显式校验候选资格和 baseline 活动身份，同事务切换指针并记历史。
     def promote(self, candidate_id: str) -> dict[str, Any]:
+        ledger = SqliteEvaluationLedger(self.runtime)
         # 候选资格与 baseline 必须在 BEGIN IMMEDIATE 后核对；事务前的检查会被另一发布者穿透。
         with self.store.tx() as db:
             candidate = self.candidate(candidate_id)
             if candidate["status"] != "ELIGIBLE":
                 raise ValueError("only ELIGIBLE candidates can be promoted")
+            # 发布事务内重新核对逐题证据，不能只信已缓存的 ELIGIBLE 快照。
+            baseline, tested = ledger.require_promotion_pair(
+                candidate["baseline_eval_run_id"], candidate["candidate_eval_run_id"]
+            )
+            if baseline["policy_id"] != candidate["baseline_policy_id"] or tested["policy_id"] != candidate_id:
+                raise ValueError("promotion evidence policy identity changed")
+            if baseline["evaluation_partition"] != "final" or tested["evaluation_partition"] != "final":
+                raise ValueError("promotion requires final evaluation evidence")
+            ledger.require_held_out_final(candidate["candidate_eval_run_id"])
+            if tested["release_gate"].get("passed") is not True:
+                raise ValueError("promotion requires a passing release gate")
             current = self.active(candidate["domain"])
             if current["policy_id"] != candidate["baseline_policy_id"]:
                 raise ValueError("candidate baseline is stale; re-evaluate against current active policy")
