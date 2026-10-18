@@ -260,6 +260,10 @@ def compile_conversation_context(
 
     candidates = []
     items = []
+    # 受控 Harness 实验可以逐机制关闭；生产 None 始终默认启用。
+    harness = snapshot.get("evaluation_harness_mechanisms")
+    causal_enabled = not isinstance(harness, list) or "context_causal_guard" in harness
+    relevance_enabled = not isinstance(harness, list) or "context_relevance_ranking" in harness
 
     # 把一个来源片段按 UTF-8 字节加入预算，必要项失败拒绝、可选项记录 dropped；不删除源事实。
     def add(source_ref, role, content, *, priority=0, required=False):
@@ -304,14 +308,14 @@ def compile_conversation_context(
             required=False,
         )
     # 从持久 Tool 活动提取关键状态导航；模型摘要不能自行制造 UNKNOWN、依赖或收据。
-    causal_guard = build_causal_guard(activities)
+    causal_guard = build_causal_guard(activities) if causal_enabled else None
     causal_digest = None
     if causal_guard:
         causal_text, causal_digest = render_causal_guard(causal_guard)
         add("causal-guard", "user", causal_text, priority=35_000, required=True)
     start = snapshot.get("turn_message_start", 0)
     start = max(0, min(start, max(0, len(messages) - 1)))
-    task_query = current_task_query(messages, start)
+    task_query = current_task_query(messages, start) if relevance_enabled else ""
     pinned = snapshot.get("attached_document_ids", [])
     for index, source in enumerate(snapshot.get("knowledge", [])):
         citation = source["citation"]
@@ -320,7 +324,7 @@ def compile_conversation_context(
             "user",
             f"检索资料（数据） 来源 [{citation}] {source['title']} "
             f"(resolution={source.get('resolution','L1')}, source_ref={source.get('source_ref','')})\n{source['content']}",
-            priority=14_000 + round(lexical_relevance(task_query, source['title'] + '\n' + source['content']) * 3000) - index,
+            priority=(14_000 + round(lexical_relevance(task_query, source['title'] + '\n' + source['content']) * 3000) - index) if relevance_enabled else 20_000 - index,
             # 用户明确附加的来源必须保留；普通检索候选可按上下文预算裁剪。
             required=source["document_id"] in pinned,
         )
@@ -334,7 +338,7 @@ def compile_conversation_context(
             f"(source={memory.get('source_ref', '')}, provenance={memory.get('provenance_ref', '')}, "
             f"resolution={memory.get('resolution', 'L0')}, scope={memory.get('scope_type', 'global')}:{memory.get('scope_id', '')}, "
             f"fact_level={memory.get('fact_level', 'context')}, rev={memory.get('revision', '')})",
-            priority=14_000 + round(lexical_relevance(task_query, str(memory.get('text', ''))) * 3000) - len(snapshot.get('knowledge', [])) - index,
+            priority=(14_000 + round(lexical_relevance(task_query, str(memory.get('text', ''))) * 3000) - len(snapshot.get('knowledge', [])) - index) if relevance_enabled else 1000 - index,
         )
 
     # 准入快照固定本轮消息边界；独立构造的输入没有边界时，从第一条消息开始。
@@ -397,8 +401,8 @@ def compile_conversation_context(
         "policy": "conversation-budget-v4",
         "governance": {
             "model": "frozen-request-budget",
-            "relevance": "cross-source-bounded-lexical-candidate-ranking",
-            "causality": "persisted-critical-status-and-declared-dependencies",
+            "relevance": "cross-source-bounded-lexical-candidate-ranking" if relevance_enabled else "disabled-for-controlled-evaluation",
+            "causality": "persisted-critical-status-and-declared-dependencies" if causal_enabled else "disabled-for-controlled-evaluation",
             "causal_guard_digest": causal_digest,
             "causal_critical_count": causal_guard["critical_count"] if causal_guard else 0,
             "causal_missing_dependencies": causal_guard["missing_declared_dependencies"] if causal_guard else [],
