@@ -1,0 +1,125 @@
+# 手动真实模型对照：绝不在 PR/Push 自动运行或消耗供应商额度。
+name: Context A/B (real provider, opt-in)
+
+on:
+  workflow_dispatch:
+    inputs:
+      provider:
+        description: "Paid real API provider"
+        required: true
+        type: choice
+        options: [openai, deepseek]
+      model:
+        description: "Exact real model id (never fixture)"
+        required: true
+        type: string
+      suite:
+        description: "Frozen suite (discovery first, declared heldout later)"
+        required: true
+        default: "evals/daily-v1.json"
+        type: choice
+        options:
+          - evals/daily-v1.json
+          - evals/context-heldout-v1.json
+      repeats:
+        description: "Paired trials per case (cost multiplies by four arms)"
+        required: true
+        default: "1"
+        type: choice
+        options: ["1", "2"]
+      case_id:
+        description: "Optional single case for affordable diagnostics; partial suite cannot qualify"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: myth-live-context-${{ github.ref }}-${{ inputs.provider }}
+  cancel-in-progress: false
+
+jobs:
+  run:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+      BENCH_PROVIDER: ${{ inputs.provider }}
+      BENCH_MODEL: ${{ inputs.model }}
+      BENCH_SUITE: ${{ inputs.suite }}
+      BENCH_REPEATS: ${{ inputs.repeats }}
+      BENCH_CASE: ${{ inputs.case_id }}
+      BENCH_OUTPUT: .runtime/benchmarks/context-live-${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Myth from this revision
+        run: python -m pip install -e .
+      - name: Preflight explicit credentials and bounded configuration
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os
+          provider = os.environ["BENCH_PROVIDER"]
+          model = os.environ["BENCH_MODEL"].strip()
+          expected_secret = {"openai": "OPENAI_API_KEY", "deepseek": "DEEPSEEK_API_KEY"}
+          if provider not in expected_secret:
+              raise SystemExit("unsupported live benchmark provider")
+          if not model or model == "fixture":
+              raise SystemExit("real benchmark requires explicit actual model id")
+          if not os.environ.get(expected_secret[provider]):
+              raise SystemExit("requested provider has no configured Actions secret")
+          if os.environ["BENCH_REPEATS"] not in {"1", "2"}:
+              raise SystemExit("real benchmark repeats outside bounded allowlist")
+          print("Manual real-provider benchmark preflight passed (credential not printed).")
+          PY
+      - name: Run four-way Context ablation and persist all outcomes
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json, os, sys
+          from myth.task_benchmark import CONTEXT_BENCHMARK_ARMS, run_task_benchmark
+          case = os.environ.get("BENCH_CASE", "").strip()
+          report = run_task_benchmark(
+              os.environ["BENCH_SUITE"],
+              os.environ["BENCH_OUTPUT"],
+              provider_name=os.environ["BENCH_PROVIDER"],
+              model=os.environ["BENCH_MODEL"],
+              repeats=int(os.environ["BENCH_REPEATS"]),
+              arms=tuple(CONTEXT_BENCHMARK_ARMS),
+              case_ids=(case,) if case else (),
+              auth_root=".",
+          )
+          summary = report.get("context_ablation") or {}
+          print(json.dumps({
+              "suite_id": report["suite_id"],
+              "partition": report["partition"],
+              "kind": report["kind"],
+              "complete_suite": report["complete_suite"],
+              "pairs": summary.get("complete_pair_count"),
+              "expected_pairs": summary.get("expected_pair_count"),
+              "quality": summary.get("quality"),
+              "safety": summary.get("safety"),
+              "cost": summary.get("cost"),
+              "activation_mismatch_count": summary.get("activation_mismatch_count"),
+              "ready_for_separate_heldout_review": summary.get("ready_for_separate_heldout_review"),
+              "promotion_eligible": False,
+          }, ensure_ascii=False, indent=2))
+          if any(not t["success"] for t in report["trials"]):
+              raise SystemExit("some trials failed their independent oracle; all outcomes are saved")
+          PY
+      - name: Upload benchmark summaries (not raw model/credential objects)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: context-real-ablation-${{ github.run_id }}
+          path: |
+            .runtime/benchmarks/context-live-${{ github.run_id }}/report.json
+            .runtime/benchmarks/context-live-${{ github.run_id }}/suite.json
+          if-no-files-found: warn
+          retention-days: 7
