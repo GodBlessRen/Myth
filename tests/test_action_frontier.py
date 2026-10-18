@@ -55,6 +55,7 @@ def wire(kind, capability="", arguments=None, claim="已完成"):
 class FrontierProvider:
     provider_id = "ollama"
 
+    # 保存受控工作区与是否在第二次模型决定后撤销来源的故障注入开关。
     def __init__(self, workspace, *, archive_before_choice=False):
         self.workspace = workspace
         self.archive_before_choice = archive_before_choice
