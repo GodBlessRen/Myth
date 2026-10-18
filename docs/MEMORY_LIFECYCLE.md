@@ -184,3 +184,18 @@ Provider 在 Ticket 前明确未派发，可以退避后再次准入模型机会
 ### Previous content is baseline, not Evidence
 
 上一版 Mental Model 可以作为文档演进基线以减少 prose drift：`previous content + new admitted evidence → revised document`。但 `previous_content` 永远不能自动进入 `evidence_refs`，最终 Evidence 只能映射到本次 admitted 的底层 Memory sources。
+
+
+## Evidence-bounded multi-probe Recall
+
+`memory.recall` is an opt-in SEEK tool that reuses the existing SQLite Memory authority, optional Milvus hydration, Runtime Tool Ticket/Receipt, and L0/L1/L2 disclosure. It does not introduce a separate memory database or a new background worker.
+
+- `query` (required): one primary search string; `probes` (optional): at most three complementary searches. Duplicate probes are skipped before backend calls. Each search reuses the existing lexical/Milvus candidate path; fusion uses rank (RRF) rather than treating heterogeneous similarity scores as probabilities.
+- `required_refs` (optional): up to four exact `memory:mem_<uuid>@<revision>` anchors previously observed via an admitted Memory view. Every anchor is rechecked in SQLite for visibility, active state, exact revision and linked-evidence freshness. Invalid anchors yield `missing`, `unavailable`, `revision_changed` or `stale_evidence`.
+- `limit`: 1–8 L0 results, with valid required anchors admitted ahead of ranked optional candidates. Requests with more anchors than available slots fail before execution. All search probes and output bounds are fixed; this is not an autonomous unlimited retrieval loop.
+- `evidence_gate.status`: `unverified` (no exact anchors), `anchored` (all exact anchors remain current) or `references_unavailable` (at least one anchor invalid). `answer_verified` remains **false** in all cases. An anchor is source-identity evidence, not an oracle of semantic sufficiency, causation, permission, or Verification.
+- `retrieval.probes` and `degraded` preserve transparent search/degradation information. No unmeasured token savings or real-provider accuracy improvement is asserted. Duplicate sources are returned once and the original Memory revision history remains unchanged.
+
+The new path is useful for revisiting previously cited memories across long-running work while reporting version mismatches explicitly. Semantic answer sufficiency remains the model/application's responsibility and should be evaluated against independent held-out tasks before introducing any automated rewrite of Memory facts.
+
+Fixed local regression: `python -m unittest tests.test_memory_recall -v` (or full discovery); see `tests/test_memory_recall.py`.
