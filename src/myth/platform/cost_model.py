@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+from math import isfinite
 from typing import Mapping
 
 from ..domain import canonical_json
@@ -39,21 +40,32 @@ class CostModel:
         if not self.cost_model_id.strip() or self.version < 1:
             raise ValueError("cost model id/version are required")
         for meter, weight in self.weights.items():
-            if (
-                not str(meter).strip()
-                or not isinstance(weight, (int, float))
-                or weight < 0
-            ):
+            # NaN、Infinity、bool 和超大整数均不是可运算成本；否则报告/Seal 会绑定伪成本。
+            try:
+                finite = type(weight) in (int, float) and isfinite(weight)
+            except OverflowError:
+                finite = False
+            if not isinstance(meter, str) or not meter.strip() or not finite or weight < 0:
                 raise ValueError(
-                    "cost weights require non-empty meters and non-negative numbers"
+                    "cost weights require non-empty meters and finite non-negative numbers"
                 )
 
     # 按显式权重汇总正向成本差；不存在维度当前按零项处理，不表示该维度已真实测量。
     def weighted_cost(self, delta: Mapping[str, float]) -> float:
-        return sum(
-            float(weight) * max(0.0, float(delta.get(meter, 0.0)))
-            for meter, weight in self.weights.items()
-        )
+        total = 0.0
+        for meter, weight in self.weights.items():
+            change = delta.get(meter, 0.0)
+            # 已测成本的差额允许负值（节约），但不允许 NaN/Infinity 漂入校准矩阵。
+            try:
+                valid = type(change) in (int, float) and isfinite(change)
+            except OverflowError:
+                valid = False
+            if not valid:
+                raise ValueError("weighted cost requires finite measured deltas")
+            total += float(weight) * max(0.0, float(change))
+        if not isfinite(total):
+            raise ValueError("weighted cost exceeds finite numeric range")
+        return total
 
 
 # 成本模型的不可变身份目录；同 ID 不允许不同版本/权重悄悄覆盖。
