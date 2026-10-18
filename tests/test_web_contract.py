@@ -65,6 +65,56 @@ class WebContractTests(unittest.TestCase):
             threading.Event().wait(0.01)
         self.fail("local worker did not finish")
 
+    # 回归断言：真实 Loopback HTTP 接口通过仓储原子更新 Memory，CAS 重放不得多生成 revision。
+    def test_memory_actions_http_atomic_and_replay_fail_closed(self):
+        with self.call("/api/workspace/memories/actions", {
+            "actions": [
+                {"op": "ADD", "kind": "semantic", "text": "Evidence first",
+                 "source_ref": "user:atomic-http"},
+            ],
+        }) as response:
+            created = json.load(response)
+        self.assertEqual(created["status"], "COMMITTED")
+        memory_id = created["changes"][0]["memory_id"]
+
+        with self.call("/api/workspace/memories/actions", {
+            "actions": [
+                {"op": "UPDATE", "memory_id": memory_id, "expected_revision": 1,
+                 "operations": [{"op": "replace_text", "text": "Evidence before claims"}]},
+            ],
+        }) as response:
+            changed = json.load(response)
+        self.assertEqual(changed["changes"][0]["revision"], 2)
+
+        with self.assertRaises(error.HTTPError) as caught:
+            self.call("/api/workspace/memories/actions", {
+                "actions": [
+                    {"op": "UPDATE", "memory_id": memory_id, "expected_revision": 1,
+                     "operations": [{"op": "replace_text", "text": "Blind replay"}]},
+                ],
+            })
+        self.assertEqual(caught.exception.code, 400)
+        with MythRuntime(self.root) as runtime:
+            record = runtime.store.db.execute(
+                "SELECT text,revision FROM workspace_memories WHERE memory_id=?",
+                (memory_id,),
+            ).fetchone()
+        self.assertEqual((record["text"], record["revision"]), ("Evidence before claims", 2))
+
+    # 回归断言：API 拒绝模型绕过授权提交 verified 级别，以及携带未声明的权限字段。
+    def test_memory_actions_http_rejects_unapproved_fact_promotion(self):
+        with self.assertRaises(error.HTTPError) as caught:
+            self.call("/api/workspace/memories/actions", {
+                "actions": [{"op": "ADD", "kind": "semantic", "text": "Unverified",
+                             "source_ref": "model:guess", "fact_level": "verified"}],
+            })
+        self.assertEqual(caught.exception.code, 400)
+        with self.assertRaises(error.HTTPError) as caught:
+            self.call("/api/workspace/memories/actions", {
+                "actions": [], "permission": "admin",
+            })
+        self.assertEqual(caught.exception.code, 400)
+
     # 回归断言：Driver 返回仍是 RUNNING 时 Web 继续安全驱动；不能仅清本机 active。
     def test_web_worker_reenters_if_driver_returns_running_without_yield(self):
         original = AgentRuntime.run
