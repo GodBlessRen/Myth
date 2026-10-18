@@ -177,6 +177,36 @@ class ContextGovernanceTests(unittest.TestCase):
             self.assertEqual(first, second)
             self.assertEqual(calls, ["send"])
 
+    def test_controlled_mechanisms_change_real_context_behavior(self):
+        """真实 Context 编译验证全开、全关、单项开启的差异，不用标签伪造消融。"""
+        from myth.evaluation_runner import CONTROLLED_HARNESS_MECHANISMS
+        self.assertIn("context_causal_guard", CONTROLLED_HARNESS_MECHANISMS)
+        self.assertIn("context_relevance_ranking", CONTROLLED_HARNESS_MECHANISMS)
+        original = {
+            "messages": [{"role": "user", "content": "payment timeout"}],
+            "knowledge": [{"document_id": "unrelated", "citation": "doc:u:0",
+                           "title": "astronomy", "content": "astronomy " * 1250}],
+            "memory": [{"memory_id": "relevant",
+                        "text": "payment timeout " * 650}],
+        }
+        activities = [{"step": 1, "decision_id": "attempt-1",
+                       "result": {"status": "UNKNOWN", "error": "timeout"}}]
+        def compile_with(enabled):
+            """隔离同一输入下的一组机制，使所选内容的变化可直接比较。"""
+            snapshot = {**original, "evaluation_harness_mechanisms": list(enabled)}
+            return conversation_request(SETTINGS, snapshot, snapshot["messages"], activities)
+        baseline = compile_with(())
+        full = compile_with(("context_causal_guard", "context_relevance_ranking"))
+        only_causal = compile_with(("context_causal_guard",))
+        only_relevance = compile_with(("context_relevance_ranking",))
+        self.assertNotIn("causal-guard", baseline.context_report["selected"])
+        self.assertIn("causal-guard", full.context_report["selected"])
+        self.assertIn("causal-guard", only_causal.context_report["selected"])
+        self.assertNotIn("causal-guard", only_relevance.context_report["selected"])
+        self.assertIn("knowledge:doc:u:0", baseline.context_report["selected"])
+        self.assertIn("memory:relevant@", " ".join(full.context_report["selected"]))
+        self.assertIn("memory:relevant@", " ".join(only_relevance.context_report["selected"]))
+
     def test_remote_model_window_requires_frozen_matching_preflight(self):
         """仅身份匹配的冻结公开窗口可以扩大远端软预算，切换模型立即退回保守上限。"""
         remote = {"provider": "openai", "model": "fixture", "max_output_tokens": 1024}
