@@ -107,3 +107,10 @@ Context Compiler 的 `bytes_used` 是**进入 ModelRequest.messages 的 UTF-8 �
 `context_cost_calibration(events, model_invocations)` 是纯只读投影，由会话 Inspector 展示；按 `provider_id/model_id` 分组，公开请求数、实测覆盖率与 `observed_context_bytes_per_reported_input_token`。未报告、非法 bool/字符串/负数、未派发或身份不一致时保持未测，不猜 Token=0；存在部分实测时，整体 Token/字节总量返回 `None`，只有配对样本可生成观察性比值。
 
 **绝不把该经验比值作为 tokenizer 的上界或自动扩容许可证。** Provider 可能带 schema、特殊 Token、缓存、不同语言和不公开的协议元数据；Fixture Adapter 报告的用量也仅可验证管线，不代表真实供应商质量。只有独立模型 Token 计数/稳定的 Provider 计量、 held-out 长任务成功率与无重试风险证据足够时，才能考虑更激进的动态预算。
+
+
+## 实验最终闭环
+
+四组 Context 实验不再只在确定性 Compiler 夹具上运行。现在复用真实 `task-benchmark` 的 Workspace / frozen Snapshot / Ticket / Receipt / Oracle，对 `context-baseline`、`context-causal`、`context-relevance`、`context-full` 同题同次执行 paired A/B；可选本地 Ollama 或显式授权的远端 Provider。禁止将缺失 Token / 失败效果当 0 计费或 PASS。报告与手动真实 Provider CI 运行见 [Context SOTA Evidence](CONTEXT_SOTA_EVAL.md)。
+
+`ready_for_separate_heldout_review` 只是准备复核门槛；没有计费模型、独立 held-out 样本与语义/安全验收时**不能声称 SOTA**，且本评测从不自动 Promote。

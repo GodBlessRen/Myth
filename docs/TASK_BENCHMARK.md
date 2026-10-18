@@ -103,3 +103,14 @@ leave-one-out
 `evals/context-governance-v1.json` 已扩展至七项**确定性 Context Compiler 探针**，可通过 `myth eval --suite evals/context-governance-v1.json` 检验同 Run 未结算风险、显式因果依赖、跨来源相关性、无假阳性、fail-closed 预算、长历史活跃集及历史 UNKNOWN 的权威结算。 `run_controlled_harness_experiment` 以 `context_causal_guard`、`context_relevance_ranking` 为真实开关执行全关/单机制/全开。在这组固定探针上实现差异，不代表真实多模型 Prompt 成功率或 Token 成本领先。
 
 更多实现语义见 [Context Governance](CONTEXT_GOVERNANCE.md)。
+
+
+## Final-mile：四组真实 Context 对照
+
+新增 `--context-ablation`（等价于 `--arm context-baseline/--arm context-causal/--arm context-relevance/--arm context-full`）。所有组使用同一固定 Provider+Model、相同基础 Harness 机制，在各自独立 Workspace 内冻结不同的 Context 开关；顺序按 case/repeat 轮换。不能与路由 `myth/simple-loop` Arm 混用。
+
+它不仅报告 selected/folded，还保存每个模型请求的实际机制启用、原始模型收据和 `usage_measured` 各字段的覆盖率。汇总在 `report.json.context_ablation` 中按相同 case/repeat 计算质量翻转、未知风险及 input/output Token/latency 的配对 delta；任何缺测都使对应总 delta 保持 `null`。`ready_for_separate_heldout_review` 仅为实验复核建议，`promotion_eligible=false` 不自动改生产策略。
+
+`evals/context-heldout-v1.json` 是单独声明、固定的七项任务集，不与 `daily-v1.json` 混用证据身份。它不是凭公开 JSON 即可自证的统计盲测。真实 Provider 和本地 scripted 的产出分别标记 `real_provider` 与 `harness_fixture`。
+
+完整命令、GitHub Actions 手动运行、可能产生的费用、Provider 缺测与 SOTA 门禁见 [Context SOTA Evidence](CONTEXT_SOTA_EVAL.md)。

@@ -1,0 +1,186 @@
+{
+  "suite_id": "context-heldout-v1",
+  "version": 1,
+  "partition": "heldout",
+  "principle": "Separate declared heldout task set for context A/B; public suite identity is not evidence of statistical blinding.",
+  "cases": [
+    {
+      "id": "release-two-docs",
+      "category": "retrieval",
+      "documents": [
+        {
+          "title": "Operation Charter",
+          "content": "For project Orion, freeze code is CHARTER-5174. Team lead is Mei."
+        },
+        {
+          "title": "Delivery Register",
+          "content": "Project Orion final acceptance code is DELIVERY-9421. The shipment moved to Monday."
+        }
+      ],
+      "prompt": "根据给定的两份项目资料分别报告 Orion 的 freeze code 与 final acceptance code，不能混为一个编号。",
+      "acceptance": {
+        "answer_contains": [
+          "CHARTER-5174",
+          "DELIVERY-9421"
+        ]
+      },
+      "steps": [
+        {
+          "claim": "Orion 的 freeze code 为 CHARTER-5174；final acceptance code 为 DELIVERY-9421。"
+        }
+      ]
+    },
+    {
+      "id": "source-nested-scan",
+      "category": "tools",
+      "files": {
+        "README.md": "A general file without incident code.",
+        "ops/journal.txt": "2026-09-04: recovered write transaction, stable receipt id RCT-7306."
+      },
+      "prompt": "先调用 project.search 查询 receipt，然后用 project.read 读取 ops/journal.txt，最终给出准确的 receipt id。",
+      "acceptance": {
+        "tools": [
+          "project.search",
+          "project.read"
+        ],
+        "answer_contains": [
+          "RCT-7306"
+        ]
+      },
+      "steps": [
+        {
+          "tool": "project.search",
+          "args": {
+            "query": "receipt"
+          }
+        },
+        {
+          "tool": "project.read",
+          "args": {
+            "path": "ops/journal.txt"
+          }
+        },
+        {
+          "claim": "最终收据编号是 RCT-7306。"
+        }
+      ]
+    },
+    {
+      "id": "artifact-markdown-exact",
+      "category": "artifact",
+      "prompt": "使用 artifact.write 创建 summary.md，字节内容必须恰好为 '# Status\\nverified=true\\n'（其中转义序列代表真正换行）；随后确认。",
+      "acceptance": {
+        "artifacts": {
+          "summary.md": "# Status\nverified=true\n"
+        }
+      },
+      "steps": [
+        {
+          "tool": "artifact.write",
+          "args": {
+            "path": "summary.md",
+            "content": "# Status\nverified=true\n"
+          }
+        },
+        {
+          "claim": "summary.md 已生成。"
+        }
+      ]
+    },
+    {
+      "id": "patch-audit-copied",
+      "category": "artifact",
+      "files": {
+        "service.env.example": "mode=debug\nretry=false\n"
+      },
+      "prompt": "使用 project.patch_exact 对 service.env.example 输出副本中将 mode=debug 精确替换为 mode=release（expected_count=1）；必须保留 retry=false 以及原项目文件。",
+      "acceptance": {
+        "artifacts": {
+          "service.env.example": "mode=release\nretry=false\n"
+        }
+      },
+      "steps": [
+        {
+          "tool": "project.patch_exact",
+          "args": {
+            "path": "service.env.example",
+            "old_text": "mode=debug",
+            "new_text": "mode=release",
+            "expected_count": 1
+          }
+        },
+        {
+          "claim": "已输出修改副本，原项目文件未覆盖。"
+        }
+      ]
+    },
+    {
+      "id": "preflight-recovery-document",
+      "category": "recovery",
+      "interrupt_before_run": true,
+      "prompt": "恢复后仅使用 artifact.write 输出 restore.txt，内容恰好为 SAFE-RESUME-804，无换行。",
+      "acceptance": {
+        "artifacts": {
+          "restore.txt": "SAFE-RESUME-804"
+        }
+      },
+      "steps": [
+        {
+          "tool": "artifact.write",
+          "args": {
+            "path": "restore.txt",
+            "content": "SAFE-RESUME-804"
+          }
+        },
+        {
+          "claim": "恢复后已生成 restore.txt。"
+        }
+      ]
+    },
+    {
+      "id": "goal-checkpoint-carryover",
+      "category": "continuity",
+      "first_prompt": "当前里程碑验收码为 MILESTONE-683。下一轮新会话需要引用该码，请先只回答该码。",
+      "prompt": "现在根据同一 Goal 的上一轮已持久化进度，复述里程碑验收码，不要捏造新编码。",
+      "acceptance": {
+        "answer_contains": [
+          "MILESTONE-683"
+        ]
+      },
+      "steps": [
+        {
+          "claim": "MILESTONE-683"
+        },
+        {
+          "claim": "MILESTONE-683"
+        }
+      ]
+    },
+    {
+      "id": "resolve-dated-conflict",
+      "category": "retrieval",
+      "documents": [
+        {
+          "title": "Legacy Report 2026-05",
+          "content": "Report dated 2026-05-01: operational threshold 200 units, marked superseded."
+        },
+        {
+          "title": "Current Report 2026-09",
+          "content": "Report dated 2026-09-30: operational threshold 320 units, explicitly replaces the earlier May report."
+        }
+      ],
+      "prompt": "仅根据两份报告回答截至 2026-10-01 最新有效 operational threshold，必须说明采用的是哪份报告。",
+      "acceptance": {
+        "answer_contains": [
+          "320",
+          "2026-09-30"
+        ]
+      },
+      "steps": [
+        {
+          "claim": "最新有效阈值为 320 units，依据 2026-09-30 的 Current Report。"
+        }
+      ]
+    }
+  ]
+}

@@ -185,7 +185,12 @@ def build_parser() -> argparse.ArgumentParser:
     tasks.add_argument("--model", default="fixture")
     tasks.add_argument("--ollama-url", default="http://127.0.0.1:11434")
     tasks.add_argument("--repeats", type=int, default=3)
-    tasks.add_argument("--arm", action="append", choices=["myth", "simple-loop"])
+    tasks.add_argument("--arm", action="append", choices=[
+        "myth", "simple-loop", "context-baseline", "context-causal",
+        "context-relevance", "context-full",
+    ])
+    tasks.add_argument("--context-ablation", action="store_true",
+                       help="run baseline/causal/relevance/full on identical cases and provider")
     tasks.add_argument("--case", action="append", default=[], dest="case_ids")
 
     history = sub.add_parser(
@@ -300,8 +305,14 @@ def main() -> None:
     args = build_parser().parse_args()
 
     if args.command == "task-benchmark":
-        from .task_benchmark import run_task_benchmark
-
+        from .task_benchmark import CONTEXT_BENCHMARK_ARMS, run_task_benchmark
+        # 完整 Context 实验固定四种组态；不得和路由消融混用或重复计算。
+        if args.context_ablation and args.arm:
+            raise ValueError("--context-ablation and --arm cannot be combined")
+        arms = (
+            tuple(CONTEXT_BENCHMARK_ARMS)
+            if args.context_ablation else tuple(args.arm or ["myth", "simple-loop"])
+        )
         result = run_task_benchmark(
             args.suite,
             args.output,
@@ -310,7 +321,7 @@ def main() -> None:
             ollama_url=args.ollama_url,
             repeats=args.repeats,
             auth_root=args.root,
-            arms=tuple(args.arm or ["myth", "simple-loop"]),
+            arms=arms,
             case_ids=args.case_ids,
             on_trial=lambda trial: print(
                 f"{trial['repeat']} {trial['case_id']} {trial['arm']}: "
@@ -323,6 +334,12 @@ def main() -> None:
                 "report": str(args.output.resolve() / "report.json"),
                 "complete_suite": result["complete_suite"],
                 "summary": result["summary"],
+                "context_ablation": (
+                    {
+                        key: value for key, value in (result.get("context_ablation") or {}).items()
+                        if key != "pairs"
+                    } if result.get("context_ablation") else None
+                ),
             }
         )
         if any(not t["success"] for t in result["trials"]):
