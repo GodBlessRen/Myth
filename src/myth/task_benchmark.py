@@ -200,6 +200,181 @@ def _arm_summary(trials, arm, case_ids, repeats):
     }
 
 
+# 只能比较同 case/repeat 的真实试次；缺测成本和不完整变体绝不补零以制造效率收益。
+def summarize_context_ablation(trials, arms, case_ids, repeats, *, kind, complete_suite):
+    """Context 机制配对汇总：质量、安全、成本分离；输出不是自动 Promote 决定。"""
+    expected = frozenset(CONTEXT_BENCHMARK_ARMS)
+    variants_complete = frozenset(arms) == expected
+    by_block = {}
+    duplicate = []
+    for trial in trials:
+        key = (trial.get("case_id"), trial.get("repeat"))
+        arm = trial.get("arm")
+        group = by_block.setdefault(key, {})
+        if arm in group:
+            duplicate.append({"case_id": key[0], "repeat": key[1], "arm": arm})
+        group[arm] = trial
+
+    pairs = []
+    quality = Counter()
+    safety = Counter()
+    metric_names = ("input_tokens", "output_tokens", "provider_wall_ms")
+    cost = {
+        name: {"paired_samples": 0, "baseline_sum": 0, "full_sum": 0}
+        for name in metric_names
+    }
+    expected_blocks = len(case_ids) * repeats
+    for case_id in case_ids:
+        for repeat in range(1, repeats + 1):
+            group = by_block.get((case_id, repeat)) or {}
+            if not variants_complete or set(group) != expected:
+                pairs.append({
+                    "case_id": case_id, "repeat": repeat,
+                    "status": "INCOMPLETE", "observed_arms": sorted(group),
+                })
+                continue
+            baseline, full = group["context-baseline"], group["context-full"]
+            b_ok, f_ok = baseline.get("success") is True, full.get("success") is True
+            outcome = (
+                "improved" if f_ok and not b_ok else
+                "regressed" if b_ok and not f_ok else
+                "both_pass" if b_ok else "both_fail"
+            )
+            quality[outcome] += 1
+            base_unknown = baseline.get("status") == "UNKNOWN"
+            full_unknown = full.get("status") == "UNKNOWN"
+            if full_unknown and not base_unknown:
+                safety["new_unknown"] += 1
+            if full.get("human_takeover") is True and baseline.get("human_takeover") is False:
+                safety["new_human_takeover"] += 1
+            repeats_base = baseline.get("repeated_tool_calls")
+            repeats_full = full.get("repeated_tool_calls")
+            if (
+                type(repeats_base) is int and type(repeats_full) is int
+                and repeats_full > repeats_base
+            ):
+                safety["more_repeated_tool_calls"] += 1
+
+            metrics = {}
+            for name in metric_names:
+                a = (baseline.get("usage_measured") or {}).get(name)
+                b = (full.get("usage_measured") or {}).get(name)
+                valid = (
+                    type(a) in (int, float) and type(b) in (int, float)
+                    and a >= 0 and b >= 0
+                )
+                metrics[name] = {
+                    "baseline": a if valid else None,
+                    "full": b if valid else None,
+                    "delta": b - a if valid else None,
+                }
+                if valid:
+                    cost[name]["paired_samples"] += 1
+                    cost[name]["baseline_sum"] += a
+                    cost[name]["full_sum"] += b
+            # 机制 on/off 必须出现在真正冻结的请求报告中；没有模型调用记缺测，而非假触发。
+            activation = {}
+            for arm in sorted(expected):
+                records = group[arm].get("context_activation")
+                if not isinstance(records, list) or not records:
+                    activation[arm] = None
+                    continue
+                want_causal = arm in {"context-causal", "context-full"}
+                want_relevance = arm in {"context-relevance", "context-full"}
+                activation[arm] = all(
+                    isinstance(item, dict)
+                    and (item.get("causality") != "disabled-for-controlled-evaluation") == want_causal
+                    and (item.get("relevance") != "disabled-for-controlled-evaluation") == want_relevance
+                    for item in records
+                )
+            pairs.append({
+                "case_id": case_id,
+                "repeat": repeat,
+                "status": "PAIRED",
+                "quality": {
+                    "baseline_pass": b_ok,
+                    "full_pass": f_ok,
+                    "causal_only_pass": group["context-causal"].get("success") is True,
+                    "relevance_only_pass": group["context-relevance"].get("success") is True,
+                    "outcome_flip": outcome,
+                },
+                "safety": {
+                    "new_unknown": full_unknown and not base_unknown,
+                    "new_human_takeover": (
+                        full.get("human_takeover") is True
+                        and baseline.get("human_takeover") is False
+                    ),
+                },
+                "measured_cost": metrics,
+                "mechanism_config_verified_in_requests": activation,
+                "harness_evidence": {
+                    arm: {
+                        "run_ids": group[arm].get("run_ids"),
+                        "status": group[arm].get("status"),
+                        "evidence_root": group[arm].get("evidence_root"),
+                    }
+                    for arm in sorted(expected)
+                },
+            })
+
+    complete_pairs = sum(item["status"] == "PAIRED" for item in pairs)
+    cost_summary = {}
+    for name, item in cost.items():
+        complete_metric = (
+            complete_suite and variants_complete
+            and complete_pairs == expected_blocks
+            and item["paired_samples"] == expected_blocks
+        )
+        cost_summary[name] = {
+            "paired_samples": item["paired_samples"],
+            "expected_pairs": expected_blocks,
+            "baseline_total": item["baseline_sum"] if complete_metric else None,
+            "full_total": item["full_sum"] if complete_metric else None,
+            "delta": (
+                item["full_sum"] - item["baseline_sum"] if complete_metric else None
+            ),
+        }
+    deltas = [item["delta"] for item in cost_summary.values()]
+    evidence_full = complete_suite and variants_complete and complete_pairs == expected_blocks
+    metrics_full = evidence_full and all(x is not None for x in deltas)
+    no_quality_regression = quality["regressed"] == 0
+    no_safety_regression = (
+        safety["new_unknown"] == 0
+        and safety["new_human_takeover"] == 0
+        and safety["more_repeated_tool_calls"] == 0
+    )
+    activation_mismatch = sum(
+        any(value is False for value in (pair.get("mechanism_config_verified_in_requests") or {}).values())
+        for pair in pairs if pair["status"] == "PAIRED"
+    )
+    ready = (
+        kind == "real_provider"
+        and evidence_full and metrics_full and no_quality_regression
+        and no_safety_regression and activation_mismatch == 0
+        and all(delta <= 0 for delta in deltas)
+        and any(delta < 0 for delta in deltas)
+    )
+    return {
+        "method": "same-case-repeat-controlled-harness-v1",
+        "complete_pair_count": complete_pairs,
+        "expected_pair_count": expected_blocks,
+        "full_context_arms": variants_complete,
+        "quality": dict(sorted(quality.items())),
+        "safety": dict(sorted(safety.items())),
+        "cost": cost_summary,
+        "activation_mismatch_count": activation_mismatch,
+        "pairs": pairs,
+        "ready_for_separate_heldout_review": ready,
+        "promotion_eligible": False,
+        "release_policy": (
+            "No automatic promotion; heldout identity, repeated model quality, full "
+            "provider receipts and human approval required. Mechanism interaction "
+            "is observable, not causal proof."
+        ),
+        "evidence_kind": kind,
+    }
+
+
 # 在独立持久 root 执行固定任务，并实际重开 Goal 数据库；记录所有 Run、状态、计量与独立 checks。
 def _trial(root, case, arm, settings, provider, *, context_mechanisms=None):
     started = time.perf_counter()
