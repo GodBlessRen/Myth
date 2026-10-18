@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+from contextlib import closing
 import hashlib
 import json
 from pathlib import Path
@@ -43,6 +44,7 @@ class ContextReleaseLastMileTests(unittest.TestCase):
             }
         }
         objects = evidence / "objects"
+        # 写入哈希命名且字节身份可复查的虚拟对象，不接触正式 Runtime 数据。
         def write_object(value):
             payload = json.dumps(value, ensure_ascii=False).encode("utf-8")
             digest = hashlib.sha256(payload).hexdigest()
@@ -54,7 +56,7 @@ class ContextReleaseLastMileTests(unittest.TestCase):
         request_ref = write_object(request)
         response_ref = write_object({"status": "synthetic"})
         request_digest = hashlib.sha256(attempt.encode("utf-8")).hexdigest()
-        with sqlite3.connect(evidence / "runtime.db") as db:
+        with closing(sqlite3.connect(evidence / "runtime.db")) as db, db:
             db.execute("CREATE TABLE workspace_turns(run_id TEXT PRIMARY KEY,status TEXT)")
             db.execute(
                 "CREATE TABLE model_invocations("
