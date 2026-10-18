@@ -157,3 +157,44 @@ def validate_model_selection(
         raise ValueError(
             "当前模型不支持所选 Thinking 档位；请按模型能力重新选择。"
         )
+
+# REMOTE_FALLBACK_BYTES：没有供应商可核验窗口时继续使用历史保守上限。
+REMOTE_FALLBACK_BYTES = 42_000
+# REMOTE_MAX_BYTES：即使目录宣称超大窗口，也限制每次投影的本地物理成本。
+REMOTE_MAX_BYTES = 256_000
+
+
+# 根据准入时冻结的公开模型能力分配远端 Context；未能核对的目录信息不扩大预算。
+def remote_context_budget(settings: dict[str, Any]) -> dict[str, Any]:
+    """返回 UTF-8 字节软预算及可审计来源，不把字节近似冒充精确 Token。"""
+    profile = settings.get("admitted_model_profile")
+    fallback = {
+        "max_bytes": REMOTE_FALLBACK_BYTES,
+        "window_tokens": None,
+        "source": "conservative-remote-fallback",
+        "formula": "remote-projection-cap=42000",
+    }
+    if not isinstance(profile, dict):
+        return fallback
+    if (
+        profile.get("id") != settings.get("model")
+        or profile.get("provider") != settings.get("provider")
+        or profile.get("source") != "provider-preflight"
+    ):
+        return fallback
+    window = profile.get("context_window")
+    if type(window) is not int or not 2048 <= window <= 8_000_000:
+        return fallback
+    output = settings.get("max_output_tokens", 2048)
+    if type(output) is not int or output < 0:
+        raise ValueError("invalid output tokens for remote Context budget")
+    available = window - output - 512
+    if available <= 0:
+        raise ValueError("remote model context window leaves no room for input")
+    # 3 bytes/token 只是混合语言启发式；请求太大仍依赖供应商最终 Token 限制校验。
+    return {
+        "max_bytes": min(REMOTE_MAX_BYTES, available * 3),
+        "window_tokens": window,
+        "source": "provider-preflight-frozen",
+        "formula": "min(256000,(declared_window-output-512)*3)",
+    }
