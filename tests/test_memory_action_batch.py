@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import sqlite3
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -201,6 +202,25 @@ class MemoryActionBatchTests(unittest.TestCase):
             ])
         self.assertEqual(self.memory.apply_actions([])["status"], "NOOP")
         self.assertEqual(self.memory.current_change_seq(), 0)
+
+    # 一致性读快照必须由 SQLite 真实禁止写入，退出后还原业务连接写权限。
+    def test_read_snapshot_cannot_mutate_state_and_restores_write_access(self):
+        with self.runtime.store.read_snapshot() as db:
+            self.assertEqual(db.execute("PRAGMA query_only").fetchone()[0], 1)
+            with self.assertRaises(sqlite3.OperationalError):
+                db.execute("CREATE TABLE illegal_snapshot_write(id TEXT)")
+            with self.assertRaises(RuntimeError):
+                self.memory.apply_actions([
+                    {"op": "ADD", "kind": "semantic", "text": "Nested",
+                     "source_ref": "source:nested"},
+                ])
+        self.assertEqual(self.runtime.store.db.execute("PRAGMA query_only").fetchone()[0], 0)
+        self.assertFalse(self.runtime.store.db.in_transaction)
+        applied = self.memory.apply_actions([
+            {"op": "ADD", "kind": "semantic", "text": "Allowed",
+             "source_ref": "source:after-read"},
+        ])
+        self.assertEqual(applied["count"], 1)
 
     # 远端 Milvus 派生写入失败不能抹除已经提交的 SQLite 事实，投影单独报告 degraded。
     def test_vector_sync_failure_does_not_invalidate_commit(self):
