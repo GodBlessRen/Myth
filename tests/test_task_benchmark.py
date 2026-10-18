@@ -195,6 +195,45 @@ class TaskBenchmarkTests(unittest.TestCase):
         self.assertFalse(summary["ready_for_separate_heldout_review"])
         self.assertFalse(summary["promotion_eligible"])
 
+    # 模拟两种受控证据覆盖，证明 winner 预检真正验证所有四组，而不是只检查 baseline/full。
+    def test_real_provider_readiness_requires_all_four_arm_receipts(self):
+        """离线构造的数字仅测试发布门禁逻辑，不构成真实 Provider 领先证据。"""
+        records = []
+        for arm in CONTEXT_BENCHMARK_ARMS:
+            records.append({
+                "case_id": "edge", "repeat": 1, "arm": arm,
+                "status": "COMPLETED", "model_calls": 1,
+                "success": arm != "context-baseline",
+                "human_takeover": False, "repeated_tool_calls": 0,
+                "usage_measured": {
+                    "input_tokens": 50 if arm == "context-full" else 60,
+                    "output_tokens": 10, "provider_wall_ms": 100,
+                },
+                "context_activation": [{
+                    "causality": "causal-active-set-v2" if arm in (
+                        "context-causal", "context-full"
+                    ) else "disabled-for-controlled-evaluation",
+                    "relevance": "cross-source-bounded-lexical-candidate-ranking"
+                    if arm in ("context-relevance", "context-full")
+                    else "disabled-for-controlled-evaluation",
+                }],
+            })
+        summary = summarize_context_ablation(
+            records, tuple(CONTEXT_BENCHMARK_ARMS), ("edge",), 1,
+            kind="real_provider", complete_suite=True,
+        )
+        self.assertTrue(summary["ready_for_separate_heldout_review"])
+        self.assertFalse(summary["promotion_eligible"])
+        self.assertEqual(summary["fully_measured_variant_pairs"], 1)
+        records[1] = {**records[1], "status": "RUNNER_ERROR", "model_calls": None,
+                      "usage_measured": {}}
+        rejected = summarize_context_ablation(
+            records, tuple(CONTEXT_BENCHMARK_ARMS), ("edge",), 1,
+            kind="real_provider", complete_suite=True,
+        )
+        self.assertFalse(rejected["ready_for_separate_heldout_review"])
+        self.assertEqual(rejected["fully_measured_variant_pairs"], 0)
+
     # 不完整对照不可以当作全四机制，基线和路由组混用应在创建证据目录前拒绝。
     def test_context_ablation_rejects_mixed_arms_and_marks_incomplete(self):
         """两臂诊断只能产生 INCOMPLETE 配对，绝不能自动推荐发布。"""
