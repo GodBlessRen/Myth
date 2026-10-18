@@ -80,4 +80,4 @@ with MythRuntime(Path("./myth-operator-workspace")) as runtime:
 - 执行 `python -m unittest discover -s tests -p test_semantic_contract.py -v` 验证多来源冲突、CAS 幂等、scope、单位、类型和旧证据拒绝；发布需要在**同一 head SHA** 完成全量跨平台 CI、Browser 和 Release。
 - 真实 Provider、远端数据库适配器、时态查询、性能/Token 基准及语义正确率仍未在这个模块里得到验证。
 
-**下一步必须是基于固定任务的对照评测**：在真实结构化 Memory 问答中比较有/无显式 Mapping 的事实错误率、证据引用、token、p95 延迟与冷启动成本；按已存在的 Evaluation 与人工 Promote 协议决定未来扩展。
+**离线固定任务对照已经落地**：见 [Semantic Contract Evaluation](SEMANTIC_EVAL.md)。同一 JSON Pointer 的裸选择器与带 Evidence/约束的合同在 16 个预先固定 Oracle Case 上作配对验证；离线结果不是实际 LLM 质量，未来仍必须按独立 Provider A/B 补真实 tokens/质量/生产延迟。原计划中的：在真实结构化 Memory 问答中比较有/无显式 Mapping 的事实错误率、证据引用、token、p95 延迟与冷启动成本；按已存在的 Evaluation 与人工 Promote 协议决定未来扩展。

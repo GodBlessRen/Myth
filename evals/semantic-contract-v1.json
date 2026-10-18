@@ -1,0 +1,420 @@
+{
+  "suite_id": "semantic-contract-offline-ablation",
+  "version": 1,
+  "principle": "Frozen offline deterministic JSON-selector ablation: bare selector vs same selector plus Memory evidence revisions, scope, type, unit and constraints. No LLM, no semantic discovery, no held-out promotion claim.",
+  "cases": [
+    {
+      "case_id": "s01-scalar",
+      "category": "semantic_contract",
+      "input": {
+        "term_id": "fixture.s01_scalar",
+        "documents": [
+          {
+            "net": 150.25
+          }
+        ],
+        "pointer": "/net",
+        "aggregation": "none",
+        "value_type": "number",
+        "unit": null,
+        "unit_pointer": null,
+        "constraints": [],
+        "mutation": "none"
+      },
+      "expected": {
+        "status": "resolved",
+        "value": 150.25
+      },
+      "safety_critical": false
+    },
+    {
+      "case_id": "s02-sum",
+      "category": "semantic_contract",
+      "input": {
+        "term_id": "fixture.s02_sum",
+        "documents": [
+          {
+            "net": [
+              2,
+              3,
+              4
+            ]
+          }
+        ],
+        "pointer": "/net",
+        "aggregation": "sum",
+        "value_type": "number",
+        "unit": null,
+        "unit_pointer": null,
+        "constraints": [],
+        "mutation": "none"
+      },
+      "expected": {
+        "status": "resolved",
+        "value": 9
+      },
+      "safety_critical": false
+    },
+    {
+      "case_id": "s03-average",
+      "category": "semantic_contract",
+      "input": {
+        "term_id": "fixture.s03_average",
+        "documents": [
+          {
+            "net": [
+              2,
+              3,
+              4
+            ]
+          }
+        ],
+        "pointer": "/net",
+        "aggregation": "avg",
+        "value_type": "number",
+        "unit": null,
+        "unit_pointer": null,
+        "constraints": [],
+        "mutation": "none"
+      },
+      "expected": {
+        "status": "resolved",
+        "value": 3.0
+      },
+      "safety_critical": false
+    },
+    {
+      "case_id": "s04-count",
+      "category": "semantic_contract",
+      "input": {
+        "term_id": "fixture.s04_count",
+        "documents": [
+          {
+            "net": [
+              "alpha",
+              "beta",
+              "gamma"
+            ]
+          }
+        ],
+        "pointer": "/net",
+        "aggregation": "count",
+        "value_type": "number",
+        "unit": null,
+        "unit_pointer": null,
+        "constraints": [],
+        "mutation": "none"
+      },
+      "expected": {
+        "status": "resolved",
+        "value": 3
+      },
+      "safety_critical": false
+    },
+    {
+      "case_id": "s05-string-enum",
+      "category": "semantic_contract",
+      "input": {
+        "term_id": "fixture.s05_string_enum",
+        "documents": [
+          {
+            "net": "accepted"
+          }
+        ],
+        "pointer": "/net",
+        "aggregation": "none",
+        "value_type": "string",
+        "unit": null,
+        "unit_pointer": null,
+        "constraints": [
+          {
+            "kind": "enum",
+            "values": [
+              "accepted",
+              "pending"
+            ]
+          }
+        ],
+        "mutation": "none"
+      },
+      "expected": {
+        "status": "resolved",
+        "value": "accepted"
+      },
+      "safety_critical": false
+    },
+    {
+      "case_id": "s06-boolean-enum",
+      "category": "semantic_contract",
+      "input": {
+        "term_id": "fixture.s06_boolean_enum",
+        "documents": [
+          {
+            "net": true
+          }
+        ],
+        "pointer": "/net",
+        "aggregation": "none",
+        "value_type": "boolean",
+        "unit": null,
+        "unit_pointer": null,
+        "constraints": [
+          {
+            "kind": "enum",
+            "values": [
+              true
+            ]
+          }
+        ],
+        "mutation": "none"
+      },
+      "expected": {
+        "status": "resolved",
+        "value": true
+      },
+      "safety_critical": false
+    },
+    {
+      "case_id": "s07-below-min",
+      "category": "semantic_contract",
+      "input": {
+        "term_id": "fixture.s07_below_min",
+        "documents": [
+          {
+            "net": -1
+          }
+        ],
+        "pointer": "/net",
+        "aggregation": "none",
+        "value_type": "number",
+        "unit": null,
+        "unit_pointer": null,
+        "constraints": [
+          {
+            "kind": "min",
+            "value": 0
+          }
+        ],
+        "mutation": "none"
+      },
+      "expected": {
+        "status": "constraint_violation"
+      },
+      "safety_critical": true
+    },
+    {
+      "case_id": "s08-above-max",
+      "category": "semantic_contract",
+      "input": {
+        "term_id": "fixture.s08_above_max",
+        "documents": [
+          {
+            "net": 101
+          }
+        ],
+        "pointer": "/net",
+        "aggregation": "none",
+        "value_type": "number",
+        "unit": null,
+        "unit_pointer": null,
+        "constraints": [
+          {
+            "kind": "max",
+            "value": 100
+          }
+        ],
+        "mutation": "none"
+      },
+      "expected": {
+        "status": "constraint_violation"
+      },
+      "safety_critical": true
+    },
+    {
+      "case_id": "s09-unit-mismatch",
+      "category": "semantic_contract",
+      "input": {
+        "term_id": "fixture.s09_unit_mismatch",
+        "documents": [
+          {
+            "net": 20,
+            "currency": "EUR"
+          }
+        ],
+        "pointer": "/net",
+        "aggregation": "none",
+        "value_type": "number",
+        "unit": "USD",
+        "unit_pointer": "/currency",
+        "constraints": [],
+        "mutation": "none"
+      },
+      "expected": {
+        "status": "invalid"
+      },
+      "safety_critical": true
+    },
+    {
+      "case_id": "s10-boolean-as-number",
+      "category": "semantic_contract",
+      "input": {
+        "term_id": "fixture.s10_boolean_as_number",
+        "documents": [
+          {
+            "net": true
+          }
+        ],
+        "pointer": "/net",
+        "aggregation": "none",
+        "value_type": "number",
+        "unit": null,
+        "unit_pointer": null,
+        "constraints": [],
+        "mutation": "none"
+      },
+      "expected": {
+        "status": "constraint_violation"
+      },
+      "safety_critical": true
+    },
+    {
+      "case_id": "s11-source-conflict",
+      "category": "semantic_contract",
+      "input": {
+        "term_id": "fixture.s11_source_conflict",
+        "documents": [
+          {
+            "net": 10
+          },
+          {
+            "net": 11
+          }
+        ],
+        "pointer": "/net",
+        "aggregation": "none",
+        "value_type": "number",
+        "unit": null,
+        "unit_pointer": null,
+        "constraints": [],
+        "mutation": "none"
+      },
+      "expected": {
+        "status": "conflict"
+      },
+      "safety_critical": true
+    },
+    {
+      "case_id": "s12-source-updated",
+      "category": "semantic_contract",
+      "input": {
+        "term_id": "fixture.s12_source_updated",
+        "documents": [
+          {
+            "net": 9
+          }
+        ],
+        "pointer": "/net",
+        "aggregation": "none",
+        "value_type": "number",
+        "unit": null,
+        "unit_pointer": null,
+        "constraints": [],
+        "mutation": "revise_source"
+      },
+      "expected": {
+        "status": "stale"
+      },
+      "safety_critical": true
+    },
+    {
+      "case_id": "s13-source-revoked",
+      "category": "semantic_contract",
+      "input": {
+        "term_id": "fixture.s13_source_revoked",
+        "documents": [
+          {
+            "net": 9
+          }
+        ],
+        "pointer": "/net",
+        "aggregation": "none",
+        "value_type": "number",
+        "unit": null,
+        "unit_pointer": null,
+        "constraints": [],
+        "mutation": "revoke_source"
+      },
+      "expected": {
+        "status": "stale"
+      },
+      "safety_critical": true
+    },
+    {
+      "case_id": "s14-ancestor-revoked",
+      "category": "semantic_contract",
+      "input": {
+        "term_id": "fixture.s14_ancestor_revoked",
+        "documents": [
+          {
+            "net": 9
+          }
+        ],
+        "pointer": "/net",
+        "aggregation": "none",
+        "value_type": "number",
+        "unit": null,
+        "unit_pointer": null,
+        "constraints": [],
+        "mutation": "revoke_ancestor"
+      },
+      "expected": {
+        "status": "stale"
+      },
+      "safety_critical": true
+    },
+    {
+      "case_id": "s15-missing-pointer",
+      "category": "semantic_contract",
+      "input": {
+        "term_id": "fixture.s15_missing_pointer",
+        "documents": [
+          {
+            "other": 1
+          }
+        ],
+        "pointer": "/net",
+        "aggregation": "none",
+        "value_type": "number",
+        "unit": null,
+        "unit_pointer": null,
+        "constraints": [],
+        "mutation": "none"
+      },
+      "expected": {
+        "status": "invalid"
+      },
+      "safety_critical": true
+    },
+    {
+      "case_id": "s16-malformed-source",
+      "category": "semantic_contract",
+      "input": {
+        "term_id": "fixture.s16_malformed_source",
+        "documents": [
+          "{\"net\":"
+        ],
+        "pointer": "/net",
+        "aggregation": "none",
+        "value_type": "number",
+        "unit": null,
+        "unit_pointer": null,
+        "constraints": [],
+        "mutation": "none"
+      },
+      "expected": {
+        "status": "invalid"
+      },
+      "safety_critical": true
+    }
+  ]
+}
