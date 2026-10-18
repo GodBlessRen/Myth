@@ -101,6 +101,10 @@ class SqliteMemoryStore:
         self.store = runtime.store
         # vector_index：可选派生索引；Memory 行、scope、revision、active 才是权威事实。
         self.vector_index = vector_index
+        # 本进程索引缓存只代表某个 Adapter 已覆盖的 SQLite 变化水位；进程重启必须重新核对。
+        self._vector_backfilled_adapter = None
+        # _vector_backfilled_change_seq：索引已成功覆盖的权威变化水位，异常和撤销不能冒充健康进度。
+        self._vector_backfilled_change_seq: int | None = None
         self.store.ensure_schema(SCHEMA)
     # 校验 kind/text/source/scope/fact_level/evidence 后按来源更新或创建；revision 与证据快照同事务提交。
     def remember(
@@ -616,6 +620,8 @@ class SqliteMemoryStore:
 
     # 显式重建 active Memory 的派生向量索引；安装/迁移后可调用，失败不改变任何记忆事实。
     def rebuild_vector_index(self) -> dict:
+        # 不在远端 I/O 期间持 SQLite 事务；冻结扫描之前的水位，后续并发写入会强制下一次重新核对。
+        observed_change_seq = self.current_change_seq()
         rows = self.store.db.execute(
             "SELECT * FROM workspace_memories WHERE active=1 ORDER BY rowid"
         ).fetchall()
@@ -630,6 +636,10 @@ class SqliteMemoryStore:
             result = self._sync_vector_record(dict(row))
             synced += int(result.get("synced") or 0)
             degraded = degraded or bool(result.get("degraded"))
+        if not degraded:
+            # 标记只能在完整且无已知退化的补建后推进；写端产生的新水位下次仍会触发补建。
+            self._vector_backfilled_adapter = self.vector_index
+            self._vector_backfilled_change_seq = observed_change_seq
         return {
             "configured": True,
             "memories": seen,
@@ -827,9 +837,19 @@ class SqliteMemoryStore:
                 item.value if isinstance(item, MemoryKind) else MemoryKind(str(item)).value
                 for item in kinds
             }
+        backfill_cached = False
+        backfill_degraded = False
         try:
-            # 首次启用 Milvus 时补齐已有 active Memory；source revision 让更新项重新 upsert。
-            self.rebuild_vector_index()
+            # 同一 Adapter 且 SQLite 无新变化时跳过全库补建；变更/进程重启/后端失健康则重新核对。
+            index_status = self.vector_index.status()
+            backfill_cached = (
+                self._vector_backfilled_adapter is self.vector_index
+                and self._vector_backfilled_change_seq == self.current_change_seq()
+                and bool(index_status.get("healthy", True))
+            )
+            if not backfill_cached:
+                backfill = self.rebuild_vector_index()
+                backfill_degraded = bool(backfill.get("degraded", False))
             hits = self.vector_index.search_memories(
                 str(query), limit=max(32, int(limit) * 8)
             )
@@ -897,8 +917,9 @@ class SqliteMemoryStore:
                 "vector_candidates": len(hits),
                 "vector_hydrated": len(vector_rows),
                 "vector_stale_rejected": stale_rejected,
-                "vector_status": "ready",
-                "degraded": False,
+                "vector_status": "backfill_degraded" if backfill_degraded else "ready",
+                "vector_backfill_cached": backfill_cached,
+                "degraded": backfill_degraded,
             },
         }
 
