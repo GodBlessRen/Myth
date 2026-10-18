@@ -222,3 +222,83 @@ def evaluate_freshness(
         "external_evidence": len(rows) - len(linked),
         "stale_sources": stale_sources,
     }
+
+# normalize_memory_actions：限制批量提案的总量、操作形状和单聚合重复写；模型提案不能自己升级 fact_level。
+def normalize_memory_actions(actions: list[Mapping[str, Any]] | tuple[Mapping[str, Any], ...]) -> tuple[dict[str, Any], ...]:
+    """把 ADD/UPDATE/DELETE 转成可核对意图；任何未知字段和越权事实等级在进入事务前拒绝。"""
+    from .memory import MemoryKind
+
+    # 步骤一：有界列表一次性校验；生成器不能先消费无限量输入再做安全判定。
+    if not isinstance(actions, (list, tuple)) or len(actions) > 16:
+        raise MemoryDeltaError("memory actions must be a bounded list of at most 16 entries")
+    normalized: list[dict[str, Any]] = []
+    touched: set[tuple[str, ...]] = set()
+    for index, raw in enumerate(actions):
+        if not isinstance(raw, Mapping):
+            raise MemoryDeltaError(f"memory action {index} must be an object")
+        op = raw.get("op")
+        if op == "ADD":
+            # ADD 只创建 context 级来源；user_asserted/verified 必须走更严格的明确用户/验收流程。
+            allowed = {"op", "kind", "text", "source_ref", "scope_type", "scope_id", "evidence"}
+            if not {"op", "kind", "text", "source_ref"} <= set(raw) or set(raw) - allowed:
+                raise MemoryDeltaError(f"memory ADD {index} has missing or unsupported fields")
+            try:
+                kind = MemoryKind(raw["kind"]).value
+            except (ValueError, TypeError):
+                raise MemoryDeltaError(f"memory ADD {index} has unsupported kind") from None
+            text = _text_value(raw["text"])
+            source = raw["source_ref"]
+            if not isinstance(source, str) or not 1 <= len(source.strip()) <= 500:
+                raise MemoryDeltaError(f"memory ADD {index} requires a stable source_ref")
+            source = source.strip()
+            scope = raw.get("scope_type", "global")
+            if scope not in {"global", "project", "session"}:
+                raise MemoryDeltaError(f"memory ADD {index} has unsupported scope")
+            scope_id = raw.get("scope_id")
+            if scope == "global":
+                if scope_id is not None:
+                    raise MemoryDeltaError("global memory cannot carry a scope_id")
+            elif not isinstance(scope_id, str) or not 1 <= len(scope_id.strip()) <= 200:
+                raise MemoryDeltaError(f"memory ADD {index} requires scope_id")
+            else:
+                scope_id = scope_id.strip()
+            evidence = raw.get("evidence")
+            if evidence is not None and (not isinstance(evidence, list) or len(evidence) > 8):
+                raise MemoryDeltaError("memory ADD evidence must be a bounded list of at most 8 entries")
+            payload = {
+                "op": "ADD", "kind": kind, "text": text, "source_ref": source,
+                "scope_type": scope, "scope_id": scope_id,
+                "evidence": normalize_evidence_set(evidence, default_ref=source),
+            }
+            identity = ("source", kind, source)
+        elif op in {"UPDATE", "DELETE"}:
+            required = (
+                {"op", "memory_id", "expected_revision", "operations"}
+                if op == "UPDATE" else {"op", "memory_id", "expected_revision"}
+            )
+            if set(raw) != required:
+                raise MemoryDeltaError(f"memory {op} {index} requires exactly {sorted(required)}")
+            memory_id = raw["memory_id"]
+            revision = raw["expected_revision"]
+            if not isinstance(memory_id, str) or not 1 <= len(memory_id.strip()) <= 200:
+                raise MemoryDeltaError(f"memory {op} {index} requires memory_id")
+            if type(revision) is not int or revision < 1:
+                raise MemoryDeltaError(f"memory {op} {index} requires a positive integer expected_revision")
+            payload = {
+                "op": op, "memory_id": memory_id.strip(), "expected_revision": revision,
+            }
+            if op == "UPDATE":
+                operations = raw["operations"]
+                if not isinstance(operations, list) or not 1 <= len(operations) <= 16:
+                    raise MemoryDeltaError("memory UPDATE operations must be a bounded nonempty list")
+                payload["operations"] = normalize_delta_operations(operations)
+            identity = ("memory", memory_id.strip())
+        else:
+            raise MemoryDeltaError(f"unsupported memory action {index}")
+
+        # 步骤二：同一 batch 禁止多次写同一身份，免得调用方在不知结果 revision 时猜测执行顺序。
+        if identity in touched:
+            raise MemoryDeltaError(f"duplicate memory action identity at index {index}")
+        touched.add(identity)
+        normalized.append(payload)
+    return tuple(normalized)
