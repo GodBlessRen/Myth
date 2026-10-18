@@ -347,10 +347,41 @@ def summarize_context_ablation(trials, arms, case_ids, repeats, *, kind, complet
         any(value is False for value in (pair.get("mechanism_config_verified_in_requests") or {}).values())
         for pair in pairs if pair["status"] == "PAIRED"
     )
+    # 四种 Arm 都要有真实可归属的模型机会/计量；只核对 baseline/full 会漏掉
+    # causal-only 或 relevance-only 的 Runner ERROR，从而误报可晋级。
+    variant_measurement_pairs = 0
+    context_activation_pairs = 0
+    for case_id in case_ids:
+        for repeat in range(1, repeats + 1):
+            group = by_block.get((case_id, repeat)) or {}
+            if set(group) != expected:
+                continue
+            valid = all(
+                trial.get("status") != "RUNNER_ERROR"
+                and type(trial.get("model_calls")) is int
+                and trial["model_calls"] >= 0
+                and all(
+                    type((trial.get("usage_measured") or {}).get(meter)) is int
+                    and trial["usage_measured"][meter] >= 0
+                    for meter in metric_names
+                )
+                and (
+                    trial["model_calls"] == 0
+                    or isinstance(trial.get("context_activation"), list)
+                    and len(trial["context_activation"]) == trial["model_calls"]
+                )
+                for trial in group.values()
+            )
+            if valid:
+                variant_measurement_pairs += 1
+                if any(group[arm]["model_calls"] > 0 for arm in expected):
+                    context_activation_pairs += 1
     ready = (
         kind == "real_provider"
         and evidence_full and metrics_full and no_quality_regression
         and no_safety_regression and activation_mismatch == 0
+        and variant_measurement_pairs == expected_blocks
+        and context_activation_pairs > 0
         and all(delta <= 0 for delta in deltas)
         and any(delta < 0 for delta in deltas)
     )
@@ -363,6 +394,8 @@ def summarize_context_ablation(trials, arms, case_ids, repeats, *, kind, complet
         "safety": dict(sorted(safety.items())),
         "cost": cost_summary,
         "activation_mismatch_count": activation_mismatch,
+        "fully_measured_variant_pairs": variant_measurement_pairs,
+        "context_activation_pairs": context_activation_pairs,
         "pairs": pairs,
         "ready_for_separate_heldout_review": ready,
         "promotion_eligible": False,
