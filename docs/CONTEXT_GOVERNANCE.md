@@ -31,7 +31,7 @@ ModelRequest + Context Report   [bounded projection, not permission]
 - 来源明确：活动 `state`、`result.failure`、`result.status`、`result.results` 与委派 `handoff.depends_on` 来自本轮已持久化/已核对的步骤投影。
 - 显式依赖来自已记录的决定或交接合同。缺失的上游身份列在 `causal_missing_dependencies`，不据此编造前驱。
 - TICKETED/UNKNOWN/PENDING/BLOCKED/INCONCLUSIVE 作为开放风险始终保留；已知 FAILED/ERROR/REJECTED/CANCELLED 作为历史问题只保留最近 8 条导航。较旧的问题不是“已修复”，只是离开 provider-visible 工作集，完整历史仍保存在原仓储。被活跃风险显式依赖的历史问题不会因为年代久远而退出闭包。
-- 若旧工具步骤的结果仍写着 UNKNOWN，但同 Run 的工具操作账本已具有 RESOLVED 和持久结果，投影标记为 `historical_tool_report:UNKNOWN` 和 `runtime_tool:RESOLVED`；这只解除效果是否已结算的警报，**不代表语义验收成功**，也不用于清除并行子委派的独立 UNKNOWN。
+- 若旧工具步骤的结果仍写着 UNKNOWN，但同 Run 的工具操作账本已具有 RESOLVED、持久结果，且结果状态被核对为已知终态（未知或不认识的状态不能用于解除警报），投影标记为 `historical_tool_report:UNKNOWN` 和 `runtime_tool:RESOLVED`；这只解除效果是否已结算的警报，**不代表语义验收成功**，也不用于清除并行子委派的独立 UNKNOWN。
 - 完整 Observation 继续使用现有 `observation.read` 只能按 decision_id 精确回读**已结算**的工具 Observation；未结算 UNKNOWN 必须依据原 Runtime Ticket/Receipt 核对，不能凭摘要触发回放。Context Guard 不重新保存大对象、不重放外部效果。
 - 无前端/供应商变化可以扩大 Capability、Ticket、作用域或完成验收。
 
