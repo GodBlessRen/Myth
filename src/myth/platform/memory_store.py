@@ -9,7 +9,7 @@ import re
 import uuid
 from typing import Any, Iterable, Mapping
 
-from ..domain import digest_json
+from ..domain import IdentityConflict, digest_json
 from .continuity import CURRENT_FACTS_POLICY
 from .memory import MemoryKind
 from .memory_lifecycle import (
@@ -19,6 +19,7 @@ from .memory_lifecycle import (
     evidence_json,
     normalize_delta_operations,
     normalize_evidence_set,
+    normalize_memory_actions,
 )
 from .retrieval import reciprocal_rank_scores
 from .memory_recall import build_recall_plan, parse_memory_ref, rank_probe_rows
@@ -389,42 +390,43 @@ class SqliteMemoryStore:
             current[source_id] = None if row is None else dict(row)
         return evaluate_freshness(evidence, current)
 
-    # apply_delta：LLM/策略只能提出受约束操作；Runtime 在 expected_revision 上原子校验并应用，拒绝整批部分写。
+    # apply_delta：CAS 与 revision/evidence/change_seq 在同一 SQLite 事务内提交；内部协作者负责最外层向量同步。
     def apply_delta(
         self,
         memory_id: str,
         operations: Iterable[Mapping[str, Any]],
         *,
         expected_revision: int,
+        _db=None,
     ) -> dict[str, Any]:
+        """按冻结 revision 更新正文/证据；失败整项回滚，内部事务不提前发布向量副作用。"""
+        if type(expected_revision) is not int or expected_revision < 1:
+            raise MemoryDeltaError("memory delta requires a positive integer expected_revision")
         normalized = normalize_delta_operations(operations)
-        # 空操作不推进revision；非空提案先在事务中核对expected_revision与active。
-        # 全部证据操作合法才一起写正文、证据、历史snapshot和change水位；失败回滚，向量同步在提交后。
-        if not normalized:
-            return self.get(memory_id)
-
-        with self.store.tx() as db:
+        # 步骤一：即使空操作，也在事务内核对身份和预期 revision；不能用陈旧快照伪装无变化成功。
+        with self.store.transaction_scope(_db) as db:
             row = db.execute(
-                "SELECT * FROM workspace_memories WHERE memory_id=?", (memory_id,)
+                "SELECT * FROM workspace_memories WHERE memory_id=?", (memory_id,),
             ).fetchone()
             if row is None:
                 raise KeyError(memory_id)
-            if int(row["revision"]) != int(expected_revision):
+            if int(row["revision"]) != expected_revision:
                 raise MemoryDeltaError(
                     "memory delta expected_revision does not match current revision"
                 )
             if not bool(row["active"]):
                 raise MemoryDeltaError("memory delta cannot mutate a revoked memory")
+            if not normalized:
+                return dict(row)
 
             current_evidence = self._evidence_rows(db, memory_id)
             by_ref = {str(item["evidence_ref"]): dict(item) for item in current_evidence}
             new_text = apply_text_delta(str(row["text"]), normalized)
 
+            # 步骤二：证据增删以证据身份为键，先校验所有操作，再一次性替换当前快照。
             for operation in normalized:
                 if operation["op"] == "add_evidence":
-                    prepared = self._prepare_evidence(
-                        db, [operation["evidence"]]
-                    )[0]
+                    prepared = self._prepare_evidence(db, [operation["evidence"]])[0]
                     ref = str(prepared["evidence_ref"])
                     if ref in by_ref:
                         raise MemoryDeltaError(f"memory evidence already exists: {ref}")
@@ -435,21 +437,120 @@ class SqliteMemoryStore:
                         raise MemoryDeltaError(f"memory evidence does not exist: {ref}")
                     del by_ref[ref]
 
+            # 步骤三：正文、Evidence、immutable revision 和变化水位必须同生共死。
             revision = int(row["revision"]) + 1
             db.execute(
                 "UPDATE workspace_memories SET text=?,revision=?,updated_at=CURRENT_TIMESTAMP "
                 "WHERE memory_id=?",
                 (new_text, revision, memory_id),
             )
-            self._replace_evidence(
-                db, memory_id, [by_ref[key] for key in sorted(by_ref)]
-            )
+            self._replace_evidence(db, memory_id, [by_ref[key] for key in sorted(by_ref)])
             self._snapshot_revision(db, memory_id)
             self._record_change(db, memory_id)
 
         record = self.get(memory_id)
-        self._sync_vector_record(record)
+        if _db is None:
+            self._sync_vector_record(record)
         return record
+
+    # _check_action_evidence_scope：防止批处理把私有来源嵌入更宽的 Memory 可见范围；本地权威来源才可被引用。
+    def _check_action_evidence_scope(self, db, target: Mapping[str, Any], evidence) -> None:
+        """外部 evidence_ref 不声称可验证的作用域；引用 Memory 时必须全局或同一精确范围。"""
+        for entry in evidence:
+            source_id = entry.get("source_memory_id")
+            if not source_id:
+                continue
+            row = db.execute(
+                "SELECT scope_type,scope_id,active FROM workspace_memories WHERE memory_id=?",
+                (source_id,),
+            ).fetchone()
+            if row is None or not bool(row["active"]):
+                raise MemoryDeltaError("memory action references unavailable source memory")
+            if row["scope_type"] != "global" and (
+                row["scope_type"] != target["scope_type"]
+                or row["scope_id"] != target["scope_id"]
+            ):
+                raise MemoryDeltaError("memory action evidence crosses a narrower scope")
+
+    # apply_actions：ADD/UPDATE/DELETE 组成单个持久提交；CAS 防重放，冲突要求 reconcile 而不是盲重试。
+    def apply_actions(
+        self,
+        actions: list[Mapping[str, Any]] | tuple[Mapping[str, Any], ...],
+    ) -> dict[str, Any]:
+        """一次提交最多 16 个 Memory Action；结果只能说明本地持久状态，不能授权模型/工具效果。"""
+        normalized = normalize_memory_actions(actions)
+        if not normalized:
+            return {"status": "NOOP", "count": 0, "changes": [], "change_seq": self.current_change_seq()}
+        changes = []
+        # 步骤一：同连接 BEGIN IMMEDIATE 保护 ADD 唯一性、UPDATE/DELETE 版本与全批回滚。
+        with self.store.tx() as db:
+            for item in normalized:
+                op = item["op"]
+                if op == "ADD":
+                    conflict = db.execute(
+                        "SELECT memory_id FROM workspace_memories WHERE kind=? AND source_ref=?",
+                        (item["kind"], item["source_ref"]),
+                    ).fetchone()
+                    if conflict is not None:
+                        raise MemoryDeltaError("memory ADD identity already exists; reconcile before retry")
+                    self._check_action_evidence_scope(db, item, item["evidence"])
+                    record = self.remember(
+                        kind=item["kind"], text=item["text"],
+                        source_ref=item["source_ref"],
+                        scope_type=item["scope_type"], scope_id=item["scope_id"],
+                        fact_level="context", evidence=item["evidence"], _db=db,
+                    )
+                elif op == "UPDATE":
+                    row = db.execute(
+                        "SELECT scope_type,scope_id FROM workspace_memories WHERE memory_id=?",
+                        (item["memory_id"],),
+                    ).fetchone()
+                    if row is None:
+                        raise KeyError(item["memory_id"])
+                    linked = (
+                        operation["evidence"]
+                        for operation in item["operations"]
+                        if operation["op"] == "add_evidence"
+                    )
+                    self._check_action_evidence_scope(db, row, linked)
+                    record = self.apply_delta(
+                        item["memory_id"], item["operations"],
+                        expected_revision=item["expected_revision"], _db=db,
+                    )
+                else:
+                    record = self.revoke(
+                        item["memory_id"],
+                        expected_revision=item["expected_revision"], _db=db,
+                    )
+                changes.append({
+                    "op": op, "memory_id": record["memory_id"],
+                    "revision": int(record["revision"]), "active": bool(record["active"]),
+                })
+            seq = self.current_change_seq()
+
+        # 步骤二：提交后再同步可重建的向量投影；任何外部索引异常不得重放已经成功的 SQLite 决定。
+        projections = []
+        for entry in changes:
+            if not entry["active"]:
+                continue
+            record = self.get(entry["memory_id"])
+            try:
+                result = self._sync_vector_record(record)
+            except Exception as exc:
+                result = {
+                    "configured": self.vector_index is not None,
+                    "degraded": True, "reason": type(exc).__name__,
+                }
+            projections.append({
+                "memory_id": entry["memory_id"], **result,
+            })
+        return {
+            "status": "COMMITTED",
+            "count": len(changes),
+            "changes": changes,
+            "change_seq": seq,
+            "vector_projections": projections,
+        }
 
     # 将当前 active revision 幂等投影到 Milvus；正文只用于 embedding，查询结果仍需回 SQLite hydration。
     def _sync_vector_record(self, record: dict) -> dict:
@@ -998,10 +1099,24 @@ class SqliteMemoryStore:
             session_id=session_id,
         )["memories"]
 
-    # 撤销只改变未来可见性并形成新的 immutable revision；依赖它的 Observation 将自动变 stale。
-    def revoke(self, memory_id: str) -> dict:
-        self.get(memory_id)
-        with self.store.tx() as db:
+    # revoke：DELETE 只产生新 tombstone revision，旧证据/历史不销毁；批处理可要求精确 expected_revision。
+    def revoke(self, memory_id: str, *, expected_revision: int | None = None, _db=None) -> dict:
+        """在本地权威事务内撤销未来可见性；显式 CAS 冲突不能吞掉或冒充成功。"""
+        if expected_revision is not None and (type(expected_revision) is not int or expected_revision < 1):
+            raise MemoryDeltaError("memory revoke requires a positive integer expected_revision")
+        # 确认当前 revision、active 与撤销写入均在同一事务内，避免与另一连接竞争。
+        with self.store.transaction_scope(_db) as db:
+            row = db.execute(
+                "SELECT * FROM workspace_memories WHERE memory_id=?", (memory_id,),
+            ).fetchone()
+            if row is None:
+                raise KeyError(memory_id)
+            if expected_revision is not None and int(row["revision"]) != expected_revision:
+                raise MemoryDeltaError("memory revoke expected_revision does not match current revision")
+            if not bool(row["active"]):
+                if expected_revision is not None:
+                    raise MemoryDeltaError("memory was already revoked; reconcile before retry")
+                return dict(row)
             db.execute(
                 "UPDATE workspace_memories SET active=0,revision=revision+1,"
                 "updated_at=CURRENT_TIMESTAMP WHERE memory_id=?",
