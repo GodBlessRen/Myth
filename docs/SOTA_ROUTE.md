@@ -177,7 +177,7 @@ Promote / Rollback
 
 **SOTA Route 负责发现。Evolution 负责证明和发布。**
 
-一个偶然的漂亮 Run 不会自动改变生产策略。
+一个偶然的漂亮 Run 不会自动改变生产策略。Evolution 进一步把拟发布候选与评测时的逐题账本、冻结策略和成本模型做 **Evidence Seal** 绑定：批准后若评测内容变化，即便重新计算后字段仍然自洽，也必须重新评测；Promote 不接受未经封存的旧资格。摘要只保证本地记录的内容一致性，不能冒充独立验收来源或多次实验的统计显著性。
 
 ## Historical Replay World
 
