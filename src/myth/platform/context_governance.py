@@ -272,6 +272,8 @@ def build_causal_guard(
         "recent_issue_count": len(recent),
         "archived_issue_count": len(historical),
         "archived_issue_digest": hashlib.sha256(archived_json.encode("utf-8")).hexdigest() if historical else None,
+        # 仅供同一次 Context 编译重排原活动；不会进入模型、事件或对外治理报告。
+        "archived_issue_sources": [row["source"] for row in historical],
         "records": records,
         "missing_declared_dependencies": sorted(missing),
     }
