@@ -80,6 +80,7 @@ def _critical_labels(activity: Mapping[str, Any]) -> tuple[str, ...]:
 # 只提炼需保护的执行事实及其显式前驱；时间先后不自动推断成因果边。
 def build_causal_guard(
     activities: Sequence[Mapping[str, Any]],
+    runtime_liabilities: Mapping[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     """返回有界字段的关键依赖导航；无关键状态时不占用额外 Context。"""
     nodes: list[dict[str, Any]] = []
@@ -127,6 +128,68 @@ def build_causal_guard(
             if candidate not in by_decision:
                 by_decision[candidate] = index
         nodes.append(row)
+
+    # Runtime 未结算操作与预算不一定已经成为步骤 Result；它们由同 Run 的权威账本投影。
+    # 身份损坏时拒绝编译，不能因渲染格式错误而静默隐藏一条 UNKNOWN。
+    if isinstance(runtime_liabilities, Mapping):
+        for kind, key, ref_key, identity_field in (
+            ("tool", "operations", "decision_id", "decision_id"),
+            ("model", "models", "model_attempt_id", "model_attempt_id"),
+        ):
+            rows = runtime_liabilities.get(key) or []
+            if not isinstance(rows, (list, tuple)):
+                raise ValueError("invalid runtime liability collection")
+            for row in rows:
+                if not isinstance(row, Mapping) or row.get("state") not in {"TICKETED", "UNKNOWN"}:
+                    raise ValueError("invalid unresolved Runtime state")
+                identity = _reference(row.get(ref_key))
+                if identity is None:
+                    raise ValueError("unrepresentable unresolved Runtime identity")
+                node = {
+                    "source": "runtime-" + kind + ":" + identity,
+                    "decision_id": identity if kind == "tool" else None,
+                    "model_attempt_id": identity if kind == "model" else None,
+                    "capability": _reference(row.get("capability")) if kind == "tool" else None,
+                    "ticket_id": _reference(row.get("ticket_id")) if kind == "tool" else None,
+                    "reported_outcomes": ["runtime_" + kind + ":" + str(row["state"])],
+                    "declared_dependencies": [],
+                    "evidence_ref": None,
+                }
+                index = len(nodes)
+                nodes.append(node)
+                critical.add(index)
+                if kind == "tool" and identity not in by_decision:
+                    by_decision[identity] = index
+        cursor = runtime_liabilities.get("cursor")
+        if isinstance(cursor, Mapping) and (
+            cursor.get("recovery_state") == "RECONCILE"
+            or cursor.get("phase") == "OUTCOME_UNKNOWN"
+        ):
+            nodes.append({
+                "source": "runtime-cursor", "decision_id": None,
+                "reported_outcomes": ["runtime_cursor:RECONCILE"],
+                "declared_dependencies": [], "evidence_ref": None,
+                "checkpoint_step": cursor.get("checkpoint_step")
+                if type(cursor.get("checkpoint_step")) is int else None,
+            })
+            critical.add(len(nodes) - 1)
+        holds = runtime_liabilities.get("unknown_held") or []
+        if not isinstance(holds, (list, tuple)):
+            raise ValueError("invalid Runtime budget holds")
+        for hold in holds:
+            if not isinstance(hold, Mapping):
+                raise ValueError("invalid Runtime budget hold")
+            meter = _reference(hold.get("meter"))
+            units = hold.get("units")
+            if meter is None or type(units) is not int or units <= 0:
+                raise ValueError("invalid Runtime unknown-held meter")
+            nodes.append({
+                "source": "runtime-budget:" + meter, "decision_id": None,
+                "reported_outcomes": ["runtime_budget:UNKNOWN_HELD"],
+                "meter": meter, "units": units,
+                "declared_dependencies": [], "evidence_ref": None,
+            })
+            critical.add(len(nodes) - 1)
     if not critical:
         return None
 
@@ -150,7 +213,7 @@ def build_causal_guard(
     ]
     return {
         "policy": "causal-context-guard-v1",
-        "source": "persisted-activity-projection",
+        "source": "persisted-activity-and-runtime-ledger-projection" if runtime_liabilities else "persisted-activity-projection",
         "semantics": "reported_outcomes_and_declared_dependencies_not_causal_proof",
         "critical_count": len(critical),
         "records": records,
