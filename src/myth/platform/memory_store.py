@@ -136,46 +136,49 @@ class SqliteMemoryStore:
         if level not in {"context", "user_asserted", "verified"}:
             raise ValueError("memory fact_level must be context/user_asserted/verified")
 
-        # 本地事务边界：正文、当前 evidence 与 immutable revision snapshot 一起提交；Memory Domain 内部可加入同连接活动事务。
+        # 所有 Memory 写入口共用此事务准入；不能只依赖模型批量 Action 的调用方校验。
         with self.store.transaction_scope(_db) as db:
             row = db.execute(
                 "SELECT * FROM workspace_memories WHERE kind=? AND source_ref=?",
                 (memory_kind.value, source),
             ).fetchone()
+            memory_id = str(row["memory_id"]) if row else f"mem_{uuid.uuid4().hex}"
+            revision = int(row["revision"]) + 1 if row else 1
+
+            # 修改作用域但未显式替换 Evidence 时，也要对仍保留的引用按目标范围复核。
+            prepared = (
+                self._prepare_evidence(db, evidence, default_ref=source)
+                if evidence is not None or row is None
+                else self._evidence_rows(db, memory_id)
+            )
+            self._check_action_evidence_scope(
+                db,
+                {"memory_id": memory_id, "scope_type": scope, "scope_id": scope_value},
+                prepared,
+            )
             if row:
-                revision = int(row["revision"]) + 1
-                memory_id = str(row["memory_id"])
                 db.execute(
                     "UPDATE workspace_memories SET text=?,scope_type=?,scope_id=?,fact_level=?,"
                     "revision=?,active=1,updated_at=CURRENT_TIMESTAMP WHERE memory_id=?",
                     (value, scope, scope_value, level, revision, memory_id),
                 )
                 if evidence is not None:
-                    prepared = self._prepare_evidence(db, evidence, default_ref=source)
                     self._replace_evidence(db, memory_id, prepared)
             else:
-                memory_id = f"mem_{uuid.uuid4().hex}"
-                revision = 1
                 db.execute(
                     "INSERT INTO workspace_memories(memory_id,kind,text,source_ref,scope_type,scope_id,fact_level) "
                     "VALUES (?,?,?,?,?,?,?)",
-                    (
-                        memory_id,
-                        memory_kind.value,
-                        value,
-                        source,
-                        scope,
-                        scope_value,
-                        level,
-                    ),
+                    (memory_id, memory_kind.value, value, source, scope, scope_value, level),
                 )
-                prepared = self._prepare_evidence(db, evidence, default_ref=source)
                 self._replace_evidence(db, memory_id, prepared)
 
+            # 持久提交前验证整个支持图；多跳循环、旧 revision 或深度超限统一回滚。
+            if self.freshness(memory_id)["is_stale"]:
+                raise MemoryDeltaError("memory evidence support closure is invalid")
             self._snapshot_revision(db, memory_id)
             self._record_change(db, memory_id)
-            # 迁移作用域既移入新范围，也移出旧范围；两边的派生视图都必须失效。
             if row and (row["scope_type"], row["scope_id"]) != (scope, scope_value):
+                # Scope 迁移同时通知旧范围，避免刷新只关注新范围而沿用旧派生结论。
                 self._record_change(
                     db, memory_id, scope=(str(row["scope_type"]), row["scope_id"])
                 )
@@ -470,6 +473,9 @@ class SqliteMemoryStore:
                         raise MemoryDeltaError(f"memory evidence does not exist: {ref}")
                     del by_ref[ref]
 
+            # Delta 的直接使用与 Action 批处理同一 Evidence 准入；旧引用不得隐式跨 scope。
+            self._check_action_evidence_scope(db, dict(row), by_ref.values())
+
             # 步骤三：正文、Evidence、immutable revision 和变化水位必须同生共死。
             revision = int(row["revision"]) + 1
             db.execute(
@@ -478,6 +484,9 @@ class SqliteMemoryStore:
                 (new_text, revision, memory_id),
             )
             self._replace_evidence(db, memory_id, [by_ref[key] for key in sorted(by_ref)])
+            # 统一复核多跳依赖；在同一 SQLite 事务内完成，不会留下半次 Delta。
+            if self.freshness(memory_id)["is_stale"]:
+                raise MemoryDeltaError("memory evidence support closure is invalid")
             self._snapshot_revision(db, memory_id)
             self._record_change(db, memory_id)
 
@@ -1048,53 +1057,62 @@ class SqliteMemoryStore:
         project_id: str | None = None,
         session_id: str | None = None,
     ) -> dict:
-        item = self.get(str(memory_id))
-        if not item.get("active") or not self._visible(item, project_id, session_id):
-            raise PermissionError("memory is not visible in the admitted scope")
-        level = str(resolution or "L2").upper()
-        if level not in {"L0", "L1", "L2"}:
-            raise ValueError("resolution must be L0/L1/L2")
-        text = str(item.get("text") or "")
-        stable_ref = f"memory:{item['memory_id']}@{item['revision']}"
-        evidence = self.evidence(str(item["memory_id"]))
-        freshness = self.freshness(str(item["memory_id"]))
-        base = {
-            "memory_id": item["memory_id"],
-            "kind": item["kind"],
-            "source_ref": stable_ref,
-            "provenance_ref": item["source_ref"],
-            "scope_type": item.get("scope_type") or "global",
-            "scope_id": item.get("scope_id"),
-            "fact_level": item.get("fact_level") or "context",
-            "revision": item["revision"],
-            "resolution": level,
-            "proof_count": len(evidence),
-            "freshness": freshness["status"],
-            "is_stale": freshness["is_stale"],
-        }
-        if level == "L0":
-            return {**base, "text": text[:360], "bytes": len(text.encode("utf-8"))}
-        if level == "L1":
-            segments = [text[start : start + 800] for start in range(0, len(text), 800)]
+        # 显式 L0/L1/L2 解析同样必须冻结当前行、证据与支持闭包，不许跨提交拼接正文。
+        snapshot = nullcontext(self.store.db) if self.store.db.in_transaction else self.store.read_snapshot()
+        with snapshot:
+            item = self.get(str(memory_id))
+            if not item.get("active") or not self._visible(item, project_id, session_id):
+                raise PermissionError("memory is not visible in the admitted scope")
+            level = str(resolution or "L2").upper()
+            if level not in {"L0", "L1", "L2"}:
+                raise ValueError("resolution must be L0/L1/L2")
+            text = str(item.get("text") or "")
+            stable_ref = f"memory:{item['memory_id']}@{item['revision']}"
+            evidence = self.evidence(str(item["memory_id"]))
+            freshness = self.freshness(str(item["memory_id"]))
+            # 旧库坏引用仍可报告为 stale，但不能通过显式 resolve 泄露不允许的私有血缘。
+            if any(
+                entry["reason"] in {"scope_violation", "missing"}
+                for entry in freshness["stale_sources"]
+            ):
+                raise PermissionError("memory provenance is not visible in the admitted scope")
+            base = {
+                "memory_id": item["memory_id"],
+                "kind": item["kind"],
+                "source_ref": stable_ref,
+                "provenance_ref": item["source_ref"],
+                "scope_type": item.get("scope_type") or "global",
+                "scope_id": item.get("scope_id"),
+                "fact_level": item.get("fact_level") or "context",
+                "revision": item["revision"],
+                "resolution": level,
+                "proof_count": len(evidence),
+                "freshness": freshness["status"],
+                "is_stale": freshness["is_stale"],
+            }
+            if level == "L0":
+                return {**base, "text": text[:360], "bytes": len(text.encode("utf-8"))}
+            if level == "L1":
+                segments = [text[start : start + 800] for start in range(0, len(text), 800)]
+                return {
+                    **base,
+                    "text": text[:1200],
+                    "segments": [
+                        {"index": index, "preview": segment[:240]}
+                        for index, segment in enumerate(segments[:12])
+                    ],
+                    "segment_count": len(segments),
+                    "bytes": len(text.encode("utf-8")),
+                }
             return {
                 **base,
-                "text": text[:1200],
-                "segments": [
-                    {"index": index, "preview": segment[:240]}
-                    for index, segment in enumerate(segments[:12])
-                ],
-                "segment_count": len(segments),
+                "text": text,
                 "bytes": len(text.encode("utf-8")),
+                "evidence": evidence,
+                "freshness_report": freshness,
             }
-        return {
-            **base,
-            "text": text,
-            "bytes": len(text.encode("utf-8")),
-            "evidence": evidence,
-            "freshness_report": freshness,
-        }
 
-    # 搜索先只返回 L0 索引视图和同一次召回报告；避免为了观测元数据重复执行向量查询。
+    # 模型上下文只接纳复核过的 L0 Memory；原始 search_report 可保留候选供诊断。
     def search_view_report(
         self,
         query: str,
@@ -1104,23 +1122,58 @@ class SqliteMemoryStore:
         project_id: str | None = None,
         session_id: str | None = None,
     ) -> dict:
+        if type(limit) is not int or not 1 <= limit <= 20:
+            raise ValueError("limit must be 1-20")
+        # 检索发生在快照外，避免远端索引请求长期占用 SQLite WAL 读事务。
+        # 有界超额取候选可在过期证据占据前排时补足结果，但不声称穷尽所有有效记录。
         report = self.search_report(
             query,
             kinds=kinds,
-            limit=limit,
+            limit=min(20, max(limit, limit * 3)),
             project_id=project_id,
             session_id=session_id,
         )
-        views = [
-            self.resolve(
-                item["memory_id"],
-                resolution="L0",
-                project_id=project_id,
-                session_id=session_id,
-            )
-            for item in report["memories"]
-        ]
-        return {"memories": views, "retrieval": report["retrieval"]}
+        views = []
+        rejected = 0
+        snapshot = nullcontext(self.store.db) if self.store.db.in_transaction else self.store.read_snapshot()
+        with snapshot:
+            for item in report["memories"]:
+                if len(views) >= limit:
+                    break
+                memory_id = str(item["memory_id"])
+                current = self.store.db.execute(
+                    "SELECT revision,active,scope_type,scope_id FROM workspace_memories WHERE memory_id=?",
+                    (memory_id,),
+                ).fetchone()
+                if (
+                    current is None
+                    or not bool(current["active"])
+                    or int(current["revision"]) != int(item["revision"])
+                    or not self._visible(dict(current), project_id, session_id)
+                ):
+                    rejected += 1
+                    continue
+                try:
+                    view = self.resolve(
+                        memory_id, resolution="L0",
+                        project_id=project_id, session_id=session_id,
+                    )
+                except (KeyError, PermissionError):
+                    rejected += 1
+                    continue
+                if view["is_stale"]:
+                    rejected += 1
+                    continue
+                views.append(view)
+        return {
+            "memories": views,
+            "retrieval": {
+                **report["retrieval"],
+                "resolution": "L0",
+                "snapshot_validated": True,
+                "candidate_rejected_after_search": rejected,
+            },
+        }
 
     # 以命中 Memory 为锚点读取邻近同作用域记录，提供 chronology/navigation；不是新事实，也不改变 revision。
     def timeline(

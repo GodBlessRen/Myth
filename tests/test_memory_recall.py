@@ -239,5 +239,68 @@ class RecallStoreTests(unittest.TestCase):
         self.assertEqual(report["stale_sources"][0]["reason"], "depth_limit")
 
 
+    # Context 自动召回不得返回已撤销的多跳派生正文；有效候选应能从有界池递补。
+    def test_context_l0_excludes_stale_support_and_refills(self):
+        root = self.memory.remember(
+            kind="episodic", text="Historical root", source_ref="context:root",
+        )
+        clean = self.memory.remember(
+            kind="semantic", text="Planetary context reliable",
+            source_ref="context:clean",
+        )
+        derived = self.memory.remember(
+            kind="semantic", text="Planetary context obsolete",
+            source_ref="context:derived",
+            evidence=[{"source_memory_id": root["memory_id"]}],
+        )
+        self.memory.revoke(root["memory_id"])
+        result = self.memory.search_view_report("planetary context", limit=1)
+        self.assertEqual(
+            [item["memory_id"] for item in result["memories"]],
+            [clean["memory_id"]],
+        )
+        self.assertTrue(result["retrieval"]["snapshot_validated"])
+        self.assertGreaterEqual(result["retrieval"]["candidate_rejected_after_search"], 1)
+        self.assertNotIn(derived["memory_id"], [item["memory_id"] for item in result["memories"]])
+
+    # SQLite 候选在远端/词面检索之后变化时，冻结读快照不能把旧版本送给模型。
+    def test_context_l0_revalidates_candidate_revision(self):
+        row = self.memory.remember(
+            kind="semantic", text="Baseline context", source_ref="context:race",
+        )
+        self.memory.apply_delta(
+            row["memory_id"],
+            [{"op": "replace_text", "text": "Changed context"}],
+            expected_revision=1,
+        )
+        stale = {"memories": [row], "retrieval": {"backend": "fixture"}}
+        with patch.object(self.memory, "search_report", return_value=stale):
+            result = self.memory.search_view_report("Baseline", limit=1)
+        self.assertEqual(result["memories"], [])
+        self.assertEqual(result["retrieval"]["candidate_rejected_after_search"], 1)
+
+    # 历史异常引用只可在显式证据审查中看见失效状态，不能经过普通 L0 搜索落入 Context。
+    def test_context_l0_rejects_legacy_scope_violation(self):
+        secret = self.memory.remember(
+            kind="episodic", text="Private source", source_ref="context:private",
+            scope_type="session", scope_id="s1",
+        )
+        unsafe = self.memory.remember(
+            kind="semantic", text="Visible misleading assertion",
+            source_ref="context:legacy",
+        )
+        with self.runtime.store.tx() as db:
+            db.execute(
+                "INSERT INTO workspace_memory_evidence("
+                "memory_id,evidence_ref,source_memory_id,source_revision"
+                ") VALUES (?,?,?,?)",
+                (unsafe["memory_id"], "legacy:link", secret["memory_id"], 1),
+            )
+        result = self.memory.search_view_report("Visible misleading", limit=1)
+        self.assertEqual(result["memories"], [])
+        self.assertTrue(result["retrieval"]["snapshot_validated"])
+        self.assertGreaterEqual(result["retrieval"]["candidate_rejected_after_search"], 1)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -243,19 +243,35 @@ class MemoryLifecycleTests(unittest.TestCase):
         self.assertEqual(freshness["stale_sources"][0]["reason"], "revoked")
 
 
-    # 跨 Scope 的证据引用即使被内部导入，也不应在全局查询时冒充可验证事实。
+    # 全局 Memory 的直接写入不能引用私有 Scope；历史异常引用仍由读取校验 fail-closed。
     def test_private_evidence_never_validates_global_claim(self):
         source = self.memory.remember(
             kind="episodic", text="Session-only decision", source_ref="scope:private",
             scope_type="session", scope_id="session-a",
         )
+        watermark = self.memory.current_change_seq()
+        with self.assertRaisesRegex(MemoryDeltaError, "narrower scope"):
+            self.memory.remember(
+                kind="semantic", text="Globalized decision", source_ref="scope:global",
+                evidence=[{"source_memory_id": source["memory_id"]}],
+            )
+        self.assertEqual(self.memory.current_change_seq(), watermark)
         derived = self.memory.remember(
-            kind="semantic", text="Globalized decision", source_ref="scope:global",
-            evidence=[{"source_memory_id": source["memory_id"]}],
+            kind="semantic", text="Globalized decision", source_ref="scope:legacy",
         )
+        # 模拟旧数据库或外部损坏导入：绕过正常准入，验证读取阶段仍能发现违规血缘。
+        with self.runtime.store.tx() as db:
+            db.execute(
+                "INSERT INTO workspace_memory_evidence("
+                "memory_id,evidence_ref,source_memory_id,source_revision"
+                ") VALUES (?,?,?,?)",
+                (derived["memory_id"], "legacy:private", source["memory_id"], 1),
+            )
         report = self.memory.freshness(derived["memory_id"])
         self.assertEqual(report["status"], "stale")
         self.assertEqual(report["stale_sources"][0]["reason"], "scope_violation")
+        with self.assertRaises(PermissionError):
+            self.memory.resolve(derived["memory_id"], resolution="L2")
 
     # 两连接 WAL 故障注入：外部写入发生在同一次来源检查中，必须只读到同一旧快照。
     def test_freshness_uses_single_wal_snapshot_under_concurrent_writer(self):
@@ -288,6 +304,133 @@ class MemoryLifecycleTests(unittest.TestCase):
             self.assertTrue(changed["done"])
             self.assertEqual(observed["status"], "fresh")
         self.assertEqual(self.memory.freshness(derived["memory_id"])["status"], "stale")
+
+
+    # 直接 Delta 不得绕过 batch Memory Action 的作用域验证或生成半个 Revision。
+    def test_direct_delta_refuses_private_source_atomically(self):
+        source = self.memory.remember(
+            kind="episodic", text="private delta source", source_ref="delta:private",
+            scope_type="session", scope_id="s1",
+        )
+        target = self.memory.remember(
+            kind="semantic", text="Public delta target", source_ref="delta:public",
+        )
+        watermark = self.memory.current_change_seq()
+        with self.assertRaisesRegex(MemoryDeltaError, "narrower scope"):
+            self.memory.apply_delta(
+                target["memory_id"],
+                [{"op": "add_evidence", "evidence": {
+                    "source_memory_id": source["memory_id"],
+                }}],
+                expected_revision=1,
+            )
+        self.assertEqual(self.memory.get(target["memory_id"])["revision"], 1)
+        self.assertEqual(self.memory.current_change_seq(), watermark)
+        self.assertEqual(
+            self.memory.revision_snapshot(target["memory_id"], 1)["text"], "Public delta target",
+        )
+
+    # 旧证据不允许因变更目标 Scope 而被偷偷带到比来源更宽的范围。
+    def test_scope_migration_revalidates_retained_evidence(self):
+        source = self.memory.remember(
+            kind="semantic", text="Private source", source_ref="move:source",
+            scope_type="session", scope_id="s1",
+        )
+        derived = self.memory.remember(
+            kind="semantic", text="Private derived", source_ref="move:derived",
+            scope_type="session", scope_id="s1",
+            evidence=[{"source_memory_id": source["memory_id"]}],
+        )
+        watermark = self.memory.current_change_seq()
+        with self.assertRaisesRegex(MemoryDeltaError, "narrower scope"):
+            self.memory.remember(
+                kind="semantic", text="Moved globally", source_ref="move:derived",
+                scope_type="global",
+            )
+        self.assertEqual(self.memory.get(derived["memory_id"])["scope_type"], "session")
+        self.assertEqual(self.memory.get(derived["memory_id"])["revision"], 1)
+        self.assertEqual(self.memory.current_change_seq(), watermark)
+
+    # 一次循环引用修改即使恰好变更自身 revision，也必须整体撤销而不是发布无效知识。
+    def test_cyclic_dependency_write_rolls_back(self):
+        first = self.memory.remember(
+            kind="semantic", text="First node", source_ref="cycle:first",
+        )
+        second = self.memory.remember(
+            kind="semantic", text="Second node", source_ref="cycle:second",
+            evidence=[{"source_memory_id": first["memory_id"]}],
+        )
+        watermark = self.memory.current_change_seq()
+        with self.assertRaisesRegex(MemoryDeltaError, "support closure"):
+            self.memory.remember(
+                kind="semantic", text="Cycle attempt", source_ref="cycle:first",
+                evidence=[{"source_memory_id": second["memory_id"]}],
+            )
+        self.assertEqual(self.memory.current_change_seq(), watermark)
+        self.assertEqual(self.memory.get(first["memory_id"])["revision"], 1)
+        self.assertEqual(self.memory.get(first["memory_id"])["text"], "First node")
+        self.assertEqual(self.memory.freshness(second["memory_id"])["status"], "fresh")
+
+    # 撤销底层证据后，不能通过引用尚未更新的中间结论重新伪造有效知识。
+    def test_stale_ancestor_cannot_be_reintroduced_as_new_evidence(self):
+        root = self.memory.remember(
+            kind="episodic", text="Root old", source_ref="stale:root",
+        )
+        intermediate = self.memory.remember(
+            kind="semantic", text="Middle old", source_ref="stale:middle",
+            evidence=[{"source_memory_id": root["memory_id"]}],
+        )
+        self.memory.revoke(root["memory_id"])
+        watermark = self.memory.current_change_seq()
+        with self.assertRaisesRegex(MemoryDeltaError, "support closure"):
+            self.memory.remember(
+                kind="semantic", text="New unsupported claim",
+                source_ref="stale:new",
+                evidence=[{"source_memory_id": intermediate["memory_id"]}],
+            )
+        self.assertEqual(self.memory.current_change_seq(), watermark)
+
+
+    # 显式 resolve 读取旧正文后若另一连接提交新 Evidence，不能拼出不同提交版本的证据报告。
+    def test_resolve_keeps_text_and_evidence_in_one_wal_snapshot(self):
+        source = self.memory.remember(
+            kind="episodic", text="Source original", source_ref="resolve:snapshot:source",
+        )
+        child = self.memory.remember(
+            kind="semantic", text="Derived original", source_ref="resolve:snapshot:child",
+            evidence=[{"source_memory_id": source["memory_id"]}],
+        )
+        with MythRuntime(Path(self.tmp.name)) as other:
+            writer = Workspace(other).memory
+            original_evidence = self.memory.evidence
+            changed = {"done": False}
+
+            # 在旧版证据读出后提交不同版本，验证回传不会同时包含旧正文和新 freshness。
+            def evidence_with_writer(memory_id):
+                rows = original_evidence(memory_id)
+                if memory_id == child["memory_id"] and not changed["done"]:
+                    changed["done"] = True
+                    writer.apply_delta(
+                        child["memory_id"],
+                        [
+                            {"op": "replace_text", "text": "Derived revised"},
+                            {"op": "remove_evidence",
+                             "evidence_ref": f"memory:{source['memory_id']}"},
+                        ],
+                        expected_revision=1,
+                    )
+                return rows
+
+            with patch.object(self.memory, "evidence", side_effect=evidence_with_writer):
+                historic = self.memory.resolve(child["memory_id"], resolution="L2")
+            self.assertTrue(changed["done"])
+            self.assertEqual(historic["revision"], 1)
+            self.assertEqual(historic["text"], "Derived original")
+            self.assertEqual(historic["freshness"], "fresh")
+            self.assertEqual(historic["proof_count"], len(historic["evidence"]))
+        current = self.memory.resolve(child["memory_id"], resolution="L2")
+        self.assertEqual(current["revision"], 2)
+        self.assertEqual(current["freshness"], "untracked")
 
 
 if __name__ == "__main__":

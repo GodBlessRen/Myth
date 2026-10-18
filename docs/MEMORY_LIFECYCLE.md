@@ -117,6 +117,16 @@ Focused regression: `python -m unittest tests.test_memory_recall tests.test_know
 
 Regression gates: `test_memory_action_batch.py`, `test_memory_lifecycle.py`, and `test_knowledge_views.py`; the full suite, CI and publication checks remain authoritative. This mechanism only checks source/version/scope validity, **not semantic entailment**.
 
+## Evidence admission and Context delivery fence
+
+Three input paths share one **authoritative Evidence admission**: `remember()`, direct `apply_delta()`, and bounded `apply_actions()`. Source Memory scope and active status are checked inside the same SQLite write transaction as the target revision. Rescoping an existing Memory without replacing its Evidence must also revalidate retained links. After writing the candidate state *inside the still-open transaction*, Myth checks its complete transitive support closure (revision pins, revoked ancestor, cycles, depth/edge limits); if invalid, the target write, revision, evidence snapshot, and change watermark all roll back.
+
+The L0 memory tool and Context assembly use `search_view_report()`. Retrieval may consult the remote vector adapter **before** starting the authoritative read transaction. The selected candidates are then rehydrated under a single short SQLite snapshot, verifying active, exact revision, current scope, and complete support freshness. Stale or unauthorized candidates are excluded from model-delivered L0 text. A bounded 3× candidate oversample (max 20) refills valid results where possible; this is not exhaustive search and is reported as `candidate_rejected_after_search`. Explicit `resolve()` and timeline may surface stale historical revisions with an `is_stale` flag **only when provenance remains within the admitted scope**. A legacy missing or cross-scope source fails closed with `PermissionError` rather than revealing text through an explicit tool call.
+
+Both the automatic L0 Context search and an explicit L0/L1/L2 `resolve()` read the current row, evidence and closure from one authoritative SQLite WAL snapshot; `resolve()` never combines an old body with a newer evidence report. The write-time check prevents ordinary bad data; the read-time check protects against changed dependencies and legacy/corrupted graph rows. **Neither check proves that the sentence is logically entailed by its evidence**; Ontology constraints and Eval-controlled evolution remain a separate quality problem.
+
+Regression scope: `tests/test_memory_lifecycle.py` (write/scope/cycle/rollback), `tests/test_memory_recall.py` (model L0 Context leakage and source races), `tests/test_memory_action_batch.py` (atomic contract). Release checks still required per `AGENTS.md`.
+
 ## Progressive disclosure
 
 首次 Recall 不展开完整 Evidence。
