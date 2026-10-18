@@ -187,7 +187,10 @@ class LocalConversationExecution:
         from ..platform.handoff import project_handoffs
         activities = project_handoffs(activities)
         snapshot = dict(turn["snapshot"])
-        snapshot["frontier_run_id"] = turn["run_id"]
+        # 保存本次决策可见的精确候选投影；来源始终是原始已结算活动，而非压缩 Context。
+        snapshot["frontier_candidates"] = [
+            item.model_view() for item in build_action_frontier(turn["run_id"], turn["activities"])
+        ]
         # 必须在本 Run 的短只读查询中取得未结算工具/模型/预算；聊天步骤不是它们的权威来源。
         snapshot["runtime_liabilities"] = self.repository.context_liabilities(turn["run_id"])
         snapshot["model_pool_feedback"] = self.repository.model_feedback()[:20]
