@@ -112,6 +112,25 @@ class AlternativeProofTests(unittest.TestCase):
             with self.subTest(mask=mask, active=active):
                 self.assertEqual(observed, expected)
 
+    # 直接复现讨论例子：(A&B) OR (C&E) OR (B&E)；撤销 B/C 后不存在完整路径。
+    def test_three_path_example_removes_claim_only_when_last_path_is_lost(self):
+        premises = {name: self.source(f"example-{name}") for name in "ABCE"}
+        target = self.memory.remember(
+            kind="semantic", text="Example triple-path D",
+            source_ref="proof:example:triple",
+            evidence=[{"source_memory_id": premises[name]["memory_id"]} for name in "ABCE"],
+        )
+        refs = {name: f"memory:{premises[name]['memory_id']}" for name in "ABCE"}
+        self.memory.declare_proof_paths(
+            target["memory_id"],
+            [[refs["A"], refs["B"]], [refs["C"], refs["E"]], [refs["B"], refs["E"]]],
+            expected_revision=1,
+        )
+        self.memory.revoke(premises["B"]["memory_id"])
+        self.assertEqual(self.memory.freshness(target["memory_id"])["status"], "fresh")
+        self.memory.revoke(premises["C"]["memory_id"])
+        self.assertEqual(self.memory.freshness(target["memory_id"])["status"], "stale")
+
     # 共享前提 B 对两个 AND 组都是必需条件，撤销 B 必须级联撤销 D。
     def test_shared_dependency_revocation_invalidates_every_path(self):
         sources = {k: self.source(f"shared-{k}") for k in "ABC"}
