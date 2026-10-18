@@ -1754,10 +1754,14 @@ class SqliteWorkspaceRepository:
         ]
         # 历史 Tool Result 可能仍带 UNKNOWN；仅由同 Run 已持久收据证明效果状态不再未知。
         # RESOLVED 只表示工具机会已结算，不表示用户目标或语义验收成功。
+        # 若收据正文仍声明 UNKNOWN/PENDING，则它仍不是足以解除不明效果风险的证据。
         settled = [
             row[0] for row in self.store.db.execute(
                 "SELECT decision_id FROM workspace_operations "
-                "WHERE run_id=? AND state='RESOLVED' AND result_json IS NOT NULL ORDER BY rowid",
+                "WHERE run_id=? AND state='RESOLVED' AND result_json IS NOT NULL "
+                "AND COALESCE(UPPER(json_extract(result_json,'$.status')),'') "
+                "NOT IN ('UNKNOWN','TICKETED','PENDING','BLOCKED','INCONCLUSIVE') "
+                "ORDER BY rowid",
                 (rid,),
             ).fetchall()
         ]
