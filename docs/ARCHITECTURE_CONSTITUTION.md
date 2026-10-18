@@ -100,6 +100,7 @@ Intent Pick、Agent Loop、Information Resolution、调度和只读委派是可�
 - partial 可以用于诊断，不能拥有 release qualification；未知题号拒绝，完整分母固定。
 - 重复试次区分 pass@k 与 pass^k；成本按 successful outcome 核算，失败成本仍计入。
 - 候选先守能力/安全下限再比较成本；held-out 不反馈搜索，发布必须显式 Promote，可 Rollback。
+- Evolution 的 ELIGIBLE 是有期限的证据资格：冻结候选配置、固定逐题评测、成本模型与校准决定的 SHA-256 摘要；在写锁内比较批准时的证据与现存事实，不一致必须重新评测。摘要只是本地变更检测，不是独立 Oracle 认证或对拥有数据库写权限者的防篡改签名。
 - Historical Replay 只覆盖冻结条件下观察过的边；未观察分支为 UNOBSERVED，不产生授权或发布资格。
 - 替身、固定脚本、静态检查和本机压测的通过，按各自输入范围报告。
 
