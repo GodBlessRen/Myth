@@ -105,6 +105,24 @@ class MemoryActionBatchTests(unittest.TestCase):
         with self.assertRaises(KeyError):
             self.memory.revision_snapshot(old["memory_id"], 2)
 
+    # 同一事务不能依赖本事务即将修改/撤销的来源，否则新 Evidence 提交瞬间就 stale。
+    def test_same_batch_mutated_source_cannot_supply_evidence(self):
+        source = self.memory.remember(
+            kind="semantic", text="Before", source_ref="source:intra-batch",
+        )
+        before = self.memory.current_change_seq()
+        with self.assertRaises(MemoryDeltaError):
+            self.memory.apply_actions([
+                {"op": "UPDATE", "memory_id": source["memory_id"],
+                 "expected_revision": 1,
+                 "operations": [{"op": "replace_text", "text": "After"}]},
+                {"op": "ADD", "kind": "semantic",
+                 "text": "Derived stale", "source_ref": "source:unsafe-dependent",
+                 "evidence": [{"source_memory_id": source["memory_id"]}]},
+            ])
+        self.assertEqual(self.memory.current_change_seq(), before)
+        self.assertEqual(self.memory.get(source["memory_id"])["revision"], 1)
+
     # 同一 ADD 不能覆盖已有来源； UPDATE/DELETE 的 CAS 也不能双重执行。
     def test_replay_fails_closed_without_incrementing_revision(self):
         row = self.memory.remember(kind="semantic", text="Before", source_ref="source:replay")
