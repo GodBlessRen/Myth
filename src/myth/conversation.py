@@ -53,6 +53,15 @@ _TOOL_ARGUMENTS = {
         },
         ["query"],
     ),
+    "memory.recall": object_schema(
+        {
+            "query": {"type": "string", "minLength": 1, "maxLength": 500},
+            "probes": {"type": "array", "items": {"type": "string", "minLength": 1, "maxLength": 500}, "maxItems": 3},
+            "required_refs": {"type": "array", "items": {"type": "string", "minLength": 1, "maxLength": 80}, "maxItems": 4},
+            "limit": {"type": "integer", "minimum": 1, "maximum": 8},
+        },
+        ["query"],
+    ),
     "memory.timeline": object_schema(
         {
             "memory_id": _TEXT,
@@ -299,6 +308,12 @@ TOOL_CATALOG = {
     "memory.search": {
         "query": "search long-term memory",
         "limit": "1-8 compact L0 memory index results",
+    },
+    "memory.recall": {
+        "query": "primary question (max 500 characters)",
+        "probes": "optional 0-3 complementary queries",
+        "required_refs": "optional exact memory:mem_<uuid>@<revision> anchors",
+        "limit": "1-8 compact L0 results; evidence_gate never verifies the answer",
     },
     "memory.timeline": {
         "memory_id": "memory id returned by memory.search",

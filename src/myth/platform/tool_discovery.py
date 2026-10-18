@@ -12,6 +12,7 @@ DEFAULT_VISIBLE_TOOL_IDS = (
     "knowledge.search",
     "knowledge.resolve",
     "memory.search",
+    "memory.recall",
     "memory.timeline",
     "memory.resolve",
     "project.list",

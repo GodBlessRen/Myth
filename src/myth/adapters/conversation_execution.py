@@ -890,6 +890,19 @@ class LocalConversationExecution:
                     "retrieval": {**report["retrieval"], "resolution": "L0"},
                 }
             )
+        elif capability == "memory.recall":
+            if self.memory_store is None:
+                raise RuntimeError("memory store is unavailable")
+            result.update(
+                self.memory_store.recall_report(
+                    args.get("query", ""),
+                    probes=args.get("probes"),
+                    required_refs=args.get("required_refs"),
+                    limit=args.get("limit", 6),
+                    project_id=(turn["snapshot"].get("project") or {}).get("id"),
+                    session_id=turn["session_id"],
+                )
+            )
         elif capability == "memory.timeline":
             if self.memory_store is None:
                 raise RuntimeError("memory store is unavailable")
