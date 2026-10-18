@@ -1168,16 +1168,15 @@ class SqliteMemoryStore:
         if len(text.encode("utf-8")) > 8_000:
             text = text.encode("utf-8")[:8_000].decode("utf-8", errors="ignore")
         row = self.store.db.execute(
-            "SELECT t.session_id,s.project_id FROM workspace_turns t "
-            "JOIN workspace_sessions s ON s.id=t.session_id WHERE t.run_id=?",
+            "SELECT session_id,snapshot_json FROM workspace_turns WHERE run_id=?",
             (run_id,),
         ).fetchone()
-        scope_type = "project" if row and row["project_id"] else "session"
-        scope_id = (
-            row["project_id"]
-            if row and row["project_id"]
-            else (row["session_id"] if row else run_id)
-        )
+        # Episode 的 Scope 属于本 Run 准入时冻结的项目；会话后续改项目不能把历史搬进新项目。
+        frozen = json.loads(row["snapshot_json"]) if row else {}
+        project = frozen.get("project") if isinstance(frozen, dict) else None
+        project_id = project.get("id") if isinstance(project, dict) else None
+        scope_type = "project" if project_id else "session"
+        scope_id = project_id or (row["session_id"] if row else run_id)
         source = f"run:{run_id}"
         # 同一 BEGIN IMMEDIATE 内检查唯一来源、快照与新建；不能跨连接先查后写产生竞争。
         with self.store.tx() as db:
