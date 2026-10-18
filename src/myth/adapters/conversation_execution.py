@@ -20,6 +20,7 @@ from ..platform.capabilities import CapabilityState, default_capabilities
 from ..models import ModelMessage, ModelRequest, StepDecision, ProviderKnownFailure
 from ..platform.subagents import default_subagents
 from ..platform.tool_discovery import describe_tool, search_tools, visible_tool_ids
+from ..platform.action_frontier import build_action_frontier, select_action_candidate
 from ..strategies import LiveInformationController, RuleIntentPicker
 from ..verification import SqliteVerificationProfiles
 from ..failures import failure_result, observe_failure
@@ -186,6 +187,10 @@ class LocalConversationExecution:
         from ..platform.handoff import project_handoffs
         activities = project_handoffs(activities)
         snapshot = dict(turn["snapshot"])
+        # 保存本次决策可见的精确候选投影；来源始终是原始已结算活动，而非压缩 Context。
+        snapshot["frontier_candidates"] = [
+            item.model_view() for item in build_action_frontier(turn["run_id"], turn["activities"])
+        ]
         # 必须在本 Run 的短只读查询中取得未结算工具/模型/预算；聊天步骤不是它们的权威来源。
         snapshot["runtime_liabilities"] = self.repository.context_liabilities(turn["run_id"])
         snapshot["model_pool_feedback"] = self.repository.model_feedback()[:20]
@@ -308,6 +313,8 @@ class LocalConversationExecution:
         # 先核对文档作用域和固定摘要，再按 L0/L1/L2 的单位分页；L2 同时限制字符和 UTF-8 字节。
         document_id = args.get("document_id")
         document = self._knowledge_document(turn, document_id)
+        if document.get("archived") or (args.get("expected_digest") is not None and document["digest"] != args["expected_digest"]):
+            raise ValueError("knowledge source version is stale")
         resolution = str(args.get("resolution") or "L2").upper()
         cursor = args.get("cursor", 0)
         limit = args.get("limit", 6000 if resolution == "L2" else 12)
@@ -734,6 +741,14 @@ class LocalConversationExecution:
             return self._execute_tool(turn, decision_id, decision, provider=provider)
         capability = decision.capability_id
         args = decision.arguments if decision.arguments is not None else {}
+        if isinstance(args, dict) and "candidate_id" in args:
+            # 只接受同 Run 已结算观察；候选选择绝不授予新工具或权限。
+            candidate = select_action_candidate(
+                build_action_frontier(turn["run_id"], turn["activities"]), capability, args
+            )
+            self._check_action_candidate(turn, candidate)
+            decision = replace(decision, arguments=dict(candidate.arguments))
+            args = decision.arguments
         information_decision = self._admit_tool(turn, capability, args)
         try:
             hooks = self.tool_hooks.snapshot()
@@ -792,6 +807,26 @@ class LocalConversationExecution:
         if information_decision is not None and not information_decision.admitted:
             raise ValueError("information control denied: " + information_decision.reason)
         return information_decision
+
+    # Ticket 前独立核对最新权威版本；候选自身不替代 Memory/Knowledge 权限核验。
+    def _check_action_candidate(self, turn, candidate):
+        args = candidate.arguments
+        if candidate.capability_id == "knowledge.resolve":
+            document = self._knowledge_document(turn, args["document_id"])
+            if document.get("archived") or document["digest"] != args["expected_digest"]:
+                raise ValueError("action candidate knowledge source changed")
+        elif candidate.capability_id == "memory.resolve":
+            if self.memory_store is None:
+                raise ValueError("memory store is unavailable")
+            record = self.memory_store.resolve(
+                args["memory_id"], resolution="L0",
+                project_id=(turn["snapshot"].get("project") or {}).get("id"),
+                session_id=turn["session_id"],
+            )
+            if record["revision"] != args["expected_revision"] or record["is_stale"]:
+                raise ValueError("action candidate memory source changed")
+        else:
+            raise PermissionError("candidate capability is unsupported")
 
     # 执行经过外层准入/Hook 的工作；已有稳定绑定时复用事实而非重复效果。
     def _execute_tool(self, turn, decision_id, decision, *, provider=None, information_decision=None):
@@ -944,6 +979,10 @@ class LocalConversationExecution:
                     session_id=turn["session_id"],
                 )
             )
+            if args.get("expected_revision") is not None and (
+                result.get("revision") != args["expected_revision"] or result.get("is_stale")
+            ):
+                raise ValueError("memory source version is stale")
         elif capability == "project.list":
             result.update(self.list_project(turn, args.get("path", ".")))
         elif capability == "project.read":
