@@ -587,21 +587,60 @@ class SqliteMemoryStore:
                 ).fetchone()
                 current[source_id] = None if row is None else dict(row)
             direct = evaluate_freshness(evidence, current)
-            # 按权威快照递归检查支持链；直接证据状态保留旧字段，额外暴露传递性失败路径。
+            # 统一 SQLite WAL 快照读完整关系；仅遇显式 Proof Paths 才切换到 OR-of-AND。
+            root_row = self.get(memory_id)
+            root_paths, root_error = self._proof_paths_for(
+                self.store.db, memory_id, root_row, evidence,
+            )
+            if root_paths is not None:
+                root_row["_proof_paths"] = root_paths
+            if root_error:
+                root_row["_proof_paths_error"] = root_error
+            any_paths = root_paths is not None or bool(root_error)
+
+            # 读取每个来源时保留其证明元数据：祖先的替代证明也必须参与递归维护。
             def load(source_id: str):
+                nonlocal any_paths
                 row = self.store.db.execute(
                     "SELECT memory_id,revision,active,scope_type,scope_id "
                     "FROM workspace_memories WHERE memory_id=?", (source_id,),
                 ).fetchone()
                 if row is None:
                     return None, ()
-                return dict(row), self._evidence_rows(self.store.db, source_id)
+                source = dict(row)
+                dependencies = self._evidence_rows(self.store.db, source_id)
+                paths, error = self._proof_paths_for(
+                    self.store.db, source_id, source, dependencies,
+                )
+                if paths is not None:
+                    source["_proof_paths"] = paths
+                if error:
+                    source["_proof_paths_error"] = error
+                any_paths = any_paths or paths is not None or bool(error)
+                return source, dependencies
 
-            root_row = self.get(memory_id)
+            # 默认继续原始严格闭包，避免对未 opt-in 的 Memory 悄然改语义。
             closure = evaluate_support_closure(
                 memory_id, root_row, evidence, load=load,
             )
-            if closure["stale_sources"]:
+            if any_paths:
+                closure = evaluate_alternative_closure(
+                    memory_id, root_row, evidence, load=load,
+                )
+                # Revoked 路径可以失效，只有完整替代路径存活才允许保持 fresh。
+                # 越权/循环/检查不完整依然直接 stale，不可因另一路成立而豁免。
+                direct["stale_sources"] = closure["stale_sources"]
+                direct["is_stale"] = bool(closure["stale_sources"])
+                direct["status"] = (
+                    "stale" if direct["is_stale"] else
+                    ("fresh" if direct["linked_sources"] else "untracked")
+                )
+                direct["proof_paths"] = {
+                    "declared": root_paths is not None,
+                    "valid_path_indices": list(closure["valid_paths"]),
+                    "failed_paths": closure["failed_paths"],
+                }
+            elif closure["stale_sources"]:
                 direct["status"] = "stale"
                 direct["is_stale"] = True
                 direct["stale_sources"] = closure["stale_sources"]
@@ -1343,7 +1382,7 @@ class SqliteMemoryStore:
             freshness = self.freshness(str(item["memory_id"]))
             # 旧库坏引用仍可报告为 stale，但不能通过显式 resolve 泄露不允许的私有血缘。
             if any(
-                entry["reason"] in {"scope_violation", "missing"}
+                entry["reason"] in {"scope_violation", "missing", "proof_paths_invalid", "proof_paths_evidence_changed", "proof_paths_revision_changed"}
                 for entry in freshness["stale_sources"]
             ):
                 raise PermissionError("memory provenance is not visible in the admitted scope")
