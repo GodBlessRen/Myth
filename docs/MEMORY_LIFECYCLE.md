@@ -136,6 +136,18 @@ Regression scope: `tests/test_memory_lifecycle.py` (write/scope/cycle/rollback),
 
 这样 Evidence-backed Memory 不会反过来破坏 Context budget。
 
+## Indexed Lexical Retrieval（Highest Leverage）
+
+原有检索逐页扫描全部可见 Memory 并对每条正文提取 English/CJK bigram。现在 Memory Store 在写事务内维护 `workspace_memory_terms` 词项倒排表：查询只扫描包含查询词的 postings，以旧有的集合交集计分、原始 rowid 逆序稳定 tie-break。**这是减少候选生成成本的索引，不是 BM25 模型质量提升声明**；更换排序器必须另行验证 Recall@K/权限/时延，不能凭名字认为更好。
+
+- `remember / apply_delta / revoke / apply_actions` 都只经统一 `_record_change` 维护索引与 `change_seq`，任意中途失败同事务回滚。没有新写 API。
+- 首次启动遇到旧 Memory 时比较索引与权威水位，只在落后时从当前 active 正文重建。
+- 旧进程/直接 SQL 写入由 SQLite 触发器标记索引 dirty；该进程查询立即回退到完备词面扫描，重启后再原子重建。既不能漏召回，也不能让索引拥有权限。
+- query 无可索引词项仍采用旧扫描；索引返回候选后继续接受 Scope/Revision/Active/Freshness 的权威快照检查，Milvus 仍只提供候选。
+- Indexed 检索报告 `backend=memory-term-index`、查询词数、结果数；其 `scanned` 不是总可见 Memory 数。降级路径明确 `backend=memory-lexical-fallback` 与原因，不能伪装速度收益。
+
+反例回归：`tests/test_memory_term_index.py` 验证英文、中文二元词、Scope、kind、稳定同分排序、批处理回滚、撤销、直接 SQL 写入与重启。全套跨平台 CI 仍为发布前提。
+
 ## Milvus boundary
 
 Milvus 仍然只提供候选：
