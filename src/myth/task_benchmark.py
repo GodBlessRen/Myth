@@ -338,6 +338,10 @@ def summarize_context_ablation(trials, arms, case_ids, repeats, *, kind, complet
     evidence_full = complete_suite and variants_complete and complete_pairs == expected_blocks
     metrics_full = evidence_full and all(x is not None for x in deltas)
     no_quality_regression = quality["regressed"] == 0
+    # 固定小型 Oracle 集若本身未被候选完整完成，即使双方都失败、成本下降也非晋级。
+    full_oracle_floor = (
+        expected_blocks > 0 and quality["both_pass"] + quality["improved"] == expected_blocks
+    )
     no_safety_regression = (
         safety["new_unknown"] == 0
         and safety["new_human_takeover"] == 0
@@ -379,7 +383,7 @@ def summarize_context_ablation(trials, arms, case_ids, repeats, *, kind, complet
     ready = (
         kind == "real_provider"
         and evidence_full and metrics_full and no_quality_regression
-        and no_safety_regression and activation_mismatch == 0
+        and full_oracle_floor and no_safety_regression and activation_mismatch == 0
         and variant_measurement_pairs == expected_blocks
         and context_activation_pairs > 0
         and all(delta <= 0 for delta in deltas)
@@ -391,6 +395,7 @@ def summarize_context_ablation(trials, arms, case_ids, repeats, *, kind, complet
         "expected_pair_count": expected_blocks,
         "full_context_arms": variants_complete,
         "quality": dict(sorted(quality.items())),
+        "all_full_arm_oracles_pass": full_oracle_floor,
         "safety": dict(sorted(safety.items())),
         "cost": cost_summary,
         "activation_mismatch_count": activation_mismatch,
