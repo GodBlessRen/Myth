@@ -391,5 +391,47 @@ class MemoryLifecycleTests(unittest.TestCase):
         self.assertEqual(self.memory.current_change_seq(), watermark)
 
 
+    # 显式 resolve 读取旧正文后若另一连接提交新 Evidence，不能拼出不同提交版本的证据报告。
+    def test_resolve_keeps_text_and_evidence_in_one_wal_snapshot(self):
+        source = self.memory.remember(
+            kind="episodic", text="Source original", source_ref="resolve:snapshot:source",
+        )
+        child = self.memory.remember(
+            kind="semantic", text="Derived original", source_ref="resolve:snapshot:child",
+            evidence=[{"source_memory_id": source["memory_id"]}],
+        )
+        with MythRuntime(Path(self.tmp.name)) as other:
+            writer = Workspace(other).memory
+            original_evidence = self.memory.evidence
+            changed = {"done": False}
+
+            # 在旧版证据读出后提交不同版本，验证回传不会同时包含旧正文和新 freshness。
+            def evidence_with_writer(memory_id):
+                rows = original_evidence(memory_id)
+                if memory_id == child["memory_id"] and not changed["done"]:
+                    changed["done"] = True
+                    writer.apply_delta(
+                        child["memory_id"],
+                        [
+                            {"op": "replace_text", "text": "Derived revised"},
+                            {"op": "remove_evidence",
+                             "evidence_ref": f"memory:{source['memory_id']}"},
+                        ],
+                        expected_revision=1,
+                    )
+                return rows
+
+            with patch.object(self.memory, "evidence", side_effect=evidence_with_writer):
+                historic = self.memory.resolve(child["memory_id"], resolution="L2")
+            self.assertTrue(changed["done"])
+            self.assertEqual(historic["revision"], 1)
+            self.assertEqual(historic["text"], "Derived original")
+            self.assertEqual(historic["freshness"], "fresh")
+            self.assertEqual(historic["proof_count"], len(historic["evidence"]))
+        current = self.memory.resolve(child["memory_id"], resolution="L2")
+        self.assertEqual(current["revision"], 2)
+        self.assertEqual(current["freshness"], "untracked")
+
+
 if __name__ == "__main__":
     unittest.main()
