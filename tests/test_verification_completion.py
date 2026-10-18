@@ -8,6 +8,7 @@ import unittest
 
 from myth.runtime import MythRuntime
 from myth.workspace import Workspace
+from myth.verification import _inside
 
 
 class VerificationCompletionTests(unittest.TestCase):
@@ -30,6 +31,18 @@ class VerificationCompletionTests(unittest.TestCase):
     def tearDown(self):
         self.runtime.close()
         self.tmp.cleanup()
+
+    # 即使传入的受信根含未归一化父目录，目标仍必须通过规范化根内的真实路径检查。
+    def test_admitted_root_is_canonicalized_before_path_check(self):
+        (self.project_root / "folder").mkdir()
+        (self.project_root / "app.py").write_text("ok", encoding="utf-8")
+        noncanonical_root = self.project_root / "folder" / ".."
+        self.assertEqual(
+            _inside(noncanonical_root, "app.py", must_exist=True),
+            (self.project_root / "app.py").resolve(),
+        )
+        with self.assertRaises(PermissionError):
+            _inside(noncanonical_root, "../escape.py")
 
     # 直接运行固定 profile 的进程层，Tool Ticket 合同由既有 delivery 测试独立证明。
     def run_profile(self, source=None):

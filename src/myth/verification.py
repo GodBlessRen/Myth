@@ -55,8 +55,10 @@ def _inside(root: Path, value: str, *, must_exist: bool = False) -> Path:
     path = Path(raw)
     if path.is_absolute() or path.drive or ".." in path.parts or "\x00" in raw:
         raise PermissionError("verification path must be relative to the admitted project")
-    resolved = (root / path).resolve()
-    if not resolved.is_relative_to(root):
+    # Windows 临时目录可能经过 junction/不同路径拼写；比较前统一权威根和目标的真实路径。
+    canonical_root = root.resolve()
+    resolved = (canonical_root / path).resolve()
+    if not resolved.is_relative_to(canonical_root):
         raise PermissionError("verification path escapes admitted project")
     if must_exist and not resolved.exists():
         raise ValueError(f"verification path does not exist: {raw}")

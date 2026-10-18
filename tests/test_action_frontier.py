@@ -11,7 +11,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from myth.conversation import validate_tool_arguments
 from myth.models import ModelResult, ProviderStatus
+from myth.platform.model_pool import pending_resolutions, pending_reviews
 from myth.platform.action_frontier import (
     MAX_ACTION_CANDIDATES,
     build_action_frontier,
@@ -87,6 +89,21 @@ class FrontierProvider:
 
 # 防回归重点是候选身份及原 Runtime 事务，而非第三方模型输出偏好。
 class ActionFrontierTests(unittest.TestCase):
+    # Knowledge 的 resolution=L2 不能触发子代理审核；该异常曾使完整模型步骤崩溃。
+    def test_knowledge_resolution_is_not_agent_review(self):
+        activities = [
+            {"result": {"capability_id": "knowledge.resolve", "resolution": "L2", "document_id": "d"}},
+            {"result": {"capability_id": "memory.resolve", "resolution": "L0", "memory_id": "m"}},
+        ]
+        self.assertEqual(pending_resolutions(activities), [])
+        self.assertEqual(pending_reviews(activities), [])
+
+    # 受信测试允许不传 candidate_decision_ids；显式传入时依旧要求非空身份集合。
+    def test_trusted_profile_optional_candidate_set(self):
+        validate_tool_arguments("test.run", {"profile_id": "fixture"})
+        with self.assertRaises(ValueError):
+            validate_tool_arguments("test.run", {"profile_id": "fixture", "candidate_decision_ids": []})
+
     # 同名资料应有两个不同候选；跨 Run/Observation/版本也不能复用 ID。
     def test_identity_not_positional_and_bounded(self):
         rows = [knowledge_activity("d1", "doc1"), knowledge_activity("d2", "doc2")]
