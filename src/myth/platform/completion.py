@@ -198,6 +198,7 @@ def _candidate_subject(turn: dict[str, Any]) -> list[dict[str, str]]:
 
 # 已执行 verifier 必须 PASS；交付候选出现时，原项目测试及旧候选绿灯不能作为当前候选证明。
 def _verification_rule(turn: dict[str, Any], decision: Any) -> CompletionVerdict | None:
+    # 按执行先后只收集实际观察到的 verifier 结果；缺失不能误判为测试成功。
     verification_results = []
     for activity in turn.get("activities") or []:
         decision_data = activity.get("decision") or {}
@@ -206,8 +207,10 @@ def _verification_rule(turn: dict[str, Any], decision: Any) -> CompletionVerdict
         result = activity.get("result") or {}
         if result:
             verification_results.append(result)
+    # 从未执行测试时不新增强制测试义务；交付仍独立保持 UNVERIFIED。
     if not verification_results:
         return None  # 未测试不自动制造验收；Delivery 仍从 UNVERIFIED 开始。
+    # 最新已执行测试失败时优先暴露真实失败，不允许用更早成功覆盖。
     latest = verification_results[-1]
     if latest.get("status") != "PASSED":
         return CompletionVerdict(
@@ -219,9 +222,11 @@ def _verification_rule(turn: dict[str, Any], decision: Any) -> CompletionVerdict
                 hint="Fix the verified failure and run the trusted verification profile again.",
             ),
         )
+    # 只有存在待交付的候选补丁时，才要求 verifier 绑定完整候选集合。
     candidates = _candidate_subject(turn)
     if not candidates:
         return None
+    # 对比固定候选身份、文件路径和字节摘要；缺少绑定时一律拒绝借用原项目 PASS。
     subject = latest.get("tested_subject")
     actual = subject.get("candidates") if isinstance(subject, dict) else None
     if (
