@@ -233,6 +233,20 @@ class TaskBenchmarkTests(unittest.TestCase):
         )
         self.assertFalse(rejected["ready_for_separate_heldout_review"])
         self.assertEqual(rejected["fully_measured_variant_pairs"], 0)
+        # 全部四组即使都有便宜的实测成本，若所有独立 Oracle 均 FAIL，绝不是冠军。
+        for index, item in enumerate(records):
+            records[index] = {
+                **item, "success": False, "status": "COMPLETED", "model_calls": 1,
+                "usage_measured": {"input_tokens": 50 if item["arm"] == "context-full" else 60,
+                                   "output_tokens": 10, "provider_wall_ms": 100},
+            }
+        both_failed = summarize_context_ablation(
+            records, tuple(CONTEXT_BENCHMARK_ARMS), ("edge",), 1,
+            kind="real_provider", complete_suite=True,
+        )
+        self.assertEqual(both_failed["quality"]["both_fail"], 1)
+        self.assertFalse(both_failed["all_full_arm_oracles_pass"])
+        self.assertFalse(both_failed["ready_for_separate_heldout_review"])
 
     # 不完整对照不可以当作全四机制，基线和路由组混用应在创建证据目录前拒绝。
     def test_context_ablation_rejects_mixed_arms_and_marks_incomplete(self):
