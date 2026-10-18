@@ -78,6 +78,45 @@ class VerificationCompletionTests(unittest.TestCase):
                 "profile_id": self.profile["profile_id"], "candidate_decision_ids": ["old"]
             })
 
+    # Ticket 冻结后出现新候选，旧意图不允许复用为另一个版本的测试证明。
+    def test_candidate_intent_rejects_late_revision(self):
+        (self.project_root / "app.py").write_text("VALUE = 1\\n", encoding="utf-8")
+        digest = self.runtime.objects.put(b"VALUE = 2\\n")
+        first = {"decision": {"capability_id": "project.patch_exact"}, "result": {
+            "artifact": {"name": "app.py", "digest": digest, "decision_id": "a"}
+        }}
+        turn = {"snapshot": {"project": self.project}, "activities": [first]}
+        intent = self.workspace.verification.intent(turn, {
+            "profile_id": self.profile["profile_id"], "candidate_decision_ids": ["a"]
+        })
+        changed = dict(first["result"]["artifact"])
+        changed["decision_id"] = "b"
+        turn["activities"].append({"decision": {"capability_id": "project.patch_exact"},
+                                   "result": {"artifact": changed}})
+        with self.assertRaises(ValueError):
+            self.workspace.verification.run(turn, self.profile["profile_id"], intent=intent)
+
+    # 符号链接项目拒绝复制，不能穿过项目目录读取受信范围以外的文件。
+    def test_candidate_copy_rejects_symlink(self):
+        (self.project_root / "app.py").write_text("VALUE = 1\\n", encoding="utf-8")
+        outside = self.root / "secret.txt"
+        outside.write_text("secret", encoding="utf-8")
+        try:
+            (self.project_root / "pointer").symlink_to(outside)
+        except (OSError, NotImplementedError):
+            self.skipTest("symlinks unavailable on this host")
+        digest = self.runtime.objects.put(b"VALUE = 2\\n")
+        turn = {"snapshot": {"project": self.project}, "activities": [{
+            "decision": {"capability_id": "project.patch_exact"}, "result": {
+                "artifact": {"name": "app.py", "digest": digest, "decision_id": "a"}
+            }
+        }]}
+        intent = self.workspace.verification.intent(turn, {
+            "profile_id": self.profile["profile_id"], "candidate_decision_ids": ["a"]
+        })
+        with self.assertRaises(PermissionError):
+            self.workspace.verification.run(turn, self.profile["profile_id"], intent=intent)
+
     # 发现零测试是未验证，不能为 completion 提供 PASS。
     def test_empty_discovery_is_not_passed(self):
         result = self.run_profile()

@@ -313,6 +313,14 @@ class SqliteVerificationProfiles:
     def run(self, turn: dict[str, Any], profile_id: str, *, intent: dict[str, Any] | None = None) -> dict[str, Any]:
         profile, root, command, env = self._contract(turn, profile_id)
         subject = (intent or {}).get("tested_subject")
+        if intent is not None:
+            if intent.get("profile_id") != profile["profile_id"] or intent.get("profile_revision") != profile["revision"]:
+                raise ValueError("stale verification profile intent")
+            # 重核当前候选身份；Ticket 固定的被测对象不能被晚到参数换成另一版本。
+            ids = [item["decision_id"] for item in subject["candidates"]] if isinstance(subject, dict) else None
+            expected = self.candidate_subject(turn, {"candidate_decision_ids": ids}) if ids is not None else None
+            if subject != expected:
+                raise ValueError("verification subject changed after intent")
         start = time.monotonic()
         timed_out = False
         returncode = None
