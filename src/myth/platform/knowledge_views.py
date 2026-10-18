@@ -127,6 +127,11 @@ class SqliteKnowledgeViews:
         value = dict(row)
         changes = self._scope_changes(value, int(value["last_seen_change_seq"]), limit=1)
         value["is_stale"] = bool(changes)
+        # 时间水位未变化不代表上游依赖仍成立：按 backing Memory 的完整证据闭包复核。
+        if value.get("backing_memory_id"):
+            value["is_stale"] = value["is_stale"] or self.memory.freshness(
+                str(value["backing_memory_id"])
+            )["is_stale"]
         value["freshness"] = (
             "unmaterialized"
             if not value.get("backing_memory_id")
@@ -203,7 +208,11 @@ class SqliteKnowledgeViews:
             exclude_source_prefix="mental-model:",
         )
         # 派生模型在候选阶段排除，不能占满 top-k 后再过滤掉真正来源。
-        source_rows = report["memories"][:limit]
+        # stale/cyclic 来源不得喂回下一轮合成；扩大候选查询上限并在选择之前核验。
+        source_rows = [
+            row for row in report["memories"]
+            if not self.memory.freshness(str(row["memory_id"]))["is_stale"]
+        ][:limit]
         sources = [
             self.memory.resolve(
                 str(row["memory_id"]),
@@ -289,6 +298,8 @@ class SqliteKnowledgeViews:
                         f"mental model evidence is not visible: {memory_id}"
                     ) from exc
                 source = self.memory.get(memory_id)
+                if self.memory.freshness(memory_id)["is_stale"]:
+                    raise ValueError("mental model evidence has stale support")
                 if str(source.get("source_ref") or "").startswith("mental-model:"):
                     raise ValueError("mental model refresh cannot cite synthesized models")
                 evidence.append(
