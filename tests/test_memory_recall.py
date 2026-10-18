@@ -223,6 +223,7 @@ class RecallStoreTests(unittest.TestCase):
     def test_support_closure_budget_exhaustion_is_invalid(self):
         from myth.platform.memory_lifecycle import evaluate_support_closure
 
+        # 虚拟无限依赖链：无需构造大型数据库，即可验证深度预算越界必定拒绝。
         def load(key):
             index = int(key[1:])
             return (
