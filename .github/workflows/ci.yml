@@ -86,7 +86,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          # PR 默认 github.sha 可能是临时合并 SHA；此独立评测固定真实 HEAD 才可重复。
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
+      - name: Verify checked-out source revision
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -101,7 +107,7 @@ jobs:
       - name: Retain reproducible semantic evaluation evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: myth-semantic-ablation-${{ github.sha }}
+          name: myth-semantic-ablation-${{ github.event.pull_request.head.sha || github.sha }}
           path: .work/evidence/semantic-ablation.json
           if-no-files-found: error
           retention-days: 7
