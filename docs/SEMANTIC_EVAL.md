@@ -36,6 +36,12 @@ python -m unittest discover -s tests -p 'test_semantic_evaluation.py' -v
 
 筛选题只供诊断，`--case-id s01-scalar` 的退出码为 1 且 `complete_suite=false`。任意 candidate Case FAIL / 安全用例泄漏 / 结果不完整也必须非零退出。一次完整验证应保存 SHA、Case 输出、两臂成本字段、CI 精确提交哈希，不得只截图一个百分比。
 
+## GitHub CI 的可复核实验产物
+
+`.github/workflows/ci.yml` 在质量与跨平台全量测试之外运行独立 `semantic-eval` Job：固定命令 `--repeats 3 --seed 17`，结果写入 `.work/evidence/semantic-ablation.json` 并作为 `myth-semantic-ablation-<git SHA>` 上传（7 天保留）。**Release 必须依赖这个 Job 成功**，同时仍依赖四平台、MCP 和质量门禁。报告包含 `suite_sha256`、16 题完整分母、Case 层 PASS/FAIL、局部时间和缺测 Token/Provider cost。归档只包含合成夹具运行事实，不上传本地凭据或业务记忆。下载后可核对 Actions run 的 commit SHA 与 `summary.suite_sha256`；缺少 artifact 视作证据不完整。
+
+这一 CI 工件属于离线系统测试的可复现观察，**并不是**独立真实模型验证。不要因为它恰好 100% 通过就开启自动 ontology 演化或宣布供应商效果提升。
+
 ## 下一阶段真实 Agent A/B 的资格边界
 
 当真实 Provider 可用时，需要另一份**先冻结、独立采样的任务集**，再比较启用/隐藏 `semantics.browse` 与 `semantics.resolve` 的两条 Agent 路线。控制模型/思考档位、上下文、温度、工具权限、检索预算，固定来源/期望，不允许模型把 Oracle 看到。每 Case 多次交错随机运行，收集真实 Provider receipts 中的 `input_tokens/output_tokens/reasoning_tokens`、`cost`（缺项就是 null）、真实 `p95`、引用准确率、冲突识别率和完整结局。按**独立 Case 聚类**分析，不拿重复 trials 当样本量。候选不能降低安全 floor；无法独立判定的 Case 记 `INCONCLUSIVE`。
