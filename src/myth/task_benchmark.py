@@ -201,6 +201,45 @@ def _arm_summary(trials, arm, case_ids, repeats):
     }
 
 
+# 同一题/试次的四个真实 Arm 形成 2×2 因子实验；先找反例，再谈机制收益。
+# 仅比较独立 Oracle 的二值结论和共同实测成本；开关已冻结并不证明模型可见内容确实变化。
+def _factorial_falsification_probe(group, activation):
+    arms = ("context-baseline", "context-causal", "context-relevance", "context-full")
+    if any(type((group.get(arm) or {}).get("success")) is not bool for arm in arms):
+        return {"status": "UNVERIFIED", "reason": "missing_independent_oracle"}
+    if any(activation.get(arm) is not True for arm in arms):
+        return {"status": "UNVERIFIED", "reason": "unverified_harness_configuration"}
+    b, c, r, f = (int(group[arm]["success"]) for arm in arms)
+    contrasts = {
+        "causal_without_relevance": c - b,
+        "causal_with_relevance": f - r,
+        "relevance_without_causal": r - b,
+        "relevance_with_causal": f - c,
+    }
+    # 预声明的单调质量假设：启用某机制不应令同题独立 Oracle 从 PASS 翻为 FAIL。
+    # 任一负向对照是待复验的反例；两种条件下方向相反意味着不能主张独立增益。
+    counterexamples = sorted(key for key, delta in contrasts.items() if delta < 0)
+    cost_interactions = {}
+    for meter in ("input_tokens", "output_tokens", "provider_wall_ms"):
+        values = [(group[arm].get("usage_measured") or {}).get(meter) for arm in arms]
+        if all(type(value) in (int, float) and isfinite(value) and value >= 0 for value in values):
+            before, causal, relevance, full = (float(value) for value in values)
+            cost_interactions[meter] = full - causal - relevance + before
+        else:
+            cost_interactions[meter] = None
+    return {
+        "status": "OBSERVED_FACTORIAL",
+        "quality_contrasts": contrasts,
+        "quality_interaction": f - c - r + b,
+        "counterexamples_to_nonregression": counterexamples,
+        "no_observed_quality_difference": len({b, c, r, f}) == 1,
+        "cost_interactions": cost_interactions,
+        "mechanism_configuration_verified": True,
+        "material_intervention_verified": None,
+        "causal_attribution": False,
+    }
+
+
 # 只能比较同 case/repeat 的真实试次；缺测成本和不完整变体绝不补零以制造效率收益。
 def summarize_context_ablation(trials, arms, case_ids, repeats, *, kind, complete_suite):
     """Context 机制配对汇总：质量、安全、成本分离；输出不是自动 Promote 决定。"""
@@ -216,6 +255,7 @@ def summarize_context_ablation(trials, arms, case_ids, repeats, *, kind, complet
             duplicate.append({"case_id": key[0], "repeat": key[1], "arm": arm})
         group[arm] = trial
 
+    duplicate_blocks = {(item["case_id"], item["repeat"]) for item in duplicate}
     pairs = []
     quality = Counter()
     safety = Counter()
@@ -290,10 +330,16 @@ def summarize_context_ablation(trials, arms, case_ids, repeats, *, kind, complet
                     and (item.get("relevance") != "disabled-for-controlled-evaluation") == want_relevance
                     for item in records
                 )
+            probe = (
+                {"status": "UNVERIFIED", "reason": "duplicate_trial_block"}
+                if (case_id, repeat) in duplicate_blocks
+                else _factorial_falsification_probe(group, activation)
+            )
             pairs.append({
                 "case_id": case_id,
                 "repeat": repeat,
                 "status": "PAIRED",
+                "falsification": probe,
                 "quality": {
                     "baseline_pass": b_ok,
                     "full_pass": f_ok,
@@ -390,6 +436,45 @@ def summarize_context_ablation(trials, arms, case_ids, repeats, *, kind, complet
     statistics = case_clustered_sign_test(
         pairs, tuple(case_ids), repeats, meter="input_tokens"
     )
+    # 重复试次仍是同一个 Case：反例与交互按 Case 去重，不制造独立样本量。
+    factorial_blocks = [
+        pair for pair in pairs
+        if (pair.get("falsification") or {}).get("status") == "OBSERVED_FACTORIAL"
+    ]
+    counterexample_cases = sorted({
+        pair["case_id"] for pair in factorial_blocks
+        if pair["falsification"]["counterexamples_to_nonregression"]
+    })
+    interaction_cases = sorted({
+        pair["case_id"] for pair in factorial_blocks
+        if pair["falsification"]["quality_interaction"] != 0
+    })
+    falsification = {
+        "method": "observed-2x2-quality-factorial-v1",
+        "hypothesis": "each enabled mechanism is non-regressing on the independent oracle",
+        "observed_blocks": len(factorial_blocks),
+        "unverified_blocks": len(pairs) - len(factorial_blocks),
+        "counterexample_trial_count": sum(
+            bool(pair["falsification"]["counterexamples_to_nonregression"])
+            for pair in factorial_blocks
+        ),
+        "counterexample_case_count": len(counterexample_cases),
+        "counterexample_case_ids": counterexample_cases,
+        "interaction_case_count": len(interaction_cases),
+        "interaction_case_ids": interaction_cases,
+        "no_quality_difference_blocks": sum(
+            pair["falsification"]["no_observed_quality_difference"]
+            for pair in factorial_blocks
+        ),
+        "material_intervention_verified": None,
+        "causal_attribution": False,
+        "note": (
+            "Activation proves only frozen mechanism configuration, not that the model-visible "
+            "context changed. Contrasts locate counterexamples and interactions; they do not "
+            "identify causal effects without material-intervention evidence, repeated trials "
+            "and independent held-out verification."
+        ),
+    }
     ready = (
         kind == "real_provider"
         and evidence_full and metrics_full and no_quality_regression
@@ -407,6 +492,7 @@ def summarize_context_ablation(trials, arms, case_ids, repeats, *, kind, complet
         "full_context_arms": variants_complete,
         "duplicate_trial_blocks": duplicate,
         "paired_significance": statistics,
+        "falsification": falsification,
         "quality": dict(sorted(quality.items())),
         "all_full_arm_oracles_pass": full_oracle_floor,
         "safety": dict(sorted(safety.items())),
