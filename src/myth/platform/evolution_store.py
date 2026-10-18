@@ -485,9 +485,85 @@ class SqliteEvolutionControl:
             )
         ]
 
+    # EvoOntology-inspired nomination：只从真实、完整的 Discovery Eval 判断是否值得研究，
+    # 不生成 Candidate、触发外部模型、消耗预算或自动 Promote；未决候选阻止重复提名。
+    def nomination_report(
+        self, domain: str = "information_resolution",
+        *, min_cases: int = 8, failure_ratio: float = 0.25,
+    ) -> dict[str, Any]:
+        if type(min_cases) is not int or not 1 <= min_cases <= 1000:
+            raise ValueError("min_cases must be 1-1000")
+        if type(failure_ratio) not in (int, float) or not 0 < failure_ratio <= 1:
+            raise ValueError("failure_ratio must be within (0,1]")
+        active = self.active(domain)
+        baseline = str(active["policy_id"])
+        pending = self.store.db.execute(
+            "SELECT candidate_id FROM policy_candidates WHERE baseline_policy_id=? "
+            "AND domain=? AND status IN ('DRAFT','ELIGIBLE') ORDER BY rowid DESC LIMIT 1",
+            (baseline, domain),
+        ).fetchone()
+        base = {
+            "domain": domain, "policy_id": baseline, "due": False,
+            "reason": "insufficient_independent_discovery_evidence",
+            "independent_cases": 0, "failed_cases": 0,
+            "unknown_cases": 0, "safety_regressions": 0,
+            "evidence_eval_run_ids": [],
+        }
+        if pending is not None:
+            return {**base, "reason": "candidate_already_in_review",
+                    "candidate_id": str(pending["candidate_id"])}
+        # Evolution 先装配，Evaluation Ledger 未必在同一进程初始化；读状态不能私自执行 DDL。
+        if self.store.db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='evaluation_observations'"
+        ).fetchone() is None:
+            return base
+        records = self.store.db.execute(
+            "SELECT r.eval_run_id,r.suite_id,r.suite_version,o.case_id,o.verdict,o.safety_regression "
+            "FROM evaluation_runs AS r JOIN evaluation_observations AS o ON o.eval_run_id=r.eval_run_id "
+            "WHERE r.policy_id=? AND r.evaluation_partition='discovery' AND r.complete_suite=1 "
+            "ORDER BY r.rowid DESC,r.eval_run_id,o.case_id LIMIT 2001",
+            (baseline,),
+        ).fetchall()
+        if len(records) > 2000:
+            return {**base, "reason": "discovery_evidence_window_truncated"}
+        # 同 suite/version/case 的重复试次只算一个独立样本，避免同题重复制造虚假的演化压力。
+        seen = set()
+        supporting = []
+        fail = unknown = safety = 0
+        for row in records:
+            key = (str(row["suite_id"]), int(row["suite_version"]), str(row["case_id"]))
+            if key in seen:
+                continue
+            seen.add(key)
+            verdict = str(row["verdict"])
+            fail += int(verdict == "FAIL")
+            unknown += int(verdict not in {"PASS", "FAIL"})
+            safety += int(bool(row["safety_regression"]))
+            ref = str(row["eval_run_id"])
+            if ref not in supporting and len(supporting) < 16:
+                supporting.append(ref)
+        measured = len(seen) - unknown
+        ratio = fail / measured if measured > 0 else None
+        # 安全回归仅要求人检查而非自动重写；普通失败必须跨多个独立 Case 达门槛。
+        due = safety > 0 or (measured >= min_cases and fail >= 2 and ratio is not None and ratio >= failure_ratio)
+        reason = (
+            "safety_regression_requires_review" if safety else
+            "enough_independent_failures" if due else
+            "insufficient_independent_discovery_evidence"
+        )
+        return {
+            **base, "due": due, "reason": reason,
+            "independent_cases": len(seen), "measured_cases": measured,
+            "failed_cases": fail, "unknown_cases": unknown,
+            "safety_regressions": safety,
+            "failure_ratio": ratio,
+            "evidence_eval_run_ids": supporting,
+        }
+
     # 读取当前持久事实并生成状态投影；不得把模型 claim 当作已执行或已验收。
     def status(self, domain: str = "information_resolution") -> dict[str, Any]:
         return {
             "active": self.active(domain),
             "history": self.history(domain, 20),
+            "nomination": self.nomination_report(domain),
         }
