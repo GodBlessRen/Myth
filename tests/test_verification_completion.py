@@ -8,6 +8,7 @@ import unittest
 
 from myth.runtime import MythRuntime
 from myth.workspace import Workspace
+from myth.verification import _inside
 
 
 class VerificationCompletionTests(unittest.TestCase):
@@ -31,6 +32,18 @@ class VerificationCompletionTests(unittest.TestCase):
         self.runtime.close()
         self.tmp.cleanup()
 
+    # 即使传入的受信根含未归一化父目录，目标仍必须通过规范化根内的真实路径检查。
+    def test_admitted_root_is_canonicalized_before_path_check(self):
+        (self.project_root / "folder").mkdir()
+        (self.project_root / "app.py").write_text("ok", encoding="utf-8")
+        noncanonical_root = self.project_root / "folder" / ".."
+        self.assertEqual(
+            _inside(noncanonical_root, "app.py", must_exist=True),
+            (self.project_root / "app.py").resolve(),
+        )
+        with self.assertRaises(PermissionError):
+            _inside(noncanonical_root, "../escape.py")
+
     # 直接运行固定 profile 的进程层，Tool Ticket 合同由既有 delivery 测试独立证明。
     def run_profile(self, source=None):
         if source is not None:
@@ -39,7 +52,8 @@ class VerificationCompletionTests(unittest.TestCase):
 
     # 原项目绿灯不能替代真实候选覆盖测试；候选被复制至受限临时工作树。
     def test_candidate_overlay_tests_candidate_not_source(self):
-        (self.project_root / "app.py").write_text("VALUE = 1\n", encoding="utf-8")
+        # 原文件须固定 LF 字节，避免 Windows write_text 转 CRLF 后造成伪回归。
+        (self.project_root / "app.py").write_bytes(b"VALUE = 1\n")
         (self.test_dir / "test_fixture.py").write_text(
             "import unittest\nfrom app import VALUE\n"
             "class Check(unittest.TestCase):\n"

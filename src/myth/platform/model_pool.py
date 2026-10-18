@@ -192,11 +192,24 @@ def delegated_results(activities):
 def pending_resolutions(activities):
     """拒收结果必须由主模型提供替代内容，或被已接受的新委派取代；花销仍保留。"""
     results = delegated_results(activities)
-    resolved = {r["resolution"]["delegation_id"] for r in results if r.get("resolution")}
-    accepted = {r["review"]["delegation_id"] for r in results if r.get("review", {}).get("accepted")}
-    resolved.update(r.get("handoff", {}).get("replaces") for r in results if r.get("delegation_id") in accepted)
-    return [r["review"]["delegation_id"] for r in results if r.get("review")
-            and not r["review"]["accepted"] and r["review"]["delegation_id"] not in resolved]
+    # 各工具均可返回名为 resolution 的普通字符串；仅 Agent 的结构化收据拥有 delegation_id。
+    resolved = {
+        value["delegation_id"]
+        for row in results for value in [row.get("resolution")]
+        if isinstance(value, dict) and isinstance(value.get("delegation_id"), str)
+    }
+    reviews = [
+        value for row in results for value in [row.get("review")]
+        if isinstance(value, dict) and isinstance(value.get("delegation_id"), str)
+    ]
+    accepted = {review["delegation_id"] for review in reviews if review.get("accepted")}
+    resolved.update(
+        handoff.get("replaces")
+        for row in results for handoff in [row.get("handoff")]
+        if isinstance(handoff, dict) and row.get("delegation_id") in accepted
+    )
+    return [review["delegation_id"] for review in reviews
+            if not review.get("accepted") and review["delegation_id"] not in resolved]
 
 
 def estimate_cost(usage, rates):
@@ -212,6 +225,10 @@ def estimate_cost(usage, rates):
 def pending_reviews(activities):
     """从已消费工具事实计算尚未评分的子任务，避免凭模型文字宣称已评审。"""
     results = delegated_results(activities)
-    reviews = {x.get("review", {}).get("delegation_id") for x in results}
+    reviews = {
+        value["delegation_id"]
+        for row in results for value in [row.get("review")]
+        if isinstance(value, dict) and isinstance(value.get("delegation_id"), str)
+    }
     return [x["delegation_id"] for x in results if x.get("review_required")
             and x["delegation_id"] not in reviews]
