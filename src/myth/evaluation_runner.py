@@ -227,6 +227,8 @@ class FoundationEvalRunner:
         if self.harness_id is not None:
             snapshot["evaluation_harness_mechanisms"] = list(self.harness_mechanisms)
         expected = case.expected
+        # 先核对用例具有独立验收条件，再编译真实投影；预算拒绝和选入来源分别判定，
+        # 最后报告同一次编译的风险计数与字节，不能用预期答案反向构造模型请求。
         if not any(key in expected for key in (
             "required_sources", "excluded_sources", "required_text", "budget_error",
             "active_risk_count", "archived_issue_count",
