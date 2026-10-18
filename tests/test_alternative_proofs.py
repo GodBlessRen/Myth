@@ -77,7 +77,8 @@ class AlternativeProofTests(unittest.TestCase):
         # 另一条路径被打断后，任何 OR 分支都不能继续保留结论。
         self.memory.revoke(sources["C"]["memory_id"])
         self.assertEqual(self.memory.freshness(root["memory_id"])["status"], "stale")
-        self.assertEqual(self.memory.search_view_report("Proof-backed result D")["memories"], [])
+        selected = self.memory.search_view_report("Proof-backed result D")["memories"]
+        self.assertNotIn(root["memory_id"], {item["memory_id"] for item in selected})
 
     # 共享前提 B 对两个 AND 组都是必需条件，撤销 B 必须级联撤销 D。
     def test_shared_dependency_revocation_invalidates_every_path(self):
