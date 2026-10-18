@@ -306,7 +306,10 @@ class SqliteKnowledgeViews:
 
         # Dry Run 仍须通过相同 CAS / 权限核验，但不发布事实、不推进水位。
         backing = None
-        with self.store.tx() as db:
+        # Dry Run 进入 SQLite query_only WAL snapshot，内核层禁止任何未来误写。
+        # 真正发布仍由 BEGIN IMMEDIATE 独占 State Owner，CAS 不跨连接。
+        context = self.store.read_snapshot() if dry_run else self.store.tx()
+        with context as db:
             row = db.execute(
                 "SELECT * FROM workspace_mental_models WHERE model_id=?", (str(model_id),)
             ).fetchone()
