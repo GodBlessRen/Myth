@@ -283,12 +283,19 @@ class RuntimeStore:
         """为多次权威来源核验固定一个一致读取视图；有活动业务事务时显式拒绝嵌套。"""
         if self.db.in_transaction:
             raise RuntimeError("nested store read snapshots are not allowed")
-        self.db.execute("BEGIN")
+        # query_only 是 SQLite 强制约束，防止误将复用连接的写用例接入“只读”快照。
+        previous_query_only = int(self.db.execute("PRAGMA query_only").fetchone()[0])
+        self.db.execute("PRAGMA query_only = ON")
         try:
-            yield self.db
+            self.db.execute("BEGIN")
+            try:
+                yield self.db
+            finally:
+                # 不提交任何派生写入；异常时也释放本次一致性读视图。
+                self.db.rollback()
         finally:
-            # 只读事务无待提交效果，用 rollback 关闭快照，异常原样传播。
-            self.db.rollback()
+            # 恢复调用方连接原始权限，避免一次 Recall 阻断后续正式业务事务。
+            self.db.execute(f"PRAGMA query_only = {previous_query_only}")
 
     # 将 SQLite 行转为普通数据副本；应用不获得游标或写权限。
     @staticmethod
