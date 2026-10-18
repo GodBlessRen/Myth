@@ -21,8 +21,11 @@ _MEMORY_REF = re.compile(r"^memory:(mem_[0-9a-f]{32})@([1-9][0-9]{0,9})$")
 class RecallPlan:
     """一次有界 SEEK：主查询、最多三条补充查询与必须核对的精确来源。"""
 
+    # queries：已去重、长度受限的检索探针；同一请求最多四个。
     queries: tuple[str, ...]
+    # required_refs：必须从权威仓储逐一核验的固定版本来源。
     required_refs: tuple[str, ...]
+    # limit：本次输出候选上限；不可静默吞掉明确要求的引用。
     limit: int
 
 
@@ -44,13 +47,14 @@ def build_recall_plan(
     limit: int = 6,
 ) -> RecallPlan:
     """在任何读库/向量调用前拒绝不受限请求；重复探针不产生第二次计费。"""
+    # 步骤一：先检查总体预算及查询形状；拒绝生成器等不可预先限量的数据流。
     if type(limit) is not int or not 1 <= limit <= 8:
         raise ValueError("memory recall limit must be 1-8")
     if not isinstance(query, str) or not 1 <= len(query.strip()) <= 500:
         raise ValueError("memory recall query must contain 1-500 characters")
-    if isinstance(probes, (str, bytes, Mapping)):
+    if probes is not None and not isinstance(probes, (list, tuple)):
         raise ValueError("memory recall probes must be a list")
-    if isinstance(required_refs, (str, bytes, Mapping)):
+    if required_refs is not None and not isinstance(required_refs, (list, tuple)):
         raise ValueError("memory recall required_refs must be a list")
     extra = tuple(probes or ())
     required = tuple(required_refs or ())
@@ -59,6 +63,7 @@ def build_recall_plan(
     if len(required) > limit:
         raise ValueError("memory recall limit cannot hide required references")
 
+    # 步骤二：标准化并去重查询，保持调用方顺序但不重复消耗后端开销。
     queries = []
     seen_queries = set()
     for raw in (query, *extra):
@@ -70,6 +75,7 @@ def build_recall_plan(
             queries.append(text)
             seen_queries.add(key)
 
+    # 步骤三：精确引用先做形状与去重校验，版本有效性留给 SQLite 权威状态核验。
     seen_refs = set()
     refs = []
     for raw in required:
