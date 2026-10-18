@@ -54,6 +54,16 @@ pip install -e ".[milvus]"
 7. Context Observatory 统计 delivered，而不只统计 retrieved。
 8. 删除 Milvus Adapter 后，Myth 仍保持完整的词面检索、权限、Memory、恢复与验证语义。
 
+## Source-watermark index reconciliation
+
+`MemoryStore.search_report()` previously performed a full SQLite active-Memory scan and adapter sync **for every vector query**, even when the source state had not changed. Milvus already de-duplicates embedding for unchanged versions; that does **not** remove the repeated SQLite scan and per-record adapter calls.
+
+Now the Memory store keeps an **in-process, adapter-identity-bound coverage watermark** after a successful full backfill. With the same adapter and unchanged `workspace_memory_changes.change_seq`, subsequent queries skip the O(active Memories) backfill path but still execute actual vector search and SQLite hydration. A source change, new adapter instance, or explicitly unhealthy adapter requires a new backfill. The coverage watermark is recorded *before* scanning, so concurrent writers can only cause conservative rechecks.
+
+A failed backfill **must not advance the watermark**; a query reports `degraded=true` and `vector_status=backfill_degraded` rather than claiming the index is complete. The lexical baseline remains available. A process restart starts without a coverage watermark and reconciles its index again.
+
+**Proof boundary:** tests count fake adapter sync calls and verify recovery protocol. This does not prove Milvus server-side performance, remote collection continuity, embedding quality or true sub-linear retrieval. The lexical baseline still scans all visible Memories; optimizing that requires a separate measured retrieval design.
+
 ## 当前刻意没有做的事
 
 - 不把 Milvus 升格为 Core / Domain / 新 Runtime Layer。
