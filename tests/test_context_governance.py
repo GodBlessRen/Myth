@@ -388,6 +388,12 @@ class ContextGovernanceTests(unittest.TestCase):
             with runtime.store.tx() as db:
                 db.execute(
                     "UPDATE workspace_operations SET result_json=? WHERE decision_id=?",
+                    ('{"status":"RUNNING"}', "tool-unknown"),
+                )
+            self.assertNotIn("tool-unknown", repo.context_liabilities(rid)["settled_tool_decisions"])
+            with runtime.store.tx() as db:
+                db.execute(
+                    "UPDATE workspace_operations SET result_json=? WHERE decision_id=?",
                     ('{"status":"FAILED"}', "tool-unknown"),
                 )
             known = repo.context_liabilities(rid)
