@@ -191,10 +191,14 @@ def remote_context_budget(settings: dict[str, Any]) -> dict[str, Any]:
     available = window - output - 512
     if available <= 0:
         raise ValueError("remote model context window leaves no room for input")
-    # 3 bytes/token 只是混合语言启发式；请求太大仍依赖供应商最终 Token 限制校验。
+    # 若没有同模型的真实 tokenizer，按 UTF-8 单字节可能产生一个 Token 的不利情况保守预算。
+    # Provider 额外包装/JSON schema 仍可能消费 Tokens，所以保留更大的协议余量；不能声称硬保证。
+    envelope = 2048
+    if available <= envelope:
+        raise ValueError("remote model context window lacks reserved protocol overhead")
     return {
-        "max_bytes": min(REMOTE_MAX_BYTES, available * 3),
+        "max_bytes": min(REMOTE_MAX_BYTES, available - envelope),
         "window_tokens": window,
-        "source": "provider-preflight-frozen",
-        "formula": "min(256000,(declared_window-output-512)*3)",
+        "source": "provider-preflight-frozen-conservative",
+        "formula": "min(256000,declared_window-output-512-2048)",
     }
