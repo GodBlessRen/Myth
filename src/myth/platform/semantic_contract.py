@@ -80,6 +80,7 @@ def _constraint(raw: object, value_type: str) -> dict[str, Any]:
 # normalize_contract：在任何数据库写入前固定跨模型可复现的术语、映射与约束形状。
 def normalize_contract(raw: Mapping[str, Any]) -> dict[str, Any]:
     """返回严格 JSON 形状；无默认事实等级，也不接受模型附带的 verified/confidence。"""
+    # 第一步：拒绝未知声明与越权字段，合同只能承诺可执行的有限规则。
     allowed = {"schema", "term_id", "definition", "value_type", "unit", "mappings", "constraints"}
     if not isinstance(raw, Mapping) or set(raw) - allowed or not {"term_id", "definition", "value_type", "mappings"} <= set(raw):
         raise ValueError("semantic contract has missing or unsupported fields")
@@ -100,6 +101,7 @@ def normalize_contract(raw: Mapping[str, Any]) -> dict[str, Any]:
     mappings = raw["mappings"]
     if not isinstance(mappings, list) or not 1 <= len(mappings) <= 4:
         raise ValueError("semantic mappings must contain 1-4 entries")
+    # 第二步：逐条固定 Mapping 身份、来源/单位 Pointer 与聚合规则，重复来源路径拒绝。
     normalized: list[dict[str, Any]] = []
     seen: set[tuple[str, str]] = set()
     for raw_mapping in mappings:
@@ -130,6 +132,7 @@ def normalize_contract(raw: Mapping[str, Any]) -> dict[str, Any]:
             "aggregation": aggregation,
             "unit_pointer": unit_pointer,
         })
+    # 第三步：检查约束有界、类型兼容和 min/max 不矛盾，然后排序生成确定性 JSON。
     constraints = raw.get("constraints", [])
     if not isinstance(constraints, list) or len(constraints) > 3:
         raise ValueError("semantic constraints must be a bounded list")
