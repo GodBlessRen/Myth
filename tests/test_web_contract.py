@@ -335,15 +335,30 @@ class WebContractTests(unittest.TestCase):
         with self.call("/api/workspace" + path, payload) as response:
             return json.load(response)
 
-    # 真实本机 HTTP 合同、入口去重及跨站拒绝的局部夹具协作；只服务本测试调用链，真实行为仍由外层断言核对。
+    # 回归等待：依据持久 Turn 终态+线程退出判断完成；Windows 3.13 压力下 5 秒 wall time 造成虚假失败。
     def wait_conversation(self, sid):
-        deadline = time.monotonic() + 5
+        """等待真实完成而非仅线程退出；设明确总截止并在失败时输出脱敏状态供定位。"""
+        deadline = time.monotonic() + 20
+        last_status = "NOT_STARTED"
+        last_driver = False
+        # 先识别确定的业务失败，再观察后台线程退出；RUNNING 时不能凭一次 active=false 误报成功。
         while time.monotonic() < deadline:
             session = self.workspace_json(f"/sessions/{sid}")
-            if session["turns"] and not session["turns"][-1]["driver_active"]:
-                return session
-            threading.Event().wait(0.01)
-        self.fail("conversation did not finish")
+            if session["turns"]:
+                latest = session["turns"][-1]
+                last_status = str(latest.get("status") or "UNKNOWN")
+                last_driver = bool(latest.get("driver_active"))
+                if not last_driver and last_status == "COMPLETED":
+                    return session
+                if not last_driver and last_status in {
+                    "FAILED", "UNKNOWN", "CANCELLED", "STOPPED", "WAITING_USER"
+                }:
+                    self.fail(f"conversation settled without successful completion: {last_status}")
+            threading.Event().wait(0.025)
+        self.fail(
+            "conversation did not reach COMPLETED within bounded test deadline; "
+            f"status={last_status}, driver_active={last_driver}"
+        )
 
     # 回归断言：本机 HTTP 对话持久保存，重复提交仍复用固定入口身份。
     def test_workspace_http_chat_persistence_and_duplicate_submit(self):
