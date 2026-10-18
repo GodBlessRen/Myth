@@ -13,7 +13,6 @@ from .conversation_context import (
     conversation_budget_bytes,
 )
 from .platform.tool_discovery import visible_tool_ids
-from .platform.action_frontier import build_action_frontier
 from .platform.capabilities import capability_reachability, default_capabilities
 from .platform.context import choose_context_mode, context_boundary
 from .model_capabilities import remote_context_budget
@@ -498,7 +497,7 @@ def calculate(expression):
 
 # 根据统一工具合同和冻结事实编译有界消息；Ollama 窗口与输出预留对齐，远端保持本地投影上限。
 def conversation_request(settings, snapshot, messages, activities, control=None):
-    frontier = build_action_frontier(str(snapshot.get("frontier_run_id") or ""), activities)
+    frontier = tuple(snapshot.get("frontier_candidates") or ())
     visible_ids = visible_tool_ids(TOOL_CATALOG, activities)
     from .platform.model_pool import pending_reviews, pending_resolutions, delegated_results
     pool = settings.get("model_pool") or {}
@@ -566,7 +565,7 @@ def conversation_request(settings, snapshot, messages, activities, control=None)
         "可用工具参数：" + canonical_json(visible_catalog)
     )
     if frontier:
-        shown = [item.model_view() for item in frontier if item.capability_id in visible_ids]
+        shown = [item for item in frontier if item["capability_id"] in visible_ids]
         if shown:
             system += (
                 "\n动态动作候选（仅供选择，执行时仍核对版本/作用域/权限）："
@@ -586,7 +585,7 @@ def conversation_request(settings, snapshot, messages, activities, control=None)
             "发现只改变下一步可见目录，不会绕过 Capability/Ticket/权限准入。"
         )
     schema = (
-        conversation_schema(visible_ids, frontier_capabilities={c.capability_id for c in frontier})
+        conversation_schema(visible_ids, frontier_capabilities={c["capability_id"] for c in frontier})
         if settings["provider"] == "ollama"
         else STEP_DECISION_SCHEMA
     )
