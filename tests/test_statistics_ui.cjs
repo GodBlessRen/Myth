@@ -12,6 +12,19 @@ test("session statistics render minutes, measured TTFT and end-to-end TPS", () =
   assert.match(rows[3].title, /端到端/);
 });
 
+// 估算值视觉上必须明显，tooltip 解释 Hindsight 和旧收据代理的证据口径。
+test("approximate TPS is visibly labeled and discloses estimated coverage", () => {
+  const rows = sessionStatisticsRows({output_tps: 79.2, tps_samples: 3,
+    tps_estimated_samples: 2, tps_raw_proxy_samples: 1});
+  assert.equal(rows[3].value, "≈ 79.2 tok/s");
+  assert.match(rows[3].title, /其中 2 次为估算/);
+  assert.match(rows[3].title, /1 次旧收据/);
+  assert.match(rows[3].title, /不参与预算结算/);
+  const exact = sessionStatisticsRows({output_tps: 80, tps_estimated_samples: 0});
+  assert.equal(exact[3].value, "80 tok/s");
+  assert.doesNotMatch(exact[3].title, /可能包含推理 Token/);
+});
+
 // 缺测、负数及坏值不能显示伪造零或 NaN；已测零仍是零。
 test("missing and invalid observations stay unreported while zero is preserved", () => {
   for (const value of [null, undefined, true, "100", -1, NaN, Infinity]) {
