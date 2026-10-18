@@ -1103,7 +1103,7 @@ class SqliteMemoryStore:
             "freshness_report": freshness,
         }
 
-    # 搜索先只返回 L0 索引视图和同一次召回报告；避免为了观测元数据重复执行向量查询。
+    # 模型上下文只接纳复核过的 L0 Memory；原始 search_report 可保留候选供诊断。
     def search_view_report(
         self,
         query: str,
@@ -1113,23 +1113,54 @@ class SqliteMemoryStore:
         project_id: str | None = None,
         session_id: str | None = None,
     ) -> dict:
+        if type(limit) is not int or not 1 <= limit <= 20:
+            raise ValueError("limit must be 1-20")
+        # 检索发生在快照外，避免远端索引请求长期占用 SQLite WAL 读事务。
+        # 有界超额取候选可在过期证据占据前排时补足结果，但不声称穷尽所有有效记录。
         report = self.search_report(
             query,
             kinds=kinds,
-            limit=limit,
+            limit=min(20, max(limit, limit * 3)),
             project_id=project_id,
             session_id=session_id,
         )
-        views = [
-            self.resolve(
-                item["memory_id"],
-                resolution="L0",
-                project_id=project_id,
-                session_id=session_id,
-            )
-            for item in report["memories"]
-        ]
-        return {"memories": views, "retrieval": report["retrieval"]}
+        views = []
+        rejected = 0
+        snapshot = nullcontext(self.store.db) if self.store.db.in_transaction else self.store.read_snapshot()
+        with snapshot:
+            for item in report["memories"]:
+                if len(views) >= limit:
+                    break
+                memory_id = str(item["memory_id"])
+                current = self.store.db.execute(
+                    "SELECT revision,active,scope_type,scope_id FROM workspace_memories WHERE memory_id=?",
+                    (memory_id,),
+                ).fetchone()
+                if (
+                    current is None
+                    or not bool(current["active"])
+                    or int(current["revision"]) != int(item["revision"])
+                    or not self._visible(dict(current), project_id, session_id)
+                ):
+                    rejected += 1
+                    continue
+                view = self.resolve(
+                    memory_id, resolution="L0",
+                    project_id=project_id, session_id=session_id,
+                )
+                if view["is_stale"]:
+                    rejected += 1
+                    continue
+                views.append(view)
+        return {
+            "memories": views,
+            "retrieval": {
+                **report["retrieval"],
+                "resolution": "L0",
+                "snapshot_validated": True,
+                "candidate_rejected_after_search": rejected,
+            },
+        }
 
     # 以命中 Memory 为锚点读取邻近同作用域记录，提供 chronology/navigation；不是新事实，也不改变 revision。
     def timeline(
