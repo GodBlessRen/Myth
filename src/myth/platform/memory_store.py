@@ -797,8 +797,10 @@ class SqliteMemoryStore:
         ranked = rank_probe_rows(rankings)
         required_rows = []
         invalid_refs = []
+        invalid_ids = set()
         for ref in plan.required_refs:
             memory_id, revision = parse_memory_ref(ref)
+            invalid_ids.add(memory_id)
             row = self.store.db.execute(
                 "SELECT * FROM workspace_memories WHERE memory_id=?", (memory_id,),
             ).fetchone()
@@ -816,10 +818,13 @@ class SqliteMemoryStore:
                 invalid_refs.append({"ref": ref, "reason": "stale_evidence"})
                 continue
             required_rows.append(item)
+            invalid_ids.discard(memory_id)
 
         # 明确要求的来源不能因 top-k 截断而消失；其余候选只占剩余容量。
         by_id = {str(item["memory_id"]): item for item in required_rows}
         for item in ranked:
+            if str(item["memory_id"]) in invalid_ids:
+                continue
             if len(by_id) >= plan.limit:
                 break
             by_id.setdefault(str(item["memory_id"]), item)
