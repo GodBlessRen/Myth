@@ -186,6 +186,7 @@ class EvolutionEvidenceIntegrityTests(unittest.TestCase):
         baseline_id, tested_id = self.pair()
         calls = []
 
+        # 将竞态固定在初次读取与事务提交之间，证明旧摘要不能进入发布资格。
         def mutate_during_calibration(*args, **kwargs):
             calls.append("mutated")
             self.runtime.store.db.execute(
@@ -211,6 +212,7 @@ class EvolutionEvidenceIntegrityTests(unittest.TestCase):
     def test_late_discovery_contamination_blocks_attachment(self):
         baseline_id, tested_id = self.pair()
 
+        # 在初步计算后污染最终评测分区，必须被锁内 held-out 复核捕获。
         def leak_during_calibration(*args, **kwargs):
             self.runtime.store.db.execute(
                 "UPDATE evaluation_runs SET evaluation_partition='discovery' "
