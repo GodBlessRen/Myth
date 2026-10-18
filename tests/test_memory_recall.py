@@ -8,6 +8,7 @@ from __future__ import annotations
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from myth.conversation import validate_tool_arguments
 from myth.platform.memory_recall import build_recall_plan, parse_memory_ref, rank_probe_rows
@@ -135,6 +136,43 @@ class RecallStoreTests(unittest.TestCase):
         report = self.memory.recall_report("Keyword")
         self.assertEqual(report["evidence_gate"]["status"], "unverified")
         self.assertFalse(report["evidence_gate"]["answer_verified"])
+
+    # 回归断言：候选在检索与出报告之间发生撤销，不得把旧命中当成当前权威记忆返回。
+    def test_recall_hydration_rejects_candidate_changed_during_search(self):
+        row = self.memory.remember(
+            kind="semantic", text="Old recalled fact", source_ref="source:race-recall",
+        )
+        self.memory.revoke(row["memory_id"])
+        stale_search = {
+            "memories": [row],
+            "retrieval": {"backend": "fixture", "matched": 1},
+        }
+        with patch.object(self.memory, "search_report", return_value=stale_search):
+            report = self.memory.recall_report("Old recalled fact")
+        self.assertEqual(report["memories"], [])
+        self.assertTrue(report["retrieval"]["snapshot_validated"])
+        self.assertEqual(report["retrieval"]["candidate_rejected_after_search"], 1)
+
+    # 回归断言：普通候选即使 revision 未改变，底层来源更新也要阻止失效派生正文流回上下文。
+    def test_recall_hydration_rejects_stale_linked_memory(self):
+        source = self.memory.remember(
+            kind="episodic", text="Source first", source_ref="source:linked",
+        )
+        derived = self.memory.remember(
+            kind="semantic", text="Derived old", source_ref="derived:linked",
+            evidence=[{"source_memory_id": source["memory_id"]}],
+        )
+        self.memory.apply_delta(
+            source["memory_id"],
+            [{"op": "replace_text", "text": "Source corrected"}],
+            expected_revision=1,
+        )
+        with patch.object(self.memory, "search_report", return_value={
+            "memories": [derived], "retrieval": {"backend": "fixture"},
+        }):
+            report = self.memory.recall_report("Derived old")
+        self.assertEqual(report["memories"], [])
+        self.assertEqual(report["retrieval"]["candidate_rejected_after_search"], 1)
 
 
 if __name__ == "__main__":
