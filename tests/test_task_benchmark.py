@@ -6,7 +6,9 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from myth.task_benchmark import run_task_benchmark
+from myth.task_benchmark import (
+    CONTEXT_BENCHMARK_ARMS, run_task_benchmark, summarize_context_ablation,
+)
 
 
 SUITE = Path(__file__).resolve().parents[1] / "evals" / "daily-v1.json"
@@ -92,6 +94,127 @@ class TaskBenchmarkTests(unittest.TestCase):
                 all(t["completion_without_acceptance"] for t in report["trials"])
             )
             self.assertFalse(any(t["success"] for t in report["trials"]))
+
+    # 同题四组使用真正冻结的 Evaluation override；不是对同一模型回答修改标签。
+    def test_controlled_context_four_way_persists_real_model_requests(self):
+        """Scripted 只证明 Harness 接通；每个 Turn 都存下本次组态和真实 Context 报告。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            arms = tuple(CONTEXT_BENCHMARK_ARMS)
+            out = Path(tmp) / "four-way"
+            report = run_task_benchmark(
+                SUITE, out, repeats=1, arms=arms,
+                case_ids=["source-read", "knowledge-fact"],
+            )
+            self.assertFalse(report["complete_suite"])
+            self.assertEqual(report["kind"], "harness_fixture")
+            self.assertEqual(len(report["trials"]), 8)
+            self.assertTrue(all(t["success"] for t in report["trials"]))
+            ablation = report["context_ablation"]
+            self.assertEqual(ablation["complete_pair_count"], 2)
+            self.assertEqual(ablation["quality"]["both_pass"], 2)
+            self.assertFalse(ablation["ready_for_separate_heldout_review"])
+            self.assertFalse(ablation["promotion_eligible"])
+            self.assertEqual(ablation["cost"]["input_tokens"]["paired_samples"], 2)
+            self.assertIsNone(ablation["cost"]["input_tokens"]["delta"])
+            self.assertEqual(ablation["activation_mismatch_count"], 0)
+            for trial in report["trials"]:
+                self.assertEqual(trial["harness_mechanisms"], list(CONTEXT_BENCHMARK_ARMS[trial["arm"]]))
+                self.assertEqual(trial["usage_samples"]["input_tokens"], trial["model_calls"])
+                self.assertGreater(trial["serialized_request_bytes"], 0)
+                self.assertTrue(all(
+                    record["causality"] == (
+                        "causal-active-set-v2"
+                        if "context_causal_guard" in CONTEXT_BENCHMARK_ARMS[trial["arm"]]
+                        else "disabled-for-controlled-evaluation"
+                    )
+                    for record in trial["context_activation"]
+                ))
+                self.assertTrue(all(
+                    record["relevance"] == (
+                        "cross-source-bounded-lexical-candidate-ranking"
+                        if "context_relevance_ranking" in CONTEXT_BENCHMARK_ARMS[trial["arm"]]
+                        else "disabled-for-controlled-evaluation"
+                    )
+                    for record in trial["context_activation"]
+                ))
+            self.assertEqual(
+                json.loads((out / "report.json").read_text(encoding="utf-8"))["context_ablation"]["complete_pair_count"],
+                2,
+            )
+
+    # 与 Discovery 不同的标记集具有独立验收合同；公开 heldout 只是一种声明，不可冒充真正盲测。
+    def test_declared_heldout_fixture_has_separate_suite_and_oracles(self):
+        """全量七题四组以零外部模型调用走真实 Workspace/Ticket/独立 oracle。"""
+        heldout = SUITE.with_name("context-heldout-v1.json")
+        with tempfile.TemporaryDirectory() as tmp:
+            report = run_task_benchmark(
+                heldout, Path(tmp) / "heldout", repeats=1,
+                arms=tuple(CONTEXT_BENCHMARK_ARMS),
+            )
+            self.assertTrue(report["complete_suite"])
+            self.assertEqual(report["partition"], "declared_heldout")
+            self.assertEqual(report["selected_case_count"], 7)
+            self.assertEqual(report["context_ablation"]["complete_pair_count"], 7)
+            self.assertTrue(all(t["success"] for t in report["trials"]))
+            self.assertEqual(report["kind"], "harness_fixture")
+            self.assertFalse(report["context_ablation"]["ready_for_separate_heldout_review"])
+
+    # 即使实测部分成本优于 baseline，任一缺测或安全退化也不能升级成效率 winner。
+    def test_pairwise_missing_token_and_unknown_are_not_promotion_evidence(self):
+        """对受控质量翻转与缺测的计算保留真实分母，不补 0 Token 或安全成功。"""
+        trials = []
+        for arm in CONTEXT_BENCHMARK_ARMS:
+            t = {
+                "case_id": "sensitive", "repeat": 1, "arm": arm,
+                "success": arm != "context-full",
+                "status": "UNKNOWN" if arm == "context-full" else "COMPLETED",
+                "human_takeover": arm == "context-full",
+                "repeated_tool_calls": 1 if arm == "context-full" else 0,
+                "context_activation": [{
+                    "causality": "disabled-for-controlled-evaluation"
+                    if arm not in ("context-causal", "context-full") else "causal-active-set-v2",
+                    "relevance": "disabled-for-controlled-evaluation"
+                    if arm not in ("context-relevance", "context-full")
+                    else "cross-source-bounded-lexical-candidate-ranking",
+                }],
+                "usage_measured": {
+                    "input_tokens": None if arm == "context-full" else 30,
+                    "output_tokens": 20, "provider_wall_ms": 150,
+                },
+            }
+            trials.append(t)
+        summary = summarize_context_ablation(
+            trials, tuple(CONTEXT_BENCHMARK_ARMS), ("sensitive",), 1,
+            kind="real_provider", complete_suite=True,
+        )
+        self.assertEqual(summary["quality"]["regressed"], 1)
+        self.assertEqual(summary["safety"]["new_unknown"], 1)
+        self.assertEqual(summary["safety"]["new_human_takeover"], 1)
+        self.assertEqual(summary["safety"]["more_repeated_tool_calls"], 1)
+        self.assertIsNone(summary["cost"]["input_tokens"]["delta"])
+        self.assertFalse(summary["ready_for_separate_heldout_review"])
+        self.assertFalse(summary["promotion_eligible"])
+
+    # 不完整对照不可以当作全四机制，基线和路由组混用应在创建证据目录前拒绝。
+    def test_context_ablation_rejects_mixed_arms_and_marks_incomplete(self):
+        """两臂诊断只能产生 INCOMPLETE 配对，绝不能自动推荐发布。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with self.assertRaises(ValueError):
+                run_task_benchmark(
+                    SUITE, root / "invalid", repeats=1,
+                    arms=("myth", "context-full"),
+                )
+            self.assertFalse((root / "invalid").exists())
+            report = run_task_benchmark(
+                SUITE, root / "partial", repeats=1,
+                arms=("context-baseline", "context-full"),
+                case_ids=["arithmetic"],
+            )
+            self.assertFalse(report["complete_suite"])
+            self.assertFalse(report["context_ablation"]["full_context_arms"])
+            self.assertEqual(report["context_ablation"]["complete_pair_count"], 0)
+            self.assertFalse(report["context_ablation"]["ready_for_separate_heldout_review"])
 
     # 回归断言：无效题号/重复次数在创建证据目录和业务 Run 前拒绝。
     def test_invalid_case_and_repeat_are_rejected_before_running(self):
