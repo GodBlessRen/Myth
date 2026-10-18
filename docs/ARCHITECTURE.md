@@ -78,6 +78,6 @@ Memory 与派生知识视图的版本/撤销/刷新协议见 [MEMORY_LIFECYCLE](
 | 固定任务、完整分母与策略证据 | [TASK_BENCHMARK](TASK_BENCHMARK.md)、[SOTA_ROUTE](SOTA_ROUTE.md) |
 | 当前检查与本轮证据 | [VALIDATION](VALIDATION.md)、[REFINEMENT_REVIEW](REFINEMENT_REVIEW.md) |
 
-Evaluation 的 partial 运行没有发布资格；候选只在完整固定集合与能力下限通过后参与比较，仍需显式 Promote。Historical Replay 只覆盖已观察分支，不产生执行授权。
+Evaluation 的 partial 运行没有发布资格；候选只在完整固定集合与能力下限通过后参与比较，仍需显式 Promote。**Promotion Evidence Seal** 绑定候选配置、Baseline/Candidate 逐题证据、成本模型及校准结果；资格提交和 Promote 都在事务内复核，证据或候选改变时要求重新评测。此 SHA-256 仅检测本地内容变化，不提供独立来源认证。Historical Replay 只覆盖已观察分支，不产生执行授权。
 
 当前保留单进程/本机服务边界与单数据库格式，不保留无人使用的迁移链。Workspace 仓储、Web 服务仍是较大的协调聚合；后续拆分以真实改动压力为依据，并保住原子准入与恢复入口。下一阶段见 [ROADMAP](ROADMAP.md)。

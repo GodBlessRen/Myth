@@ -6,9 +6,12 @@ from dataclasses import asdict
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from myth.platform.evaluation import EvalObservation, EvalVerdict, summarize_observations
 from myth.platform.evaluation_store import SqliteEvaluationLedger
+from myth.platform.calibration import build_calibration_matrix
+from myth.platform.cost_model import CostModel, SqliteCostModelRegistry
 from myth.platform.evolution_store import SqliteEvolutionControl
 from myth.runtime import MythRuntime
 
@@ -127,6 +130,172 @@ class EvolutionEvidenceIntegrityTests(unittest.TestCase):
         self.assertEqual(self.evolution.active()["policy_id"], self.candidate["baseline_policy_id"])
         self.assertEqual(self.evolution.history(), [])
 
+
+    # 题数、报告、PASS 标记全都不变，仅改变实测成本时也必须撤销旧晋级资格。
+    def test_coherent_metric_change_after_qualification_blocks_promotion(self):
+        baseline_id, tested_id = self.pair()
+        eligible = self.evolution.attach_evaluation(
+            self.candidate["candidate_id"],
+            baseline_eval_run_id=baseline_id,
+            candidate_eval_run_id=tested_id,
+        )
+        self.assertTrue(eligible["efficiency_gate"]["evidence_seal"].startswith("sha256:"))
+        self.runtime.store.db.execute(
+            "UPDATE evaluation_observations SET metrics_json=? WHERE eval_run_id=?",
+            ('{"input_tokens":9,"tool_calls":1}', tested_id),
+        )
+        with self.assertRaisesRegex(ValueError, "release evidence changed"):
+            self.evolution.promote(self.candidate["candidate_id"])
+        self.assertEqual(self.evolution.history(), [])
+
+    # 已批准的规则策略不能在发布前偷换配置，即使同一套评测题全部仍然 PASS。
+    def test_policy_config_change_after_qualification_blocks_promotion(self):
+        baseline_id, tested_id = self.pair()
+        self.evolution.attach_evaluation(
+            self.candidate["candidate_id"],
+            baseline_eval_run_id=baseline_id,
+            candidate_eval_run_id=tested_id,
+        )
+        self.runtime.store.db.execute(
+            "UPDATE policy_candidates SET config_json=? WHERE candidate_id=?",
+            ('{"mode":"fixed","resolution":"L1"}', self.candidate["candidate_id"]),
+        )
+        with self.assertRaisesRegex(ValueError, "release evidence changed"):
+            self.evolution.promote(self.candidate["candidate_id"])
+
+    # 人工配置的成本权重属于同一晋级证据，旧权重不能被重新解释成新成本。
+    def test_cost_model_change_after_qualification_blocks_promotion(self):
+        registry = SqliteCostModelRegistry(self.runtime)
+        registry.put(CostModel("sealed-cost-model", 1, {"input_tokens": 1.0}))
+        baseline_id, tested_id = self.pair()
+        self.evolution.attach_evaluation(
+            self.candidate["candidate_id"],
+            baseline_eval_run_id=baseline_id,
+            candidate_eval_run_id=tested_id,
+            cost_model_id="sealed-cost-model",
+        )
+        self.runtime.store.db.execute(
+            "UPDATE cost_models SET weights_json=? WHERE cost_model_id=?",
+            ('{"input_tokens":2.0}', "sealed-cost-model"),
+        )
+        with self.assertRaisesRegex(ValueError, "release evidence changed"):
+            self.evolution.promote(self.candidate["candidate_id"])
+
+    # 校准开始后即使结果字段全部自洽，事务内也必须发现证据已换，不提交过时资格。
+    def test_metric_change_during_assessment_is_detected_before_commit(self):
+        baseline_id, tested_id = self.pair()
+        calls = []
+
+        # 将竞态固定在初次读取与事务提交之间，证明旧摘要不能进入发布资格。
+        def mutate_during_calibration(*args, **kwargs):
+            calls.append("mutated")
+            self.runtime.store.db.execute(
+                "UPDATE evaluation_observations SET metrics_json=? WHERE eval_run_id=?",
+                ('{"input_tokens":8,"tool_calls":1}', tested_id),
+            )
+            return build_calibration_matrix(*args, **kwargs)
+
+        with patch(
+            "myth.platform.evolution_store.build_calibration_matrix",
+            side_effect=mutate_during_calibration,
+        ):
+            with self.assertRaisesRegex(ValueError, "changed during evaluation assessment"):
+                self.evolution.attach_evaluation(
+                    self.candidate["candidate_id"],
+                    baseline_eval_run_id=baseline_id,
+                    candidate_eval_run_id=tested_id,
+                )
+        self.assertEqual(calls, ["mutated"])
+        self.assertEqual(self.evolution.candidate(self.candidate["candidate_id"])["status"], "DRAFT")
+
+    # 当最终集在异步评估窗口被放入 discovery 后，资格提交必须重新检查污染事实。
+    def test_late_discovery_contamination_blocks_attachment(self):
+        baseline_id, tested_id = self.pair()
+
+        # 在初步计算后污染最终评测分区，必须被锁内 held-out 复核捕获。
+        def leak_during_calibration(*args, **kwargs):
+            self.runtime.store.db.execute(
+                "UPDATE evaluation_runs SET evaluation_partition='discovery' "
+                "WHERE eval_run_id=?",
+                (tested_id,),
+            )
+            return build_calibration_matrix(*args, **kwargs)
+
+        with patch(
+            "myth.platform.evolution_store.build_calibration_matrix",
+            side_effect=leak_during_calibration,
+        ):
+            with self.assertRaisesRegex(ValueError, "final evaluation partition"):
+                self.evolution.attach_evaluation(
+                    self.candidate["candidate_id"],
+                    baseline_eval_run_id=baseline_id,
+                    candidate_eval_run_id=tested_id,
+                )
+        self.assertEqual(self.evolution.candidate(self.candidate["candidate_id"])["status"], "DRAFT")
+
+    # sealed candidate 的证据和成本可以跨进程重启复核；发布历史仍保留原始指纹。
+    def test_sealed_evidence_promotes_after_restart_and_survives_rollback(self):
+        baseline_id, tested_id = self.pair()
+        eligible = self.evolution.attach_evaluation(
+            self.candidate["candidate_id"],
+            baseline_eval_run_id=baseline_id,
+            candidate_eval_run_id=tested_id,
+        )
+        seal = eligible["efficiency_gate"]["evidence_seal"]
+        with MythRuntime(Path(self.tmp.name)) as reopened_runtime:
+            reopened = SqliteEvolutionControl(reopened_runtime)
+            promoted = reopened.promote(self.candidate["candidate_id"])
+            self.assertEqual(promoted["active"]["policy_id"], self.candidate["candidate_id"])
+            self.assertEqual(reopened.history()[0]["evidence"]["efficiency_gate"]["evidence_seal"], seal)
+            rolled = reopened.rollback(reason="test explicit rollback")
+            self.assertEqual(rolled["active"]["policy_id"], self.candidate["baseline_policy_id"])
+            self.assertEqual(rolled["history"][0]["action"], "ROLLBACK")
+
+    # 无指纹的旧 ELIGIBLE 快照不能绕过新版发布门，应重新绑定并校准评测。
+    def test_unsealed_eligible_candidate_fails_closed(self):
+        baseline_id, tested_id = self.pair()
+        self.evolution.attach_evaluation(
+            self.candidate["candidate_id"],
+            baseline_eval_run_id=baseline_id,
+            candidate_eval_run_id=tested_id,
+        )
+        self.runtime.store.db.execute(
+            "UPDATE policy_candidates SET efficiency_gate_json=? WHERE candidate_id=?",
+            ('{"passed":true,"reason":"old gate","cost_delta":{}}', self.candidate["candidate_id"]),
+        )
+        with self.assertRaisesRegex(ValueError, "requires sealed evaluation evidence"):
+            self.evolution.promote(self.candidate["candidate_id"])
+
+    # min_pairs 是能力下限而非任意旁路开关；零、负数和布尔值都不能发布。
+    def test_invalid_min_pairs_cannot_disable_release_gate(self):
+        baseline_id, tested_id = self.pair()
+        for value in (0, -1, True):
+            with self.subTest(min_pairs=value):
+                with self.assertRaisesRegex(ValueError, "at least one calibrated pair"):
+                    self.evolution.attach_evaluation(
+                        self.candidate["candidate_id"],
+                        baseline_eval_run_id=baseline_id,
+                        candidate_eval_run_id=tested_id,
+                        min_pairs=value,
+                    )
+
+    # 成本权重拒绝非数、非有限及溢出整数，避免错误权重变成“测得的”节约。
+    def test_cost_model_rejects_non_finite_and_boolean_weights(self):
+        for value in (float("nan"), float("inf"), -float("inf"), True, 10 ** 500):
+            with self.subTest(weight=str(value)[:40]):
+                with self.assertRaises(ValueError):
+                    CostModel("invalid-cost", 1, {"input_tokens": value})
+
+    # 加权成本差分和聚合都要有限，不能将 NaN 或浮点溢出提交为校准事实。
+    def test_weighted_cost_rejects_non_finite_deltas_and_overflow(self):
+        model = CostModel("finite-cost", 1, {"input_tokens": 2.0})
+        for delta in (float("nan"), float("inf"), True, 10 ** 500):
+            with self.subTest(delta=str(delta)[:40]):
+                with self.assertRaises(ValueError):
+                    model.weighted_cost({"input_tokens": delta})
+        large = CostModel("large-weight", 1, {"input_tokens": 1e308})
+        with self.assertRaisesRegex(ValueError, "finite numeric range"):
+            large.weighted_cost({"input_tokens": 1e308})
 
 if __name__ == "__main__":
     unittest.main()

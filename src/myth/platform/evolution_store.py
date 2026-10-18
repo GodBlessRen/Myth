@@ -5,9 +5,10 @@ from __future__ import annotations
 
 import json
 import uuid
+from dataclasses import asdict
 from typing import Any
 
-from ..domain import canonical_json
+from ..domain import canonical_json, digest_json
 from ..strategies.information_resolution import resolution_controller_from_config
 from .calibration import build_calibration_matrix
 from .cost_model import SqliteCostModelRegistry
@@ -193,6 +194,37 @@ class SqliteEvolutionControl:
             )
         ]
 
+    # 固定准入时的真实逐题内容、候选配置、成本权重与发布判断。
+    # Hash 只发现意外或未经该发布流程的修改；拥有数据库写权限者仍属于信任边界。
+    @staticmethod
+    def _release_evidence_seal(
+        candidate: dict[str, Any],
+        baseline: dict[str, Any],
+        tested: dict[str, Any],
+        cost_model: Any,
+        calibration: dict[str, Any],
+        efficiency_gate: dict[str, Any],
+    ) -> str:
+        # 输入统一来自同一固定 Suite 的持久 Eval Ledger；只提取可复核的业务事实。
+        run_fields = (
+            "eval_run_id", "suite_id", "suite_version", "policy_id",
+            "suite_case_count", "selected_case_count", "complete_suite",
+            "evaluation_partition", "harness_id", "harness_mechanisms",
+            "report", "release_gate", "observations", "created_at",
+        )
+        candidate_fields = (
+            "candidate_id", "domain", "baseline_policy_id", "config", "changes",
+        )
+        return "sha256:" + digest_json({
+            "format": "myth-evolution-release-v1",
+            "candidate": {key: candidate[key] for key in candidate_fields},
+            "baseline": {key: baseline[key] for key in run_fields},
+            "tested": {key: tested[key] for key in run_fields},
+            "cost_model": asdict(cost_model) if cost_model is not None else None,
+            "calibration": calibration,
+            "efficiency_gate": efficiency_gate,
+        })
+
     # 要求 baseline/candidate 的固定完整集身份与策略相符，再保存发布证据和资格。
     def attach_evaluation(
         self,
@@ -203,6 +235,8 @@ class SqliteEvolutionControl:
         cost_model_id: str | None = None,
         min_pairs: int = 1,
     ) -> dict[str, Any]:
+        if type(min_pairs) is not int or min_pairs < 1:
+            raise ValueError("promotion requires at least one calibrated pair")
         candidate = self.candidate(candidate_id)
         if candidate["status"] == "PROMOTED":
             raise ValueError("promoted candidate evidence is immutable")
@@ -230,11 +264,8 @@ class SqliteEvolutionControl:
         if baseline.get("evaluation_partition") != "final":
             raise ValueError("baseline promotion evidence must use final evaluation partition")
         pairs = ledger.paired_comparisons(baseline_eval_run_id, candidate_eval_run_id)
-        cost_model = (
-            SqliteCostModelRegistry(self.runtime).model(cost_model_id)
-            if cost_model_id
-            else None
-        )
+        cost_registry = SqliteCostModelRegistry(self.runtime) if cost_model_id else None
+        cost_model = cost_registry.model(cost_model_id) if cost_registry else None
         matrix = build_calibration_matrix(pairs, cost_model)
         calibration_ok, calibration_reason = matrix.promotion_gate(min_pairs=min_pairs)
         release_gate = tested["release_gate"]
@@ -249,7 +280,13 @@ class SqliteEvolutionControl:
             "passed": efficiency_ok,
             "reason": efficiency_reason,
             "cost_delta": cost_delta,
+            "min_pairs": min_pairs,
         }
+        # 绑定参与原始晋级判断的两个 Eval 快照与校准结果，避免内容虽自洽却已换证据。
+        evidence_seal = self._release_evidence_seal(
+            candidate, baseline, tested, cost_model, matrix.serializable(), efficiency_gate
+        )
+        efficiency_gate["evidence_seal"] = evidence_seal
         eligible = release_ok and calibration_ok and efficiency_ok
         reason = (
             "candidate passed release, capability/efficiency, and paired calibration gates"
@@ -279,10 +316,23 @@ class SqliteEvolutionControl:
         # 本地事务边界：下列写入一起提交，异常整体回滚；文件/网络效果须在事务外另行核对。
         with self.store.tx() as db:
             # 评测计算期间可能已经发布；写锁内复核，不能改写已发布候选的证据。
-            if self.candidate(candidate_id)["status"] == "PROMOTED":
+            current_candidate = self.candidate(candidate_id)
+            if current_candidate["status"] == "PROMOTED":
                 raise ValueError("promoted candidate evidence is immutable")
-            # 防止计算之后、落库之前评测行被另一路修改或补写。
-            ledger.require_promotion_pair(baseline_eval_run_id, candidate_eval_run_id)
+            # 另一路评测可能已改写该候选资格；不得用旧观察覆盖新提交。
+            if current_candidate != candidate:
+                raise ValueError("candidate changed during evaluation assessment")
+            current_baseline, current_tested = ledger.require_promotion_pair(
+                baseline_eval_run_id, candidate_eval_run_id
+            )
+            ledger.require_held_out_final(candidate_eval_run_id)
+            current_cost_model = cost_registry.model(cost_model_id) if cost_registry else None
+            if self._release_evidence_seal(
+                current_candidate, current_baseline, current_tested,
+                current_cost_model, matrix.serializable(),
+                {key: value for key, value in efficiency_gate.items() if key != "evidence_seal"},
+            ) != evidence_seal:
+                raise ValueError("release evidence changed during evaluation assessment")
             db.execute(
                 "UPDATE policy_candidates SET status=?,baseline_eval_run_id=?,candidate_eval_run_id=?,"
                 "cost_model_id=?,calibration_json=?,efficiency_gate_json=?,decision_reason=?,updated_at=CURRENT_TIMESTAMP WHERE candidate_id=?",
@@ -302,11 +352,29 @@ class SqliteEvolutionControl:
     # 显式校验候选资格和 baseline 活动身份，同事务切换指针并记历史。
     def promote(self, candidate_id: str) -> dict[str, Any]:
         ledger = SqliteEvaluationLedger(self.runtime)
+        # 模型仓储的 DDL 装配不得发生在发布事务内；预读身份只用于准备，锁内复核。
+        preflight = self.candidate(candidate_id)
+        cost_registry = (
+            SqliteCostModelRegistry(self.runtime)
+            if preflight.get("cost_model_id") else None
+        )
         # 候选资格与 baseline 必须在 BEGIN IMMEDIATE 后核对；事务前的检查会被另一发布者穿透。
         with self.store.tx() as db:
             candidate = self.candidate(candidate_id)
             if candidate["status"] != "ELIGIBLE":
                 raise ValueError("only ELIGIBLE candidates can be promoted")
+            if candidate["cost_model_id"] != preflight["cost_model_id"]:
+                raise ValueError("candidate cost model changed before promotion")
+            gate = candidate.get("efficiency_gate") or {}
+            seal = gate.get("evidence_seal")
+            min_pairs = gate.get("min_pairs")
+            if (
+                not isinstance(seal, str)
+                or not seal.startswith("sha256:")
+                or type(min_pairs) is not int
+                or min_pairs < 1
+            ):
+                raise ValueError("promotion requires sealed evaluation evidence; re-evaluate")
             # 发布事务内重新核对逐题证据，不能只信已缓存的 ELIGIBLE 快照。
             baseline, tested = ledger.require_promotion_pair(
                 candidate["baseline_eval_run_id"], candidate["candidate_eval_run_id"]
@@ -318,6 +386,16 @@ class SqliteEvolutionControl:
             ledger.require_held_out_final(candidate["candidate_eval_run_id"])
             if tested["release_gate"].get("passed") is not True:
                 raise ValueError("promotion requires a passing release gate")
+            cost_model = (
+                cost_registry.model(candidate["cost_model_id"]) if cost_registry else None
+            )
+            actual_seal = self._release_evidence_seal(
+                candidate, baseline, tested, cost_model,
+                candidate["calibration"],
+                {key: value for key, value in gate.items() if key != "evidence_seal"},
+            )
+            if actual_seal != seal:
+                raise ValueError("release evidence changed since qualification; re-evaluate")
             current = self.active(candidate["domain"])
             if current["policy_id"] != candidate["baseline_policy_id"]:
                 raise ValueError("candidate baseline is stale; re-evaluate against current active policy")
