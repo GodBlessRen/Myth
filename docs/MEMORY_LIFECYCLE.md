@@ -198,4 +198,4 @@ Provider 在 Ticket 前明确未派发，可以退避后再次准入模型机会
 
 The new path is useful for revisiting previously cited memories across long-running work while reporting version mismatches explicitly. Semantic answer sufficiency remains the model/application's responsibility and should be evaluated against independent held-out tasks before introducing any automated rewrite of Memory facts.
 
-Fixed local regression: `python -m unittest tests.test_memory_recall -v` (or full discovery); see `tests/test_memory_recall.py`.
+Fixed local regression: `python -m unittest discover -s tests -p test_memory_recall.py -v` (or full discovery); see `tests/test_memory_recall.py`.
