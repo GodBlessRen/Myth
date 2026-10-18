@@ -308,7 +308,9 @@ def compile_conversation_context(
             required=False,
         )
     # 从持久 Tool 活动提取关键状态导航；模型摘要不能自行制造 UNKNOWN、依赖或收据。
-    causal_guard = build_causal_guard(activities) if causal_enabled else None
+    causal_guard = build_causal_guard(
+        activities, snapshot.get("runtime_liabilities"),
+    ) if causal_enabled else None
     causal_digest = None
     if causal_guard:
         causal_text, causal_digest = render_causal_guard(causal_guard)
@@ -405,6 +407,10 @@ def compile_conversation_context(
             "causality": "persisted-critical-status-and-declared-dependencies" if causal_enabled else "disabled-for-controlled-evaluation",
             "causal_guard_digest": causal_digest,
             "causal_critical_count": causal_guard["critical_count"] if causal_guard else 0,
+            "causal_runtime_protected": sum(
+                ref["source"].startswith("runtime-")
+                for ref in causal_guard["records"]
+            ) if causal_guard else 0,
             "causal_missing_dependencies": causal_guard["missing_declared_dependencies"] if causal_guard else [],
             "causal_guard_selected": "causal-guard" in selected,
         },
