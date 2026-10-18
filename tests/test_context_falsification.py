@@ -8,6 +8,7 @@ from myth.task_benchmark import CONTEXT_BENCHMARK_ARMS, summarize_context_ablati
 class ContextFalsificationTests(unittest.TestCase):
     """只承认独立 Oracle、冻结配置与真实四臂试次；不把差异自动当成因果。"""
 
+    # 构造相同 Case、重复次数和配置身份的四臂假数据，明确模拟边界。
     def trials(self, outcomes, *, repeats=1, missing_oracle=False):
         rows = []
         for repeat in range(1, repeats + 1):
@@ -36,12 +37,14 @@ class ContextFalsificationTests(unittest.TestCase):
                 })
         return rows
 
+    # 调用现有汇总入口，不改变发布资格判定。
     def summary(self, rows, repeats=1):
         return summarize_context_ablation(
             rows, tuple(CONTEXT_BENCHMARK_ARMS), ("fixed-case",), repeats,
             kind="harness_fixture", complete_suite=True,
         )
 
+    # 质量退化应成为反例，交互不自动授予因果资格。
     def test_quality_interaction_and_counterexample_not_promotion(self):
         rows = self.trials({
             "context-baseline": True, "context-causal": False,
@@ -59,6 +62,7 @@ class ContextFalsificationTests(unittest.TestCase):
         self.assertIsNone(probe["material_intervention_verified"])
         self.assertFalse(result["promotion_eligible"])
 
+    # 三次同题重复不能被计算成三个独立 Case。
     def test_repeats_do_not_fake_independent_cases(self):
         rows = self.trials({
             "context-baseline": True, "context-causal": False,
@@ -68,6 +72,7 @@ class ContextFalsificationTests(unittest.TestCase):
         self.assertEqual(result["falsification"]["counterexample_trial_count"], 3)
         self.assertEqual(result["falsification"]["counterexample_case_count"], 1)
 
+    # 缺少固定 Oracle 的试次必须保持不可验证。
     def test_unknown_oracle_does_not_become_measured_failure(self):
         rows = self.trials({arm: True for arm in CONTEXT_BENCHMARK_ARMS},
                            missing_oracle=True)
@@ -75,12 +80,14 @@ class ContextFalsificationTests(unittest.TestCase):
         self.assertEqual(probe["status"], "UNVERIFIED")
         self.assertEqual(probe["reason"], "missing_independent_oracle")
 
+    # 一个实验单元重复出现，不能挑选有利版本。
     def test_duplicate_arm_blocks_disqualify_probe(self):
         rows = self.trials({arm: True for arm in CONTEXT_BENCHMARK_ARMS})
         result = self.summary(rows + [dict(rows[0])])
         self.assertEqual(result["pairs"][0]["falsification"]["status"], "UNVERIFIED")
         self.assertEqual(result["pairs"][0]["falsification"]["reason"], "duplicate_trial_block")
 
+    # 所有质量相同不能被解释为该机制已证明有益。
     def test_no_quality_difference_is_not_evidence_of_benefit(self):
         rows = self.trials({arm: True for arm in CONTEXT_BENCHMARK_ARMS})
         result = self.summary(rows)
