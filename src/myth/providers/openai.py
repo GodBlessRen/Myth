@@ -194,14 +194,22 @@ def _usage(value: dict, *, provider_id: str | None = None) -> dict[str, int]:
         "model_calls": 1,
     }
     # 缺失用量保留未知；bool/负数/字符串不能冒充供应商计量。
-    for meter in ("input_tokens", "output_tokens"):
-        if type(usage_value.get(meter)) is int and usage_value[meter] >= 0:
-            result[meter] = usage_value[meter]
-    input_details = (
-        usage_value.get("input_tokens_details")
-        if isinstance(usage_value.get("input_tokens_details"), dict)
-        else {}
-    )
+    # 标准 Responses 优先；兼容网关有时沿用 Chat Completions 的 prompt/completion 键。
+    for meter, source_keys in (
+        ("input_tokens", ("input_tokens", "prompt_tokens")),
+        ("output_tokens", ("output_tokens", "completion_tokens")),
+    ):
+        for source in source_keys:
+            amount = usage_value.get(source)
+            if type(amount) is int and amount >= 0:
+                result[meter] = amount
+                break
+    input_details = {}
+    for source in ("input_tokens_details", "prompt_tokens_details"):
+        candidate = usage_value.get(source)
+        if isinstance(candidate, dict):
+            input_details = candidate
+            break
     cached_tokens = input_details.get("cached_tokens")
     if type(cached_tokens) is int and cached_tokens >= 0:
         result["cached_input_tokens"] = cached_tokens
@@ -215,11 +223,12 @@ def _usage(value: dict, *, provider_id: str | None = None) -> dict[str, int]:
         value = usage_value.get(source_key)
         if type(value) is int and value >= 0:
             result[target_key] = value
-    output_details = (
-        usage_value.get("output_tokens_details")
-        if isinstance(usage_value.get("output_tokens_details"), dict)
-        else {}
-    )
+    output_details = {}
+    for source in ("output_tokens_details", "completion_tokens_details"):
+        candidate = usage_value.get(source)
+        if isinstance(candidate, dict):
+            output_details = candidate
+            break
     reasoning_tokens = output_details.get("reasoning_tokens")
     if type(reasoning_tokens) is int and reasoning_tokens >= 0:
         result["reasoning_tokens"] = reasoning_tokens
