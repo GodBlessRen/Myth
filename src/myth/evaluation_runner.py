@@ -229,6 +229,7 @@ class FoundationEvalRunner:
         expected = case.expected
         if not any(key in expected for key in (
             "required_sources", "excluded_sources", "required_text", "budget_error",
+            "active_risk_count", "archived_issue_count",
         )):
             raise ValueError("context governance case has no acceptance criteria")
         try:
@@ -255,6 +256,13 @@ class FoundationEvalRunner:
         ]
         if "budget_error" in expected:
             checks.append(expected["budget_error"] is False)
+        governance = report["governance"]
+        for key, report_key in (
+            ("active_risk_count", "causal_active_risk_count"),
+            ("archived_issue_count", "causal_archived_issue_count"),
+        ):
+            if key in expected:
+                checks.append(type(expected[key]) is int and governance[report_key] == expected[key])
         ok = bool(checks) and all(checks)
         evidence = tuple(
             ["context:compiler"] + [
@@ -271,6 +279,8 @@ class FoundationEvalRunner:
                 "selected_items": len(selected),
                 "dropped_items": len(report["dropped"]),
                 "causal_critical": int(report["governance"]["causal_critical_count"]),
+                "causal_active_risks": int(governance["causal_active_risk_count"]),
+                "causal_archived_known_issues": int(governance["causal_archived_issue_count"]),
                 "model_calls": 0,
                 "budget_rejected": 0,
             },
