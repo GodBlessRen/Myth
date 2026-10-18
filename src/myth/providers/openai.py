@@ -33,7 +33,7 @@ def _openai_model_capability(model_id: str, display_name: str | None = None) -> 
             levels=["none", "low", "medium", "high", "xhigh", "max"],
             default="none",
             off="none",
-            source="provider",
+            source="adapter-family-rule",
         )
         context_window = 1_050_000
         max_output_tokens = 131_072
@@ -42,7 +42,7 @@ def _openai_model_capability(model_id: str, display_name: str | None = None) -> 
             kind="effort",
             levels=["none", "low", "medium", "high", "xhigh"],
             off="none",
-            source="provider",
+            source="adapter-family-rule",
         )
     return model_capability(
         model_id,
@@ -50,7 +50,7 @@ def _openai_model_capability(model_id: str, display_name: str | None = None) -> 
         context_window=context_window,
         max_output_tokens=max_output_tokens,
         reasoning=reasoning,
-        source="provider",
+        source="adapter-family-rule",
     )
 
 
