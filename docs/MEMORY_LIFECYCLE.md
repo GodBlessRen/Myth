@@ -97,6 +97,16 @@ remove_evidence
 
 最小回归：`python -m unittest discover -s tests -p test_memory_action_batch.py -v`；真实 HTTP 回归：`python -m unittest discover -s tests -p test_web_contract.py -v`。
 
+## Transitive Truth Maintenance (Semantica-inspired)
+
+A Memory-linked Evidence edge is pinned to the authority Memory's exact revision. Freshness is now checked across **the complete linked support closure**, not only direct parents. If any ancestor was revoked, replaced, missing, crosses an inadmissible scope, or forms a cycle, derived Memory is stale. Traversal limits (32 hops / 256 edges) fail closed rather than silently accepting unchecked ancestors. The deterministic report contains the failing ancestry path; external Evidence without a version remains untracked, **never auto-verified**.
+
+Hindsight-style Knowledge Pages and Memory Recall reuse the same source owner. A materialized model inherits the supporting Memory's stale flag, and refresh preparation excludes stale inputs. Publication checks cited evidence again under the existing SQLite write transaction; a stale source cannot be laundered into a new backing Memory. No new schema, provider call, permission, or vector-index authority is introduced.
+
+**Boundaries:** this checks structural support validity, not logical entailment, objective factual truth, or independently authenticated remote sources. More granular ontology mappings and learned evolution proposals remain outside this change. Existing Evolution release qualification and explicit Promote continue to own experiment governance.
+
+Focused regression: `python -m unittest tests.test_memory_recall tests.test_knowledge_views -v`; full release gates remain in `AGENTS.md`.
+
 ## Progressive disclosure
 
 首次 Recall 不展开完整 Evidence。

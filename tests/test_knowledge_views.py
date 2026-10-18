@@ -341,5 +341,55 @@ class KnowledgeViewTests(unittest.TestCase):
         self.assertEqual(after, before)
 
 
+    # 已保存的模型在底层三跳证据撤销后必须标 stale；水位之外还须检查完整来源依赖。
+    def test_materialized_view_propagates_transitive_source_revocation(self):
+        root = self.memory.remember(
+            kind="episodic", text="root architecture source", source_ref="closure:view:root",
+        )
+        child = self.memory.remember(
+            kind="semantic", text="architecture inference", source_ref="closure:view:child",
+            evidence=[{"source_memory_id": root["memory_id"]}],
+        )
+        model = self.views.create_model(
+            name="Truth closure", source_query="architecture inference",
+        )
+        prepared = self.views.prepare_refresh(model["model_id"])
+        self.assertIn(child["memory_id"], [x["memory_id"] for x in prepared["sources"]])
+        published = self.views.commit_refresh(
+            model["model_id"], content="Architecture is supported.",
+            evidence_memory_ids=[child["memory_id"]],
+            expected_model_revision=prepared["model_revision"],
+            observed_change_seq=prepared["observed_change_seq"],
+        )
+        self.assertEqual(published["freshness"], "fresh")
+        self.memory.revoke(root["memory_id"])
+        self.assertEqual(self.views.model(model["model_id"])["freshness"], "stale")
+
+    # 模型合成前的候选必须过滤陈旧事实；返回旧来源也无法越过提交时的强校验。
+    def test_refresh_rejects_transitively_stale_source(self):
+        root = self.memory.remember(
+            kind="episodic", text="root project truth", source_ref="closure:prepare:root",
+        )
+        child = self.memory.remember(
+            kind="semantic", text="project truth synthesis", source_ref="closure:prepare:child",
+            evidence=[{"source_memory_id": root["memory_id"]}],
+        )
+        model = self.views.create_model(
+            name="Stale input guard", source_query="project truth synthesis",
+        )
+        prepared = self.views.prepare_refresh(model["model_id"])
+        self.memory.revoke(root["memory_id"])
+        later = self.views.prepare_refresh(model["model_id"])
+        self.assertNotIn(child["memory_id"], [x["memory_id"] for x in later["sources"]])
+        with self.assertRaisesRegex(ValueError, "stale support"):
+            # 使用当前水位证明：即使调用方试图手工塞入陈旧 ID，发布门槛仍拒绝。
+            self.views.commit_refresh(
+                model["model_id"], content="Untrusted synthesis.",
+                evidence_memory_ids=[child["memory_id"]],
+                expected_model_revision=later["model_revision"],
+                observed_change_seq=later["observed_change_seq"],
+            )
+
+
 if __name__ == "__main__":
     unittest.main()

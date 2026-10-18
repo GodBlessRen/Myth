@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Iterable, Mapping
+from typing import Any, Callable, Iterable, Mapping
 
 
 # MemoryDeltaError：Delta 形状、证据或文本违反稳定合同；调用方应保持原 revision 不变。
@@ -222,6 +222,92 @@ def evaluate_freshness(
         "external_evidence": len(rows) - len(linked),
         "stale_sources": stale_sources,
     }
+
+# evaluate_support_closure：按冻结 source_revision 沿证据依赖查到底；无论是撤销、越权、成环还是预算耗尽都不能视为 fresh。
+# load 由权威仓储提供 (当前来源行, 当前证据行)，算法只读、不修改状态或升级事实等级。
+def evaluate_support_closure(
+    root_id: str,
+    root_row: Mapping[str, Any],
+    root_evidence: Iterable[Mapping[str, Any]],
+    *,
+    load: Callable[[str], tuple[Mapping[str, Any] | None, Iterable[Mapping[str, Any]]]],
+    max_edges: int = 256,
+    max_depth: int = 32,
+) -> dict[str, Any]:
+    """有界验证派生 Memory 的完整证据闭包；不足以检查完时宁可标 stale。"""
+    if type(max_edges) is not int or max_edges < 1 or type(max_depth) is not int or max_depth < 1:
+        raise ValueError("support closure limits must be positive integers")
+
+    # 路径栈记录正在依赖的祖先，避免循环图被 cache 命中后错误地当成无环图。
+    root = str(root_id)
+    stack = [
+        (dict(edge), (root,), 1)
+        for edge in root_evidence
+        if edge.get("source_memory_id")
+    ][::-1]
+    cache: dict[str, tuple[Mapping[str, Any] | None, tuple[dict[str, Any], ...]]] = {}
+    issues: list[dict[str, Any]] = []
+    checked_edges = 0
+    while stack:
+        edge, ancestors, depth = stack.pop()
+        source_id = str(edge["source_memory_id"])
+        path = (*ancestors, source_id)
+        if checked_edges >= max_edges:
+            issues.append({"memory_id": source_id, "reason": "closure_limit", "path": list(path)})
+            break
+        checked_edges += 1
+        if source_id in ancestors:
+            issues.append({"memory_id": source_id, "reason": "dependency_cycle", "path": list(path)})
+            continue
+        if depth > max_depth:
+            issues.append({"memory_id": source_id, "reason": "depth_limit", "path": list(path)})
+            continue
+        if source_id not in cache:
+            row, dependencies = load(source_id)
+            cache[source_id] = (
+                None if row is None else dict(row),
+                tuple(dict(item) for item in dependencies),
+            )
+        row, dependencies = cache[source_id]
+        if row is None:
+            issues.append({"memory_id": source_id, "reason": "missing", "path": list(path)})
+            continue
+        if not bool(row.get("active")):
+            issues.append({"memory_id": source_id, "reason": "revoked", "path": list(path)})
+            continue
+
+        # 不能从私有来源推导到更宽的作用域；历史上的坏引用在读取时也必须 fail closed。
+        parent = root_row if ancestors[-1] == root else cache[ancestors[-1]][0]
+        if parent is None or (
+            row.get("scope_type") != "global"
+            and (
+                row.get("scope_type") != parent.get("scope_type")
+                or row.get("scope_id") != parent.get("scope_id")
+            )
+        ):
+            issues.append({"memory_id": source_id, "reason": "scope_violation", "path": list(path)})
+            continue
+
+        expected = edge.get("source_revision")
+        actual = row.get("revision")
+        if type(expected) is not int or type(actual) is not int or expected != actual:
+            issues.append({
+                "memory_id": source_id, "reason": "revision_changed",
+                "expected_revision": expected, "current_revision": actual,
+                "path": list(path),
+            })
+            continue
+
+        for dependency in reversed(dependencies):
+            if dependency.get("source_memory_id"):
+                stack.append((dependency, path, depth + 1))
+
+    return {
+        "stale_sources": issues,
+        "checked_memories": len(cache),
+        "checked_edges": checked_edges,
+    }
+
 
 # normalize_memory_actions：限制批量提案的总量、操作形状和单聚合重复写；模型提案不能自己升级 fact_level。
 def normalize_memory_actions(actions: list[Mapping[str, Any]] | tuple[Mapping[str, Any], ...]) -> tuple[dict[str, Any], ...]:

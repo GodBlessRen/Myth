@@ -175,5 +175,69 @@ class RecallStoreTests(unittest.TestCase):
         self.assertEqual(report["retrieval"]["candidate_rejected_after_search"], 1)
 
 
+    # 三跳链 A->B->C 中 C 的撤销必须使 A 在 Recall 阶段被拒绝，不得只检查直接 B。
+    def test_transitive_revocation_invalidates_grandchild_recall(self):
+        source = self.memory.remember(
+            kind="episodic", text="deep source", source_ref="closure:source",
+        )
+        middle = self.memory.remember(
+            kind="semantic", text="middle conclusion", source_ref="closure:middle",
+            evidence=[{"source_memory_id": source["memory_id"]}],
+        )
+        derived = self.memory.remember(
+            kind="semantic", text="final conclusion", source_ref="closure:derived",
+            evidence=[{"source_memory_id": middle["memory_id"]}],
+        )
+        self.memory.revoke(source["memory_id"])
+        fresh = self.memory.freshness(derived["memory_id"])
+        self.assertTrue(fresh["is_stale"])
+        self.assertEqual(fresh["stale_sources"][0]["reason"], "revoked")
+        self.assertEqual(
+            fresh["stale_sources"][0]["path"],
+            [derived["memory_id"], middle["memory_id"], source["memory_id"]],
+        )
+        report = self.memory.recall_report(
+            "final conclusion",
+            required_refs=[f"memory:{derived['memory_id']}@1"],
+        )
+        self.assertEqual(report["evidence_gate"]["status"], "references_unavailable")
+        self.assertEqual(report["evidence_gate"]["invalid_refs"][0]["reason"], "stale_evidence")
+
+    # 现有直接/间接来源即使未变更自身 revision，传递性依赖失效也不能复活。
+    def test_support_closure_fails_closed_on_cycles(self):
+        from myth.platform.memory_lifecycle import evaluate_support_closure
+
+        graph = {
+            "a": ({"active": 1, "revision": 1, "scope_type": "global", "scope_id": None},
+                  [{"source_memory_id": "b", "source_revision": 1}]),
+            "b": ({"active": 1, "revision": 1, "scope_type": "global", "scope_id": None},
+                  [{"source_memory_id": "a", "source_revision": 1}]),
+        }
+        report = evaluate_support_closure(
+            "a", graph["a"][0], graph["a"][1], load=lambda key: graph[key],
+        )
+        self.assertEqual(report["stale_sources"][0]["reason"], "dependency_cycle")
+        self.assertEqual(report["stale_sources"][0]["path"], ["a", "b", "a"])
+
+    # 恶意或意外的超深证据链不可绕过校验预算后被标记 fresh。
+    def test_support_closure_budget_exhaustion_is_invalid(self):
+        from myth.platform.memory_lifecycle import evaluate_support_closure
+
+        # 虚拟无限依赖链：无需构造大型数据库，即可验证深度预算越界必定拒绝。
+        def load(key):
+            index = int(key[1:])
+            return (
+                {"active": 1, "revision": 1, "scope_type": "global", "scope_id": None},
+                [{"source_memory_id": f"m{index+1}", "source_revision": 1}],
+            )
+
+        report = evaluate_support_closure(
+            "root", {"scope_type": "global", "scope_id": None},
+            [{"source_memory_id": "m0", "source_revision": 1}],
+            load=load, max_depth=3,
+        )
+        self.assertEqual(report["stale_sources"][0]["reason"], "depth_limit")
+
+
 if __name__ == "__main__":
     unittest.main()
