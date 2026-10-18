@@ -6,9 +6,9 @@ Context 是按预算给模型的**派生投影**；Run、Action、Attempt、Tick
 
 Myth 目前采用三个互补维度：
 
-1. **Model-Aware**：本地使用冻结的 `num_ctx`；远端 Web Send/Goal Schedule 在模型预检时只冻结公开的 provider/model/window，身份和来源匹配才允许动态软预算，缺测退回 42,000 字节；硬上限 256,000 字节。Token/字节系数是估计，不等于供应商 tokenizer 计数或保证请求一定可容纳。
+1. **Model-Aware**：本地使用冻结的 `num_ctx`；远端 Web Send/Goal Schedule 只冻结有明确 Provider 来源、精确模型身份的公开窗口；adapter 按型号前缀推测的能力标记为 adapter-family-rule，不冒充供应商报告。仅来源通过双重核对时使用保守 UTF-8 预算 `min(256000,window-output-512-2048)`，否则退回 42,000 字节。Token/字节边界并非 Provider tokenizer 的精确计量，额外的协议包装仍可能增加 Token。
 2. **Relevance-Aware**：仅对已通过来源/作用域准入的 Knowledge 与 Memory 计算有限长度的任务词面覆盖率，并采用同一可比优先级；相关性只决定候选顺序，不改变 `fact_level`、来源真实性、权限和执行状态。显式附件仍为 required。
-3. **Causality-Aware**：从持久活动中提取已记录的 UNKNOWN、FAILED、已知失败、并行子任务失败/拒收和显式 `depends_on`，构建可回读的证据导航。模型自述与事件时序不能自行证明因果关系。关键导航以 required 装箱，预算不足则失败，不隐藏执行风险。
+3. **Causality-Aware**：从持久活动中提取已记录的 UNKNOWN、FAILED、已知失败、并行子任务失败/拒收和显式 `depends_on`；另从同 Run 未结算 Tool/Model Attempt、Recovery Cursor 与 UNKNOWN held 预算读取只读风险索引。模型自述与事件时序不能自行证明因果关系。关键导航以 required 装箱，预算不足则失败，不隐藏执行风险。
 
 ## 权威记录与投影关系
 
@@ -31,7 +31,7 @@ ModelRequest + Context Report   [bounded projection, not permission]
 - 来源明确：活动 `state`、`result.failure`、`result.status`、`result.results` 与委派 `handoff.depends_on` 来自本轮已持久化/已核对的步骤投影。
 - 显式依赖来自已记录的决定或交接合同。缺失的上游身份列在 `causal_missing_dependencies`，不据此编造前驱。
 - 失败或未知执行结果不会因较新的无关成功而静默消失；它们保留来源导航，但单靠本策略不能断言故障尚未恢复，仍须交 Runtime/Verification 判定。
-- 完整 Observation 继续使用现有 `observation.read` 按 decision_id 精确回读；Context Guard 不重新保存大对象、不重放外部效果。
+- 完整 Observation 继续使用现有 `observation.read` 只能按 decision_id 精确回读**已结算**的工具 Observation；未结算 UNKNOWN 必须依据原 Runtime Ticket/Receipt 核对，不能凭摘要触发回放。Context Guard 不重新保存大对象、不重放外部效果。
 - 无前端/供应商变化可以扩大 Capability、Ticket、作用域或完成验收。
 
 ## 控制实验
@@ -67,3 +67,19 @@ ModelRequest + Context Report   [bounded projection, not permission]
 单元回归：`python -m unittest discover -s tests -p test_context_governance.py -v`。
 
 完整门禁和任务对照：见 `AGENTS.md` 与 `docs/TASK_BENCHMARK.md`。失败、缺测、UNKNOWN 必须记录，不能剔除分母；候选通过完整集后仍需 held-out 验证和显式 Promote。
+
+## 固定机制消融：不以替身冒充真实模型实验
+
+`evals/context-governance-v1.json` 固定五项可执行 ContextCompiler 检查，涵盖：未结算 Tool/预算、显式依赖闭包、Knowledge/Memory 选择、清洁状态阴性对照、预算耗尽 fail-closed。它们都是确定性 `0 model_calls` 的 **Harness Fixture**，只验证架构不变量与选择差异；不测真实回答质量、长时间运行或真实节约成本。
+
+完整 Suite：
+```bash
+python -m myth.cli eval --suite evals/context-governance-v1.json
+```
+
+全关/单项/全开受控对照：
+```bash
+python -c "from myth.evaluation_runner import run_controlled_harness_experiment as run; import json; print(json.dumps(run('evals/context-governance-v1.json', ('context_causal_guard', 'context_relevance_ranking')), ensure_ascii=False, indent=2))"
+```
+
+对照结果的 `prompt_bytes` 仅是实际编译的 UTF-8 字节，不是 Provider 报告的 Token；针对缺测或明确预算拒绝不填入伪造的 token 数。发布前仍必须在多模型真实 Provider 上运行固定 Task/held-out 集并配对比较成功率、总计费、时延和无盲重试不变量。
