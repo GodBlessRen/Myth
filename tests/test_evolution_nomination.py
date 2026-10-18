@@ -45,7 +45,7 @@ class EvolutionNominationTests(unittest.TestCase):
     def test_nomination_requires_independent_discovery_failures_and_does_not_create_candidate(self):
         """三例失败跨八道题达到门槛；反复评测相同 Case 不能增加分母。"""
         failures = ["FAIL", "FAIL", "FAIL", "PASS", "PASS", "PASS", "PASS", "PASS"]
-        first = self.record("stable-suite", failures)
+        self.record("stable-suite", failures)
         self.record("stable-suite", failures)
         report = self.evolution.nomination_report()
         self.assertTrue(report["due"])
@@ -53,7 +53,9 @@ class EvolutionNominationTests(unittest.TestCase):
         self.assertEqual(report["independent_cases"], 8)
         self.assertEqual(report["failed_cases"], 3)
         self.assertEqual(report["failure_ratio"], 3 / 8)
-        self.assertIn(first["eval_run_id"], report["evidence_eval_run_ids"])
+        self.assertEqual(len(report["evidence_eval_run_ids"]), 1)
+        self.assertIn(report["evidence_eval_run_ids"][0],
+                      [item["eval_run_id"] for item in self.ledger.list_runs(5)])
         self.assertEqual(self.evolution.candidates(), [])
         self.assertEqual(self.evolution.history(), [])
 
