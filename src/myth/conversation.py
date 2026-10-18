@@ -15,6 +15,8 @@ from .conversation_context import (
 from .platform.tool_discovery import visible_tool_ids
 from .platform.capabilities import capability_reachability, default_capabilities
 from .platform.context import choose_context_mode, context_boundary
+from .model_capabilities import remote_context_budget
+from .acceptance import ContextBudgetError
 
 
 # 构造统一工具参数 schema；目录描述参数形状，不替代实际参数/范围校验。
@@ -549,8 +551,15 @@ def build_context_request(settings, snapshot, messages, activities, control=None
     max_output_tokens = settings.get("max_output_tokens", 2048)
     is_ollama = settings.get("provider") == "ollama"
     num_ctx = settings.get("num_ctx", 8192) if is_ollama else None
+    # Ollama 使用冻结 num_ctx；远端仅采用预检阶段冻结且身份匹配的公开窗口。
+    # 所有 Token→UTF-8 字节变换均为软预算，供应商最终响应仍是权威。
+    try:
+        remote_budget = None if is_ollama else remote_context_budget(settings)
+    except ValueError as exc:
+        raise ContextBudgetError(str(exc)) from exc
     max_bytes = (
-        conversation_budget_bytes(num_ctx, max_output_tokens) if is_ollama else 42_000
+        conversation_budget_bytes(num_ctx, max_output_tokens)
+        if is_ollama else int(remote_budget["max_bytes"])
     )
     control = control or {}
     manual_compact = bool(control.get("compact_requested"))
@@ -650,8 +659,13 @@ def build_context_request(settings, snapshot, messages, activities, control=None
     report["max_output_tokens"] = max_output_tokens
     report["budget_formula"] = (
         "(num_ctx-max_output_tokens-512)*3"
-        if is_ollama
-        else "remote-projection-cap=42000"
+        if is_ollama else remote_budget["formula"]
+    )
+    report["model_budget_source"] = (
+        "frozen-ollama-num_ctx" if is_ollama else remote_budget["source"]
+    )
+    report["declared_model_context_window"] = (
+        num_ctx if is_ollama else remote_budget["window_tokens"]
     )
     report["visible_tools"] = list(visible_ids)
     report["deferred_tools"] = deferred_ids
