@@ -39,13 +39,13 @@ class VerificationCompletionTests(unittest.TestCase):
 
     # 原项目绿灯不能替代真实候选覆盖测试；候选被复制至受限临时工作树。
     def test_candidate_overlay_tests_candidate_not_source(self):
-        (self.project_root / "app.py").write_text("VALUE = 1\\n", encoding="utf-8")
+        (self.project_root / "app.py").write_text("VALUE = 1\n", encoding="utf-8")
         (self.test_dir / "test_fixture.py").write_text(
-            "import unittest\\nfrom app import VALUE\\n"
-            "class Check(unittest.TestCase):\\n"
-            " def test_value(self): self.assertEqual(VALUE, 2)\\n", encoding="utf-8",
+            "import unittest\nfrom app import VALUE\n"
+            "class Check(unittest.TestCase):\n"
+            " def test_value(self): self.assertEqual(VALUE, 2)\n", encoding="utf-8",
         )
-        payload = b"VALUE = 2\\n"
+        payload = b"VALUE = 2\n"
         from myth.domain import sha256_bytes
         digest = self.runtime.objects.put(payload)
         self.assertEqual(digest, sha256_bytes(payload))
@@ -60,7 +60,7 @@ class VerificationCompletionTests(unittest.TestCase):
         result = self.workspace.verification.run(turn, self.profile["profile_id"], intent=intent)
         self.assertEqual(result["status"], "PASSED")
         self.assertEqual(result["tested_subject"], intent["tested_subject"])
-        self.assertEqual((self.project_root / "app.py").read_bytes(), b"VALUE = 1\\n")
+        self.assertEqual((self.project_root / "app.py").read_bytes(), b"VALUE = 1\n")
         self.assertEqual(self.workspace.verification.run(turn, self.profile["profile_id"])["status"], "FAILED")
 
     # 声称缺失或非最新补丁身份必须拒绝，不能仅测试有利的一个文件。
@@ -80,8 +80,8 @@ class VerificationCompletionTests(unittest.TestCase):
 
     # Ticket 冻结后出现新候选，旧意图不允许复用为另一个版本的测试证明。
     def test_candidate_intent_rejects_late_revision(self):
-        (self.project_root / "app.py").write_text("VALUE = 1\\n", encoding="utf-8")
-        digest = self.runtime.objects.put(b"VALUE = 2\\n")
+        (self.project_root / "app.py").write_text("VALUE = 1\n", encoding="utf-8")
+        digest = self.runtime.objects.put(b"VALUE = 2\n")
         first = {"decision": {"capability_id": "project.patch_exact"}, "result": {
             "artifact": {"name": "app.py", "digest": digest, "decision_id": "a"}
         }}
@@ -98,14 +98,14 @@ class VerificationCompletionTests(unittest.TestCase):
 
     # 符号链接项目拒绝复制，不能穿过项目目录读取受信范围以外的文件。
     def test_candidate_copy_rejects_symlink(self):
-        (self.project_root / "app.py").write_text("VALUE = 1\\n", encoding="utf-8")
+        (self.project_root / "app.py").write_text("VALUE = 1\n", encoding="utf-8")
         outside = self.root / "secret.txt"
         outside.write_text("secret", encoding="utf-8")
         try:
             (self.project_root / "pointer").symlink_to(outside)
         except (OSError, NotImplementedError):
             self.skipTest("symlinks unavailable on this host")
-        digest = self.runtime.objects.put(b"VALUE = 2\\n")
+        digest = self.runtime.objects.put(b"VALUE = 2\n")
         turn = {"snapshot": {"project": self.project}, "activities": [{
             "decision": {"capability_id": "project.patch_exact"}, "result": {
                 "artifact": {"name": "app.py", "digest": digest, "decision_id": "a"}
