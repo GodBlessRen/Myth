@@ -222,7 +222,10 @@ class TaskBenchmarkTests(unittest.TestCase):
             records, tuple(CONTEXT_BENCHMARK_ARMS), ("edge",), 1,
             kind="real_provider", complete_suite=True,
         )
-        self.assertTrue(summary["ready_for_separate_heldout_review"])
+        # 单 Case 单次运行只证明门禁能看见收据，不能把一条漂亮样本称为显著收益。
+        self.assertFalse(summary["ready_for_separate_heldout_review"])
+        self.assertFalse(summary["paired_significance"]["passed"])
+        self.assertEqual(summary["paired_significance"]["discordant_cases"], 1)
         self.assertFalse(summary["promotion_eligible"])
         self.assertEqual(summary["fully_measured_variant_pairs"], 1)
         records[1] = {**records[1], "status": "RUNNER_ERROR", "model_calls": None,
