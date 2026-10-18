@@ -277,6 +277,46 @@ class ContextGovernanceTests(unittest.TestCase):
                 {"model_attempt_id": "m1", "state": "RESOLVED"}
             ]})
 
+    def test_remote_window_provenance_blocks_adapter_family_guess(self):
+        """模型名推测的窗口不冒充 Provider 实测；真正来源声明需要两层一致。"""
+        from myth.providers.openai import _openai_model_capability
+        self.assertEqual(
+            _openai_model_capability("gpt-5.6-claim")["source"],
+            "adapter-family-rule",
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            web = ConversationWebService(Path(tmp))
+            settings = {"provider": "openai", "model": "fixture", "max_output_tokens": 512}
+            profile = {"id": "fixture", "context_window": 65536, "source": "adapter-family-rule"}
+            def mocked_connection(_settings):
+                """仅固定公开预检结果，用来核对来源而非访问真实网络。"""
+                return {"ready": True, "provider": "openai", "details": {
+                    "models": ["fixture"], "model_capabilities": {"fixture": profile},
+                    "capability_source": "provider",
+                }}
+            web.connection = mocked_connection
+            self.assertIsNone(web._require_model_preflight(settings, entry="send"))
+            profile["source"] = "provider"
+            frozen = web._require_model_preflight(settings, entry="send")
+            self.assertEqual(frozen["context_window"], 65536)
+            self.assertEqual(frozen["source"], "provider-preflight")
+
+    def test_remote_budget_reserves_pessimistic_token_density(self):
+        """在短窗口下，即使输入接近单字节单 Token 也保留输出与协议余量。"""
+        settings = {
+            "provider": "openai", "model": "fixture", "max_output_tokens": 1024,
+            "admitted_model_profile": {
+                "provider": "openai", "id": "fixture", "context_window": 8192,
+                "source": "provider-preflight",
+            },
+        }
+        result = remote_context_budget(settings)
+        self.assertEqual(result["max_bytes"], 8192 - 1024 - 512 - 2048)
+        self.assertLess(result["max_bytes"], 8192 - 1024 - 512)
+        settings["admitted_model_profile"]["context_window"] = 3000
+        with self.assertRaises(ValueError):
+            remote_context_budget(settings)
+
     def test_remote_model_window_requires_frozen_matching_preflight(self):
         """仅身份匹配的冻结公开窗口可以扩大远端软预算，切换模型立即退回保守上限。"""
         remote = {"provider": "openai", "model": "fixture", "max_output_tokens": 1024}
@@ -297,7 +337,7 @@ class ContextGovernanceTests(unittest.TestCase):
         self.assertEqual(req.context_report["max_bytes"], budget["max_bytes"])
         self.assertEqual(req.context_report["declared_model_context_window"], 65536)
         self.assertEqual(req.context_report["model_budget_source"],
-                         "provider-preflight-frozen")
+                         "provider-preflight-frozen-conservative")
 
 
 if __name__ == "__main__":
