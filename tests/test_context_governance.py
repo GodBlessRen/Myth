@@ -211,6 +211,72 @@ class ContextGovernanceTests(unittest.TestCase):
         self.assertIn("memory:relevant@", " ".join(full["selected"]))
         self.assertIn("memory:relevant@", " ".join(only_relevance["selected"]))
 
+    def test_unresolved_runtime_ledgers_survive_missing_step_result(self):
+        """直接构造崩溃窗口的持久账本：无步骤结果时依然保护 UNKNOWN，结算后恢复为零风险。"""
+        from myth.conversation_context import compile_conversation_context
+        with tempfile.TemporaryDirectory() as tmp, MythRuntime(Path(tmp)) as runtime:
+            repo = Workspace(runtime).repository
+            repo.save_settings(SETTINGS)
+            sid = repo.create_session()["id"]
+            rid = repo.create_turn(sid, "Explain what happened", "ledger-guard")["run_id"]
+            # 夹具直接写入 SQLite 模拟工具收据未落库时的断电状态；生产不得绕过正式 Ticket。
+            with runtime.store.tx() as db:
+                db.execute(
+                    "INSERT INTO workspace_operations "
+                    "(decision_id,run_id,capability,state,intent_json,ticket_id,reserved_bytes) "
+                    "VALUES(?,?,?,'UNKNOWN','{}',?,0)",
+                    ("tool-pending", rid, "artifact.write", "ctkt-pending"),
+                )
+                db.execute(
+                    "UPDATE workspace_execution_cursors SET phase='OUTCOME_UNKNOWN', "
+                    "recovery_state='RECONCILE' WHERE run_id=?", (rid,),
+                )
+                db.execute(
+                    "UPDATE accounts SET unknown_held=1 WHERE run_id=? AND meter='write_bytes'",
+                    (rid,),
+                )
+            liabilities = repo.context_liabilities(rid)
+            self.assertEqual(liabilities["operations"][0]["state"], "UNKNOWN")
+            turn = repo.turn(rid)
+            snapshot = {**turn["snapshot"], "runtime_liabilities": liabilities}
+            messages, report = compile_conversation_context(
+                "system", snapshot, snapshot["messages"], [],
+                max_bytes=16_000,
+            )
+            joined = "\n".join(item.content for item in messages)
+            self.assertIn("runtime-tool:tool-pending", joined)
+            self.assertIn("runtime-budget:write_bytes", joined)
+            self.assertIn("runtime-cursor", joined)
+            self.assertIn("causal-guard", report["selected"])
+            self.assertEqual(report["governance"]["causal_runtime_protected"], 3)
+            with runtime.store.tx() as db:
+                db.execute(
+                    "UPDATE workspace_operations SET state='RESOLVED',result_json='{}' "
+                    "WHERE decision_id='tool-pending'",
+                )
+                db.execute(
+                    "UPDATE workspace_execution_cursors SET phase='TOOL_RECORDED', "
+                    "recovery_state='NONE' WHERE run_id=?", (rid,),
+                )
+                db.execute(
+                    "UPDATE accounts SET unknown_held=0 WHERE run_id=? AND meter='write_bytes'",
+                    (rid,),
+                )
+            current = repo.context_liabilities(rid)
+            clean = build_causal_guard([], current)
+            self.assertIsNone(clean)
+
+    def test_invalid_runtime_identity_fails_closed(self):
+        """未结算状态身份无法安全表示时明确拒绝，不应为节省 Token 直接删除。"""
+        with self.assertRaises(ValueError):
+            build_causal_guard([], {"operations": [
+                {"decision_id": "bad secret with whitespace", "state": "UNKNOWN"}
+            ]})
+        with self.assertRaises(ValueError):
+            build_causal_guard([], {"models": [
+                {"model_attempt_id": "m1", "state": "RESOLVED"}
+            ]})
+
     def test_remote_model_window_requires_frozen_matching_preflight(self):
         """仅身份匹配的冻结公开窗口可以扩大远端软预算，切换模型立即退回保守上限。"""
         remote = {"provider": "openai", "model": "fixture", "max_output_tokens": 1024}
