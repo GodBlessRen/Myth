@@ -188,7 +188,7 @@ def _observable_output(value: dict) -> list[dict]:
 
 
 # 投影供应商实际用量、推理 Token 及可选缓存量；缺字段保持未知，不结算为真实零成本。
-def _usage(value: dict) -> dict[str, int]:
+def _usage(value: dict, *, provider_id: str | None = None) -> dict[str, int]:
     usage_value = value.get("usage") if isinstance(value.get("usage"), dict) else {}
     result = {
         "model_calls": 1,
@@ -223,6 +223,42 @@ def _usage(value: dict) -> dict[str, int]:
     reasoning_tokens = output_details.get("reasoning_tokens")
     if type(reasoning_tokens) is int and reasoning_tokens >= 0:
         result["reasoning_tokens"] = reasoning_tokens
+
+    # 预算仍使用供应商原样报告的 output_tokens；可见 TPS 必须单独证明推理折叠口径。
+    # 官方 OpenAI Responses 的 output 包含 reasoning；兼容网关则仅在 total 精确匹配时判定。
+    input_count = result.get("input_tokens")
+    output_count = result.get("output_tokens")
+    thoughts = result.get("reasoning_tokens")
+    total = usage_value.get("total_tokens")
+    if type(output_count) is int and type(thoughts) is int:
+        if thoughts == 0:
+            result["visible_output_tokens"] = output_count
+        elif output_count >= thoughts:
+            folded = (
+                type(input_count) is int
+                and type(total) is int
+                and total == input_count + output_count
+            )
+            unfolded = (
+                type(input_count) is int
+                and type(total) is int
+                and total == input_count + output_count + thoughts
+            )
+            if folded or (
+                provider_id in {"openai", "chatgpt"}
+                and type(total) is not int
+            ):
+                result["visible_output_tokens"] = output_count - thoughts
+            elif unfolded:
+                result["visible_output_tokens"] = output_count
+        elif (
+            type(input_count) is int
+            and type(total) is int
+            and total == input_count + output_count + thoughts
+        ):
+            # Unfolded 网关允许 reasoning 大于 visible output，不能误减成零。
+            result["visible_output_tokens"] = output_count
+    # 对近似/漂移 total 不伪造精确可见 Token；原始计量和 UNKNOWN 语义不变。
     return result
 
 
@@ -403,17 +439,36 @@ class OpenAIResponsesProvider:
 
         if not isinstance(value, dict):
             raise RuntimeError(f"{self.provider_name} response must be a JSON object")
-        if value.get("status") not in {None, "completed"}:
+        # 一旦收到完整终态响应，先记录真实用量；本地解析失败不能退化为效果未知。
+        usage = _usage(value, provider_id=self.provider_id)
+        status = value.get("status")
+        if status in {"failed", "incomplete", "cancelled"}:
+            error_value = value.get("error")
+            error_code = public_error_code(
+                error_value.get("code") if isinstance(error_value, dict) else None,
+                status,
+            )
+            raise ProviderKnownFailure(
+                f"{self.provider_name} Responses terminal failure: {error_code}",
+                usage=usage,
+                raw={"status": status, "error": {"code": error_code}},
+            )
+        if status not in {None, "completed"}:
+            # 非终态可能仍在远端运行，不得靠一份中途快照释放预算。
             raise RuntimeError(
                 f"{self.provider_name} response ended without successful completion"
             )
         try:
             output_text = _extract_output_text(value)
-        except RuntimeError:
+        except (RuntimeError, TypeError, AttributeError):
             if not streamed_text:
-                raise
+                # completed 是已知终态；无可用正文是已知解析失败，不是网络 UNKNOWN。
+                raise ProviderKnownFailure(
+                    f"{self.provider_name} completed response has no usable output_text",
+                    usage=usage,
+                    raw={"status": "completed", "error": {"code": "missing_output_text"}},
+                ) from None
             output_text = streamed_text
-        usage = _usage(value)
         if first_token_ms is not None:
             usage["time_to_first_token_ms"] = first_token_ms
         # Provider Evidence 默认保留远端未知元数据，便于未来比较；凭据与私有 reasoning body 由 denylist 剔除。
