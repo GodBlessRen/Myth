@@ -825,6 +825,14 @@ class ConversationWebService:
                 source_ref=value.get("source_ref") or "user",
             )
 
+    # apply_memory_actions：仅本机明确发起的产品写入可提交 Memory 提案；不注册为模型可执行工具。
+    def apply_memory_actions(self, value):
+        """把批量动作交给唯一 Memory 仓储原子提交；请求中额外能力/权限声明一律拒绝。"""
+        if not isinstance(value, dict) or set(value) != {"actions"}:
+            raise ValueError("memory action request requires only actions")
+        with MythRuntime(self.root) as runtime:
+            return Workspace(runtime).memory.apply_actions(value["actions"])
+
     # 列出当前可见长期 Goal；归档过滤只影响未来产品导航。
     def goals(self, include_archived=False):
         with MythRuntime(self.root) as runtime:
@@ -1072,6 +1080,8 @@ class ConversationWebService:
             return self.model_catalog.info(value.get("provider"), value.get("model", ""), force=value.get("force", False))
         if parts == ["connection"]:
             return self.connection(value, force=True)
+        if parts == ["memories", "actions"]:
+            return self.apply_memory_actions(value)
         if parts == ["memories"]:
             return self.remember(value)
         if parts == ["mental-models"]:

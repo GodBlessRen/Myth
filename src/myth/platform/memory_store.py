@@ -9,7 +9,7 @@ import re
 import uuid
 from typing import Any, Iterable, Mapping
 
-from ..domain import digest_json
+from ..domain import IdentityConflict, digest_json
 from .continuity import CURRENT_FACTS_POLICY
 from .memory import MemoryKind
 from .memory_lifecycle import (
@@ -19,6 +19,7 @@ from .memory_lifecycle import (
     evidence_json,
     normalize_delta_operations,
     normalize_evidence_set,
+    normalize_memory_actions,
 )
 from .retrieval import reciprocal_rank_scores
 from .memory_recall import build_recall_plan, parse_memory_ref, rank_probe_rows
@@ -389,42 +390,43 @@ class SqliteMemoryStore:
             current[source_id] = None if row is None else dict(row)
         return evaluate_freshness(evidence, current)
 
-    # apply_delta：LLM/策略只能提出受约束操作；Runtime 在 expected_revision 上原子校验并应用，拒绝整批部分写。
+    # apply_delta：CAS 与 revision/evidence/change_seq 在同一 SQLite 事务内提交；内部协作者负责最外层向量同步。
     def apply_delta(
         self,
         memory_id: str,
         operations: Iterable[Mapping[str, Any]],
         *,
         expected_revision: int,
+        _db=None,
     ) -> dict[str, Any]:
+        """按冻结 revision 更新正文/证据；失败整项回滚，内部事务不提前发布向量副作用。"""
+        if type(expected_revision) is not int or expected_revision < 1:
+            raise MemoryDeltaError("memory delta requires a positive integer expected_revision")
         normalized = normalize_delta_operations(operations)
-        # 空操作不推进revision；非空提案先在事务中核对expected_revision与active。
-        # 全部证据操作合法才一起写正文、证据、历史snapshot和change水位；失败回滚，向量同步在提交后。
-        if not normalized:
-            return self.get(memory_id)
-
-        with self.store.tx() as db:
+        # 步骤一：即使空操作，也在事务内核对身份和预期 revision；不能用陈旧快照伪装无变化成功。
+        with self.store.transaction_scope(_db) as db:
             row = db.execute(
-                "SELECT * FROM workspace_memories WHERE memory_id=?", (memory_id,)
+                "SELECT * FROM workspace_memories WHERE memory_id=?", (memory_id,),
             ).fetchone()
             if row is None:
                 raise KeyError(memory_id)
-            if int(row["revision"]) != int(expected_revision):
+            if int(row["revision"]) != expected_revision:
                 raise MemoryDeltaError(
                     "memory delta expected_revision does not match current revision"
                 )
             if not bool(row["active"]):
                 raise MemoryDeltaError("memory delta cannot mutate a revoked memory")
+            if not normalized:
+                return dict(row)
 
             current_evidence = self._evidence_rows(db, memory_id)
             by_ref = {str(item["evidence_ref"]): dict(item) for item in current_evidence}
             new_text = apply_text_delta(str(row["text"]), normalized)
 
+            # 步骤二：证据增删以证据身份为键，先校验所有操作，再一次性替换当前快照。
             for operation in normalized:
                 if operation["op"] == "add_evidence":
-                    prepared = self._prepare_evidence(
-                        db, [operation["evidence"]]
-                    )[0]
+                    prepared = self._prepare_evidence(db, [operation["evidence"]])[0]
                     ref = str(prepared["evidence_ref"])
                     if ref in by_ref:
                         raise MemoryDeltaError(f"memory evidence already exists: {ref}")
@@ -435,21 +437,126 @@ class SqliteMemoryStore:
                         raise MemoryDeltaError(f"memory evidence does not exist: {ref}")
                     del by_ref[ref]
 
+            # 步骤三：正文、Evidence、immutable revision 和变化水位必须同生共死。
             revision = int(row["revision"]) + 1
             db.execute(
                 "UPDATE workspace_memories SET text=?,revision=?,updated_at=CURRENT_TIMESTAMP "
                 "WHERE memory_id=?",
                 (new_text, revision, memory_id),
             )
-            self._replace_evidence(
-                db, memory_id, [by_ref[key] for key in sorted(by_ref)]
-            )
+            self._replace_evidence(db, memory_id, [by_ref[key] for key in sorted(by_ref)])
             self._snapshot_revision(db, memory_id)
             self._record_change(db, memory_id)
 
         record = self.get(memory_id)
-        self._sync_vector_record(record)
+        if _db is None:
+            self._sync_vector_record(record)
         return record
+
+    # _check_action_evidence_scope：防止批处理把私有来源嵌入更宽的 Memory 可见范围；本地权威来源才可被引用。
+    def _check_action_evidence_scope(self, db, target: Mapping[str, Any], evidence) -> None:
+        """外部 evidence_ref 不声称可验证的作用域；引用 Memory 时必须全局或同一精确范围。"""
+        for entry in evidence:
+            source_id = entry.get("source_memory_id")
+            if not source_id:
+                continue
+            # 来源不能以当前记忆本身为独立证明；这种闭环在 revision 推进后必定失效。
+            if source_id == target.get("memory_id"):
+                raise MemoryDeltaError("memory action cannot cite itself as evidence")
+            row = db.execute(
+                "SELECT scope_type,scope_id,active FROM workspace_memories WHERE memory_id=?",
+                (source_id,),
+            ).fetchone()
+            if row is None or not bool(row["active"]):
+                raise MemoryDeltaError("memory action references unavailable source memory")
+            if row["scope_type"] != "global" and (
+                row["scope_type"] != target["scope_type"]
+                or row["scope_id"] != target["scope_id"]
+            ):
+                raise MemoryDeltaError("memory action evidence crosses a narrower scope")
+
+    # apply_actions：ADD/UPDATE/DELETE 组成单个持久提交；CAS 防重放，冲突要求 reconcile 而不是盲重试。
+    def apply_actions(
+        self,
+        actions: list[Mapping[str, Any]] | tuple[Mapping[str, Any], ...],
+    ) -> dict[str, Any]:
+        """一次提交最多 16 个 Memory Action；结果只能说明本地持久状态，不能授权模型/工具效果。"""
+        normalized = normalize_memory_actions(actions)
+        if not normalized:
+            return {"status": "NOOP", "count": 0, "changes": [], "change_seq": self.current_change_seq()}
+        changes = []
+        # 步骤一：同连接 BEGIN IMMEDIATE 保护 ADD 唯一性、UPDATE/DELETE 版本与全批回滚。
+        with self.store.tx() as db:
+            for item in normalized:
+                op = item["op"]
+                if op == "ADD":
+                    conflict = db.execute(
+                        "SELECT memory_id FROM workspace_memories WHERE kind=? AND source_ref=?",
+                        (item["kind"], item["source_ref"]),
+                    ).fetchone()
+                    if conflict is not None:
+                        raise MemoryDeltaError("memory ADD identity already exists; reconcile before retry")
+                    self._check_action_evidence_scope(db, item, item["evidence"])
+                    record = self.remember(
+                        kind=item["kind"], text=item["text"],
+                        source_ref=item["source_ref"],
+                        scope_type=item["scope_type"], scope_id=item["scope_id"],
+                        fact_level="context", evidence=item["evidence"], _db=db,
+                    )
+                elif op == "UPDATE":
+                    row = db.execute(
+                        "SELECT scope_type,scope_id FROM workspace_memories WHERE memory_id=?",
+                        (item["memory_id"],),
+                    ).fetchone()
+                    if row is None:
+                        raise KeyError(item["memory_id"])
+                    linked = (
+                        operation["evidence"]
+                        for operation in item["operations"]
+                        if operation["op"] == "add_evidence"
+                    )
+                    self._check_action_evidence_scope(db, {
+                        "memory_id": item["memory_id"],
+                        "scope_type": row["scope_type"], "scope_id": row["scope_id"],
+                    }, linked)
+                    record = self.apply_delta(
+                        item["memory_id"], item["operations"],
+                        expected_revision=item["expected_revision"], _db=db,
+                    )
+                else:
+                    record = self.revoke(
+                        item["memory_id"],
+                        expected_revision=item["expected_revision"], _db=db,
+                    )
+                changes.append({
+                    "op": op, "memory_id": record["memory_id"],
+                    "revision": int(record["revision"]), "active": bool(record["active"]),
+                })
+            seq = self.current_change_seq()
+
+        # 步骤二：提交后再同步可重建的向量投影；任何外部索引异常不得重放已经成功的 SQLite 决定。
+        projections = []
+        for entry in changes:
+            if not entry["active"]:
+                continue
+            record = self.get(entry["memory_id"])
+            try:
+                result = self._sync_vector_record(record)
+            except Exception as exc:
+                result = {
+                    "configured": self.vector_index is not None,
+                    "degraded": True, "reason": type(exc).__name__,
+                }
+            projections.append({
+                "memory_id": entry["memory_id"], **result,
+            })
+        return {
+            "status": "COMMITTED",
+            "count": len(changes),
+            "changes": changes,
+            "change_seq": seq,
+            "vector_projections": projections,
+        }
 
     # 将当前 active revision 幂等投影到 Milvus；正文只用于 embedding，查询结果仍需回 SQLite hydration。
     def _sync_vector_record(self, record: dict) -> dict:
@@ -471,8 +578,12 @@ class SqliteMemoryStore:
         try:
             result = self.vector_index.sync_memories(payload)
             return {"configured": True, "synced": result.get("upserted", 0)}
-        except RuntimeError:
-            return {"configured": True, "synced": 0, "degraded": True}
+        except Exception as exc:
+            # 权威 Memory 已独立提交；派生索引的网络/驱动异常只产生退化事实，不能触发盲目重放。
+            return {
+                "configured": True, "synced": 0, "degraded": True,
+                "reason": type(exc).__name__,
+            }
 
     # 显式重建 active Memory 的派生向量索引；安装/迁移后可调用，失败不改变任何记忆事实。
     def rebuild_vector_index(self) -> dict:
@@ -798,41 +909,64 @@ class SqliteMemoryStore:
         required_rows = []
         invalid_refs = []
         invalid_ids = set()
-        for ref in plan.required_refs:
-            memory_id, revision = parse_memory_ref(ref)
-            invalid_ids.add(memory_id)
-            row = self.store.db.execute(
-                "SELECT * FROM workspace_memories WHERE memory_id=?", (memory_id,),
-            ).fetchone()
-            if row is None:
-                invalid_refs.append({"ref": ref, "reason": "missing"})
-                continue
-            item = dict(row)
-            if not item["active"] or not self._visible(item, project_id, session_id):
-                invalid_refs.append({"ref": ref, "reason": "unavailable"})
-                continue
-            if int(item["revision"]) != revision:
-                invalid_refs.append({"ref": ref, "reason": "revision_changed"})
-                continue
-            if self.freshness(memory_id)["is_stale"]:
-                invalid_refs.append({"ref": ref, "reason": "stale_evidence"})
-                continue
-            required_rows.append(item)
-            invalid_ids.discard(memory_id)
+        rejected_candidates = 0
 
-        # 明确要求的来源不能因 top-k 截断而消失；其余候选只占剩余容量。
-        by_id = {str(item["memory_id"]): item for item in required_rows}
-        for item in ranked:
-            if str(item["memory_id"]) in invalid_ids:
-                continue
-            if len(by_id) >= plan.limit:
-                break
-            by_id.setdefault(str(item["memory_id"]), item)
-        views = [
-            self.resolve(memory_id, resolution="L0",
-                         project_id=project_id, session_id=session_id)
-            for memory_id in by_id
-        ]
+        # 步骤一：检索/向量调用全部已结束；在一个短 WAL 读快照内统一核验来源、作用域与版本。
+        # 这样不会将不同提交时刻的 revision/evidence 拼成“已锚定”，同时不持写锁等待外部后端。
+        with self.store.read_snapshot() as db:
+            for ref in plan.required_refs:
+                memory_id, revision = parse_memory_ref(ref)
+                invalid_ids.add(memory_id)
+                row = db.execute(
+                    "SELECT * FROM workspace_memories WHERE memory_id=?", (memory_id,),
+                ).fetchone()
+                if row is None:
+                    invalid_refs.append({"ref": ref, "reason": "missing"})
+                    continue
+                item = dict(row)
+                if not item["active"] or not self._visible(item, project_id, session_id):
+                    invalid_refs.append({"ref": ref, "reason": "unavailable"})
+                    continue
+                if int(item["revision"]) != revision:
+                    invalid_refs.append({"ref": ref, "reason": "revision_changed"})
+                    continue
+                if self.freshness(memory_id)["is_stale"]:
+                    invalid_refs.append({"ref": ref, "reason": "stale_evidence"})
+                    continue
+                required_rows.append(item)
+                invalid_ids.discard(memory_id)
+
+            # 步骤二：指定来源优先；普通排名候选必须再次 hydration，不能返回查询期间已变更的旧片段。
+            by_id = {str(item["memory_id"]): item for item in required_rows}
+            for ranked_item in ranked:
+                key = str(ranked_item["memory_id"])
+                if key in invalid_ids or key in by_id:
+                    continue
+                if len(by_id) >= plan.limit:
+                    break
+                row = db.execute(
+                    "SELECT * FROM workspace_memories WHERE memory_id=?", (key,),
+                ).fetchone()
+                if (
+                    row is None
+                    or not bool(row["active"])
+                    or not self._visible(dict(row), project_id, session_id)
+                    or int(row["revision"]) != int(ranked_item["revision"])
+                ):
+                    rejected_candidates += 1
+                    continue
+                if self.freshness(key)["is_stale"]:
+                    rejected_candidates += 1
+                    continue
+                by_id[key] = dict(row)
+            views = [
+                self.resolve(
+                    memory_id, resolution="L0",
+                    project_id=project_id, session_id=session_id,
+                )
+                for memory_id in by_id
+            ]
+
         return {
             "memories": views,
             "evidence_gate": {
@@ -849,6 +983,8 @@ class SqliteMemoryStore:
                 "probes": probe_reports,
                 "unique_candidates": len(ranked),
                 "selected": len(views),
+                "snapshot_validated": True,
+                "candidate_rejected_after_search": rejected_candidates,
                 "degraded": any(item["degraded"] for item in probe_reports),
             },
         }
@@ -998,10 +1134,24 @@ class SqliteMemoryStore:
             session_id=session_id,
         )["memories"]
 
-    # 撤销只改变未来可见性并形成新的 immutable revision；依赖它的 Observation 将自动变 stale。
-    def revoke(self, memory_id: str) -> dict:
-        self.get(memory_id)
-        with self.store.tx() as db:
+    # revoke：DELETE 只产生新 tombstone revision，旧证据/历史不销毁；批处理可要求精确 expected_revision。
+    def revoke(self, memory_id: str, *, expected_revision: int | None = None, _db=None) -> dict:
+        """在本地权威事务内撤销未来可见性；显式 CAS 冲突不能吞掉或冒充成功。"""
+        if expected_revision is not None and (type(expected_revision) is not int or expected_revision < 1):
+            raise MemoryDeltaError("memory revoke requires a positive integer expected_revision")
+        # 确认当前 revision、active 与撤销写入均在同一事务内，避免与另一连接竞争。
+        with self.store.transaction_scope(_db) as db:
+            row = db.execute(
+                "SELECT * FROM workspace_memories WHERE memory_id=?", (memory_id,),
+            ).fetchone()
+            if row is None:
+                raise KeyError(memory_id)
+            if expected_revision is not None and int(row["revision"]) != expected_revision:
+                raise MemoryDeltaError("memory revoke expected_revision does not match current revision")
+            if not bool(row["active"]):
+                if expected_revision is not None:
+                    raise MemoryDeltaError("memory was already revoked; reconcile before retry")
+                return dict(row)
             db.execute(
                 "UPDATE workspace_memories SET active=0,revision=revision+1,"
                 "updated_at=CURRENT_TIMESTAMP WHERE memory_id=?",
@@ -1011,27 +1161,50 @@ class SqliteMemoryStore:
             self._record_change(db, memory_id)
         return self.get(memory_id)
 
-    # 以 Run 来源幂等记录结束经历，按冻结项目/会话范围保存；不宣称回答为 verified。
+    # record_episode：同 Run 的经历正文必须完全一致；补偿重放不能增加 revision 或令其他派生记忆伪过期。
     def record_episode(self, run_id: str, user_text: str, assistant_text: str) -> dict:
+        """保存唯一的终态经历；同源同内容直接返回，身份冲突显式拒绝以便调用方核对事实。"""
         text = f"User: {user_text.strip()}\nAssistant: {assistant_text.strip()}"
         if len(text.encode("utf-8")) > 8_000:
             text = text.encode("utf-8")[:8_000].decode("utf-8", errors="ignore")
         row = self.store.db.execute(
-            "SELECT t.session_id,s.project_id FROM workspace_turns t "
-            "JOIN workspace_sessions s ON s.id=t.session_id WHERE t.run_id=?",
+            "SELECT session_id,snapshot_json FROM workspace_turns WHERE run_id=?",
             (run_id,),
         ).fetchone()
-        scope_type = "project" if row and row["project_id"] else "session"
-        scope_id = (
-            row["project_id"]
-            if row and row["project_id"]
-            else (row["session_id"] if row else run_id)
-        )
-        return self.remember(
-            kind=MemoryKind.EPISODIC,
-            text=text,
-            source_ref=f"run:{run_id}",
-            scope_type=scope_type,
-            scope_id=scope_id,
-            fact_level="context",
-        )
+        # Episode 的 Scope 属于本 Run 准入时冻结的项目；会话后续改项目不能把历史搬进新项目。
+        frozen = json.loads(row["snapshot_json"]) if row else {}
+        project = frozen.get("project") if isinstance(frozen, dict) else None
+        project_id = project.get("id") if isinstance(project, dict) else None
+        scope_type = "project" if project_id else "session"
+        scope_id = project_id or (row["session_id"] if row else run_id)
+        source = f"run:{run_id}"
+        # 同一 BEGIN IMMEDIATE 内检查唯一来源、快照与新建；不能跨连接先查后写产生竞争。
+        with self.store.tx() as db:
+            existing = db.execute(
+                "SELECT * FROM workspace_memories WHERE kind=? AND source_ref=?",
+                (MemoryKind.EPISODIC.value, source),
+            ).fetchone()
+            if existing is not None:
+                if (
+                    bool(existing["active"])
+                    and existing["text"] == text
+                    and existing["scope_type"] == scope_type
+                    and existing["scope_id"] == scope_id
+                    and existing["fact_level"] == "context"
+                ):
+                    return dict(existing)
+                raise IdentityConflict(
+                    "the recorded run episode conflicts with its committed immutable source"
+                )
+            record = self.remember(
+                kind=MemoryKind.EPISODIC,
+                text=text,
+                source_ref=source,
+                scope_type=scope_type,
+                scope_id=scope_id,
+                fact_level="context",
+                _db=db,
+            )
+        # SQLite 已经提交后才同步可重建向量投影；外部索引与 Memory 事实不可混为一笔事务。
+        self._sync_vector_record(record)
+        return record

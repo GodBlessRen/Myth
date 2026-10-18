@@ -65,6 +65,56 @@ class WebContractTests(unittest.TestCase):
             threading.Event().wait(0.01)
         self.fail("local worker did not finish")
 
+    # 回归断言：真实 Loopback HTTP 接口通过仓储原子更新 Memory，CAS 重放不得多生成 revision。
+    def test_memory_actions_http_atomic_and_replay_fail_closed(self):
+        with self.call("/api/workspace/memories/actions", {
+            "actions": [
+                {"op": "ADD", "kind": "semantic", "text": "Evidence first",
+                 "source_ref": "user:atomic-http"},
+            ],
+        }) as response:
+            created = json.load(response)
+        self.assertEqual(created["status"], "COMMITTED")
+        memory_id = created["changes"][0]["memory_id"]
+
+        with self.call("/api/workspace/memories/actions", {
+            "actions": [
+                {"op": "UPDATE", "memory_id": memory_id, "expected_revision": 1,
+                 "operations": [{"op": "replace_text", "text": "Evidence before claims"}]},
+            ],
+        }) as response:
+            changed = json.load(response)
+        self.assertEqual(changed["changes"][0]["revision"], 2)
+
+        with self.assertRaises(error.HTTPError) as caught:
+            self.call("/api/workspace/memories/actions", {
+                "actions": [
+                    {"op": "UPDATE", "memory_id": memory_id, "expected_revision": 1,
+                     "operations": [{"op": "replace_text", "text": "Blind replay"}]},
+                ],
+            })
+        self.assertEqual(caught.exception.code, 400)
+        with MythRuntime(self.root) as runtime:
+            record = runtime.store.db.execute(
+                "SELECT text,revision FROM workspace_memories WHERE memory_id=?",
+                (memory_id,),
+            ).fetchone()
+        self.assertEqual((record["text"], record["revision"]), ("Evidence before claims", 2))
+
+    # 回归断言：API 拒绝模型绕过授权提交 verified 级别，以及携带未声明的权限字段。
+    def test_memory_actions_http_rejects_unapproved_fact_promotion(self):
+        with self.assertRaises(error.HTTPError) as caught:
+            self.call("/api/workspace/memories/actions", {
+                "actions": [{"op": "ADD", "kind": "semantic", "text": "Unverified",
+                             "source_ref": "model:guess", "fact_level": "verified"}],
+            })
+        self.assertEqual(caught.exception.code, 400)
+        with self.assertRaises(error.HTTPError) as caught:
+            self.call("/api/workspace/memories/actions", {
+                "actions": [], "permission": "admin",
+            })
+        self.assertEqual(caught.exception.code, 400)
+
     # 回归断言：Driver 返回仍是 RUNNING 时 Web 继续安全驱动；不能仅清本机 active。
     def test_web_worker_reenters_if_driver_returns_running_without_yield(self):
         original = AgentRuntime.run
@@ -285,15 +335,30 @@ class WebContractTests(unittest.TestCase):
         with self.call("/api/workspace" + path, payload) as response:
             return json.load(response)
 
-    # 真实本机 HTTP 合同、入口去重及跨站拒绝的局部夹具协作；只服务本测试调用链，真实行为仍由外层断言核对。
+    # 回归等待：依据持久 Turn 终态+线程退出判断完成；Windows 3.13 压力下 5 秒 wall time 造成虚假失败。
     def wait_conversation(self, sid):
-        deadline = time.monotonic() + 5
+        """等待真实完成而非仅线程退出；设明确总截止并在失败时输出脱敏状态供定位。"""
+        deadline = time.monotonic() + 20
+        last_status = "NOT_STARTED"
+        last_driver = False
+        # 先识别确定的业务失败，再观察后台线程退出；RUNNING 时不能凭一次 active=false 误报成功。
         while time.monotonic() < deadline:
             session = self.workspace_json(f"/sessions/{sid}")
-            if session["turns"] and not session["turns"][-1]["driver_active"]:
-                return session
-            threading.Event().wait(0.01)
-        self.fail("conversation did not finish")
+            if session["turns"]:
+                latest = session["turns"][-1]
+                last_status = str(latest.get("status") or "UNKNOWN")
+                last_driver = bool(latest.get("driver_active"))
+                if not last_driver and last_status == "COMPLETED":
+                    return session
+                if not last_driver and last_status in {
+                    "FAILED", "UNKNOWN", "CANCELLED", "STOPPED", "WAITING_USER"
+                }:
+                    self.fail(f"conversation settled without successful completion: {last_status}")
+            threading.Event().wait(0.025)
+        self.fail(
+            "conversation did not reach COMPLETED within bounded test deadline; "
+            f"status={last_status}, driver_active={last_driver}"
+        )
 
     # 回归断言：本机 HTTP 对话持久保存，重复提交仍复用固定入口身份。
     def test_workspace_http_chat_persistence_and_duplicate_submit(self):
