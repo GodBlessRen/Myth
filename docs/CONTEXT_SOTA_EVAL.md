@@ -63,7 +63,7 @@ python -m myth.cli task-benchmark --context-ablation --suite evals/context-heldo
 - `context_ablation.quality`：improved / regressed / both_pass / both_fail；**不是**文学、开放问答的语义质量统计。
 - `context_ablation.safety`：新增 UNKNOWN、人类接管和更多重复工具调用风险；重复调用并不必然等于重复副作用，但需要人工检查。
 - `context_ablation.cost`：所有配对均有 Provider/Adapter 计量时才计算总 input/output tokens、provider wall time 的差额；缺测时总差额为 `null`，保留 `paired_samples`。
-- `context_ablation.ready_for_separate_heldout_review`：仅在真实 Provider、完整四组每组均有可归属的有效调用/成本证据（并至少一题真实启用 Context）、无质量/安全回退、共同实测成本全部不恶化且至少一项改善时才可能为真；它仅意味着**可以进入独立 Heldout 复核**。
+- `context_ablation.ready_for_separate_heldout_review`：仅在真实 Provider、完整四组每组均有可归属的有效调用/成本证据（并至少一题真实启用 Context）、full Arm 在固定集合上全部通过独立 Oracle、无质量/安全回退、共同实测成本全部不恶化且至少一项改善时才可能为真；它仅意味着**可以进入独立 Heldout 复核**。
 - `context_ablation.promotion_eligible`：**恒为 false**；该小集合没有权威自动发布资格。发布必须复用 Myth 的显式 Evaluation/Policy Promote 治理，不能绕过用户授权。
 
 `Provider` 的 `input_tokens` 是派发后计量，不是预调接口的精确 tokenizer。当前 Context 预算继续使用保守软字节预算；`context_cost_calibration` 是实测历史比例，不能据此无条件扩容。若真实 Token 窗口预检仍缺测，必须保持原 fallback。
