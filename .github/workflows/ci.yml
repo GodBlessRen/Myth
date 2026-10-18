@@ -80,8 +80,35 @@ jobs:
       - name: Verify Skill Hook and real local MCP handshake
         run: python -m unittest discover -s tests -p "test_extensions.py" -v
 
+  semantic-eval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install checked-out package
+        run: python -m pip install -e .
+      # 独立运行冻结 Oracle；脚本失败/缺失完整题数必须令发布门禁失败。
+      - name: Run exact-head Semantic Contract ablation
+        run: |
+          mkdir -p .work/evidence
+          python scripts/eval_semantic_contract.py --repeats 3 --seed 17 --output .work/evidence/semantic-ablation.json
+      # 仅上传无用户数据的合成夹具结果；报告带套件哈希，归档名称绑定 Git commit。
+      - name: Retain reproducible semantic evaluation evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: myth-semantic-ablation-${{ github.sha }}
+          path: .work/evidence/semantic-ablation.json
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
   release:
-    needs: [quality, test, mcp-integration]
+    needs: [quality, test, mcp-integration, semantic-eval]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
