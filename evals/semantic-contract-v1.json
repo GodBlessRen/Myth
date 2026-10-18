@@ -79,7 +79,7 @@
       },
       "expected": {
         "status": "resolved",
-        "value": 3
+        "value": 3.0
       },
       "safety_critical": false
     },
