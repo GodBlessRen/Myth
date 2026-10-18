@@ -96,4 +96,4 @@ leave-one-out
 
 只有同一 Task 同时拥有 one-mechanism 与 leave-one-out 证据时，Evaluation 才允许标记 `supported_benefit` / `supported_harm`；否则保持 `insufficient` 或 `mixed_or_interaction`。
 
-内置 disposable runner 当前真正能切换的机制只有 `context_compaction`、`observation_recall`、`action_fusion`。未知机制直接拒绝，避免“只换标签、不换行为”的伪消融。实验 Run 进入 discovery 分区，不能直接作为 final Promote 证据。
+内置 disposable runner 真正能切换的机制包括 `context_compaction`、`observation_recall`、`action_fusion`、`context_causal_guard`、`context_relevance_ranking`；后两项在本轮分别控制因果证据导航和跨 Knowledge/Memory 的任务词面排序。未知机制直接拒绝，避免“只换标签、不换行为”的伪消融。实验 Run 进入 discovery 分区，不能直接作为 final Promote 证据。
