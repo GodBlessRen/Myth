@@ -12,6 +12,7 @@ from pathlib import Path
 
 from myth.conversation import TOOL_CATALOG, validate_tool_arguments
 from myth.platform.capabilities import default_capabilities
+from myth.models import ModelResult, ProviderStatus
 from myth.platform.memory_lifecycle import MemoryDeltaError
 from myth.platform.semantic_contract import (
     evaluate_json_mapping,
@@ -218,6 +219,70 @@ class SemanticContractTests(unittest.TestCase):
         self.assertEqual(policy.action_for("semantics.browse"), InformationControlAction.SEEK)
         self.assertEqual(policy.action_for("semantics.resolve"), InformationControlAction.EXPAND)
         self.assertIs(self.workspace.execution.semantic_catalog, self.semantics)
+
+
+    # 实际 Conversation Run：模型先发现延迟工具，随后才可持 Ticket 调用语义求值。
+    def test_agent_can_discover_and_execute_readonly_semantic_tool(self):
+        source = self._source({"net": 44, "currency": "USD"}, ref="semantic:agent")
+        self.semantics.propose(self._contract([source["memory_id"]]))
+        self.workspace.repository.save_settings({"provider": "ollama", "model": "test"})
+        session_id = self.workspace.repository.create_session()["id"]
+        run_id = self.workspace.repository.create_turn(
+            session_id, "请读取定义的 net revenue", "semantic-tool-e2e"
+        )["run_id"]
+
+        # FixedProvider：仅返回受控 StepDecision 序列；Run/Ticket/Receipt/权限使用生产路径。
+        class FixedProvider:
+            # provider_id：夹具标识，不是远端真实模型能力。
+            provider_id = "ollama"
+
+            # 构造可重放的三步决定，不调用网络。
+            def __init__(self):
+                self.responses = [
+                    ("tool.search", {"query": "semantics.resolve", "limit": 6}),
+                    ("semantics.resolve", {"term_id": "finance.net_revenue"}),
+                    (None, None),
+                ]
+                self.calls = 0
+
+            # 固定健康返回仅用于模型连接夹具，不证明供应商连通性。
+            def check(self):
+                return ProviderStatus("ollama", True, details={"models": ["test"]})
+
+            # 用真实 StepDecision 协议包装工具发现、执行和终态回答。
+            def invoke(self, request):
+                name, args = self.responses[min(self.calls, len(self.responses) - 1)]
+                self.calls += 1
+                payload = {
+                    "decision_type": "tool_call" if name else "request_completion",
+                    "reason": "semantic tool fixture",
+                    "capability_id": name or "",
+                    "arguments_json": json.dumps(args or {}),
+                    "question": "",
+                    "missing_info_category": "",
+                    "claim": "The exact contract returned forty four" if not name else "",
+                    "goal_coverage": "answer",
+                    "evidence_refs": [],
+                    "remaining": [],
+                }
+                return ModelResult(
+                    json.dumps(payload),
+                    {"model_calls": 1, "input_tokens": 20, "output_tokens": 30},
+                    {"fixture": True},
+                )
+
+        provider = FixedProvider()
+        self.workspace.run(run_id, provider)
+        turn = self.workspace.repository.turn(run_id)
+        operations = [
+            item for item in turn["activities"]
+            if (item.get("decision") or {}).get("capability_id") == "semantics.resolve"
+        ]
+        self.assertEqual(len(operations), 1)
+        self.assertEqual(operations[0]["result"]["status"], "resolved")
+        self.assertEqual(operations[0]["result"]["value"], 44)
+        self.assertFalse(operations[0]["result"]["verified"])
+        self.assertGreaterEqual(provider.calls, 3)
 
 
 if __name__ == "__main__":
