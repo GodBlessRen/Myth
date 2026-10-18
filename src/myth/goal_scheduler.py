@@ -215,7 +215,7 @@ class GoalScheduler:
             )
 
     # 同事务提交 occurrence、Turn/预算、Goal 关联/进度并返回 Run 身份；未到期返回 None，忙/等待明确拒绝且不消费机会。
-    def admit(self, schedule_id, now=None):
+    def admit(self, schedule_id, now=None, *, model_capability=None):
         """先准备再提交机会；准备不占写锁，机会/Turn/Goal 仍由一个事务提交。"""
         now = time.time() if now is None else float(now)
         row = self.store.db.execute(
@@ -227,6 +227,9 @@ class GoalScheduler:
         if not row["enabled"] or row["due_at"] > now or row["retry_at"] > now:
             return None
         settings = json.loads(row["settings_json"])
+        # Web 预检阶段传入的模型公开窗口随本次 Turn 冻结；旧 Schedule 合同不被改写。
+        if isinstance(model_capability, dict):
+            settings["admitted_model_profile"] = dict(model_capability)
         request_id = f"wake:{schedule_id}:{row['sequence']}"
         # 先在写锁外完成 Memory/知识/对象/环境读取；竞争者消费同一机会时，本次退出。
         try:
