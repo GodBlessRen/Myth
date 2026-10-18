@@ -3,6 +3,9 @@
 import unittest
 from pathlib import Path
 import tempfile
+import subprocess
+import sys
+import json
 
 from myth.runtime import MythRuntime
 from myth.workspace import Workspace
@@ -316,6 +319,28 @@ class ContextGovernanceTests(unittest.TestCase):
         settings["admitted_model_profile"]["context_window"] = 3000
         with self.assertRaises(ValueError):
             remote_context_budget(settings)
+
+    def test_controlled_eval_cli_is_reproducible_without_provider(self):
+        """公开 CLI 使用固定 Suite 运行四组真实机制切换，不请求模型也不自动写评测账本。"""
+        root = Path(__file__).resolve().parent.parent
+        process = subprocess.run(
+            [
+                sys.executable, "-m", "myth.cli", "eval-controlled",
+                "--suite", str(root / "evals" / "context-governance-v1.json"),
+                "--mechanism", "context_causal_guard",
+                "--mechanism", "context_relevance_ranking",
+            ],
+            cwd=root, capture_output=True, text=True, timeout=30,
+        )
+        self.assertEqual(process.returncode, 0, process.stderr[-3000:])
+        output = json.loads(process.stdout)
+        self.assertEqual(output["evaluation_partition"], "discovery")
+        self.assertEqual(len(output["runs"]), 4)
+        self.assertTrue(all(r["complete_suite"] for r in output["runs"]))
+        self.assertTrue(all(
+            obs["metrics"].get("model_calls", 0) == 0
+            for run in output["runs"] for obs in run["observations"]
+        ))
 
     def test_fixed_suite_proves_mechanism_specific_ablation(self):
         """五道固定 Context 题运行全关/单机制/全开，任务结论必须来自真实编译结果。"""
