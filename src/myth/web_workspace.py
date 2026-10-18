@@ -330,7 +330,12 @@ class ConversationWebService:
         profiles = details.get("model_capabilities")
         profile = profiles.get(str(settings.get("model"))) if isinstance(profiles, dict) else None
         window = profile.get("context_window") if isinstance(profile, dict) else None
-        if type(window) is int and 2048 <= window <= 8_000_000:
+        if (
+            details.get("capability_source") == "provider"
+            and isinstance(profile, dict)
+            and profile.get("source") == "provider"
+            and type(window) is int and 2048 <= window <= 8_000_000
+        ):
             return {
                 "provider": str(settings.get("provider")),
                 "id": str(settings.get("model")),
