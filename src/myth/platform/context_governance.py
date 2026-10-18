@@ -14,8 +14,11 @@ from typing import Any
 # _CRITICAL：已记录的失败/未决状态标签；未知结果宁可保留导航，也不能当成功删去。
 _CRITICAL = frozenset({
     "UNKNOWN", "FAILED", "ERROR", "INCONCLUSIVE", "BLOCKED",
-    "SKIPPED", "REJECTED", "CANCELLED", "PENDING",
+    "SKIPPED", "REJECTED", "CANCELLED", "PENDING", "TICKETED",
 })
+# 历史已知失败只携带最近导航；所有开放风险和显式依赖祖先不受此窗口限制。
+_RECENT_KNOWN_ISSUES = 8
+_UNRESOLVED_SUFFIXES = (":UNKNOWN", ":TICKETED", ":PENDING", ":BLOCKED", ":INCONCLUSIVE")
 # _REFERENCE：只接受可导航的短身份；不把任意 Tool 正文复制进因果摘要。
 _REFERENCE = re.compile(r"^[A-Za-z0-9_.:/@+-]{1,200}$")
 # _WORD：英文词项与中文连续词段；这是保守词面估计，不是语义理解或因果置信度。
@@ -77,6 +80,16 @@ def _critical_labels(activity: Mapping[str, Any]) -> tuple[str, ...]:
     return tuple(dict.fromkeys(labels))
 
 
+# 未知效果和未完成审核始终占据安全工作集；已知终态仅作为近期问题导航。
+def _unresolved_labels(labels: Sequence[str]) -> bool:
+    return any(
+        label.endswith(_UNRESOLVED_SUFFIXES)
+        or label in {"subagent_review:pending", "subagent_review:pending_review"}
+        or label.endswith(":review_pending_review")
+        for label in labels
+    )
+
+
 # 只提炼需保护的执行事实及其显式前驱；时间先后不自动推断成因果边。
 def build_causal_guard(
     activities: Sequence[Mapping[str, Any]],
@@ -86,6 +99,13 @@ def build_causal_guard(
     nodes: list[dict[str, Any]] = []
     by_decision: dict[str, int] = {}
     critical: set[int] = set()
+    # 同 Run 的已结算工具身份是权威状态，但不表示用户目标或语义验收通过。
+    settled: set[str] = set()
+    if isinstance(runtime_liabilities, Mapping):
+        ids = runtime_liabilities.get("settled_tool_decisions") or []
+        if not isinstance(ids, (list, tuple)) or any(_reference(ref) is None for ref in ids):
+            raise ValueError("invalid settled Runtime tool identities")
+        settled = set(ids)
     for index, activity in enumerate(activities):
         result = activity.get("result")
         result = result if isinstance(result, Mapping) else {}
@@ -93,6 +113,14 @@ def build_causal_guard(
         ref = f"activity:{step}" if type(step) is int and step >= 0 else f"activity-index:{index}"
         decision_id = _reference(activity.get("decision_id"))
         labels = _critical_labels(activity)
+        # 只将原工具的过时 UNKNOWN 标记为历史状态；并行子委派和审核不能由父收据代偿。
+        if decision_id in settled:
+            stale = {"step:UNKNOWN", "step:PENDING", "step:TICKETED",
+                     "tool_report:UNKNOWN", "tool_report:PENDING", "tool_report:TICKETED"}
+            if any(label in stale for label in labels):
+                labels = tuple(
+                    "historical_" + label if label in stale else label for label in labels
+                ) + ("runtime_tool:RESOLVED",)
         declared = list(_dependencies(activity.get("declared_dependencies")))
         handoff = result.get("handoff")
         if isinstance(handoff, Mapping):
@@ -193,7 +221,15 @@ def build_causal_guard(
     if not critical:
         return None
 
-    # 只遍历已记录的显式依赖闭包；循环和重边由 visited 截止，不凭空制造丢失的前驱。
+    # 永远保留开放效果；已知失败保留最近 N 项供决策，旧失败仍在持久记录中。
+    active = {
+        index for index in critical
+        if index >= len(activities)
+        or _unresolved_labels(nodes[index]["reported_outcomes"])
+    }
+    recent = set(sorted(critical - active)[-_RECENT_KNOWN_ISSUES:])
+    critical = active | recent
+    # 对所有已选择风险取显式依赖闭包，旧失败若是必需前驱仍能重新进入工作集。
     protected = set(critical)
     missing: set[str] = set()
     frontier = list(sorted(critical))
@@ -207,15 +243,35 @@ def build_causal_guard(
                 protected.add(predecessor)
                 frontier.append(predecessor)
 
+    historical = [
+        {
+            "source": nodes[index]["source"],
+            "decision_id": nodes[index].get("decision_id"),
+            "reported_outcomes": nodes[index]["reported_outcomes"],
+        }
+        for index in range(len(activities))
+        if index not in protected and nodes[index]["reported_outcomes"]
+    ]
+    archived_json = json.dumps(historical, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     records = [
-        {**nodes[index], "role": "critical" if index in critical else "declared_predecessor"}
+        {
+            **nodes[index],
+            "role": (
+                "active_risk" if index in active else
+                "recent_issue" if index in recent else "declared_predecessor"
+            ),
+        }
         for index in sorted(protected)
     ]
     return {
-        "policy": "causal-context-guard-v1",
+        "policy": "causal-active-set-v2",
         "source": "persisted-activity-and-runtime-ledger-projection" if runtime_liabilities else "persisted-activity-projection",
         "semantics": "reported_outcomes_and_declared_dependencies_not_causal_proof",
         "critical_count": len(critical),
+        "active_risk_count": len(active),
+        "recent_issue_count": len(recent),
+        "archived_issue_count": len(historical),
+        "archived_issue_digest": hashlib.sha256(archived_json.encode("utf-8")).hexdigest() if historical else None,
         "records": records,
         "missing_declared_dependencies": sorted(missing),
     }
@@ -240,6 +296,9 @@ def render_causal_guard(guard: Mapping[str, Any]) -> tuple[str, str]:
         {
             "policy": guard.get("policy"),
             "critical_count": guard.get("critical_count"),
+            "active_risk_count": guard.get("active_risk_count", 0),
+            "archived_issue_count": guard.get("archived_issue_count", 0),
+            "archived_issue_digest": guard.get("archived_issue_digest"),
             "records": records,
             "missing_declared_dependencies": guard.get("missing_declared_dependencies") or [],
         },
@@ -251,6 +310,7 @@ def render_causal_guard(guard: Mapping[str, Any]) -> tuple[str, str]:
         + payload
         + "\nUNKNOWN/TICKETED 必须先由 Runtime 核对，不可视为失败或自动安全重试。"
         "已结算的 Observation 可使用原 decision_id 精确回读；未结算操作只核对 Runtime Ticket/Receipt。"
+        "历史已知故障索引被归档不表示已修复；详见持久活动与报告摘要。"
     )
     return message, digest
 
