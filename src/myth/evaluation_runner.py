@@ -11,6 +11,8 @@ import time
 from typing import Iterable
 
 from .conversation import calculate
+from .conversation_context import compile_conversation_context
+from .acceptance import ContextBudgetError
 from .domain import SimulatedCrash
 from .platform.control import ControlCommand
 from .platform.evaluation import (
@@ -172,6 +174,8 @@ class FoundationEvalRunner:
             method = getattr(self, f"_case_{case.case_id.replace('-','_')}", None)
             if method is None and case.category == "intent_adversarial":
                 method = self._case_intent_adversarial
+            if method is None and case.category == "context_governance":
+                method = self._case_context_governance
             if method is None:
                 return EvalObservation(
                     case.case_id,
@@ -212,6 +216,65 @@ class FoundationEvalRunner:
                 harness_id=self.harness_id,
                 comparison_key=case.case_id,
             )
+
+    # 逐项验证实际 ContextCompiler 产物；不调用模型，分数只覆盖证据保留和选择语义。
+    def _case_context_governance(self, case):
+        """固定 Context 输入与字节预算，验证可关闭的机制产生真实选择差异。"""
+        data = case.input
+        snapshot = dict(data["snapshot"])
+        messages = list(snapshot.get("messages") or [])
+        activities = list(data.get("activities") or [])
+        if self.harness_id is not None:
+            snapshot["evaluation_harness_mechanisms"] = list(self.harness_mechanisms)
+        expected = case.expected
+        if not any(key in expected for key in (
+            "required_sources", "excluded_sources", "required_text", "budget_error",
+        )):
+            raise ValueError("context governance case has no acceptance criteria")
+        try:
+            projected, report = compile_conversation_context(
+                str(data.get("system") or "Context governance fixture"),
+                snapshot, messages, activities,
+                max_bytes=int(data["max_bytes"]),
+                compact_mode=bool(data.get("compact", False)),
+            )
+        except ContextBudgetError:
+            ok = expected.get("budget_error") is True
+            return (
+                EvalVerdict.PASS if ok else EvalVerdict.FAIL,
+                "fixture ContextCompiler budget rejected; no provider invocation",
+                ("context:required-budget-rejection",),
+                {"budget_rejected": 1, "model_calls": 0},
+            )
+        selected = set(report["selected"])
+        text = "\n".join(message.content for message in projected)
+        checks = [
+            *(source in selected for source in expected.get("required_sources", [])),
+            *(source not in selected for source in expected.get("excluded_sources", [])),
+            *(fragment in text for fragment in expected.get("required_text", [])),
+        ]
+        if "budget_error" in expected:
+            checks.append(expected["budget_error"] is False)
+        ok = bool(checks) and all(checks)
+        evidence = tuple(
+            ["context:compiler"] + [
+                ref for ref in report["selected"] if ref == "causal-guard"
+                or ref.startswith(("memory:", "knowledge:"))
+            ][:8]
+        )
+        return (
+            EvalVerdict.PASS if ok else EvalVerdict.FAIL,
+            f"fixture ContextCompiler assertions={sum(checks)}/{len(checks)}; no provider quality measured",
+            evidence,
+            {
+                "prompt_bytes": int(report["bytes_used"]),
+                "selected_items": len(selected),
+                "dropped_items": len(report["dropped"]),
+                "causal_critical": int(report["governance"]["causal_critical_count"]),
+                "model_calls": 0,
+                "budget_rejected": 0,
+            },
+        )
 
     # 探测日期/版本/百分比等对路由的反例；固定预期避免宽松算术形状误判。
     def _case_intent_adversarial(self, case):
