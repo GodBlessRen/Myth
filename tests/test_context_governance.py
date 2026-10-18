@@ -364,6 +364,38 @@ class ContextGovernanceTests(unittest.TestCase):
         self.assertEqual(child["active_risk_count"], 1)
         self.assertIn("child_0:UNKNOWN", child["records"][0]["reported_outcomes"])
 
+    def test_resolved_row_with_unknown_receipt_cannot_close_ambiguity(self):
+        """SQL 状态 RESOLVED 但收据仍报 UNKNOWN 时不能解除风险；已知 FAILED 也不等于验收。"""
+        with tempfile.TemporaryDirectory() as tmp, MythRuntime(Path(tmp)) as runtime:
+            repo = Workspace(runtime).repository
+            repo.save_settings(SETTINGS)
+            sid = repo.create_session()["id"]
+            rid = repo.create_turn(sid, "check receipt", "ambiguous-receipt")["run_id"]
+            with runtime.store.tx() as db:
+                db.execute(
+                    "INSERT INTO workspace_operations "
+                    "(decision_id,run_id,capability,state,intent_json,result_json,ticket_id) "
+                    "VALUES(?,?,?,'RESOLVED','{}','{\"status\":\"UNKNOWN\"}',?)",
+                    ("tool-unknown", rid, "mcp.call", "ticket-unknown"),
+                )
+            activity = [{"step": 1, "decision_id": "tool-unknown",
+                         "result": {"status": "UNKNOWN"}}]
+            still_unknown = repo.context_liabilities(rid)
+            self.assertNotIn("tool-unknown", still_unknown["settled_tool_decisions"])
+            self.assertEqual(build_causal_guard(
+                activity, still_unknown,
+            )["active_risk_count"], 1)
+            with runtime.store.tx() as db:
+                db.execute(
+                    "UPDATE workspace_operations SET result_json=? WHERE decision_id=?",
+                    ('{"status":"FAILED"}', "tool-unknown"),
+                )
+            known = repo.context_liabilities(rid)
+            self.assertIn("tool-unknown", known["settled_tool_decisions"])
+            guard = build_causal_guard(activity, known)
+            self.assertEqual(guard["active_risk_count"], 0)
+            self.assertIn("runtime_tool:RESOLVED", guard["records"][0]["reported_outcomes"])
+
     def test_invalid_runtime_identity_fails_closed(self):
         """未结算状态身份无法安全表示时明确拒绝，不应为节省 Token 直接删除。"""
         with self.assertRaises(ValueError):
