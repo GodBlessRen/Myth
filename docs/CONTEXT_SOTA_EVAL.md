@@ -90,7 +90,7 @@ python -m myth.cli task-benchmark-review --discovery .runtime/benchmarks/discove
 
 复核重新计算每组成本、逐次对照和统计量，核对 Suite 内容摘要、Case 全格覆盖、源码摘要、Provider/模型/设置、声明的分区以及两组 Case 不相交。它还以只读 SQLite 打开每个 Trial 的 `runtime.db`，核对 Run 状态、模型 Ticket、已结算模型 Attempt、`model-receipts/` 收据、请求/响应 SHA-256 对象、实际冻结的 Context 开关，以及 Token/耗时聚合；仅有一个空 `.runtime` 目录不足以通过。对于 Ollama，还要求两边模型权重 digest 可读取且相同。缺失、篡改或成本分母不完整时 `HOLD`（CLI 退出码 1）；条件全部满足时为 `READY_FOR_MANUAL_REVIEW`（退出码 0），**不执行 Promote，`promotion_eligible=false`**。
 
-公开 held-out 题不等于秘密盲测；现有报告目录可被拥有写权限者整体改写，SHA-256 不是数字签名。对 ChatGPT / OpenAI 等没有稳定权重 digest 的托管模型，复核会保持 `HOLD`，直至模型版本能通过独立可信证据确定。目录存在和自报 Provider 用量也不等于外部 Receipt 原件已获第三方认证。此步骤只提升**工程可审查性**，不宣称已证实跨模型、跨任务或跨时间的 SOTA。
+公开 held-out 题不等于秘密盲测；现有报告目录可被拥有写权限者整体改写，SHA-256 不是数字签名。对 ChatGPT / OpenAI 等没有稳定权重 digest 的托管模型，复核会保持 `HOLD`，直至模型版本能通过独立可信证据确定。即便 Runtime 原始对象、Receipt 和 SQLite 彼此一致，也不等于外部 Provider 真实身份或计费记录已获第三方独立认证；拥有整个目录写权限的人仍可同时伪造这几份本地证据。此步骤只提升**工程可审查性**，不宣称已证实跨模型、跨任务或跨时间的 SOTA。
 
 ## SOTA-LEVEL 的真正晋级条件
 
