@@ -281,8 +281,61 @@ class ContextGovernanceTests(unittest.TestCase):
                     (rid,),
                 )
             current = repo.context_liabilities(rid)
+            self.assertIn("tool-pending", current["settled_tool_decisions"])
             clean = build_causal_guard([], current)
             self.assertIsNone(clean)
+
+    def test_active_set_limits_historical_failures_but_never_drops_open_unknown(self):
+        """80 次已知失败只保留最近 8 次，未决 UNKNOWN 和它的旧前驱永远不能丢。"""
+        from myth.platform.context_governance import render_causal_guard
+        activities = [
+            {"step": i, "decision_id": f"done-{i}",
+             "capability": "test.run", "result": {"status": "FAILED"}}
+            for i in range(80)
+        ]
+        activities.append({
+            "step": 80, "decision_id": "open-tool",
+            "declared_dependencies": ["done-0"],
+            "capability": "artifact.write", "result": {"status": "UNKNOWN"},
+        })
+        guard = build_causal_guard(activities)
+        self.assertEqual(guard["active_risk_count"], 1)
+        self.assertEqual(guard["recent_issue_count"], 8)
+        self.assertEqual(guard["archived_issue_count"], 71)
+        self.assertEqual(guard["critical_count"], 9)
+        self.assertEqual(len(guard["records"]), 10)
+        self.assertEqual(guard["records"][0]["role"], "declared_predecessor")
+        self.assertEqual(guard["records"][-1]["role"], "active_risk")
+        self.assertEqual(guard["records"][0]["decision_id"], "done-0")
+        text, digest = render_causal_guard(guard)
+        self.assertIn("open-tool", text)
+        self.assertLess(len(text.encode("utf-8")), 6000)
+        self.assertEqual(len(digest), 64)
+        self.assertEqual(len(guard["archived_issue_digest"]), 64)
+
+    def test_runtime_receipt_retires_stale_activity_unknown_not_child_unknown(self):
+        """同 Run RESOLVED 只校准原工具 UNKNOWN，不能凭父收据消除子委派风险。"""
+        activities = [
+            {"step": 1, "decision_id": "write-1", "result": {"status": "UNKNOWN"}},
+        ]
+        old = build_causal_guard(activities)
+        self.assertEqual(old["active_risk_count"], 1)
+        settled = build_causal_guard(
+            activities, {"settled_tool_decisions": ["write-1"]}
+        )
+        self.assertEqual(settled["active_risk_count"], 0)
+        self.assertEqual(settled["recent_issue_count"], 1)
+        self.assertIn("runtime_tool:RESOLVED", settled["records"][0]["reported_outcomes"])
+        self.assertIn("historical_tool_report:UNKNOWN", settled["records"][0]["reported_outcomes"])
+        child = build_causal_guard(
+            [{"step": 2, "decision_id": "parent",
+              "result": {"status": "UNKNOWN", "results": [
+                  {"delegation_id": "sub-1", "status": "UNKNOWN"}
+              ]}}],
+            {"settled_tool_decisions": ["parent"]},
+        )
+        self.assertEqual(child["active_risk_count"], 1)
+        self.assertIn("child_0:UNKNOWN", child["records"][0]["reported_outcomes"])
 
     def test_invalid_runtime_identity_fails_closed(self):
         """未结算状态身份无法安全表示时明确拒绝，不应为节省 Token 直接删除。"""
