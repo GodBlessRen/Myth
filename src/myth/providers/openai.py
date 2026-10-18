@@ -224,41 +224,47 @@ def _usage(value: dict, *, provider_id: str | None = None) -> dict[str, int]:
     if type(reasoning_tokens) is int and reasoning_tokens >= 0:
         result["reasoning_tokens"] = reasoning_tokens
 
-    # 预算仍使用供应商原样报告的 output_tokens；可见 TPS 必须单独证明推理折叠口径。
-    # 官方 OpenAI Responses 的 output 包含 reasoning；兼容网关则仅在 total 精确匹配时判定。
+    # 消费方不能拿可见 Token 计算账单：output_tokens 永远保留供应商原样实测。
+    # Folded: output 含 reasoning；Unfolded: output 仅含可见生成。
+    # total 有小幅漂移时借鉴 Hindsight 的有界恢复，仅输出 *估计*，不冒充实测。
     input_count = result.get("input_tokens")
     output_count = result.get("output_tokens")
     thoughts = result.get("reasoning_tokens")
     total = usage_value.get("total_tokens")
-    if type(output_count) is int and type(thoughts) is int:
-        if thoughts == 0:
+    if type(output_count) is int:
+        if type(thoughts) is not int:
+            # 未报告 reasoning 不能证明其为 0；UI 可据此显示带 ≈ 标记的降级估计。
+            result["estimated_visible_output_tokens"] = output_count
+        elif thoughts == 0:
             result["visible_output_tokens"] = output_count
-        elif output_count >= thoughts:
-            folded = (
-                type(input_count) is int
-                and type(total) is int
-                and total == input_count + output_count
-            )
-            unfolded = (
-                type(input_count) is int
-                and type(total) is int
-                and total == input_count + output_count + thoughts
-            )
-            if folded or (
-                provider_id in {"openai", "chatgpt"}
-                and type(total) is not int
-            ):
-                result["visible_output_tokens"] = output_count - thoughts
-            elif unfolded:
-                result["visible_output_tokens"] = output_count
-        elif (
-            type(input_count) is int
-            and type(total) is int
-            and total == input_count + output_count + thoughts
-        ):
-            # Unfolded 网关允许 reasoning 大于 visible output，不能误减成零。
-            result["visible_output_tokens"] = output_count
-    # 对近似/漂移 total 不伪造精确可见 Token；原始计量和 UNKNOWN 语义不变。
+        else:
+            folded = max(0, output_count - thoughts)
+            if type(input_count) is int and type(total) is int and total >= 0:
+                if total == input_count + output_count and output_count >= thoughts:
+                    result["visible_output_tokens"] = folded
+                elif total == input_count + output_count + thoughts:
+                    # Unfolded 的 reasoning 可能大于 completion，不得直接相减归零。
+                    result["visible_output_tokens"] = output_count
+                elif total == input_count + output_count and output_count < thoughts:
+                    # 报告自相矛盾：Folded 无法成立，用完整输出作低置信度代理。
+                    result["estimated_visible_output_tokens"] = output_count
+                else:
+                    # Hindsight: clamp(total - reasoning - input, [folded, output])。
+                    # 总量漂移也能显示估算值，但推导不能越过这两种合法读法的范围。
+                    derived = total - thoughts - input_count
+                    result["estimated_visible_output_tokens"] = min(
+                        output_count, max(folded, derived)
+                    )
+            elif provider_id in {"openai", "chatgpt"} and output_count >= thoughts:
+                # 官方 Responses 既定 Folded 语义；兼容供应商不能擅自继承。
+                result["visible_output_tokens"] = folded
+            else:
+                # 没有 total，只有输出/推理分项：折叠读法是估计而不是供应商事实。
+                # reasoning 大于 output 时改用 output 代理，避免把非空完成误报零速率。
+                result["estimated_visible_output_tokens"] = (
+                    folded if output_count >= thoughts else output_count
+                )
+    # 两个派生键均不替代原始 output_tokens，也不会影响 Runtime 预算/UNKNOWN-held。
     return result
 
 
