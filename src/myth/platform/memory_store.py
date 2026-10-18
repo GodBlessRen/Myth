@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import re
 import uuid
+from contextlib import nullcontext
 from typing import Any, Iterable, Mapping
 
 from ..domain import IdentityConflict, digest_json
@@ -376,44 +377,47 @@ class SqliteMemoryStore:
 
     # freshness：只对 Memory-linked evidence 比较当前 source revision/active；外部 provenance 无水位时保持 untracked。
     def freshness(self, memory_id: str) -> dict[str, Any]:
-        evidence = self.evidence(memory_id)
-        source_ids = {
-            str(item["source_memory_id"])
-            for item in evidence
-            if item.get("source_memory_id")
-        }
-        current: dict[str, dict[str, Any] | None] = {}
-        for source_id in source_ids:
-            row = self.store.db.execute(
-                "SELECT memory_id,revision,active FROM workspace_memories WHERE memory_id=?",
-                (source_id,),
-            ).fetchone()
-            current[source_id] = None if row is None else dict(row)
-        direct = evaluate_freshness(evidence, current)
-        # 按权威快照递归检查支持链；直接证据状态保留旧字段，额外暴露传递性失败路径。
-        def load(source_id: str):
-            row = self.store.db.execute(
-                "SELECT memory_id,revision,active,scope_type,scope_id "
-                "FROM workspace_memories WHERE memory_id=?", (source_id,),
-            ).fetchone()
-            if row is None:
-                return None, ()
-            return dict(row), self._evidence_rows(self.store.db, source_id)
+        # 读取前先冻结单连接 WAL 快照；写事务或 Recall 已有快照时复用，不发生嵌套。
+        snapshot = nullcontext(self.store.db) if self.store.db.in_transaction else self.store.read_snapshot()
+        with snapshot:
+            evidence = self.evidence(memory_id)
+            source_ids = {
+                str(item["source_memory_id"])
+                for item in evidence
+                if item.get("source_memory_id")
+            }
+            current: dict[str, dict[str, Any] | None] = {}
+            for source_id in source_ids:
+                row = self.store.db.execute(
+                    "SELECT memory_id,revision,active FROM workspace_memories WHERE memory_id=?",
+                    (source_id,),
+                ).fetchone()
+                current[source_id] = None if row is None else dict(row)
+            direct = evaluate_freshness(evidence, current)
+            # 按权威快照递归检查支持链；直接证据状态保留旧字段，额外暴露传递性失败路径。
+            def load(source_id: str):
+                row = self.store.db.execute(
+                    "SELECT memory_id,revision,active,scope_type,scope_id "
+                    "FROM workspace_memories WHERE memory_id=?", (source_id,),
+                ).fetchone()
+                if row is None:
+                    return None, ()
+                return dict(row), self._evidence_rows(self.store.db, source_id)
 
-        root_row = self.get(memory_id)
-        closure = evaluate_support_closure(
-            memory_id, root_row, evidence, load=load,
-        )
-        if closure["stale_sources"]:
-            direct["status"] = "stale"
-            direct["is_stale"] = True
-            direct["stale_sources"] = closure["stale_sources"]
-        direct["support_closure"] = {
-            "checked_memories": closure["checked_memories"],
-            "checked_edges": closure["checked_edges"],
-            "valid": not bool(closure["stale_sources"]),
-        }
-        return direct
+            root_row = self.get(memory_id)
+            closure = evaluate_support_closure(
+                memory_id, root_row, evidence, load=load,
+            )
+            if closure["stale_sources"]:
+                direct["status"] = "stale"
+                direct["is_stale"] = True
+                direct["stale_sources"] = closure["stale_sources"]
+            direct["support_closure"] = {
+                "checked_memories": closure["checked_memories"],
+                "checked_edges": closure["checked_edges"],
+                "valid": not bool(closure["stale_sources"]),
+            }
+            return direct
 
     # apply_delta：CAS 与 revision/evidence/change_seq 在同一 SQLite 事务内提交；内部协作者负责最外层向量同步。
     def apply_delta(
