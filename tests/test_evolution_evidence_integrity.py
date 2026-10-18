@@ -279,5 +279,23 @@ class EvolutionEvidenceIntegrityTests(unittest.TestCase):
                         min_pairs=value,
                     )
 
+    # 成本权重拒绝非数、非有限及溢出整数，避免错误权重变成“测得的”节约。
+    def test_cost_model_rejects_non_finite_and_boolean_weights(self):
+        for value in (float("nan"), float("inf"), -float("inf"), True, 10 ** 500):
+            with self.subTest(weight=str(value)[:40]):
+                with self.assertRaises(ValueError):
+                    CostModel("invalid-cost", 1, {"input_tokens": value})
+
+    # 加权成本差分和聚合都要有限，不能将 NaN 或浮点溢出提交为校准事实。
+    def test_weighted_cost_rejects_non_finite_deltas_and_overflow(self):
+        model = CostModel("finite-cost", 1, {"input_tokens": 2.0})
+        for delta in (float("nan"), float("inf"), True, 10 ** 500):
+            with self.subTest(delta=str(delta)[:40]):
+                with self.assertRaises(ValueError):
+                    model.weighted_cost({"input_tokens": delta})
+        large = CostModel("large-weight", 1, {"input_tokens": 1e308})
+        with self.assertRaisesRegex(ValueError, "finite numeric range"):
+            large.weighted_cost({"input_tokens": 1e308})
+
 if __name__ == "__main__":
     unittest.main()
