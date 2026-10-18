@@ -80,6 +80,28 @@ def _clean_scope(scope_type: str, scope_id: str | None) -> tuple[str, str | None
     return scope, value
 
 
+# _apply_document_delta：Delta 仅允许对当前原文进行唯一精确命中替换，禁止猜测位置或模糊合并。
+def _apply_document_delta(previous: str, operations: list[dict] | tuple[dict, ...]) -> str:
+    if not isinstance(operations, (list, tuple)) or len(operations) > 8:
+        raise ValueError("mental model delta requires at most eight operations")
+    body = str(previous)
+    for index, operation in enumerate(operations):
+        if not isinstance(operation, dict) or set(operation) != {"op", "old_text", "new_text"}:
+            raise ValueError(f"invalid mental model delta operation {index}")
+        old = operation.get("old_text")
+        new = operation.get("new_text")
+        if (operation.get("op") != "replace_exact" or not isinstance(old, str)
+                or not old or not isinstance(new, str)):
+            raise ValueError(f"invalid mental model exact replacement {index}")
+        if body.count(old) != 1:
+            raise ValueError(f"mental model delta target is missing or ambiguous at {index}")
+        body = body.replace(old, new, 1)
+    body = body.strip()
+    if not body or len(body.encode("utf-8")) > 16_000:
+        raise ValueError("mental model delta exceeds durable content bounds")
+    return body
+
+
 # SqliteKnowledgeViews：一个深模块同时拥有 materialized Memory view 与其导航树，避免内容/树双写真相。
 class SqliteKnowledgeViews:
     # 复用同一 Runtime/MemoryStore；所有派生正文仍通过 MemoryStore 写入，Milvus/证据/freshness 合同不复制。
@@ -262,14 +284,28 @@ class SqliteKnowledgeViews:
         evidence_memory_ids: Iterable[str],
         expected_model_revision: int,
         observed_change_seq: int,
+        mode: str = "full",
+        delta_operations: list[dict] | tuple[dict, ...] | None = None,
+        dry_run: bool = False,
     ) -> dict[str, Any]:
-        body = str(content or "").strip()
-        if not body or len(body.encode("utf-8")) > 16_000:
+        if mode not in {"full", "delta"}:
+            raise ValueError("mental model refresh mode must be full/delta")
+        if type(dry_run) is not bool:
+            raise ValueError("dry_run must be boolean")
+        if mode == "full" and delta_operations is not None:
+            raise ValueError("full refresh cannot include delta operations")
+        if mode == "delta" and delta_operations is None:
+            raise ValueError("delta refresh requires explicit operations")
+        # Delta 在当前事务内读当前权威正文，不能在旧 prepare 快照上直接应用。
+        body = str(content or "").strip() if mode == "full" else None
+        if mode == "full" and (not body or len(body.encode("utf-8")) > 16_000):
             raise ValueError("mental model content must contain 1-16000 UTF-8 bytes")
         evidence_ids = tuple(dict.fromkeys(str(item).strip() for item in evidence_memory_ids))
         if not evidence_ids or any(not item for item in evidence_ids):
             raise ValueError("mental model refresh requires evidence Memory ids")
 
+        # Dry Run 仍须通过相同 CAS / 权限核验，但不发布事实、不推进水位。
+        backing = None
         with self.store.tx() as db:
             row = db.execute(
                 "SELECT * FROM workspace_mental_models WHERE model_id=?", (str(model_id),)
@@ -290,6 +326,15 @@ class SqliteKnowledgeViews:
             session_id = (
                 str(model["scope_id"]) if model["scope_type"] == "session" else None
             )
+            # 步骤一：Delta 对当前 backing revision 的确定性文本补丁，任何歧义直接拒绝。
+            if mode == "delta":
+                backing_id = model.get("backing_memory_id")
+                if not backing_id:
+                    raise ValueError("delta requires a materialized mental model")
+                previous = self.memory.get(str(backing_id))
+                if not bool(previous["active"]):
+                    raise ValueError("delta backing Memory is revoked")
+                body = _apply_document_delta(str(previous["text"]), delta_operations)
             evidence = []
             for memory_id in evidence_ids:
                 try:
@@ -315,47 +360,81 @@ class SqliteKnowledgeViews:
                     }
                 )
 
-            backing = self.memory.remember(
-                kind="semantic",
-                text=body,
-                source_ref=f"mental-model:{model_id}",
-                scope_type=str(model["scope_type"]),
-                scope_id=model.get("scope_id"),
-                fact_level="context",
-                evidence=evidence,
-                _db=db,
-            )
-            new_revision = int(model["revision"]) + 1
-            # backing Memory 写入已追加 change_seq；刷新水位推进到事务内最新值，避免把自身发布判成 stale。
-            watermark = self.memory.current_change_seq()
-            db.execute(
-                "UPDATE workspace_mental_models SET backing_memory_id=?,revision=?,"
-                "last_seen_change_seq=?,last_refreshed_at=CURRENT_TIMESTAMP,"
-                "updated_at=CURRENT_TIMESTAMP WHERE model_id=?",
-                (
-                    str(backing["memory_id"]),
-                    new_revision,
-                    watermark,
-                    str(model_id),
-                ),
-            )
-            db.execute(
-                "INSERT INTO workspace_mental_model_revisions("
-                "model_id,revision,backing_memory_id,backing_memory_revision,"
-                "source_change_seq,evidence_count"
-                ") VALUES (?,?,?,?,?,?)",
-                (
-                    str(model_id),
-                    new_revision,
-                    str(backing["memory_id"]),
-                    int(backing["revision"]),
-                    watermark,
-                    len(evidence),
-                ),
-            )
+            # 步骤二：正文和固定支持来源完全一致时，刷新仅改变观察水位。
+            # No-op 仍是有效成功，不能制造多余 Memory revision、缓存失效或向量回填。
+            current_id = model.get("backing_memory_id")
+            unchanged = False
+            if current_id:
+                old = self.memory.get(str(current_id))
+                prior_edges = self.memory.evidence(str(current_id))
+                actual_versions = {
+                    entry["source_memory_id"]: int(self.memory.get(entry["source_memory_id"])["revision"])
+                    for entry in evidence
+                }
+                unchanged = bool(old["active"]) and str(old["text"]) == body and (
+                    len(prior_edges) == len(evidence)
+                    and {
+                        edge.get("source_memory_id"): edge.get("source_revision")
+                        for edge in prior_edges
+                    } == actual_versions
+                    and all(edge.get("source_memory_id") for edge in prior_edges)
+                )
+            if dry_run:
+                return {
+                    "status": "DRY_RUN", "mode": mode,
+                    "would_publish": not unchanged, "content": body,
+                    "evidence_count": len(evidence),
+                    "observed_change_seq": int(observed_change_seq),
+                }
+            if unchanged:
+                db.execute(
+                    "UPDATE workspace_mental_models SET last_seen_change_seq=?,"
+                    "last_refreshed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE model_id=?",
+                    (self.memory.current_change_seq(), str(model_id)),
+                )
+            else:
+                backing = self.memory.remember(
+                    kind="semantic",
+                    text=body,
+                    source_ref=f"mental-model:{model_id}",
+                    scope_type=str(model["scope_type"]),
+                    scope_id=model.get("scope_id"),
+                    fact_level="context",
+                    evidence=evidence,
+                    _db=db,
+                )
+                new_revision = int(model["revision"]) + 1
+                # backing Memory 写入已追加 change_seq；刷新水位推进到事务内最新值，避免把自身发布判成 stale。
+                watermark = self.memory.current_change_seq()
+                db.execute(
+                    "UPDATE workspace_mental_models SET backing_memory_id=?,revision=?,"
+                    "last_seen_change_seq=?,last_refreshed_at=CURRENT_TIMESTAMP,"
+                    "updated_at=CURRENT_TIMESTAMP WHERE model_id=?",
+                    (
+                        str(backing["memory_id"]),
+                        new_revision,
+                        watermark,
+                        str(model_id),
+                    ),
+                )
+                db.execute(
+                    "INSERT INTO workspace_mental_model_revisions("
+                    "model_id,revision,backing_memory_id,backing_memory_revision,"
+                    "source_change_seq,evidence_count"
+                    ") VALUES (?,?,?,?,?,?)",
+                    (
+                        str(model_id),
+                        new_revision,
+                        str(backing["memory_id"]),
+                        int(backing["revision"]),
+                        watermark,
+                        len(evidence),
+                    ),
+                )
 
         # Milvus 是事务外派生索引；业务提交成功后再同步 backing Memory。
-        self.memory._sync_vector_record(backing)
+        if backing is not None:
+            self.memory._sync_vector_record(backing)
         return self.model(str(model_id), resolution="L1")
 
     # create_folder：Knowledge Page 层只创建树容器，不拥有正文。
