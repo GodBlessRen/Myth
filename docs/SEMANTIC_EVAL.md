@@ -38,7 +38,7 @@ python -m unittest discover -s tests -p 'test_semantic_evaluation.py' -v
 
 ## GitHub CI 的可复核实验产物
 
-`.github/workflows/ci.yml` 在质量与跨平台全量测试之外运行独立 `semantic-eval` Job：固定命令 `--repeats 3 --seed 17`，结果写入 `.work/evidence/semantic-ablation.json` 并作为 `myth-semantic-ablation-<git SHA>` 上传（7 天保留）。**Release 必须依赖这个 Job 成功**，同时仍依赖四平台、MCP 和质量门禁。报告包含 `suite_sha256`、16 题完整分母、Case 层 PASS/FAIL、局部时间和缺测 Token/Provider cost。归档只包含合成夹具运行事实，不上传本地凭据或业务记忆。下载后可核对 Actions run 的 commit SHA 与 `summary.suite_sha256`；缺少 artifact 视作证据不完整。
+`.github/workflows/ci.yml` 在质量与跨平台全量测试之外运行独立 `semantic-eval` Job：固定命令 `--repeats 3 --seed 17`，结果写入 `.work/evidence/semantic-ablation.json` 并作为 `myth-semantic-ablation-<git SHA>` 上传（7 天保留）。**Release 必须依赖这个 Job 成功**，同时仍依赖四平台、MCP 和质量门禁。报告包含 `suite_sha256`、16 题完整分母、Case 层 PASS/FAIL、局部时间和缺测 Token/Provider cost。归档只包含合成夹具运行事实，不上传本地凭据或业务记忆。在 PR 事件中该 Job 显式检出 `github.event.pull_request.head.sha`，并用 `git rev-parse HEAD` 核验，避免把 GitHub 的临时 merge SHA 冒充 PR 真实代码提交；工件名同样绑定**实际检出的 head SHA**。普通 CI 矩阵继续检查 GitHub 的 PR 合并结果，从而同时覆盖候选源码与合并集成。下载后核对工件 SHA 名称、Actions 运行的 PR head 与 `summary.suite_sha256`；缺少 artifact 视作证据不完整。
 
 这一 CI 工件属于离线系统测试的可复现观察，**并不是**独立真实模型验证。不要因为它恰好 100% 通过就开启自动 ontology 演化或宣布供应商效果提升。
 
