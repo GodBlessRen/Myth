@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import re
 import uuid
+from contextlib import nullcontext
 from typing import Any, Iterable
 
 
@@ -119,38 +120,41 @@ class SqliteKnowledgeViews:
 
     # model：返回 Mental Model 元数据和可验证 staleness；正文按需从 backing Memory 解析。
     def model(self, model_id: str, *, resolution: str = "L0") -> dict[str, Any]:
-        row = self.store.db.execute(
-            "SELECT * FROM workspace_mental_models WHERE model_id=?", (str(model_id),)
-        ).fetchone()
-        if row is None:
-            raise KeyError(model_id)
-        value = dict(row)
-        changes = self._scope_changes(value, int(value["last_seen_change_seq"]), limit=1)
-        value["is_stale"] = bool(changes)
-        # 时间水位未变化不代表上游依赖仍成立：按 backing Memory 的完整证据闭包复核。
-        if value.get("backing_memory_id"):
-            value["is_stale"] = value["is_stale"] or self.memory.freshness(
-                str(value["backing_memory_id"])
-            )["is_stale"]
-        value["freshness"] = (
-            "unmaterialized"
-            if not value.get("backing_memory_id")
-            else ("stale" if changes else "fresh")
-        )
-        if value.get("backing_memory_id"):
-            value["content"] = self.memory.resolve(
-                str(value["backing_memory_id"]),
-                resolution=resolution,
-                project_id=(
-                    str(value["scope_id"]) if value["scope_type"] == "project" else None
-                ),
-                session_id=(
-                    str(value["scope_id"]) if value["scope_type"] == "session" else None
-                ),
+        # Page 的元数据、变化水位、支持链和正文必须来自同一读取快照。
+        snapshot = nullcontext(self.store.db) if self.store.db.in_transaction else self.store.read_snapshot()
+        with snapshot:
+            row = self.store.db.execute(
+                "SELECT * FROM workspace_mental_models WHERE model_id=?", (str(model_id),)
+            ).fetchone()
+            if row is None:
+                raise KeyError(model_id)
+            value = dict(row)
+            changes = self._scope_changes(value, int(value["last_seen_change_seq"]), limit=1)
+            value["is_stale"] = bool(changes)
+            # 时间水位未变化不代表上游依赖仍成立：按 backing Memory 的完整证据闭包复核。
+            if value.get("backing_memory_id"):
+                value["is_stale"] = value["is_stale"] or self.memory.freshness(
+                    str(value["backing_memory_id"])
+                )["is_stale"]
+            value["freshness"] = (
+                "unmaterialized"
+                if not value.get("backing_memory_id")
+                else ("stale" if value["is_stale"] else "fresh")
             )
-        else:
-            value["content"] = None
-        return value
+            if value.get("backing_memory_id"):
+                value["content"] = self.memory.resolve(
+                    str(value["backing_memory_id"]),
+                    resolution=resolution,
+                    project_id=(
+                        str(value["scope_id"]) if value["scope_type"] == "project" else None
+                    ),
+                    session_id=(
+                        str(value["scope_id"]) if value["scope_type"] == "session" else None
+                    ),
+                )
+            else:
+                value["content"] = None
+            return value
 
     # list_models：列表只返回紧凑状态，避免为了页面目录批量展开正文/Evidence。
     def list_models(self, *, active_only: bool = True) -> list[dict[str, Any]]:
@@ -191,6 +195,8 @@ class SqliteKnowledgeViews:
     ) -> dict[str, Any]:
         if type(limit) is not int or not 1 <= limit <= 50:
             raise ValueError("limit must be 1-50")
+        # 合成的源水位必须早于所有候选/正文读取；晚于读取将允许旧内容冒领新版本来源。
+        observed_change_seq = self.memory.current_change_seq()
         model = self.model(model_id, resolution="L0")
         if not model.get("active"):
             raise ValueError("mental model is inactive")
@@ -202,7 +208,7 @@ class SqliteKnowledgeViews:
         )
         report = self.memory.search_report(
             str(model["source_query"]),
-            limit=min(20, limit),
+            limit=20,  # 为 stale 来源预留有界替补槽位；返回候选仍受实际 limit 限制。
             project_id=project_id,
             session_id=session_id,
             exclude_source_prefix="mental-model:",
@@ -242,7 +248,7 @@ class SqliteKnowledgeViews:
             "scope_id": model.get("scope_id"),
             # previous_content：仅作为“待演进文档基线”；不能自动进入 evidence_refs 或获得事实权重。
             "previous_content": previous_content,
-            "observed_change_seq": self.memory.current_change_seq(),
+            "observed_change_seq": observed_change_seq,
             "sources": sources,
             "retrieval": report["retrieval"],
         }

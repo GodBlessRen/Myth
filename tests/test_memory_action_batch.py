@@ -279,6 +279,8 @@ class EpisodeIdempotenceTests(unittest.TestCase):
         first = self.memory.record_episode("episode-test", "Question", "Answer")
         dependent = self.memory.remember(
             kind="semantic", text="Learned answer", source_ref="derived:episode-test",
+            # 派生结论不得比其 Episode 来源具有更宽的可见作用域。
+            scope_type=first["scope_type"], scope_id=first["scope_id"],
             evidence=[{"source_memory_id": first["memory_id"]}],
         )
         watermark = self.memory.current_change_seq()

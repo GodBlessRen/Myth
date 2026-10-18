@@ -107,6 +107,16 @@ Hindsight-style Knowledge Pages and Memory Recall reuse the same source owner. A
 
 Focused regression: `python -m unittest tests.test_memory_recall tests.test_knowledge_views -v`; full release gates remain in `AGENTS.md`.
 
+## Read-snapshot qualification and refresh race fence
+
+- **Evidence closure is snapshot-consistent:** `MemoryStore.freshness()` runs each stand-alone support traversal against one SQLite WAL read snapshot; a Recall or write transaction reuses its established connection snapshot. Evidence from two different database revisions must never combine to claim a valid chain.
+- **Scope is a data-flow invariant:** session-scoped source Evidence cannot validate a global claim. Duplicate Episode settlement must preserve the derived Memory's matching scope instead of relaxing the security gate.
+- **Materialized-view staleness is one state:** Knowledge Page `freshness` and `is_stale` agree even if backing Memory evidence fails without a new source watermark (for example integrity fault injection).
+- **Freeze the source watermark before reading:** `prepare_refresh()` captures `observed_change_seq` before any retrieval/Memory content. If a writer changes even one source during preparation or LLM synthesis, `commit_refresh()` refuses the old synthesis under its existing SQLite write transaction. A watermark sampled *after* content would permit incorrectly binding a stale model answer to a new source revision.
+- **Bounded source refill:** source selection considers up to 20 ranked candidates before filtering stale Evidence, then returns at most the requested count. This is a bounded quality improvement, not a claim of exhaustive recall or measured semantic accuracy.
+
+Regression gates: `test_memory_action_batch.py`, `test_memory_lifecycle.py`, and `test_knowledge_views.py`; the full suite, CI and publication checks remain authoritative. This mechanism only checks source/version/scope validity, **not semantic entailment**.
+
 ## Progressive disclosure
 
 首次 Recall 不展开完整 Evidence。

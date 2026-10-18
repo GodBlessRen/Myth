@@ -243,5 +243,52 @@ class MemoryLifecycleTests(unittest.TestCase):
         self.assertEqual(freshness["stale_sources"][0]["reason"], "revoked")
 
 
+    # 跨 Scope 的证据引用即使被内部导入，也不应在全局查询时冒充可验证事实。
+    def test_private_evidence_never_validates_global_claim(self):
+        source = self.memory.remember(
+            kind="episodic", text="Session-only decision", source_ref="scope:private",
+            scope_type="session", scope_id="session-a",
+        )
+        derived = self.memory.remember(
+            kind="semantic", text="Globalized decision", source_ref="scope:global",
+            evidence=[{"source_memory_id": source["memory_id"]}],
+        )
+        report = self.memory.freshness(derived["memory_id"])
+        self.assertEqual(report["status"], "stale")
+        self.assertEqual(report["stale_sources"][0]["reason"], "scope_violation")
+
+    # 两连接 WAL 故障注入：外部写入发生在同一次来源检查中，必须只读到同一旧快照。
+    def test_freshness_uses_single_wal_snapshot_under_concurrent_writer(self):
+        source = self.memory.remember(
+            kind="episodic", text="First version", source_ref="snapshot:source",
+        )
+        derived = self.memory.remember(
+            kind="semantic", text="Derived version", source_ref="snapshot:derived",
+            evidence=[{"source_memory_id": source["memory_id"]}],
+        )
+        with MythRuntime(Path(self.tmp.name)) as other:
+            writer = Workspace(other).memory
+            original = self.memory._evidence_rows
+            changed = {"done": False}
+
+            # 在旧证据行读出后，使用独立连接提交新 revision；当前读取必须保持原 SQLite 视图。
+            def racing_evidence(db, memory_id):
+                rows = original(db, memory_id)
+                if memory_id == derived["memory_id"] and not changed["done"]:
+                    changed["done"] = True
+                    writer.apply_delta(
+                        source["memory_id"],
+                        [{"op": "replace_text", "text": "Second version"}],
+                        expected_revision=1,
+                    )
+                return rows
+
+            with patch.object(self.memory, "_evidence_rows", side_effect=racing_evidence):
+                observed = self.memory.freshness(derived["memory_id"])
+            self.assertTrue(changed["done"])
+            self.assertEqual(observed["status"], "fresh")
+        self.assertEqual(self.memory.freshness(derived["memory_id"])["status"], "stale")
+
+
 if __name__ == "__main__":
     unittest.main()
