@@ -270,6 +270,8 @@ class MemoryLifecycleTests(unittest.TestCase):
         report = self.memory.freshness(derived["memory_id"])
         self.assertEqual(report["status"], "stale")
         self.assertEqual(report["stale_sources"][0]["reason"], "scope_violation")
+        with self.assertRaises(PermissionError):
+            self.memory.resolve(derived["memory_id"], resolution="L2")
 
     # 两连接 WAL 故障注入：外部写入发生在同一次来源检查中，必须只读到同一旧快照。
     def test_freshness_uses_single_wal_snapshot_under_concurrent_writer(self):
