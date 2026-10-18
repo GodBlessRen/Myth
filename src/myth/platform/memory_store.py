@@ -460,6 +460,9 @@ class SqliteMemoryStore:
             source_id = entry.get("source_memory_id")
             if not source_id:
                 continue
+            # 来源不能以当前记忆本身为独立证明；这种闭环在 revision 推进后必定失效。
+            if source_id == target.get("memory_id"):
+                raise MemoryDeltaError("memory action cannot cite itself as evidence")
             row = db.execute(
                 "SELECT scope_type,scope_id,active FROM workspace_memories WHERE memory_id=?",
                 (source_id,),
@@ -512,7 +515,10 @@ class SqliteMemoryStore:
                         for operation in item["operations"]
                         if operation["op"] == "add_evidence"
                     )
-                    self._check_action_evidence_scope(db, row, linked)
+                    self._check_action_evidence_scope(db, {
+                        "memory_id": item["memory_id"],
+                        "scope_type": row["scope_type"], "scope_id": row["scope_id"],
+                    }, linked)
                     record = self.apply_delta(
                         item["memory_id"], item["operations"],
                         expected_revision=item["expected_revision"], _db=db,
@@ -572,8 +578,12 @@ class SqliteMemoryStore:
         try:
             result = self.vector_index.sync_memories(payload)
             return {"configured": True, "synced": result.get("upserted", 0)}
-        except RuntimeError:
-            return {"configured": True, "synced": 0, "degraded": True}
+        except Exception as exc:
+            # 权威 Memory 已独立提交；派生索引的网络/驱动异常只产生退化事实，不能触发盲目重放。
+            return {
+                "configured": True, "synced": 0, "degraded": True,
+                "reason": type(exc).__name__,
+            }
 
     # 显式重建 active Memory 的派生向量索引；安装/迁移后可调用，失败不改变任何记忆事实。
     def rebuild_vector_index(self) -> dict:
