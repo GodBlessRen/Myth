@@ -47,7 +47,46 @@ class StatisticsRuleTests(unittest.TestCase):
         result = session_statistics(samples, [])
         self.assertEqual(result["output_tps"], 100)
         samples[0]["usage"].pop("visible_output_tokens")
-        self.assertIsNone(session_statistics(samples, [])["output_tps"])
+        # 旧收据只含 raw output/reasoning 时，降级为 Folded 估算并明确来源。
+        estimate = session_statistics(samples, [])
+        self.assertEqual(estimate["output_tps"], 100)
+        self.assertEqual(estimate["tps_estimated_samples"], 1)
+        self.assertEqual(estimate["tps_raw_proxy_samples"], 1)
+
+    def test_tps_combines_exact_bounded_and_legacy_estimates_without_fake_coverage(self):
+        """配对样本采用可见实测、Hindsight 恢复、历史原始代理三级语义。"""
+        samples = [
+            {"model_attempt_id": "exact", "outcome": "SUCCEEDED",
+             "usage": {"provider_wall_ms": 2000, "output_tokens": 50,
+                       "visible_output_tokens": 20}},
+            {"model_attempt_id": "bounded", "outcome": "SUCCEEDED",
+             "usage": {"provider_wall_ms": 1000, "output_tokens": 80,
+                       "estimated_visible_output_tokens": 47}},
+            {"model_attempt_id": "legacy", "outcome": "SUCCEEDED",
+             "usage": {"provider_wall_ms": 1000, "output_tokens": 100,
+                       "reasoning_tokens": 40}},
+            {"model_attempt_id": "missing", "outcome": "SUCCEEDED",
+             "usage": {"provider_wall_ms": 1000, "output_tokens": "oops"}},
+            {"model_attempt_id": "failed", "outcome": "FAILED",
+             "usage": {"provider_wall_ms": 1000, "output_tokens": 1000}},
+        ]
+        stats = session_statistics(samples, [])
+        self.assertEqual(stats["tps_samples"], 3)
+        self.assertEqual(stats["tps_estimated_samples"], 2)
+        self.assertEqual(stats["tps_raw_proxy_samples"], 1)
+        self.assertEqual(stats["tps_output_tokens"], 127)
+        self.assertEqual(stats["tps_wall_ms"], 4000)
+        self.assertEqual(stats["output_tps"], 31.75)
+
+    def test_legacy_unfolded_proxy_does_not_collapse_nonempty_completion_to_zero(self):
+        """Reasoning > completion 的旧供应商读法有歧义，应标为代理而非精确 0。"""
+        sample = {"model_attempt_id": "legacy-unfolded", "outcome": "SUCCEEDED",
+                  "usage": {"output_tokens": 10, "reasoning_tokens": 70,
+                            "provider_wall_ms": 1000}}
+        stats = session_statistics([sample], [])
+        self.assertEqual(stats["output_tps"], 10)
+        self.assertEqual(stats["tps_estimated_samples"], 1)
+        self.assertEqual(stats["tps_raw_proxy_samples"], 1)
 
     # 没有输出的调用不能借另一调用的时长做除数，缺测应为未报告。
     def test_unpaired_output_and_time_do_not_make_a_rate(self):
