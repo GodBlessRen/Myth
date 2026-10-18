@@ -194,12 +194,14 @@ class SemanticCatalog:
         project_id: str | None = None,
         session_id: str | None = None,
     ) -> dict[str, Any]:
+        # 第一步：用单个 SQLite WAL 快照先核对精确术语身份、当前作用域和原始证据闭包。
         snapshot = nullcontext(self.store.db) if self.store.db.in_transaction else self.store.read_snapshot()
         with snapshot:
             definition = self.resolve(term_id, project_id=project_id, session_id=session_id)
             if definition["status"] != "ready":
                 return {**definition, "value": None, "verified": False}
             contract = definition["contract"]
+            # 第二步：各个独立 JSON 来源逐一求值，任一越权、过期、类型或单位错误都拒绝。
             values = []
             for mapping in contract["mappings"]:
                 source_id = mapping["source_memory_id"]
@@ -221,6 +223,7 @@ class SemanticCatalog:
                     return {**definition, "status": "constraint_violation", "value": None,
                             "violations": problems}
                 values.append(value)
+            # 第三步：多来源必须给出一致且类型相同的数值；冲突不能靠排名替代一致性证明。
             if any(type(value) is not type(values[0]) or value != values[0] for value in values[1:]):
                 return {**definition, "status": "conflict", "value": None,
                         "reason": "independent_mappings_disagree"}
@@ -236,6 +239,7 @@ class SemanticCatalog:
         project_id: str | None = None,
         session_id: str | None = None,
     ) -> dict[str, Any]:
+        # 第一步：搜索预算/输入形状先验约束，不能用模糊查询强迫全量扫描私有知识。
         if not isinstance(query, str) or not 1 <= len(query.strip()) <= 120:
             raise ValueError("semantic browse query must contain 1-120 characters")
         if type(limit) is not int or not 1 <= limit <= 8:
@@ -247,6 +251,7 @@ class SemanticCatalog:
                 "WHERE kind='semantic' AND source_ref LIKE ? ORDER BY rowid DESC LIMIT 257",
                 (_PREFIX + "%",),
             ).fetchall()
+            # 第二步：先执行 Source Scope 可见性，再解析正文并复核 Source Revision。
             found = []
             for row in candidates[:256]:
                 current = dict(row)
@@ -272,6 +277,7 @@ class SemanticCatalog:
                 })
                 if len(found) >= limit:
                     break
+        # 第三步：检索只作为导航，并明确报告未扫描尽头，不能给出全本体完备性承诺。
         return {
             "terms": found,
             "retrieval": {
