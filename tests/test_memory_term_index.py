@@ -11,13 +11,17 @@ from myth.platform.memory_lifecycle import MemoryDeltaError
 
 
 class MemoryTermIndexTests(unittest.TestCase):
+    """真实 SQLite 连接下核对词项候选与权威读路径，测试彼此隔离。"""
+
     def setUp(self):
+        """为每条检索测试创建独立临时 Run/Memory 数据库。"""
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
         self.runtime = MythRuntime(self.root)
         self.memory = Workspace(self.runtime).memory
 
     def tearDown(self):
+        """结束连接后删除临时数据库，防止索引水位串扰。"""
         self.runtime.close()
         self.tmp.cleanup()
 
