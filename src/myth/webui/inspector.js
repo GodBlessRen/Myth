@@ -951,6 +951,25 @@ function renderInspectorContext(session, turn) {
     ].forEach(([k, v]) => {
       inspectorFact(box, k, v);
     });
+    // 此值包含本地冻结报告与 JSON 包装；不是 Provider prompt tokens，也不是模型上下文上限。
+    if (Number.isInteger(compiled.serialized_request_bytes)) {
+      inspectorFact(
+        box, "Durable request bytes",
+        inspectorNumber(compiled.serialized_request_bytes) + " / " +
+        inspectorNumber(compiled.serialized_request_cap_bytes) + " bytes (local envelope)",
+      );
+    }
+    const calibration = turn?.context_cost_calibration || {};
+    for (const group of (calibration.groups || []).slice(0, 3)) {
+      const ratio = typeof group.observed_context_bytes_per_reported_input_token === "number"
+        ? String(group.observed_context_bytes_per_reported_input_token) : "N/A";
+      inspectorFact(
+        box, "Measured Context / Input",
+        String(group.provider) + " · " + String(group.model) + " · " +
+        inspectorNumber(group.paired_samples) + "/" + inspectorNumber(group.attempts) +
+        " paired · " + ratio + " bytes/reported token (observational)",
+      );
+    }
     const contextDecision = compiled.context_decision;
     if (contextDecision) {
       inspectorFact(
