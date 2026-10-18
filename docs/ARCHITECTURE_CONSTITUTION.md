@@ -99,6 +99,7 @@ Intent Pick、Agent Loop、Information Resolution、调度和只读委派是可�
 - Evidence Before Score：结论回溯固定 Case、Run、对象状态与 Oracle 身份；确定性 Oracle 优先。
 - partial 可以用于诊断，不能拥有 release qualification；未知题号拒绝，完整分母固定。
 - 重复试次区分 pass@k 与 pass^k；成本按 successful outcome 核算，失败成本仍计入。
+- 多次配对的统计有效样本量以 Case 为独立单位，同题重复先归并；Context 候选须在 Discovery 与独立 held-out 中分别通过固定显著性门槛，仍不自动授予 Promote。报告自称“real_provider”不构成收据真实性或模型版本证明。
 - 候选先守能力/安全下限再比较成本；held-out 不反馈搜索，发布必须显式 Promote，可 Rollback。
 - Evolution 的 ELIGIBLE 是有期限的证据资格：冻结候选配置、固定逐题评测、成本模型与校准决定的 SHA-256 摘要；在写锁内比较批准时的证据与现存事实，不一致必须重新评测。摘要只是本地变更检测，不是独立 Oracle 认证或对拥有数据库写权限者的防篡改签名。
 - Historical Replay 只覆盖冻结条件下观察过的边；未观察分支为 UNOBSERVED，不产生授权或发布资格。
