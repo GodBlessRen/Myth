@@ -899,41 +899,64 @@ class SqliteMemoryStore:
         required_rows = []
         invalid_refs = []
         invalid_ids = set()
-        for ref in plan.required_refs:
-            memory_id, revision = parse_memory_ref(ref)
-            invalid_ids.add(memory_id)
-            row = self.store.db.execute(
-                "SELECT * FROM workspace_memories WHERE memory_id=?", (memory_id,),
-            ).fetchone()
-            if row is None:
-                invalid_refs.append({"ref": ref, "reason": "missing"})
-                continue
-            item = dict(row)
-            if not item["active"] or not self._visible(item, project_id, session_id):
-                invalid_refs.append({"ref": ref, "reason": "unavailable"})
-                continue
-            if int(item["revision"]) != revision:
-                invalid_refs.append({"ref": ref, "reason": "revision_changed"})
-                continue
-            if self.freshness(memory_id)["is_stale"]:
-                invalid_refs.append({"ref": ref, "reason": "stale_evidence"})
-                continue
-            required_rows.append(item)
-            invalid_ids.discard(memory_id)
+        rejected_candidates = 0
 
-        # 明确要求的来源不能因 top-k 截断而消失；其余候选只占剩余容量。
-        by_id = {str(item["memory_id"]): item for item in required_rows}
-        for item in ranked:
-            if str(item["memory_id"]) in invalid_ids:
-                continue
-            if len(by_id) >= plan.limit:
-                break
-            by_id.setdefault(str(item["memory_id"]), item)
-        views = [
-            self.resolve(memory_id, resolution="L0",
-                         project_id=project_id, session_id=session_id)
-            for memory_id in by_id
-        ]
+        # 步骤一：检索/向量调用全部已结束；在一个短 WAL 读快照内统一核验来源、作用域与版本。
+        # 这样不会将不同提交时刻的 revision/evidence 拼成“已锚定”，同时不持写锁等待外部后端。
+        with self.store.read_snapshot() as db:
+            for ref in plan.required_refs:
+                memory_id, revision = parse_memory_ref(ref)
+                invalid_ids.add(memory_id)
+                row = db.execute(
+                    "SELECT * FROM workspace_memories WHERE memory_id=?", (memory_id,),
+                ).fetchone()
+                if row is None:
+                    invalid_refs.append({"ref": ref, "reason": "missing"})
+                    continue
+                item = dict(row)
+                if not item["active"] or not self._visible(item, project_id, session_id):
+                    invalid_refs.append({"ref": ref, "reason": "unavailable"})
+                    continue
+                if int(item["revision"]) != revision:
+                    invalid_refs.append({"ref": ref, "reason": "revision_changed"})
+                    continue
+                if self.freshness(memory_id)["is_stale"]:
+                    invalid_refs.append({"ref": ref, "reason": "stale_evidence"})
+                    continue
+                required_rows.append(item)
+                invalid_ids.discard(memory_id)
+
+            # 步骤二：指定来源优先；普通排名候选必须再次 hydration，不能返回查询期间已变更的旧片段。
+            by_id = {str(item["memory_id"]): item for item in required_rows}
+            for ranked_item in ranked:
+                key = str(ranked_item["memory_id"])
+                if key in invalid_ids or key in by_id:
+                    continue
+                if len(by_id) >= plan.limit:
+                    break
+                row = db.execute(
+                    "SELECT * FROM workspace_memories WHERE memory_id=?", (key,),
+                ).fetchone()
+                if (
+                    row is None
+                    or not bool(row["active"])
+                    or not self._visible(dict(row), project_id, session_id)
+                    or int(row["revision"]) != int(ranked_item["revision"])
+                ):
+                    rejected_candidates += 1
+                    continue
+                if self.freshness(key)["is_stale"]:
+                    rejected_candidates += 1
+                    continue
+                by_id[key] = dict(row)
+            views = [
+                self.resolve(
+                    memory_id, resolution="L0",
+                    project_id=project_id, session_id=session_id,
+                )
+                for memory_id in by_id
+            ]
+
         return {
             "memories": views,
             "evidence_gate": {
@@ -950,6 +973,8 @@ class SqliteMemoryStore:
                 "probes": probe_reports,
                 "unique_candidates": len(ranked),
                 "selected": len(views),
+                "snapshot_validated": True,
+                "candidate_rejected_after_search": rejected_candidates,
                 "degraded": any(item["degraded"] for item in probe_reports),
             },
         }
