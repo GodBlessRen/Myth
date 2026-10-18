@@ -44,28 +44,46 @@ def usage_measurements(invocations, fields):
     }
 
 
-# 累计已报告耗时、按调用平均 TTFT；TPS 仅配对成功调用自己的输出/用时，不能借用其他调用的时间。
+# 耗时与 TTFT 只用真实计量；可见输出 TPS 接受明确标记的估计值，但不参与任何结算。
 def session_statistics(invocations, operations):
     model_ms = tool_ms = ttft_ms = output_tokens = output_wall_ms = 0
     model_samples = tool_samples = ttft_samples = tps_samples = 0
+    tps_estimated_samples = tps_raw_proxy_samples = 0
     model_attempts = tool_calls = 0
     for item in unique_records(invocations, "model_attempt_id"):
         model_attempts += 1
         usage = item.get("usage") if isinstance(item.get("usage"), dict) else {}
         wall = measured_integer(usage.get("provider_wall_ms"))
         first = measured_integer(usage.get("time_to_first_token_ms"))
-        # TPS 只能使用已证明的可见输出；推理用量不冒充生成正文。
-        # 旧调用缺少 visible_output_tokens 时不提供速率，而非推断为零。
+        # 新收据优先：明确可见量 > 上游有界估算 > 旧收据的原始输出代理。
+        # 未知 reasoning 绝不能默认为已实测的 0；代理一律标记为估计。
         tokens = measured_integer(usage.get("visible_output_tokens"))
+        estimated = False
+        raw_proxy = False
+        if tokens is None:
+            tokens = measured_integer(usage.get("estimated_visible_output_tokens"))
+            if tokens is not None:
+                estimated = True
+            else:
+                raw = measured_integer(usage.get("output_tokens"))
+                thoughts = measured_integer(usage.get("reasoning_tokens"))
+                if raw is not None:
+                    # 旧收据没有 total/shape；按 Hindsight 的 Folded 保守读法估计。
+                    # reasoning 大于 raw 时可能是 Unfolded，保留 raw 代理而不是伪造 0。
+                    tokens = raw - thoughts if thoughts is not None and thoughts <= raw else raw
+                    estimated = True
+                    raw_proxy = True
         if wall is not None:
             model_samples += 1
             model_ms += wall
         if first is not None and (wall is None or first <= wall):
             ttft_samples += 1
             ttft_ms += first
-        # FAILED/UNKNOWN/零派发不参加输出速率；毫秒分辨率为零时没有可靠的除数。
+        # 只配对同一次成功调用自己的耗时；FAILED/UNKNOWN/零耗时不进入分母。
         if item.get("outcome") == "SUCCEEDED" and tokens is not None and wall is not None and wall > 0:
             tps_samples += 1
+            tps_estimated_samples += int(estimated)
+            tps_raw_proxy_samples += int(raw_proxy)
             output_tokens += tokens
             output_wall_ms += wall
     for item in unique_records(operations, "decision_id"):
@@ -85,6 +103,8 @@ def session_statistics(invocations, operations):
         "ttft_samples": ttft_samples,
         "output_tps": output_tokens * 1000 / output_wall_ms if output_wall_ms else None,
         "tps_samples": tps_samples,
+        "tps_estimated_samples": tps_estimated_samples,
+        "tps_raw_proxy_samples": tps_raw_proxy_samples,
         "tps_output_tokens": output_tokens,
         "tps_wall_ms": output_wall_ms,
         "tps_basis": "end_to_end",
