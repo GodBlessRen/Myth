@@ -27,7 +27,15 @@ _TYPES = {"number", "string", "boolean"}
 
 # _number：JSON 数值必须有限且不能把 bool 当 0/1 混入定量结论。
 def _number(value: object) -> bool:
-    return type(value) in {int, float} and math.isfinite(value)
+    if type(value) not in {int, float}:
+        return False
+    # 超大整数可能使 math.isfinite 的隐式 float 转换溢出，拒绝而不是变成异常绕过。
+    if type(value) is int and value.bit_length() > 256:
+        return False
+    try:
+        return math.isfinite(value)
+    except (OverflowError, ValueError):
+        return False
 
 
 # _string：字段长度/内容在输入阶段限制，避免存入无界的描述或模糊身份。
