@@ -36,7 +36,8 @@ from .workspace import Workspace
 
 # CONTROLLED_HARNESS_MECHANISMS：内置受控实验真正能切换的现有机制；未知机制拒绝，避免“只改标签”的伪消融。
 CONTROLLED_HARNESS_MECHANISMS = frozenset(
-    {"context_compaction", "observation_recall", "action_fusion"}
+    {"context_compaction", "observation_recall", "action_fusion",
+     "context_causal_guard", "context_relevance_ranking"}
 )
 
 
