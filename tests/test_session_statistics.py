@@ -15,7 +15,7 @@ from urllib.request import urlopen
 
 from myth.models import ModelResult
 from myth.runtime import MythRuntime
-from myth.session_statistics import session_statistics
+from myth.session_statistics import session_statistics, context_cost_calibration
 from myth.web import AgentWebService, make_handler
 from myth.web_workspace import ConversationWebService
 from myth.workspace import Workspace
@@ -86,6 +86,68 @@ class StatisticsRuleTests(unittest.TestCase):
         self.assertEqual(result["output_tps"], 20)
 
 
+    # 上下文与 Token 来自不同计量边界；只有相同 model_attempt_id 且同模型的样本才能构成比值。
+    def test_context_calibration_rejects_cross_model_and_partial_metrics(self):
+        """同 Provider 不同模型绝不混合，缺测、bool、负数与重复身份都保持明确覆盖率。"""
+        events = [
+            {"kind": "ConversationContextCompiled", "payload": {
+                "model_attempt_id": "a", "bytes_used": 1200,
+                "serialized_request_bytes": 1300}},
+            {"kind": "ConversationContextCompiled", "payload": {
+                "model_attempt_id": "a", "bytes_used": 1200}},
+            {"kind": "ConversationContextCompiled", "payload": {
+                "model_attempt_id": "b", "bytes_used": 200,
+                "serialized_request_bytes": 450}},
+            {"kind": "ConversationContextCompiled", "payload": {
+                "model_attempt_id": "c", "bytes_used": True,
+                "serialized_request_bytes": -1}},
+        ]
+        facts = [
+            {"model_attempt_id": "a", "provider_id": "openai", "model_id": "model-x",
+             "usage": {"input_tokens": 100}},
+            {"model_attempt_id": "b", "provider_id": "openai", "model_id": "model-x",
+             "usage": {}},
+            {"model_attempt_id": "c", "provider_id": "openai", "model_id": "model-y",
+             "usage": {"input_tokens": 50}},
+            {"model_attempt_id": "a", "provider_id": "openai", "model_id": "model-x",
+             "usage": {"input_tokens": 999}},
+        ]
+        result = context_cost_calibration(events, facts)
+        self.assertEqual(result["attempts"], 3)
+        self.assertFalse(result["safe_to_expand_context_budget"])
+        x, y = result["groups"]
+        self.assertEqual(x["model"], "model-x")
+        self.assertEqual(x["paired_samples"], 1)
+        self.assertEqual(x["attempts"], 2)
+        self.assertEqual(x["measured_pair_coverage"], 0.5)
+        self.assertIsNone(x["reported_input_tokens"])
+        self.assertIsNone(x["context_bytes"])
+        self.assertEqual(x["observed_context_bytes_per_reported_input_token"], 12)
+        self.assertEqual(x["serialized_request_bytes"], 1750)
+        self.assertEqual(y["model"], "model-y")
+        self.assertEqual(y["paired_samples"], 0)
+        self.assertEqual(y["context_byte_samples"], 0)
+        self.assertEqual(y["serialized_byte_samples"], 0)
+        self.assertIsNone(y["observed_context_bytes_per_reported_input_token"])
+
+    # 没有 Provider 使用量时只计算局部字节和样本覆盖，不把未派发或未知调用记成零。
+    def test_context_calibration_missing_actual_token_is_not_free(self):
+        """工具链历史只有 ContextCompiled 事件时，实测 Input Token 必须保留未知。"""
+        result = context_cost_calibration([
+            {"kind": "ConversationContextCompiled", "payload": {
+                "model_attempt_id": "t", "bytes_used": 450,
+                "serialized_request_bytes": 900}},
+        ], [{"model_attempt_id": "t", "provider_id": "ollama", "model_id": "fixture",
+             "usage": {"input_tokens": False}}])
+        sample = result["groups"][0]
+        self.assertEqual(sample["attempts"], 1)
+        self.assertEqual(sample["input_token_samples"], 0)
+        self.assertIsNone(sample["reported_input_tokens"])
+        self.assertIsNone(sample["observed_context_bytes_per_reported_input_token"])
+        self.assertEqual(sample["serialized_request_bytes"], 900)
+
+
+
 # 每个用例独立 Runtime；指标来自持久调用记录，页面读取不能签发模型/工具机会。
 class SessionStatisticsTests(unittest.TestCase):
     # 新会话使用固定供应商设置，避免读取本机真实配置或认证。
@@ -146,6 +208,18 @@ class SessionStatisticsTests(unittest.TestCase):
         self.assertEqual(expected["tool_calls"], 1)
         self.assertEqual(expected["tool_timing_samples"], 1)
         self.assertEqual(ConversationWebService(self.root).session(self.sid)["statistics"], expected)
+        # 会话 Context 校准直接读取同一 Run 的已结算收据，不重复调用 Provider。
+        observed = ConversationWebService(self.root).session(self.sid)
+        calibration = observed["context_cost_calibration"]
+        self.assertEqual(calibration["attempts"], 3)
+        self.assertEqual(len(calibration["groups"]), 1)
+        self.assertEqual(calibration["groups"][0]["paired_samples"], 3)
+        self.assertEqual(calibration["groups"][0]["serialized_byte_samples"], 3)
+        self.assertFalse(calibration["safe_to_expand_context_budget"])
+        self.assertEqual(
+            sum(t["context_cost_calibration"]["attempts"] for t in observed["turns"]),
+            calibration["attempts"],
+        )
 
     # 稳定工具决定复用原计时；恢复不重新执行，也不把计量塞进模型下一步的工具结果正文。
     def test_tool_receipt_persists_time_and_reuse_keeps_budget(self):
