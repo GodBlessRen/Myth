@@ -648,6 +648,8 @@ class SqliteMemoryStore:
                 )
                 direct["proof_paths"] = {
                     "declared": root_paths is not None,
+                    # Proof 解释必须能从 winning index 回到原始 Evidence refs，不能只报告数量。
+                    "paths": list(root_paths or ()),
                     "valid_path_indices": list(closure["valid_paths"]),
                     "failed_paths": closure["failed_paths"],
                 }
