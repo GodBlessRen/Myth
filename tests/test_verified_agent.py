@@ -340,12 +340,12 @@ class VerifiedAgentTests(unittest.TestCase):
             for account in runtime.store.get_accounts(rid):
                 self.assertEqual(account["reserved"], 0)
 
-    # 回归断言：必需请求过大在模型 Ticket 前失败，不静默截掉约束。
+    # 回归断言：完整持久模型请求超过 512 KiB 时在 Ticket 前失败，不静默截断必需意图。
     def test_oversized_full_model_request_stops_before_model_ticket(self):
         with self.sandbox() as tmp:
             _, _, agent, provider, rid = self.fixture(Path(tmp))
             agent.runtime.store.db.execute(
-                "UPDATE runs SET goal=? WHERE run_id=?", ("x" * 70000, rid)
+                "UPDATE runs SET goal=? WHERE run_id=?", ("x" * 600000, rid)
             )
             status = agent.run(rid, provider)
             self.assertEqual(status["agent"]["status"], "FAILED")
