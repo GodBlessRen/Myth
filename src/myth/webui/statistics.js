@@ -21,7 +21,7 @@ function sessionStatisticsRows(stats = {}) {
   const rawProxies = Number.isInteger(stats.tps_raw_proxy_samples) && stats.tps_raw_proxy_samples > 0
     ? stats.tps_raw_proxy_samples : 0;
   const tps = typeof stats.output_tps === "number" && Number.isFinite(stats.output_tps) && stats.output_tps >= 0
-    ? `${estimated ? "≈ " : ""}${stats.output_tps.toFixed(1).replace(/\\.0$/, "")} tok/s` : "未报告";
+    ? `${estimated ? "≈ " : ""}${stats.output_tps.toFixed(1).replace(/\.0$/, "")} tok/s` : "未报告";
   return [
     {label: "模型累计用时", value: statisticsDuration(stats.model_wall_ms) + coverage(stats.model_timing_samples, stats.model_attempts),
       title: "会话内已记录的模型调用累计用时，包含网络/认证等待与已知失败；并发调用分别累加。"},
