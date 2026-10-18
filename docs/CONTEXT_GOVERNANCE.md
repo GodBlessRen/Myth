@@ -94,3 +94,16 @@ Guard 与 Inspector 分别暴露 `causal_active_risk_count`（开放效果/审�
 硬约束不设置数量上限：当某 Run 的未结算执行状态超出 Context 预算时，编译失败并等待 Runtime 人工/自动核对，**绝不裁掉最老的 UNKNOWN 以腾出 Token**。归档只针对已知终态的历史提示，不能对没有受信运行收据的未知副作用使用时间窗口。
 
 当前上下文窗口仍为保守 UTF-8 字节估计，而非 tokenizer 精确计数。SOTA 判定必须额外包含真实 Provider 的 `input_tokens`、缓存字段覆盖率、任务成功率、Latency、UNKNOWN Reconcile 无重复效果的跨模型 A/B；仅七道确定性 Fixture 通过不可作为领先证据。
+
+
+## Request / Context / Token：三个不同单位，两个预算门禁
+
+Context Compiler 的 `bytes_used` 是**进入 ModelRequest.messages 的 UTF-8 正文字节总量**；它的 `max_bytes` 是按模型能力（或保守 fallback）分配的软上限。这些字节不包括远端传输的完整 schema、role/tool 包装，也不能当作 tokenizer 的实报 Token。
+
+`DecisionRuntime.request_decision` 在签发模型 Ticket 前，将完整 `ModelRequest.serializable()` 以确定性 JSON 编码，并限制 **512 KiB 本地对象上限**（`MAX_SERIALIZED_REQUEST_BYTES`）。此前全局 64 KiB 检查会阻断已核验模型窗口允许的大 Context；新上限只扩大持久请求对象允许的容量，**不扩大 Provider 证实的上下文窗口、效果授权或用户预算**。超额在 Ticket 前显式拒绝，不产生未决供应商效果。
+
+两个字节计量同时写入原有 `ConversationContextCompiled` 事件：`bytes_used`（选中 Context 正文字节）和 `serialized_request_bytes`（本地带 schema/report 的完整冻结请求），并保留 `serialized_request_cap_bytes`。在已有模型收据结算路径，`ConversationContextCostObserved` 把相同 Attempt 的本地请求字节、Context 字节、Provider/Adapter 报告的 `input_tokens` 与 Cache 字段配对。异常缓存报告不得产生大于 100% 的命中率。
+
+`context_cost_calibration(events, model_invocations)` 是纯只读投影，由会话 Inspector 展示；按 `provider_id/model_id` 分组，公开请求数、实测覆盖率与 `observed_context_bytes_per_reported_input_token`。未报告、非法 bool/字符串/负数、未派发或身份不一致时保持未测，不猜 Token=0；存在部分实测时，整体 Token/字节总量返回 `None`，只有配对样本可生成观察性比值。
+
+**绝不把该经验比值作为 tokenizer 的上界或自动扩容许可证。** Provider 可能带 schema、特殊 Token、缓存、不同语言和不公开的协议元数据；Fixture Adapter 报告的用量也仅可验证管线，不代表真实供应商质量。只有独立模型 Token 计数/稳定的 Provider 计量、 held-out 长任务成功率与无重试风险证据足够时，才能考虑更激进的动态预算。

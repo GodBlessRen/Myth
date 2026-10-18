@@ -80,6 +80,11 @@ CREATE TABLE IF NOT EXISTS model_request_keys (
 """
 
 
+# MAX_SERIALIZED_REQUEST_BYTES：限制含 schema/本地证据的不可变请求对象，不是模型 Context 窗口。
+# 之前 64 KiB 对所有模型一刀切，使已核验的大窗口即使 Context 合格也无法派发。
+MAX_SERIALIZED_REQUEST_BYTES = 512 * 1024
+
+
 class DecisionRuntime:
     """模型调用协调器；同 request_key 绑定同请求，收据先发布再结算，恢复不再次调用不明供应商请求。"""
 
@@ -309,6 +314,9 @@ class DecisionRuntime:
                         **context_report,
                         "model_attempt_id": attempt_id,
                         "request_ref": request_ref,
+                        "serialized_request_bytes": input_hold,
+                        "serialized_request_cap_bytes": MAX_SERIALIZED_REQUEST_BYTES,
+                        "serialized_request_unit": "utf8-bytes-including-local-metadata",
                     },
                 )
         return attempt_id, ticket_id
@@ -522,6 +530,7 @@ class DecisionRuntime:
                     if type(input_tokens) is int
                     and input_tokens > 0
                     and type(cached_tokens) is int
+                    and 0 <= cached_tokens <= input_tokens
                     else None
                 )
                 self._event(
@@ -533,7 +542,8 @@ class DecisionRuntime:
                         "context_mode": context_report.get("context_mode"),
                         "previous_context_mode": context_report.get("previous_context_mode"),
                         "provider_visible_bytes": context_report.get("bytes_used"),
-                        "input_tokens": input_tokens if type(input_tokens) is int else None,
+                        "serialized_request_bytes": context_report.get("serialized_request_bytes"),
+                        "input_tokens": input_tokens if type(input_tokens) is int and input_tokens >= 0 else None,
                         "cached_input_tokens": cached_tokens if type(cached_tokens) is int else None,
                         "cache_write_input_tokens": (
                             cache_write_tokens
@@ -702,9 +712,11 @@ class DecisionRuntime:
         request_bytes = json.dumps(
             model_request.serializable(), ensure_ascii=False, sort_keys=True
         ).encode("utf-8")
-        if len(request_bytes) > 65_536:
+        # 本地对象字节数包含 schema、JSON 转义及 Context Report；与供应商 input_tokens 不同。
+        # 统一上限保证大窗口合法请求不被旧 64 KiB 拦截，仍有固定上限防止极端占用。
+        if len(request_bytes) > MAX_SERIALIZED_REQUEST_BYTES:
             raise ContextBudgetError(
-                "serialized model request exceeds the 65536-byte preflight limit"
+                f"serialized model request exceeds the {MAX_SERIALIZED_REQUEST_BYTES}-byte storage limit"
             )
         request_ref = self.objects.put(request_bytes)
         request_digest = digest_json(model_request.serializable())

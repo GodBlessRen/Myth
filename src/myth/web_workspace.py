@@ -18,7 +18,9 @@ from .platform.control import ControlCommand
 from .strategies import RuleIntentPicker
 from .goal_scheduler import GoalScheduler
 from .durable_executor import executor_snapshot, run_liveness
-from .session_statistics import session_statistics, measured_integer, unique_records, usage_measurements
+from .session_statistics import (
+    session_statistics, measured_integer, unique_records, usage_measurements, context_cost_calibration,
+)
 from .adapters.model_catalog import PublicModelCatalog
 
 
@@ -475,6 +477,7 @@ class ConversationWebService:
             # 复用下方已读取的模型/工具事实，整段会话线性汇总；不为统计再增加逐轮 SQL 查询。
             model_invocations = []
             tool_operations = []
+            context_events = []
             for turn in value["turns"]:
                 lease = workspace.repository.driver_lease(turn["run_id"])
                 if turn["status"] == "RUNNING" and (lease is None or lease["expired"]):
@@ -498,6 +501,10 @@ class ConversationWebService:
                 turn["operations"] = workspace.repository.operations(turn["run_id"])
                 turn["events"] = workspace.repository.events(turn["run_id"])
                 model_state = workspace.repository.decisions.status(turn["run_id"])
+                turn["context_cost_calibration"] = context_cost_calibration(
+                    turn["events"], model_state["model_invocations"],
+                )
+                context_events.extend(turn["events"])
                 model_invocations.extend(model_state["model_invocations"])
                 tool_operations.extend(turn["operations"])
                 # Execution Graph 只是现有 durable facts 的观测投影，不新增执行状态或授权。
@@ -534,6 +541,9 @@ class ConversationWebService:
                 turn["sota_route"] = workspace.sota_route.view(turn["run_id"])
             value["artifacts"] = workspace.repository.artifacts(sid)
             value["statistics"] = session_statistics(model_invocations, tool_operations)
+            value["context_cost_calibration"] = context_cost_calibration(
+                context_events, model_invocations,
+            )
             return value
 
     # 先在本机 active 集占位，再竞争持久 Driver Lease 并启动线程；失败释放占位，线程退出清理自己的 owner。

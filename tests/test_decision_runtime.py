@@ -8,7 +8,9 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from myth.decision_runtime import DecisionRuntime
+from myth.decision_runtime import DecisionRuntime, MAX_SERIALIZED_REQUEST_BYTES
+from myth.conversation import conversation_request
+from myth.session_statistics import context_cost_calibration
 from myth.acceptance import ContextBudgetError
 from myth.models import (
     ContextTruncated,
@@ -213,6 +215,126 @@ class DecisionRuntimeTests(unittest.TestCase):
                 self.assertEqual(observed["cached_input_tokens"], 8)
                 self.assertEqual(observed["cache_write_input_tokens"], 4)
                 self.assertAlmostEqual(observed["cache_reuse_ratio"], 0.4)
+
+    # 大窗口要求 Context 预算与完整请求持久化预算一致；超旧 64 KiB 的合法请求仍经过唯一 Ticket。
+    def test_large_verified_context_is_admitted_and_measured(self) -> None:
+        """固定 90 KiB 请求经真实 Ticket 与收据结算，序列化大小绑定同一 Attempt 的两条事件。"""
+        with tempfile.TemporaryDirectory() as tmp, MythRuntime(Path(tmp)) as runtime:
+            decisions = DecisionRuntime(runtime)
+            rid = decisions.create_goal_run(
+                goal="large context preflight", provider_id="fake",
+                model_id="fake-model", max_output_tokens=100,
+            )
+            large = "L" * 90_000
+            # 经过真正的三维 Context Engine，不以伪造报告绕过软预算投影。
+            snapshot = {"messages": [{"role": "user", "content": large}]}
+            request = conversation_request(
+                {
+                    "provider": "openai", "model": "fake-model",
+                    "max_output_tokens": 100,
+                    "admitted_model_profile": {
+                        "provider": "openai", "id": "fake-model",
+                        "source": "provider-preflight", "context_window": 262_144,
+                    },
+                },
+                snapshot, snapshot["messages"], [],
+            )
+            self.assertEqual(request.context_report["max_bytes"], 256_000)
+            self.assertEqual(
+                request.context_report["model_budget_source"],
+                "provider-preflight-frozen-conservative",
+            )
+            decisions.request_decision(
+                run_id=rid, provider=FakeProvider(), model="fake-model",
+                max_output_tokens=100, model_request_override=request,
+            )
+            status = decisions.status(rid)
+            compiled = next(
+                event["payload"] for event in status["events"]
+                if event["kind"] == "ConversationContextCompiled"
+            )
+            cost = next(
+                event["payload"] for event in status["events"]
+                if event["kind"] == "ConversationContextCostObserved"
+            )
+            actual = len(json.dumps(
+                request.serializable(), ensure_ascii=False, sort_keys=True,
+            ).encode("utf-8"))
+            self.assertGreater(actual, 65_536)
+            self.assertEqual(compiled["serialized_request_bytes"], actual)
+            self.assertEqual(compiled["serialized_request_cap_bytes"], MAX_SERIALIZED_REQUEST_BYTES)
+            self.assertEqual(cost["serialized_request_bytes"], actual)
+            self.assertEqual(cost["input_tokens"], 20)
+            self.assertEqual(len(status["model_invocations"]), 1)
+            result = context_cost_calibration(status["events"], status["model_invocations"])
+            self.assertEqual(result["attempts"], 1)
+            self.assertEqual(result["groups"][0]["paired_samples"], 1)
+            self.assertEqual(result["groups"][0]["serialized_request_bytes"], actual)
+            self.assertFalse(result["safe_to_expand_context_budget"])
+
+    # 固定存储上限仍必须在任何模型 Ticket 前拒绝，避免大窗口变成无限请求对象。
+    def test_hard_request_storage_limit_fails_before_ticket(self) -> None:
+        """超 512 KiB 请求不能留下模型机会、收据或 UNKNOWN 预算，不得先调用供应商。"""
+        with tempfile.TemporaryDirectory() as tmp, MythRuntime(Path(tmp)) as runtime:
+            decisions = DecisionRuntime(runtime)
+            rid = decisions.create_goal_run(
+                goal="oversized request", provider_id="fake",
+                model_id="fake-model", max_output_tokens=100,
+            )
+            request = ModelRequest(
+                model="fake-model",
+                messages=(ModelMessage("user", "X" * MAX_SERIALIZED_REQUEST_BYTES),),
+                response_schema=STEP_DECISION_SCHEMA,
+                max_output_tokens=100,
+            )
+            with self.assertRaises(ContextBudgetError):
+                decisions.request_decision(
+                    run_id=rid, provider=FakeProvider(fail=True),
+                    model="fake-model", max_output_tokens=100,
+                    model_request_override=request,
+                )
+            state = decisions.status(rid)
+            self.assertEqual(state["model_invocations"], [])
+            self.assertFalse(any(
+                event["kind"] == "ModelTicketGranted" for event in state["events"]
+            ))
+            self.assertTrue(all(
+                row["unknown_held"] == 0 for row in state["budgets"]
+            ))
+
+    # 已报告缓存 Token 大于输入 Token 时，只能保留来源字段并拒绝计算非法的命中率。
+    def test_invalid_cache_ratio_is_not_reported(self) -> None:
+        """供应商用量内部矛盾不得产生大于一的缓存命中率。"""
+        with tempfile.TemporaryDirectory() as tmp, MythRuntime(Path(tmp)) as runtime:
+            decisions = DecisionRuntime(runtime)
+            rid = decisions.create_goal_run(
+                goal="check cache measurement", provider_id="fake",
+                model_id="fake-model", max_output_tokens=100,
+            )
+            provider = FakeProvider()
+            original = provider.invoke
+            def invalid_cache(request):
+                """用合法模型提案制造不合法缓存计量，验证不会污染 Context Cost 比率。"""
+                result = original(request)
+                return ModelResult(
+                    result.text, {**result.usage, "cached_input_tokens": 21},
+                    result.raw, result.response_id,
+                )
+            provider.invoke = invalid_cache
+            request = ModelRequest(
+                "fake-model", (ModelMessage("user", "hello"),),
+                STEP_DECISION_SCHEMA, max_output_tokens=100,
+                context_report={"bytes_used": 5},
+            )
+            decisions.request_decision(
+                run_id=rid, provider=provider, model="fake-model",
+                max_output_tokens=100, model_request_override=request,
+            )
+            cost = next(
+                event["payload"] for event in decisions.status(rid)["events"]
+                if event["kind"] == "ConversationContextCostObserved"
+            )
+            self.assertIsNone(cost["cache_reuse_ratio"])
 
     # 回归断言：Ticket 后传输异常保持未知，不把超时当作已知未执行。
     def test_provider_exception_after_ticket_becomes_unknown(self) -> None:

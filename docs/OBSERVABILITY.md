@@ -305,3 +305,11 @@ Myth 把两种时间分开显示：
 两者都不是“模型内部纯推理时间”。前者包含工具、Runtime、排队和网络；后者只覆盖 provider 调用边界，但仍可能包含网络与供应商排队。若供应商报告内部 duration，应作为第三类独立 metric 保留。
 
 运行中的“用时”由服务端持久消息起点投影，每次会话轮询刷新；页面刷新不会重置计时。
+
+
+### Context 字节、完整请求与实测 Token 分离
+
+- `ConversationContextCompiled.bytes_used`：已选择 ModelMessage 正文的本地 UTF-8 字节；不是 Token 数。
+- `ConversationContextCompiled.serialized_request_bytes`：Ticket 前真实冻结请求（含本地 schema、上下文报告、JSON）的 UTF-8 字节，受 512 KiB 存储门禁限制；不是供应商 Prompt Body 的精确字节。
+- `ConversationContextCostObserved.input_tokens`：已结算 Attempt 的供应商/Adapter 回传字段；缺测不会由字节数推断。
+- 会话 `context_cost_calibration`：按 Provider+Model 聚合可配对样本，展示覆盖率和**观察性**字节/实报 Token；不自动调整 Context 窗口，不证明模型质量提升。第三栏显示固定请求字节上限、实际大小以及实测覆盖率。
