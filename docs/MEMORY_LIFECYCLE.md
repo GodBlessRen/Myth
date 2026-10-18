@@ -136,6 +136,17 @@ Regression scope: `tests/test_memory_lifecycle.py` (write/scope/cycle/rollback),
 
 这样 Evidence-backed Memory 不会反过来破坏 Context budget。
 
+## Mental Model Delta / Full / Dry Run（低成本、可逆、同一个 State Owner）
+
+`SqliteKnowledgeViews.commit_refresh()` 现复用同一个 CAS/Scope/Source-Watermark/Evidence Gate 接受三种行为：
+- **Full**：接收完整经过准入的 synthesis 文档，保持现有 Scheduler 默认行为，不改变模型输出协议。
+- **Delta**：只允许最多 8 条 `replace_exact(old_text,new_text)` 操作，必须在 *当前 backing revision* 中恰好出现一次；无基线、目标不唯一、来源水位变化均拒绝。
+- **Dry Run**：提供候选正文、来源覆盖数和 `would_publish`，验证逻辑与提交路径相同，但绝不修改 Memory/model revision 或 source watermark。
+
+如果候选正文和所有支持来源的当前 `(memory_id,revision)` 完全一致，刷新只更新 last-seen 水位/时间，不制造新 backing revision，也不重复触发向量回填。**支持来源版本有变化，即使正文没变也要重新钉住证据**。这不声称实现了 Hindsight 的自动 Delta LLM 编排或独立防漂移时钟；调度层继续优先使用已经验证的 Full，Delta 在稳定结构化输出协议接入前只由明确调用方触发。
+
+局部测试：`tests/test_mental_model_deep_refresh.py` 覆盖 Full/Delta/Dry Run、No-op、失败回滚、来源重绑和 CAS；仍需完整 CI。
+
 ## Indexed Lexical Retrieval（Highest Leverage）
 
 原有检索逐页扫描全部可见 Memory 并对每条正文提取 English/CJK bigram。现在 Memory Store 在写事务内维护 `workspace_memory_terms` 词项倒排表：查询只扫描包含查询词的 postings，以旧有的集合交集计分、原始 rowid 逆序稳定 tie-break。**这是减少候选生成成本的索引，不是 BM25 模型质量提升声明**；更换排序器必须另行验证 Recall@K/权限/时延，不能凭名字认为更好。
