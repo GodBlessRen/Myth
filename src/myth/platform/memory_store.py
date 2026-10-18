@@ -1126,8 +1126,9 @@ class SqliteMemoryStore:
             self._record_change(db, memory_id)
         return self.get(memory_id)
 
-    # 以 Run 来源幂等记录结束经历，按冻结项目/会话范围保存；不宣称回答为 verified。
+    # record_episode：同 Run 的经历正文必须完全一致；补偿重放不能增加 revision 或令其他派生记忆伪过期。
     def record_episode(self, run_id: str, user_text: str, assistant_text: str) -> dict:
+        """保存唯一的终态经历；同源同内容直接返回，身份冲突显式拒绝以便调用方核对事实。"""
         text = f"User: {user_text.strip()}\nAssistant: {assistant_text.strip()}"
         if len(text.encode("utf-8")) > 8_000:
             text = text.encode("utf-8")[:8_000].decode("utf-8", errors="ignore")
@@ -1142,11 +1143,34 @@ class SqliteMemoryStore:
             if row and row["project_id"]
             else (row["session_id"] if row else run_id)
         )
-        return self.remember(
-            kind=MemoryKind.EPISODIC,
-            text=text,
-            source_ref=f"run:{run_id}",
-            scope_type=scope_type,
-            scope_id=scope_id,
-            fact_level="context",
-        )
+        source = f"run:{run_id}"
+        # 同一 BEGIN IMMEDIATE 内检查唯一来源、快照与新建；不能跨连接先查后写产生竞争。
+        with self.store.tx() as db:
+            existing = db.execute(
+                "SELECT * FROM workspace_memories WHERE kind=? AND source_ref=?",
+                (MemoryKind.EPISODIC.value, source),
+            ).fetchone()
+            if existing is not None:
+                if (
+                    bool(existing["active"])
+                    and existing["text"] == text
+                    and existing["scope_type"] == scope_type
+                    and existing["scope_id"] == scope_id
+                    and existing["fact_level"] == "context"
+                ):
+                    return dict(existing)
+                raise IdentityConflict(
+                    "the recorded run episode conflicts with its committed immutable source"
+                )
+            record = self.remember(
+                kind=MemoryKind.EPISODIC,
+                text=text,
+                source_ref=source,
+                scope_type=scope_type,
+                scope_id=scope_id,
+                fact_level="context",
+                _db=db,
+            )
+        # SQLite 已经提交后才同步可重建向量投影；外部索引与 Memory 事实不可混为一笔事务。
+        self._sync_vector_record(record)
+        return record
