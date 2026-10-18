@@ -21,6 +21,7 @@ class FakeVectorIndex:
     def __init__(self):
         self.knowledge = {}
         self.memories = {}
+        self.memory_sync_calls = 0
 
     # 返回固定健康投影供装配测试；不证明真实服务可用。
     def status(self):
@@ -34,6 +35,7 @@ class FakeVectorIndex:
 
     # 保存 Memory revision，供 revoke/freshness 回归构造候选。
     def sync_memories(self, rows):
+        self.memory_sync_calls += 1
         for row in rows:
             self.memories[row["record_id"]] = dict(row)
         return {"received": len(rows), "upserted": len(rows), "skipped": 0}
@@ -200,6 +202,74 @@ class MilvusRetrievalTests(unittest.TestCase):
         )
         self.assertLessEqual(report["delivered"]["memory"], report["retrieved"]["memory"])
 
+
+
+    # 首次索引补建后，无源变化的多探针检索不可每次重新全库扫描同步。
+    def test_vector_backfill_reuses_fixed_change_watermark(self):
+        memory = self.workspace.memory
+        source = memory.remember(
+            kind="semantic", text="stable hybrid vector evidence", source_ref="index:stable",
+        )
+        before = self.fake.memory_sync_calls
+        first = memory.search_report("vector evidence", limit=3)
+        after_first = self.fake.memory_sync_calls
+        self.assertGreater(after_first, before)
+        self.assertFalse(first["retrieval"]["vector_backfill_cached"])
+        second = memory.search_report("another unrelated probe", limit=3)
+        self.assertEqual(self.fake.memory_sync_calls, after_first)
+        self.assertTrue(second["retrieval"]["vector_backfill_cached"])
+
+        memory.apply_delta(
+            source["memory_id"],
+            [{"op": "replace_text", "text": "changed hybrid vector evidence"}],
+            expected_revision=1,
+        )
+        after_write = self.fake.memory_sync_calls
+        self.assertGreater(after_write, after_first)
+        renewed = memory.search_report("vector evidence", limit=3)
+        self.assertFalse(renewed["retrieval"]["vector_backfill_cached"])
+        self.assertGreater(self.fake.memory_sync_calls, after_write)
+        after_rebuild = self.fake.memory_sync_calls
+        memory.search_report("vector evidence", limit=3)
+        self.assertEqual(self.fake.memory_sync_calls, after_rebuild)
+
+    # 更换远端索引适配器时不能重用旧实例的内存水位；即使 SQLite 没有新写入也要补齐。
+    def test_vector_backfill_cannot_cross_adapter_identity(self):
+        memory = self.workspace.memory
+        row = memory.remember(
+            kind="semantic", text="adapter replacement fact", source_ref="index:replacement",
+        )
+        memory.search_report("replacement", limit=3)
+        replacement = FakeVectorIndex()
+        memory.vector_index = replacement
+        report = memory.search_report("replacement", limit=3)
+        self.assertFalse(report["retrieval"]["vector_backfill_cached"])
+        self.assertIn(row["memory_id"], replacement.memories)
+
+    # 后端 upsert 失败不能推进已补建水位或谎报索引健康；词面结果仍须可用。
+    def test_failed_backfill_is_reported_and_retried(self):
+        memory = self.workspace.memory
+        row = memory.remember(
+            kind="semantic", text="lexical fallback after index failure",
+            source_ref="index:failure",
+        )
+        calls = {"n": 0}
+
+        # 模拟真实派生索引故障：业务 SQLite 成功而所有向量同步失败。
+        def reject_sync(rows):
+            calls["n"] += 1
+            raise RuntimeError("backfill unavailable")
+
+        self.fake.sync_memories = reject_sync
+        report = memory.search_report("lexical fallback", limit=3)
+        self.assertTrue(report["retrieval"]["degraded"])
+        self.assertEqual(report["retrieval"]["vector_status"], "backfill_degraded")
+        self.assertFalse(report["retrieval"]["vector_backfill_cached"])
+        self.assertIn(row["memory_id"], [item["memory_id"] for item in report["memories"]])
+        once = calls["n"]
+        again = memory.search_report("lexical fallback", limit=3)
+        self.assertTrue(again["retrieval"]["degraded"])
+        self.assertGreater(calls["n"], once)
 
 
 if __name__ == "__main__":
