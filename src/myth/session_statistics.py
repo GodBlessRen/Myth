@@ -87,3 +87,104 @@ def session_statistics(invocations, operations):
         "tps_wall_ms": output_wall_ms,
         "tps_basis": "end_to_end",
     }
+
+
+
+# 基于同 Run 冻结请求与已结算模型用量形成后验实测校准；本函数不访问对象库或持久化第二份事实。
+def context_cost_calibration(events, invocations):
+    """按 Provider+模型聚合实际 Context 字节和已报告 Input Token，保留样本覆盖与缺测。
+
+    返回的是可观察的 Context 字节 / Provider 计量比，不是 tokenizer 精确计数；
+    schema、传输包装、cache 和历史转换都可能影响 Provider 实际 Token 用量。
+    """
+    compiled = {}
+    for item in events:
+        if not isinstance(item, dict) or item.get("kind") != "ConversationContextCompiled":
+            continue
+        payload = item.get("payload")
+        if not isinstance(payload, dict):
+            continue
+        attempt = payload.get("model_attempt_id")
+        if isinstance(attempt, str) and attempt:
+            # 一个 Ticket 对应一个冻结请求，重复展示同一事件不能制造更多样本。
+            compiled.setdefault(attempt, payload)
+    invocations_by_id = {}
+    for item in unique_records(invocations, "model_attempt_id"):
+        if not isinstance(item, dict):
+            continue
+        attempt = item.get("model_attempt_id")
+        if isinstance(attempt, str) and attempt:
+            invocations_by_id[attempt] = item
+
+    grouped = {}
+    for attempt, projection in compiled.items():
+        invocation = invocations_by_id.get(attempt) or {}
+        provider = str(invocation.get("provider_id") or "unknown")
+        model = str(invocation.get("model_id") or "unknown")
+        key = (provider, model)
+        group = grouped.setdefault(key, {
+            "provider": provider, "model": model, "attempts": 0,
+            "input_token_samples": 0, "context_byte_samples": 0,
+            "serialized_byte_samples": 0, "paired_samples": 0,
+            "paired_input_tokens": 0, "paired_context_bytes": 0,
+            "total_serialized_bytes": 0,
+        })
+        group["attempts"] += 1
+        usage = invocation.get("usage")
+        usage = usage if isinstance(usage, dict) else {}
+        tokens = measured_integer(usage.get("input_tokens"))
+        visible_bytes = measured_integer(projection.get("bytes_used"))
+        serialized_bytes = measured_integer(projection.get("serialized_request_bytes"))
+        # 每个度量独立计覆盖率；仅同时实测的请求才能计算跨量纲比率。
+        if tokens is not None:
+            group["input_token_samples"] += 1
+        if visible_bytes is not None:
+            group["context_byte_samples"] += 1
+        if serialized_bytes is not None:
+            group["serialized_byte_samples"] += 1
+            group["total_serialized_bytes"] += serialized_bytes
+        if tokens is not None and visible_bytes is not None:
+            group["paired_samples"] += 1
+            group["paired_input_tokens"] += tokens
+            group["paired_context_bytes"] += visible_bytes
+
+    rows = []
+    for key in sorted(grouped):
+        group = grouped[key]
+        paired_tokens = group["paired_input_tokens"]
+        rows.append({
+            "provider": group["provider"],
+            "model": group["model"],
+            "attempts": group["attempts"],
+            "input_token_samples": group["input_token_samples"],
+            "context_byte_samples": group["context_byte_samples"],
+            "serialized_byte_samples": group["serialized_byte_samples"],
+            "paired_samples": group["paired_samples"],
+            # 仅完整配对才能把聚合值称作该组总量；部分观察只给局部比值及分母。
+            "reported_input_tokens": (
+                group["paired_input_tokens"]
+                if group["paired_samples"] == group["attempts"] else None
+            ),
+            "context_bytes": (
+                group["paired_context_bytes"]
+                if group["paired_samples"] == group["attempts"] else None
+            ),
+            "serialized_request_bytes": (
+                group["total_serialized_bytes"]
+                if group["serialized_byte_samples"] == group["attempts"] else None
+            ),
+            "observed_context_bytes_per_reported_input_token": (
+                round(group["paired_context_bytes"] / paired_tokens, 4)
+                if paired_tokens > 0 else None
+            ),
+            "measured_pair_coverage": (
+                round(group["paired_samples"] / group["attempts"], 4)
+            ),
+        })
+    return {
+        "source": "persisted-context-compiler-and-model-usage",
+        "semantics": "observed-projection-ratio-not-tokenizer-upper-bound",
+        "attempts": len(compiled),
+        "groups": rows,
+        "safe_to_expand_context_budget": False,
+    }
