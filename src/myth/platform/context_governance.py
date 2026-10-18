@@ -223,16 +223,34 @@ def build_causal_guard(
 
 # 生成稳定字节和摘要，外层用 required=True 装箱；Context 溢出时拒绝而非删关键记录。
 def render_causal_guard(guard: Mapping[str, Any]) -> tuple[str, str]:
-    """保留短导航而不拷贝大结果；所有原始事实继续由其仓储拥有。"""
+    """只发送非空导航字段；摘要绑定模型实际可见的 JSON，原始状态仍属于权威仓储。"""
+    records = []
+    for row in guard.get("records") or []:
+        # 未决身份、状态、显式依赖和来源一字不删；只有空字段可省略。
+        compact = {
+            key: row[key] for key in (
+                "source", "role", "decision_id", "model_attempt_id", "capability",
+                "ticket_id", "reported_outcomes", "declared_dependencies",
+                "evidence_ref", "child_delegation_ids", "checkpoint_step", "meter", "units",
+            )
+            if key in row and row[key] is not None and row[key] != [] and row[key] != ""
+        }
+        records.append(compact)
     payload = json.dumps(
-        guard, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        {
+            "policy": guard.get("policy"),
+            "critical_count": guard.get("critical_count"),
+            "records": records,
+            "missing_declared_dependencies": guard.get("missing_declared_dependencies") or [],
+        },
+        ensure_ascii=False, sort_keys=True, separators=(",", ":"),
     )
     digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
     message = (
-        "关键执行状态与声明的依赖（来自持久记录；不是独立验收或授权）：\n"
+        "关键执行状态索引（已记录的状态及声明依赖，不是因果证明、执行授权或成功验收）：\n"
         + payload
-        + "\nUNKNOWN 必须先通过 Runtime 核对；状态不明不能推定失败或安全重试。"
-        "如需详情，使用原 decision_id 回读持久 Observation。"
+        + "\nUNKNOWN/TICKETED 必须先由 Runtime 核对，不可视为失败或自动安全重试。"
+        "已结算的 Observation 可使用原 decision_id 精确回读；未结算操作只核对 Runtime Ticket/Receipt。"
     )
     return message, digest
 
