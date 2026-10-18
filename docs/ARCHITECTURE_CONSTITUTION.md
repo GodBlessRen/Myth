@@ -83,6 +83,7 @@ Intent Pick、Agent Loop、Information Resolution、调度和只读委派是可�
 - Runtime 能确定的后继不再多调用模型；需要新语义判断时不能强行融合。
 - 可恢复的效果失败属于持久 Observation；紧随其后的 completion 不能把失败静默覆盖，Runtime 至少要求一次 follow-through。后续同能力成功可闭合旧失败；没有成功时允许模型在看见提醒后明确说明阻塞，而不是无限自重试。
 - mutation 与后继 verifier 的结果分别记录，部分成功保持显式。
+- 候选代码只能由与完整候选修订绑定的测试证明；原项目 PASS 不代表输出副本 PASS。任何候选集变化均使旧候选级验证不再适用。
 - 效率按 provider-visible 投影与实测成本计算；缺测保持 N/A。考虑 upfront cost、debt 和剩余请求，使用 cooldown/margin 避免振荡。
 - available、exposed、reachable 分开显示，未生效给稳定 reason code。
 - 当前 `agent.delegate` 是单层只读隔离 worker，接收有界 task/context 与明确来源，不继承父历史、不写入、不递归委派。

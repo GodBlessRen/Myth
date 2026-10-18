@@ -177,8 +177,28 @@ def _evidence_rule(turn: dict[str, Any], decision: Any) -> CompletionVerdict | N
     )
 
 
-# 已实际运行 verifier 时只接受最新 PASS；未运行 verifier 不在此凭空新增验收要求。
+# 从已结算 patch_exact 产物获得每个相对路径的最新候选；模型叙述/失败结果不计入证明对象。
+def _candidate_subject(turn: dict[str, Any]) -> list[dict[str, str]]:
+    latest: dict[str, dict[str, str]] = {}
+    for activity in turn.get("activities") or []:
+        decision = activity.get("decision") or {}
+        if decision.get("capability_id") != "project.patch_exact":
+            continue
+        result = activity.get("result") or {}
+        artifact = result.get("artifact") if isinstance(result, dict) else None
+        if not isinstance(artifact, dict):
+            continue
+        path, digest, decision_id = (
+            artifact.get("name"), artifact.get("digest"), artifact.get("decision_id")
+        )
+        if all(isinstance(value, str) and value for value in (path, digest, decision_id)):
+            latest[path] = {"path": path, "digest": digest, "decision_id": decision_id}
+    return sorted(latest.values(), key=lambda item: item["path"])
+
+
+# 已执行 verifier 必须 PASS；交付候选出现时，原项目测试及旧候选绿灯不能作为当前候选证明。
 def _verification_rule(turn: dict[str, Any], decision: Any) -> CompletionVerdict | None:
+    # 按执行先后只收集实际观察到的 verifier 结果；缺失不能误判为测试成功。
     verification_results = []
     for activity in turn.get("activities") or []:
         decision_data = activity.get("decision") or {}
@@ -187,20 +207,44 @@ def _verification_rule(turn: dict[str, Any], decision: Any) -> CompletionVerdict
         result = activity.get("result") or {}
         if result:
             verification_results.append(result)
-    if not verification_results or verification_results[-1].get("status") == "PASSED":
+    # 从未执行测试时不新增强制测试义务；交付仍独立保持 UNVERIFIED。
+    if not verification_results:
+        return None  # 未测试不自动制造验收；Delivery 仍从 UNVERIFIED 开始。
+    # 最新已执行测试失败时优先暴露真实失败，不允许用更早成功覆盖。
+    latest = verification_results[-1]
+    if latest.get("status") != "PASSED":
+        return CompletionVerdict(
+            False,
+            FailureObservation(
+                "verification", "verification_not_passed",
+                "completion rejected: the latest executed verification did not pass",
+                True, "test.run", expected="latest test.run status=PASSED",
+                hint="Fix the verified failure and run the trusted verification profile again.",
+            ),
+        )
+    # 只有存在待交付的候选补丁时，才要求 verifier 绑定完整候选集合。
+    candidates = _candidate_subject(turn)
+    if not candidates:
         return None
-    return CompletionVerdict(
-        False,
-        FailureObservation(
-            "verification",
-            "verification_not_passed",
-            "completion rejected: the latest executed verification did not pass",
-            True,
-            "test.run",
-            expected="latest test.run status=PASSED",
-            hint="Fix the verified failure and run the trusted verification profile again before requesting completion.",
-        ),
-    )
+    # 对比固定候选身份、文件路径和字节摘要；缺少绑定时一律拒绝借用原项目 PASS。
+    subject = latest.get("tested_subject")
+    actual = subject.get("candidates") if isinstance(subject, dict) else None
+    if (
+        not isinstance(subject, dict)
+        or subject.get("kind") != "candidate_overlay"
+        or actual != candidates
+    ):
+        return CompletionVerdict(
+            False,
+            FailureObservation(
+                "verification", "verification_subject_mismatch",
+                "the latest PASS does not prove the current candidate artifact set",
+                True, "test.run",
+                expected="a candidate_overlay test.run PASS with all current candidate digests",
+                hint="Run test.run with candidate_decision_ids for every current project.patch_exact output; a source-only PASS is insufficient.",
+            ),
+        )
+    return None
 
 
 # 顺序即产品语义：更早的 durable blocker 优先暴露；外部调用方仍只看到 evaluate(turn, decision)。

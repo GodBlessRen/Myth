@@ -39,3 +39,23 @@ React `/next/` 还必须经 [React Workbench Workflow](https://github.com/GodBle
 ## 记录规则
 
 测到什么写什么；缺测标记 `not measured`。Model claim 不等于验收，UI 投影不等于持久事实，UNKNOWN 不等于 FAILED。功能文档不堆积旧测试数字；故障输入和版本化结果集中进入审查/评测证据。
+
+
+## Candidate-bound Harness verification（2026-10-19，PR candidate）
+
+`test.run` 可选提供 `candidate_decision_ids`（1–32 个），与本 Run 每个路径的最新
+`project.patch_exact` 结果**全量精确匹配**后才准入。系统复核内容寻址的候选字节，
+将明确受信的项目复制到临时工作树，并在其中叠加候选运行固定 unittest。
+`test.run` Receipt 中的 `tested_subject` 保存具体候选版本；原项目测试 PASS
+不能证明候选成功。新的候选版本产生后，完成守卫拒绝沿用旧 PASS。
+
+未提供 `candidate_decision_ids` 时，仍执行原项目测试，但若本 Run 存在候选，
+该 PASS 不足以支持候选级完成。复制最多 5000 个文件、64 MiB，总体不提供
+网络或 OS 隔离；仅允许用户明确受信项目。危险代码不得通过此途径执行。
+临时副本不等于安全沙箱；实际安全隔离需要独立容器/沙箱 adapter。
+
+本机制只使“执行结果是否对应交付候选”更可验证，不自动产生
+独立 Delivery Acceptance PASSED，不进行自动 Promote。
+修改后验证：`python -m unittest discover -s tests -p 'test_verification_completion.py' -v`
+及 `python -m unittest discover -s tests -p 'test_completion_guard_rules.py' -v`。
+CI 结果与真实 Provider 费用、效率收益应分别记录，不能把静态提交视作实测通过。

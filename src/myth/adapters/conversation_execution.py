@@ -826,7 +826,7 @@ class LocalConversationExecution:
                 turn["run_id"], decision_id, capability, intent
             )
             tool_started = time.monotonic()
-            result = self.verification.run(turn, args.get("profile_id"))
+            result = self.verification.run(turn, args.get("profile_id"), intent=intent)
             tool_wall_ms = max(0, int((time.monotonic() - tool_started) * 1000))
             return self._record_tool_receipt(op, result, tool_wall_ms)
 

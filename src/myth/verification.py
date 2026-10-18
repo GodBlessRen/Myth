@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import re
 import signal
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -17,7 +18,7 @@ import time
 import uuid
 from typing import Any
 
-from .domain import canonical_json
+from .domain import canonical_json, sha256_bytes
 
 
 SCHEMA = r"""
@@ -191,13 +192,83 @@ class SqliteVerificationProfiles:
             env["PYTHONPATH"] = os.pathsep.join(pythonpath)
         return profile, root, command, env
 
+    # 只承认来自本 Run 已结算补丁的候选；外部参数不能自行声明候选摘要或跳过缺失的文件。
+    def candidate_subject(self, turn: dict[str, Any], args: dict[str, Any]) -> dict[str, Any] | None:
+        ids = args.get("candidate_decision_ids")
+        if ids is None:
+            return None
+        if not isinstance(ids, list) or not ids or len(ids) > 32 or any(
+            not isinstance(i, str) or not i or len(i) > 200 for i in ids
+        ) or len(ids) != len(set(ids)):
+            raise ValueError("candidate_decision_ids requires 1-32 distinct decision identities")
+        seen: dict[str, dict[str, str]] = {}
+        for activity in turn.get("activities") or []:
+            decision = activity.get("decision") or {}
+            if decision.get("capability_id") != "project.patch_exact":
+                continue
+            artifact = (activity.get("result") or {}).get("artifact")
+            if not isinstance(artifact, dict):
+                continue
+            path, digest, decision_id = (
+                artifact.get("name"), artifact.get("digest"), artifact.get("decision_id")
+            )
+            if all(isinstance(v, str) and v for v in (path, digest, decision_id)):
+                seen[path] = {"path": path, "digest": digest, "decision_id": decision_id}
+        if not seen or {x["decision_id"] for x in seen.values()} != set(ids):
+            raise ValueError("candidate_decision_ids must match every latest candidate in the Run")
+        return {"kind": "candidate_overlay", "candidates": sorted(seen.values(), key=lambda x: x["path"])}
+
+    # 测试前冻结项目输入树；拒绝符号链接、异常大小与非普通文件，防止信任边界扩散。
+    def _copy_project(self, source: Path, target: Path) -> None:
+        excluded = {".git", ".runtime", ".trash", ".work", ".venv", "venv", "node_modules", "__pycache__", ".aws", ".ssh", ".codex", ".myth", ".config", "secrets"}
+        total, count = 0, 0
+        for directory, dirs, files in os.walk(source, followlinks=False):
+            base = Path(directory)
+            relative = base.relative_to(source)
+            safe_dirs = []
+            for name in dirs:
+                path = base / name
+                if name in excluded:
+                    continue
+                if path.is_symlink():
+                    raise PermissionError("candidate verification rejects project symlinks")
+                safe_dirs.append(name)
+            dirs[:] = safe_dirs
+            output_dir = target / relative
+            output_dir.mkdir(parents=True, exist_ok=True)
+            for name in files:
+                path = base / name
+                if path.is_symlink() or not path.is_file():
+                    raise PermissionError("candidate verification rejects non-regular project files")
+                size = path.stat().st_size
+                total += size
+                count += 1
+                if count > 5000 or total > 64 * 1024 * 1024 or size > 8 * 1024 * 1024:
+                    raise ValueError("candidate verification project exceeds bounded copy limits")
+                shutil.copyfile(path, output_dir / name)
+
+    # 创建候选工作树后重新计算代码字节，绝不把受信原项目的测试当作候选证明。
+    def _prepare_candidate(self, root: Path, target: Path, subject: dict[str, Any]) -> None:
+        self._copy_project(root, target)
+        for item in subject["candidates"]:
+            src = _inside(root, item["path"], must_exist=True)
+            dst = _inside(target, item["path"], must_exist=True)
+            if not src.is_file() or not dst.is_file():
+                raise PermissionError("candidate must replace a regular existing project file")
+            payload = self.runtime.objects.get(item["digest"])
+            if sha256_bytes(payload) != item["digest"] or len(payload) > 1_000_000:
+                raise ValueError("candidate object digest or size invalid")
+            dst.write_bytes(payload)
+
     # 在 Tool Ticket 前冻结 profile/revision、命令和资源上限；此时不启动测试进程。
     def intent(self, turn: dict[str, Any], args: dict[str, Any]) -> dict[str, Any]:
         profile, root, command, _ = self._contract(turn, args.get("profile_id"))
+        subject = self.candidate_subject(turn, args)
         return {
             "write_bytes": 0,
             "requires_receipt": True,
             "profile_id": profile["profile_id"],
+            "tested_subject": subject,
             "profile_revision": profile["revision"],
             "project_id": profile["project_id"],
             "kind": profile["kind"],
@@ -239,13 +310,29 @@ class SqliteVerificationProfiles:
                 pass
 
     # 在已准入项目执行固定 unittest profile，按超时停止并保存有界输出；退出码与证据摘要决定结果。
-    def run(self, turn: dict[str, Any], profile_id: str) -> dict[str, Any]:
+    def run(self, turn: dict[str, Any], profile_id: str, *, intent: dict[str, Any] | None = None) -> dict[str, Any]:
         profile, root, command, env = self._contract(turn, profile_id)
+        subject = (intent or {}).get("tested_subject")
+        if intent is not None:
+            if intent.get("profile_id") != profile["profile_id"] or intent.get("profile_revision") != profile["revision"]:
+                raise ValueError("stale verification profile intent")
+            # 重核当前候选身份；Ticket 固定的被测对象不能被晚到参数换成另一版本。
+            ids = [item["decision_id"] for item in subject["candidates"]] if isinstance(subject, dict) else None
+            expected = self.candidate_subject(turn, {"candidate_decision_ids": ids}) if ids is not None else None
+            if subject != expected:
+                raise ValueError("verification subject changed after intent")
         start = time.monotonic()
         timed_out = False
         returncode = None
         spawn_error = None
-        with tempfile.TemporaryFile() as stdout_file, tempfile.TemporaryFile() as stderr_file:
+        with tempfile.TemporaryDirectory(prefix="myth-candidate-") as candidate_dir, tempfile.TemporaryFile() as stdout_file, tempfile.TemporaryFile() as stderr_file:
+            if subject is not None:
+                staged = Path(candidate_dir) / "project"
+                self._prepare_candidate(root, staged, subject)
+                root = staged
+                env = dict(env)
+                if profile["pythonpath"]:
+                    env["PYTHONPATH"] = os.pathsep.join(str(_inside(staged, p, must_exist=True)) for p in profile["pythonpath"])
             kwargs: dict[str, Any] = {
                 "cwd": str(root), "env": env, "stdin": subprocess.DEVNULL,
                 "stdout": stdout_file, "stderr": stderr_file, "close_fds": True,
@@ -308,6 +395,7 @@ class SqliteVerificationProfiles:
             ),
             "profile_id": profile["profile_id"],
             "profile_revision": profile["revision"],
+            "tested_subject": subject,
             "returncode": returncode,
             "timed_out": timed_out,
             "spawn_error": spawn_error,
