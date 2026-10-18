@@ -1,6 +1,12 @@
 """Context Governance 纯策略与真实 Conversation 编译回归。"""
 
 import unittest
+from pathlib import Path
+import tempfile
+
+from myth.runtime import MythRuntime
+from myth.workspace import Workspace
+from myth.web_workspace import ConversationWebService
 
 from myth.acceptance import ContextBudgetError
 from myth.conversation import conversation_request
@@ -137,6 +143,39 @@ class ContextGovernanceTests(unittest.TestCase):
         self.assertNotIn("knowledge:doc:u:0", selected)
         self.assertEqual(request.context_report["delivered"]["memory"], 1)
         self.assertEqual(request.context_report["delivered"]["knowledge"], 0)
+
+    def test_web_send_freezes_provider_window_and_replays_same_intent(self):
+        """真实准入持久化公开模型窗口，重复 request_id 不再依赖当前目录或网络。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with MythRuntime(root) as runtime:
+                repository = Workspace(runtime).repository
+                repository.save_settings({
+                    "provider": "openai", "model": "fixture",
+                    "max_output_tokens": 1024,
+                })
+                sid = repository.create_session()["id"]
+            web = ConversationWebService(root)
+            web.model_catalog.quote_settings = lambda settings: settings
+            web._spawn = lambda run_id: None
+            profile = {
+                "id": "fixture", "provider": "openai",
+                "context_window": 65536, "source": "provider-preflight",
+            }
+            calls = []
+            def preflight(settings, *, entry):
+                """离线预检替身记录请求次数；不联网也不授予执行权。"""
+                calls.append(entry)
+                return profile
+            web._require_model_preflight = preflight
+            first = web.send(sid, {"text": "Explain timeout", "request_id": "fixed"})
+            with MythRuntime(root) as runtime:
+                turn = Workspace(runtime).repository.turn(first["run_id"])
+            self.assertEqual(turn["settings"]["admitted_model_profile"], profile)
+            self.assertEqual(turn["settings"]["model"], "fixture")
+            second = web.send(sid, {"text": "Explain timeout", "request_id": "fixed"})
+            self.assertEqual(first, second)
+            self.assertEqual(calls, ["send"])
 
     def test_remote_model_window_requires_frozen_matching_preflight(self):
         """仅身份匹配的冻结公开窗口可以扩大远端软预算，切换模型立即退回保守上限。"""
