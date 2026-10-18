@@ -52,7 +52,8 @@ class VerificationCompletionTests(unittest.TestCase):
 
     # 原项目绿灯不能替代真实候选覆盖测试；候选被复制至受限临时工作树。
     def test_candidate_overlay_tests_candidate_not_source(self):
-        (self.project_root / "app.py").write_text("VALUE = 1\n", encoding="utf-8")
+        # 原文件须固定 LF 字节，避免 Windows write_text 转 CRLF 后造成伪回归。
+        (self.project_root / "app.py").write_bytes(b"VALUE = 1\n")
         (self.test_dir / "test_fixture.py").write_text(
             "import unittest\nfrom app import VALUE\n"
             "class Check(unittest.TestCase):\n"
