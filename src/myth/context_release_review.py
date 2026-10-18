@@ -6,18 +6,122 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 import re
+import sqlite3
 from typing import Any
 
 from .domain import digest_json
 from .task_benchmark import CONTEXT_BENCHMARK_ARMS, summarize_context_ablation
+from .session_statistics import usage_measurements
 
 
 # 固定工作流接受的完整 Arm 集与三次配对试次，缺测或筛题绝不进入最终评审。
 _REQUIRED_ARMS = frozenset(CONTEXT_BENCHMARK_ARMS)
 _SOURCE_DIGEST = re.compile(r"[0-9a-f]{64}\Z")
+
+
+# 按内容寻址对象的 SHA-256 核对请求/响应原始字节，禁止符号链接代替持久证据。
+def _read_object(runtime_dir: Path, digest: str) -> bytes:
+    if not isinstance(digest, str) or not _SOURCE_DIGEST.fullmatch(digest):
+        raise ValueError("model request/response has an invalid content digest")
+    path = runtime_dir / "objects" / digest[:2] / digest[2:]
+    if path.is_symlink() or not path.is_file():
+        raise ValueError("model content-addressed object is missing or not a regular file")
+    value = path.read_bytes()
+    if hashlib.sha256(value).hexdigest() != digest:
+        raise ValueError("model content-addressed object digest mismatch")
+    return value
+
+
+# 独立于 report.json，读取持久模型 Ticket/Receipt、用量和请求 Context 元数据。
+def _verify_trial_receipts(trial: dict[str, Any], evidence: Path, provider: str, model: str) -> None:
+    database = evidence / "runtime.db"
+    if database.is_symlink() or not database.is_file():
+        raise ValueError("benchmark model SQLite receipt database is missing")
+    run_ids = trial.get("run_ids")
+    if (
+        not isinstance(run_ids, list)
+        or not run_ids
+        or any(not isinstance(run_id, str) or not run_id for run_id in run_ids)
+        or len(set(run_ids)) != len(run_ids)
+    ):
+        raise ValueError("benchmark trial has invalid durable run identities")
+    invocations = []
+    # SQLite URI 使用只读模式，不创建表、策略、运行时或模型请求。
+    with sqlite3.connect(database.as_uri() + "?mode=ro", uri=True) as db:
+        db.row_factory = sqlite3.Row
+        db.execute("PRAGMA query_only = ON")
+        for run_id in run_ids:
+            status = db.execute(
+                "SELECT status FROM workspace_turns WHERE run_id=?", (run_id,)
+            ).fetchone()
+            if status is None:
+                raise ValueError("benchmark run identity is missing from SQLite")
+            if run_id == run_ids[-1] and status["status"] != trial.get("status"):
+                raise ValueError("benchmark final run status differs from SQLite")
+            invocations.extend(dict(item) for item in db.execute(
+                "SELECT * FROM model_invocations WHERE run_id=? ORDER BY rowid", (run_id,)
+            ).fetchall())
+
+    if type(trial.get("model_calls")) is not int or trial["model_calls"] != len(invocations):
+        raise ValueError("benchmark model invocation denominator differs from receipts")
+    activation = trial.get("context_activation")
+    if not isinstance(activation, list) or len(activation) != len(invocations):
+        raise ValueError("benchmark Context activation count differs from persisted calls")
+
+    facts = []
+    for index, row in enumerate(invocations):
+        if (
+            row["provider_id"] != provider or row["model_id"] != model
+            or row["state"] != "RESOLVED" or row["outcome"] != "SUCCEEDED"
+            or not row["ticket_id"] or not row["response_ref"]
+        ):
+            raise ValueError("benchmark model invocation is not a settled matching provider receipt")
+        receipt_path = evidence / "model-receipts" / (row["model_attempt_id"] + ".json")
+        if receipt_path.is_symlink() or not receipt_path.is_file():
+            raise ValueError("benchmark model receipt journal is missing")
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+        usage = json.loads(row["usage_json"])
+        if (
+            not isinstance(receipt, dict) or not isinstance(usage, dict)
+            or receipt.get("model_attempt_id") != row["model_attempt_id"]
+            or receipt.get("request_digest") != row["request_digest"]
+            or receipt.get("response_ref") != row["response_ref"]
+            or receipt.get("response_id") != row["response_id"]
+            or receipt.get("usage") != usage
+        ):
+            raise ValueError("benchmark model receipt journal conflicts with SQLite")
+
+        request = json.loads(_read_object(evidence, row["request_ref"]))
+        _read_object(evidence, row["response_ref"])
+        context = request.get("context_report") if isinstance(request, dict) else None
+        if not isinstance(context, dict):
+            raise ValueError("benchmark frozen model request has no Context report")
+        governance = context.get("governance") or {}
+        expected = {
+            "model_attempt_id": row["model_attempt_id"],
+            "causality": governance.get("causality"),
+            "relevance": governance.get("relevance"),
+            "context_mode": context.get("context_mode"),
+            "selected": len(context.get("selected") or []),
+            "bytes_used": context.get("bytes_used"),
+        }
+        if activation[index] != expected:
+            raise ValueError("benchmark Context activation contradicts frozen model request")
+        facts.append({"model_attempt_id": row["model_attempt_id"], "usage": usage})
+
+    measurements = usage_measurements(
+        facts, ("input_tokens", "output_tokens", "cached_input_tokens", "provider_wall_ms")
+    )
+    if (
+        trial.get("usage_measured") != measurements["totals"]
+        or trial.get("usage_samples") != measurements["samples"]
+        or trial.get("measured_model_attempts") != measurements["attempts"]
+    ):
+        raise ValueError("benchmark model usage totals differ from durable receipts")
 
 
 # 从一个本地评测目录校验原始 Suite/Trial 身份，并独立重算所有配对统计。
@@ -78,6 +182,7 @@ def _validated_bundle(directory: str | Path) -> dict[str, Any]:
         resolved = Path(evidence_root).resolve()
         if not resolved.is_relative_to(root) or not resolved.is_dir():
             raise ValueError("benchmark trial durable evidence is missing or outside bundle")
+        _verify_trial_receipts(trial, resolved, report["provider"], report["model"])
     if seen != expected_cells:
         raise ValueError("benchmark trial grid is incomplete")
     source = report.get("source_digest")
