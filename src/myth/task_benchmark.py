@@ -6,7 +6,7 @@ from __future__ import annotations
 from collections import Counter
 from datetime import datetime, timezone
 import json
-from math import sqrt
+from math import isfinite, sqrt
 from pathlib import Path
 import re
 import time
@@ -16,6 +16,7 @@ from .artifacts import atomic_write
 from .domain import canonical_json, digest_json
 from .domains.information import IntentPick, IntentRoute
 from .models import ModelResult
+from .platform.trial_statistics import case_clustered_sign_test
 from .providers import create_provider
 from .runtime import MythRuntime
 from .session_statistics import usage_measurements
@@ -261,6 +262,8 @@ def summarize_context_ablation(trials, arms, case_ids, repeats, *, kind, complet
                 b = (full.get("usage_measured") or {}).get(name)
                 valid = (
                     type(a) in (int, float) and type(b) in (int, float)
+                    and isfinite(a) and isfinite(b)
+                    and isfinite(b - a)
                     and a >= 0 and b >= 0
                 )
                 metrics[name] = {
@@ -335,7 +338,10 @@ def summarize_context_ablation(trials, arms, case_ids, repeats, *, kind, complet
             ),
         }
     deltas = [item["delta"] for item in cost_summary.values()]
-    evidence_full = complete_suite and variants_complete and complete_pairs == expected_blocks
+    evidence_full = (
+        complete_suite and variants_complete and complete_pairs == expected_blocks
+        and not duplicate
+    )
     metrics_full = evidence_full and all(x is not None for x in deltas)
     no_quality_regression = quality["regressed"] == 0
     # 固定小型 Oracle 集若本身未被候选完整完成，即使双方都失败、成本下降也非晋级。
@@ -380,6 +386,10 @@ def summarize_context_ablation(trials, arms, case_ids, repeats, *, kind, complet
                 variant_measurement_pairs += 1
                 if any(group[arm]["model_calls"] > 0 for arm in expected):
                     context_activation_pairs += 1
+    # 同一 Case 的重复试次不能冒充独立 Case；发布建议必须有固定主指标的显著性证据。
+    statistics = case_clustered_sign_test(
+        pairs, tuple(case_ids), repeats, meter="input_tokens"
+    )
     ready = (
         kind == "real_provider"
         and evidence_full and metrics_full and no_quality_regression
@@ -388,12 +398,15 @@ def summarize_context_ablation(trials, arms, case_ids, repeats, *, kind, complet
         and context_activation_pairs > 0
         and all(delta <= 0 for delta in deltas)
         and any(delta < 0 for delta in deltas)
+        and statistics["passed"]
     )
     return {
-        "method": "same-case-repeat-controlled-harness-v1",
+        "method": "same-case-repeat-controlled-harness-v2",
         "complete_pair_count": complete_pairs,
         "expected_pair_count": expected_blocks,
         "full_context_arms": variants_complete,
+        "duplicate_trial_blocks": duplicate,
+        "paired_significance": statistics,
         "quality": dict(sorted(quality.items())),
         "all_full_arm_oracles_pass": full_oracle_floor,
         "safety": dict(sorted(safety.items())),
@@ -405,9 +418,10 @@ def summarize_context_ablation(trials, arms, case_ids, repeats, *, kind, complet
         "ready_for_separate_heldout_review": ready,
         "promotion_eligible": False,
         "release_policy": (
-            "No automatic promotion; heldout identity, repeated model quality, full "
-            "provider receipts and human approval required. Mechanism interaction "
-            "is observable, not causal proof."
+            "No automatic promotion. Require >=3 paired repeats per case, >=6 independent "
+            "non-tied cases, a predeclared input-token exact one-sided sign test p<=0.05, "
+            "separate heldout review, full provider evidence and explicit human approval. "
+            "Case independence and external SOTA remain unproven."
         ),
         "evidence_kind": kind,
     }
