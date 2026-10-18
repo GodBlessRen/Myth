@@ -97,3 +97,9 @@ leave-one-out
 只有同一 Task 同时拥有 one-mechanism 与 leave-one-out 证据时，Evaluation 才允许标记 `supported_benefit` / `supported_harm`；否则保持 `insufficient` 或 `mixed_or_interaction`。
 
 内置 disposable runner 真正能切换的机制包括 `context_compaction`、`observation_recall`、`action_fusion`、`context_causal_guard`、`context_relevance_ranking`；后两项在本轮分别控制因果证据导航和跨 Knowledge/Memory 的任务词面排序。未知机制直接拒绝，避免“只换标签、不换行为”的伪消融。实验 Run 进入 discovery 分区，不能直接作为 final Promote 证据。
+
+### Context Governance 固定消融基线
+
+`evals/context-governance-v1.json` 是新增的五项**确定性 Context Compiler 探针**，可通过 `myth eval --suite evals/context-governance-v1.json` 检验同 Run 未结算风险、显式因果依赖、跨来源相关性、无假阳性及 fail-closed 预算。 `run_controlled_harness_experiment` 以 `context_causal_guard`、`context_relevance_ranking` 为真实开关执行全关/单机制/全开。在这组固定探针上实现差异，不代表真实多模型 Prompt 成功率或 Token 成本领先。
+
+更多实现语义见 [Context Governance](CONTEXT_GOVERNANCE.md)。
