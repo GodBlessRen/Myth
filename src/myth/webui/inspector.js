@@ -965,6 +965,35 @@ function renderInspectorContext(session, turn) {
               inspectorNumber(contextDecision.provider_visible_saving_bytes, " bytes/request")),
       );
     }
+    // Context 选择事实来自不可变请求/同事务事件；词面相关性、声明依赖不冒充语义或因果证明。
+    const governance = compiled.governance || null;
+    if (governance) {
+      inspectorFact(
+        box,
+        "Model budget",
+        String(compiled.model_budget_source || "unknown") +
+          (compiled.declared_model_context_window == null
+            ? " · window N/A" : " · " +
+              inspectorNumber(compiled.declared_model_context_window, " tokens declared")),
+      );
+      inspectorFact(box, "Relevance", String(governance.relevance || "N/A"));
+      inspectorFact(
+        box,
+        "Causal guard",
+        governance.causal_guard_selected
+          ? inspectorNumber(governance.causal_critical_count) +
+            " critical · " + String(governance.causal_guard_digest || "").slice(0, 12) + "…"
+          : governance.causality === "disabled-for-controlled-evaluation"
+            ? "Evaluation disabled" : "本次无关键状态",
+      );
+      if ((governance.causal_missing_dependencies || []).length) {
+        inspectorFact(
+          box,
+          "Missing dependencies",
+          governance.causal_missing_dependencies.slice(0, 5).join(" / "),
+        );
+      }
+    }
     const reachability = compiled.capability_reachability || [];
     if (reachability.length) {
       inspectorFact(
