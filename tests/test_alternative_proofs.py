@@ -80,6 +80,32 @@ class AlternativeProofTests(unittest.TestCase):
         selected = self.memory.search_view_report("Proof-backed result D")["memories"]
         self.assertNotIn(root["memory_id"], {item["memory_id"] for item in selected})
 
+    # 16 种输入组合全部按布尔公式验证，避免仅覆盖一条撤销快乐路径。
+    def test_all_four_premise_truth_assignments_match_dnf(self):
+        for mask in range(16):
+            sources = {
+                name: self.source(f"table-{mask}-{name}") for name in "ABCE"
+            }
+            claim = self.memory.remember(
+                kind="semantic", text=f"Truth table claim {mask}",
+                source_ref=f"proof:table:{mask}",
+                evidence=[{"source_memory_id": sources[name]["memory_id"]} for name in "ABCE"],
+            )
+            refs = {name: f"memory:{sources[name]['memory_id']}" for name in "ABCE"}
+            self.memory.declare_proof_paths(
+                claim["memory_id"],
+                [[refs["A"], refs["B"]], [refs["C"], refs["E"]]],
+                expected_revision=1,
+            )
+            active = {name: bool(mask & (1 << index)) for index, name in enumerate("ABCE")}
+            for name, enabled in active.items():
+                if not enabled:
+                    self.memory.revoke(sources[name]["memory_id"])
+            expected = (active["A"] and active["B"]) or (active["C"] and active["E"])
+            observed = self.memory.freshness(claim["memory_id"])["status"] == "fresh"
+            with self.subTest(mask=mask, active=active):
+                self.assertEqual(observed, expected)
+
     # 共享前提 B 对两个 AND 组都是必需条件，撤销 B 必须级联撤销 D。
     def test_shared_dependency_revocation_invalidates_every_path(self):
         sources = {k: self.source(f"shared-{k}") for k in "ABC"}
