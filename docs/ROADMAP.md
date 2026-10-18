@@ -29,3 +29,16 @@
 ## 每次变更的完成条件
 
 当前源码、注释、架构说明与工具目录一致；淘汰内容进入 `.trash/<日期>/` 并注明替代入口；[验证与发布检查](VALIDATION.md)通过；结论注明版本、输入和证据范围。
+
+
+## 2026-10-19 · Evidence-driven evolution nomination（EvoOntology-inspired）
+
+已在现有 `SqliteEvolutionControl` 内实现只读 `nomination_report()` 并汇入 `status().nomination`（CLI 可见），不创建新 Run/Candidate、不调模型、不修改活动策略：
+
+- 仅观察当前活动 Policy 的 **complete Discovery Eval**，held-out Final 不进入候选提名信号。
+- 按 `(suite_id,suite_version,case_id)` 将重复试次归为一个独立样本；默认至少 8 个独立可测 Case 且失败比例达 25% 才建议研究，不将 INCONCLUSIVE/UNSUPPORTED 当失败或成功。
+- 任意可信的 `safety_regression` 独立触发人工审查，而不是自动重写系统；已有 DRAFT/ELIGIBLE 候选阻止制造重复建议。
+- 证据扫描有界（最多 2000 观测）；超窗直接标为未取得足够可验证覆盖。报告只暴露 Discovery Eval Run ID，不泄漏 held-out 题目。
+- Promote/Rollback 依旧由原 Release Evidence Seal 与显式审批控制。本功能只决定“值得研究吗”，不是“应该上线”。
+
+局部回归：`tests/test_evolution_nomination.py`。若没有真实的、多任务独立 Discovery 证据，状态应明确 `due=false`，**不演化也属于正确结果**。
