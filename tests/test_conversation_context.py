@@ -441,10 +441,10 @@ class ConversationContinuityTests(unittest.TestCase):
                 events, [e for e in saved if e["kind"] == "ConversationContextCompiled"]
             )
 
-    # 回归断言：请求构造失败前没有 Ticket/已使用 Compact 的伪造事件。
+    # 回归断言：强制系统约束超过冻结模型 Context 软预算时，没有模型 Ticket/伪造编译事件。
     def test_context_failure_has_no_model_ticket_or_compiled_event(self):
         turn = self.repo.turn(self.rid)
-        turn["snapshot"]["project"] = {"instructions": "X" * 70000}
+        turn["snapshot"]["project"] = {"instructions": "X" * 150000}
         with self.runtime.store.tx() as db:
             db.execute(
                 "UPDATE workspace_turns SET snapshot_json=? WHERE run_id=?",
