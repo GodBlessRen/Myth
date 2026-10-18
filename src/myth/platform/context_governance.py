@@ -83,7 +83,7 @@ def _critical_labels(activity: Mapping[str, Any]) -> tuple[str, ...]:
 # 未知效果和未完成审核始终占据安全工作集；已知终态仅作为近期问题导航。
 def _unresolved_labels(labels: Sequence[str]) -> bool:
     return any(
-        label.endswith(_UNRESOLVED_SUFFIXES)
+        (not label.startswith("historical_") and label.endswith(_UNRESOLVED_SUFFIXES))
         or label in {"subagent_review:pending", "subagent_review:pending_review"}
         or label.endswith(":review_pending_review")
         for label in labels
