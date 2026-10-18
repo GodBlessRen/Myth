@@ -252,7 +252,7 @@ def normalize_memory_actions(actions: list[Mapping[str, Any]] | tuple[Mapping[st
                 raise MemoryDeltaError(f"memory ADD {index} requires a stable source_ref")
             source = source.strip()
             scope = raw.get("scope_type", "global")
-            if scope not in {"global", "project", "session"}:
+            if not isinstance(scope, str) or scope not in {"global", "project", "session"}:
                 raise MemoryDeltaError(f"memory ADD {index} has unsupported scope")
             scope_id = raw.get("scope_id")
             if scope == "global":
@@ -271,7 +271,7 @@ def normalize_memory_actions(actions: list[Mapping[str, Any]] | tuple[Mapping[st
                 "evidence": normalize_evidence_set(evidence, default_ref=source),
             }
             identity = ("source", kind, source)
-        elif op in {"UPDATE", "DELETE"}:
+        elif isinstance(op, str) and op in {"UPDATE", "DELETE"}:
             required = (
                 {"op", "memory_id", "expected_revision", "operations"}
                 if op == "UPDATE" else {"op", "memory_id", "expected_revision"}
