@@ -249,6 +249,26 @@ class EpisodeIdempotenceTests(unittest.TestCase):
         self.assertEqual(self.memory.current_change_seq(), watermark)
         self.assertEqual(self.memory.freshness(dependent["memory_id"])["status"], "fresh")
 
+    # Turn 准入冻结项目范围；事后更改 Session 项目也不能改变同一 Run 的历史经历归属。
+    def test_episode_scope_uses_frozen_turn_project(self):
+        workspace = Workspace(self.runtime)
+        repository = workspace.repository
+        old_project = repository.create_project({"name": "original"})
+        new_project = repository.create_project({"name": "moved"})
+        repository.save_settings({
+            "provider": "ollama", "model": "test", "ollama_url": "http://127.0.0.1:11434",
+            "max_steps": 6, "max_output_tokens": 512, "thinking": False,
+        })
+        session = repository.create_session("scope", old_project["id"])
+        turn = repository.create_turn(session["id"], "Question", "request-frozen-episode")
+        repository.update_session(session["id"], {"project_id": new_project["id"]})
+        entry = self.memory.record_episode(turn["run_id"], "Question", "Answer")
+        self.assertEqual(entry["scope_type"], "project")
+        self.assertEqual(entry["scope_id"], old_project["id"])
+        replay = self.memory.record_episode(turn["run_id"], "Question", "Answer")
+        self.assertEqual(replay["memory_id"], entry["memory_id"])
+        self.assertEqual(replay["revision"], 1)
+
     # Run 身份相同但回答不同，不能覆盖历史；不把另一段答案悄悄写成新的 revision。
     def test_conflicting_episode_is_rejected(self):
         first = self.memory.record_episode("episode-conflict", "Question", "Original")
