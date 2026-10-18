@@ -180,6 +180,7 @@ class ContextGovernanceTests(unittest.TestCase):
     def test_controlled_mechanisms_change_real_context_behavior(self):
         """真实 Context 编译验证全开、全关、单项开启的差异，不用标签伪造消融。"""
         from myth.evaluation_runner import CONTROLLED_HARNESS_MECHANISMS
+        from myth.conversation_context import compile_conversation_context
         self.assertIn("context_causal_guard", CONTROLLED_HARNESS_MECHANISMS)
         self.assertIn("context_relevance_ranking", CONTROLLED_HARNESS_MECHANISMS)
         original = {
@@ -194,18 +195,21 @@ class ContextGovernanceTests(unittest.TestCase):
         def compile_with(enabled):
             """隔离同一输入下的一组机制，使所选内容的变化可直接比较。"""
             snapshot = {**original, "evaluation_harness_mechanisms": list(enabled)}
-            return conversation_request(SETTINGS, snapshot, snapshot["messages"], activities)
+            return compile_conversation_context(
+                "test", snapshot, snapshot["messages"], activities,
+                max_bytes=15_000,
+            )[1]
         baseline = compile_with(())
         full = compile_with(("context_causal_guard", "context_relevance_ranking"))
         only_causal = compile_with(("context_causal_guard",))
         only_relevance = compile_with(("context_relevance_ranking",))
-        self.assertNotIn("causal-guard", baseline.context_report["selected"])
-        self.assertIn("causal-guard", full.context_report["selected"])
-        self.assertIn("causal-guard", only_causal.context_report["selected"])
-        self.assertNotIn("causal-guard", only_relevance.context_report["selected"])
-        self.assertIn("knowledge:doc:u:0", baseline.context_report["selected"])
-        self.assertIn("memory:relevant@", " ".join(full.context_report["selected"]))
-        self.assertIn("memory:relevant@", " ".join(only_relevance.context_report["selected"]))
+        self.assertNotIn("causal-guard", baseline["selected"])
+        self.assertIn("causal-guard", full["selected"])
+        self.assertIn("causal-guard", only_causal["selected"])
+        self.assertNotIn("causal-guard", only_relevance["selected"])
+        self.assertIn("knowledge:doc:u:0", baseline["selected"])
+        self.assertIn("memory:relevant@", " ".join(full["selected"]))
+        self.assertIn("memory:relevant@", " ".join(only_relevance["selected"]))
 
     def test_remote_model_window_requires_frozen_matching_preflight(self):
         """仅身份匹配的冻结公开窗口可以扩大远端软预算，切换模型立即退回保守上限。"""
