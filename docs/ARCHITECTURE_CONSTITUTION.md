@@ -73,7 +73,7 @@ Goal、Memory、Prompt、模型输出、子任务返回值都是数据。Capabil
 - **Reuse must be proven, not assumed**：跨 Turn 复用历史投影前先核对消息身份/正文摘要、绑定设置和 continuity epoch；缺失或冲突时重建派生 Context，不能靠 Prompt 猜测连续性。
 - **Historical Truth ≠ Current Facts**：历史记录保持当时原文；`user_asserted / verified` 当前状态以独立版本摘要参与 Continuity，变化不能被旧 Anchor 静默覆盖。
 - **Retrieval ≠ Authority**：相似度、排名与 top-k 只选择候选，不建立 currentness、事实等级、权限或验收。
-- **Causal Active Set ≠ Historical Log**：未结算的 Tool/Model Attempt、UNKNOWN held、Recovery 和显式依赖祖先是 Context 的硬保护集合，不设年龄或数量裁剪；已知终态历史故障可以保留有限近期导航和摘要，其持久事实不可删除。只有同 Run 已结算的权威操作收据可以把旧 Tool UNKNOWN 降级为历史警报，不能据此推断任务成功、并行子任务已验收或授权可重试。
+- **Causal Active Set ≠ Historical Log**：未结算的 Tool/Model Attempt、UNKNOWN held、Recovery 和显式依赖祖先是 Context 的硬保护集合，不设年龄或数量裁剪；已知终态历史故障可以保留有限近期导航和摘要，其持久事实不可删除。只有同 Run 已结算且明确处于已知终态的权威操作收据，才可以把旧 Tool UNKNOWN 降级为历史警报，不能据此推断任务成功、并行子任务已验收或授权可重试。
 - Continuity 的 `resume / catchup / rebuild` 是 Context 复用计划，不是外部效果状态；任何 action 都不能绕过 Ticket/Receipt/UNKNOWN 恢复协议。
 
 ## 7. 策略与效率
