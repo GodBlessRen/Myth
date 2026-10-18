@@ -13,6 +13,7 @@ from .conversation_context import (
     conversation_budget_bytes,
 )
 from .platform.tool_discovery import visible_tool_ids
+from .platform.action_frontier import build_action_frontier
 from .platform.capabilities import capability_reachability, default_capabilities
 from .platform.context import choose_context_mode, context_boundary
 from .model_capabilities import remote_context_budget
@@ -40,6 +41,7 @@ _TOOL_ARGUMENTS = {
     "knowledge.resolve": object_schema(
         {
             "document_id": _TEXT,
+            "expected_digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
             "resolution": {"type": "string", "enum": ["L0", "L1", "L2"]},
             "cursor": {"type": "integer", "minimum": 0},
             "limit": {"type": "integer", "minimum": 1, "maximum": 12000},
@@ -83,6 +85,7 @@ _TOOL_ARGUMENTS = {
     "memory.resolve": object_schema(
         {
             "memory_id": _TEXT,
+            "expected_revision": {"type": "integer", "minimum": 1},
             "resolution": {"type": "string", "enum": ["L0", "L1", "L2"]},
         },
         ["memory_id", "resolution"],
@@ -272,8 +275,9 @@ CONVERSATION_SCHEMA = {
 
 
 # 按当前可见工具生成 Ollama 线协议；延迟工具不进入本步 schema，发现结果只影响下一步。
-def conversation_schema(tool_ids) -> dict:
+def conversation_schema(tool_ids, *, frontier_capabilities=()) -> dict:
     visible = set(tool_ids)
+    frontier = set(frontier_capabilities)
     return {
         "oneOf": [
             object_schema(
@@ -295,7 +299,10 @@ def conversation_schema(tool_ids) -> dict:
                     {
                         "action": {"type": "string", "enum": [name]},
                         "reason": _TEXT,
-                        "arguments": args,
+                        "arguments": (
+                            {"oneOf": [args, object_schema({"candidate_id": _TEXT})]}
+                            if name in frontier else args
+                        ),
                     }
                 )
                 for name, args in _TOOL_ARGUMENTS.items()
@@ -491,6 +498,7 @@ def calculate(expression):
 
 # 根据统一工具合同和冻结事实编译有界消息；Ollama 窗口与输出预留对齐，远端保持本地投影上限。
 def conversation_request(settings, snapshot, messages, activities, control=None):
+    frontier = build_action_frontier(str(snapshot.get("frontier_run_id") or ""), activities)
     visible_ids = visible_tool_ids(TOOL_CATALOG, activities)
     from .platform.model_pool import pending_reviews, pending_resolutions, delegated_results
     pool = settings.get("model_pool") or {}
@@ -557,6 +565,15 @@ def conversation_request(settings, snapshot, messages, activities, control=None)
         "Runtime 会在 Tool Ticket 前拒绝重复、停滞或超出本轮信息预算的请求；不要通过改写同义参数绕过预算。\n"
         "可用工具参数：" + canonical_json(visible_catalog)
     )
+    if frontier:
+        shown = [item.model_view() for item in frontier if item.capability_id in visible_ids]
+        if shown:
+            system += (
+                "\n动态动作候选（仅供选择，执行时仍核对版本/作用域/权限）："
+                + canonical_json(shown)
+                + '\n如选择候选，调用所列 capability_id，并仅传 {"candidate_id":"af_..."}。'
+                + "不要重新生成目标 ID；也可使用传统工具参数。"
+            )
     if pool.get("children"):
         system += "\n独立任务用 agent.parallel(tasks) 最多三项并发，按 ordinal 汇合、delegation_id 分别评分；依赖先审核再派发。\n委派声明类别/难度，可用 profile_id 选槽位；tier 是初值。agent.result 回读原文/metadata，摘要不等于全文。agent.evaluate 评分、判断 capability_tier 并绑定 metadata_digest 审核元数据；缺测 incomplete、矛盾 disputed。拒收后用 replaces 重派或 agent.resolve 补做，花销仍记录。模型池：" + canonical_json({
             "enabled": pool.get("enabled", True), "children": [
@@ -569,7 +586,7 @@ def conversation_request(settings, snapshot, messages, activities, control=None)
             "发现只改变下一步可见目录，不会绕过 Capability/Ticket/权限准入。"
         )
     schema = (
-        conversation_schema(visible_ids)
+        conversation_schema(visible_ids, frontier_capabilities={c.capability_id for c in frontier})
         if settings["provider"] == "ollama"
         else STEP_DECISION_SCHEMA
     )
