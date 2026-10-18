@@ -119,6 +119,7 @@ class SemanticAblationRunner:
             raise ValueError("semantic ablation requires a nontrivial fixed denominator")
         for case in suite.cases:
             self._validate_case(case)
+        # suite_digest：完整 Oracle/输入/套件身份的 SHA-256；测试或观察阶段不得更改已冻结分母。
         self.suite_digest = hashlib.sha256(
             canonical_json({
                 "suite_id": suite.suite_id, "version": suite.version,
