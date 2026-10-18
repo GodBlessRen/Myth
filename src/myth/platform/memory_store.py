@@ -1,5 +1,5 @@
 """生产记忆的持久 SQLite 适配器。
-以 kind/source_ref 去重并递增 revision，按 global/project/session 范围扫描全部可见候选；经历默认 context，不自动升级 verified。
+以 kind/source_ref 去重并递增 revision；原子维护 SQLite 词项倒排索引生成候选，最终来源真相仍由权威 Memory 决定。
 """
 
 from __future__ import annotations
@@ -78,6 +78,34 @@ CREATE TABLE IF NOT EXISTS workspace_memory_changes(
 );
 CREATE INDEX IF NOT EXISTS idx_workspace_memory_changes_scope
     ON workspace_memory_changes(scope_type, scope_id, change_seq);
+
+-- 索引仅存预分词的候选身份；文本/revision/scope/active 仍由 workspace_memories 裁决。
+CREATE TABLE IF NOT EXISTS workspace_memory_terms(
+    memory_id TEXT NOT NULL REFERENCES workspace_memories(memory_id),
+    term TEXT NOT NULL,
+    PRIMARY KEY(memory_id,term)
+);
+CREATE INDEX IF NOT EXISTS idx_workspace_memory_terms_term
+    ON workspace_memory_terms(term,memory_id);
+CREATE TABLE IF NOT EXISTS workspace_memory_terms_state(
+    singleton INTEGER PRIMARY KEY CHECK(singleton=1),
+    last_change_seq INTEGER NOT NULL CHECK(last_change_seq>=-1)
+);
+
+-- 非 Myth 写路径一旦直接修改 Memory 行，立即使派生索引失效。
+-- 正常 Memory Store 在同一事务的 _record_change() 之后恢复为已覆盖水位。
+CREATE TRIGGER IF NOT EXISTS trg_memory_terms_insert_dirty
+AFTER INSERT ON workspace_memories BEGIN
+    UPDATE workspace_memory_terms_state SET last_change_seq=-1 WHERE singleton=1;
+END;
+CREATE TRIGGER IF NOT EXISTS trg_memory_terms_update_dirty
+AFTER UPDATE ON workspace_memories BEGIN
+    UPDATE workspace_memory_terms_state SET last_change_seq=-1 WHERE singleton=1;
+END;
+CREATE TRIGGER IF NOT EXISTS trg_memory_terms_delete_dirty
+AFTER DELETE ON workspace_memories BEGIN
+    UPDATE workspace_memory_terms_state SET last_change_seq=-1 WHERE singleton=1;
+END;
 """
 
 
@@ -106,6 +134,56 @@ class SqliteMemoryStore:
         # _vector_backfilled_change_seq：索引已成功覆盖的权威变化水位，异常和撤销不能冒充健康进度。
         self._vector_backfilled_change_seq: int | None = None
         self.store.ensure_schema(SCHEMA)
+        self._ensure_terms_current()
+
+    # 启动只在权威水位与派生索引水位不一致时重建，且全程短 SQLite 写事务；
+    # 任意中断都不会公开半更新索引，既有 Memory 数据保持不变。
+    def _ensure_terms_current(self) -> None:
+        row = self.store.db.execute(
+            "SELECT last_change_seq FROM workspace_memory_terms_state WHERE singleton=1"
+        ).fetchone()
+        if row is not None and int(row[0]) == self.current_change_seq():
+            return
+        with self.store.tx() as db:
+            current = self.current_change_seq()
+            row = db.execute(
+                "SELECT last_change_seq FROM workspace_memory_terms_state WHERE singleton=1"
+            ).fetchone()
+            if row is not None and int(row[0]) == current:
+                return
+            db.execute("DELETE FROM workspace_memory_terms")
+            for item in db.execute(
+                "SELECT memory_id,text FROM workspace_memories WHERE active=1"
+            ).fetchall():
+                db.executemany(
+                    "INSERT INTO workspace_memory_terms(memory_id,term) VALUES (?,?)",
+                    [(str(item["memory_id"]), term) for term in sorted(_terms(str(item["text"])))],
+                )
+            db.execute(
+                "INSERT INTO workspace_memory_terms_state(singleton,last_change_seq) VALUES (1,?) "
+                "ON CONFLICT(singleton) DO UPDATE SET last_change_seq=excluded.last_change_seq",
+                (current,),
+            )
+
+    # 每次权威变更与索引投影同事务；如果写入失败，正文、Revision 与水位全部回滚。
+    def _sync_terms(self, db, memory_id: str, change_seq: int) -> None:
+        row = db.execute(
+            "SELECT text,active FROM workspace_memories WHERE memory_id=?", (memory_id,)
+        ).fetchone()
+        if row is None:
+            raise KeyError(memory_id)
+        db.execute("DELETE FROM workspace_memory_terms WHERE memory_id=?", (memory_id,))
+        if bool(row["active"]):
+            db.executemany(
+                "INSERT INTO workspace_memory_terms(memory_id,term) VALUES (?,?)",
+                [(memory_id, term) for term in sorted(_terms(str(row["text"])))],
+            )
+        db.execute(
+            "INSERT INTO workspace_memory_terms_state(singleton,last_change_seq) VALUES (1,?) "
+            "ON CONFLICT(singleton) DO UPDATE SET last_change_seq=excluded.last_change_seq",
+            (change_seq,),
+        )
+
     # 校验 kind/text/source/scope/fact_level/evidence 后按来源更新或创建；revision 与证据快照同事务提交。
     def remember(
         self,
@@ -298,7 +376,16 @@ class SqliteMemoryStore:
                 int(row["active"]),
             ),
         )
-        return int(cursor.lastrowid)
+        change_seq = int(cursor.lastrowid)
+        # 一份权威变化水位推动唯一派生词项索引，外部向量库不参与本地提交。
+        if scope is None:
+            self._sync_terms(db, memory_id, change_seq)
+        else:
+            db.execute(
+                "UPDATE workspace_memory_terms_state SET last_change_seq=? WHERE singleton=1",
+                (change_seq,),
+            )
+        return change_seq
 
     # current_change_seq：返回当前 Memory Domain 的持久变化水位；零表示尚无已记录变化。
     def current_change_seq(self) -> int:
@@ -743,8 +830,91 @@ class SqliteMemoryStore:
             "scanned": len(raw),
         }
 
-    # 遍历所有可见候选后稳定排 top-k，返回扫描覆盖；Memory 内容只作上下文。
+    # Query Selectivity：仅遍历 query 的倒排候选，不扫描每条记忆正文；
+    # 词项使用与旧逻辑相同的 English/CJK bigram，因此保持精确 Overlap 和稳定并列次序。
     def _lexical_search_report(
+        self,
+        query: str,
+        *,
+        kinds: Iterable[str | MemoryKind] | None = None,
+        limit: int = 6,
+        project_id: str | None = None,
+        session_id: str | None = None,
+        exclude_source_prefix: str | None = None,
+    ) -> dict:
+        if type(limit) is not int or not 1 <= limit <= 20:
+            raise ValueError("limit must be 1-20")
+        terms = sorted(_terms(str(query)))
+        opts = dict(
+            kinds=kinds, limit=limit, project_id=project_id,
+            session_id=session_id, exclude_source_prefix=exclude_source_prefix,
+        )
+        # 已有进程可能仍采用旧写实现；若权威水位领先索引，正确性优先，退回全扫描。
+        index = self.store.db.execute(
+            "SELECT last_change_seq FROM workspace_memory_terms_state WHERE singleton=1"
+        ).fetchone()
+        if not terms or index is None or int(index[0]) != self.current_change_seq():
+            fallback = self._lexical_scan_report(query, **opts)
+            fallback["retrieval"]["degraded"] = bool(terms)
+            fallback["retrieval"]["degraded_reason"] = (
+                "lexical_index_stale" if terms else "no_indexable_terms"
+            )
+            return fallback
+        allowed = None
+        if kinds is not None:
+            allowed = {
+                item.value if isinstance(item, MemoryKind) else MemoryKind(str(item)).value
+                for item in kinds
+            }
+        sql = (
+            "SELECT m.rowid AS candidate_cursor,m.*,COUNT(*) AS overlap,COUNT(*) OVER() AS matched_total "
+            "FROM workspace_memory_terms AS t "
+            "JOIN workspace_memories AS m ON m.memory_id=t.memory_id "
+            f"WHERE t.term IN ({','.join('?' for _ in terms)}) AND m.active=1 "
+            "AND (m.scope_type='global' "
+            "OR (m.scope_type='project' AND m.scope_id=?) "
+            "OR (m.scope_type='session' AND m.scope_id=?)) "
+        )
+        params: list[Any] = [*terms, project_id, session_id]
+        if allowed:
+            sql += f"AND m.kind IN ({','.join('?' for _ in allowed)}) "
+            params.extend(sorted(allowed))
+        if exclude_source_prefix:
+            # Prefix 不能交给 LIKE 通配符解释，避免 '%' 和 '_' 导致越界排除。
+            sql += "AND substr(m.source_ref,1,?)<>? "
+            params.extend((len(exclude_source_prefix), exclude_source_prefix))
+        sql += "GROUP BY m.memory_id ORDER BY overlap DESC,candidate_cursor DESC,m.memory_id LIMIT ?"
+        params.append(limit)
+        selected = self.store.db.execute(sql, params).fetchall()
+        memories = []
+        matched_total = int(selected[0]["matched_total"]) if selected else 0
+        for row in selected:
+            value = dict(row)
+            value.pop("candidate_cursor", None)
+            value.pop("overlap", None)
+            value.pop("matched_total", None)
+            memories.append(value)
+        return {
+            "memories": memories,
+            "retrieval": {
+                "backend": "memory-term-index",
+                "candidate_policy": "indexed-lexical-exact-overlap-v1",
+                # COUNT OVER 统计经权限筛选后真正匹配的 Memory 数量，非全部可见行；
+                # 查询仍须访问候选 posting，不能把 returned 伪装成总成本。
+                "scanned": matched_total,
+                "visible": matched_total,
+                "matched": matched_total,
+                "pages": 0,
+                "exhausted": True,
+                "truncated_before_ranking": False,
+                "index_terms": len(terms),
+                "matching_candidate_count": matched_total,
+                "returned": len(memories),
+            },
+        }
+
+    # 遍历所有可见候选后稳定排 top-k，返回扫描覆盖；Memory 内容只作上下文。
+    def _lexical_scan_report(
         self,
         query: str,
         *,
@@ -796,8 +966,8 @@ class SqliteMemoryStore:
         return {
             "memories": results,
             "retrieval": {
-                "backend": "memory-lexical",
-                "candidate_policy": "all-visible-active-memories-v2",
+                "backend": "memory-lexical-fallback",
+                "candidate_policy": "full-visible-scan-when-index-unavailable",
                 "scanned": scanned,
                 "visible": visible,
                 "matched": matched,
