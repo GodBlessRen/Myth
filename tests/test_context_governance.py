@@ -317,6 +317,33 @@ class ContextGovernanceTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             remote_context_budget(settings)
 
+    def test_fixed_suite_proves_mechanism_specific_ablation(self):
+        """五道固定 Context 题运行全关/单机制/全开，任务结论必须来自真实编译结果。"""
+        from myth.evaluation_runner import run_controlled_harness_experiment
+        suite = Path(__file__).resolve().parent.parent / "evals" / "context-governance-v1.json"
+        matrix = run_controlled_harness_experiment(
+            suite, ("context_causal_guard", "context_relevance_ranking"),
+            prefix="context-fixture-v1",
+        )
+        self.assertEqual(len(matrix), 4)
+        outcomes = {
+            frozenset(run["harness_mechanisms"]): {
+                item["case_id"]: item["verdict"] for item in run["observations"]
+            }
+            for run in matrix
+        }
+        full = frozenset({"context_causal_guard", "context_relevance_ranking"})
+        self.assertTrue(all(value == "PASS" for value in outcomes[full].values()))
+        none = outcomes[frozenset()]
+        self.assertEqual(none["context-no-false-positive"], "PASS")
+        self.assertEqual(none["causal-open-ledger"], "FAIL")
+        self.assertEqual(none["context-cross-source-relevance"], "FAIL")
+        self.assertEqual(outcomes[frozenset({"context_causal_guard"})]["causal-predecessor"], "PASS")
+        self.assertEqual(outcomes[frozenset({"context_causal_guard"})]["context-cross-source-relevance"], "FAIL")
+        self.assertEqual(outcomes[frozenset({"context_relevance_ranking"})]["context-cross-source-relevance"], "PASS")
+        self.assertEqual(outcomes[frozenset({"context_relevance_ranking"})]["context-guard-fail-closed"], "FAIL")
+        self.assertTrue(all(run["evaluation_partition"] == "discovery" for run in matrix))
+
     def test_remote_model_window_requires_frozen_matching_preflight(self):
         """仅身份匹配的冻结公开窗口可以扩大远端软预算，切换模型立即退回保守上限。"""
         remote = {"provider": "openai", "model": "fixture", "max_output_tokens": 1024}
