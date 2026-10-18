@@ -141,9 +141,15 @@ class LocalConversationExecution:
             activities.append(
                 {
                     "step": item["step"],
+                    "state": item.get("state"),
                     "decision_id": item.get("decision_id"),
                     "capability": decision.get("capability_id"),
                     "question": decision.get("question"),
+                    # 仅从已持久决策的参数提取明确依赖，不凭执行先后补造因果边。
+                    "declared_dependencies": (
+                        (decision.get("arguments") or {}).get("depends_on", [])
+                        if isinstance(decision.get("arguments"), dict) else []
+                    ),
                     "result": result,
                 }
             )
