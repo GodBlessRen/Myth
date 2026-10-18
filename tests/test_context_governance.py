@@ -313,6 +313,33 @@ class ContextGovernanceTests(unittest.TestCase):
         self.assertEqual(len(digest), 64)
         self.assertEqual(len(guard["archived_issue_digest"]), 64)
 
+    def test_archived_failures_cannot_outbid_relevant_memory_under_budget(self):
+        """长历史已知失败的预览退到可选低优先级，活跃风险与任务相关 Memory 先得到空间。"""
+        from myth.conversation_context import compile_conversation_context
+        snapshot = {
+            "messages": [{"role": "user", "content": "verification timeout"}],
+            "memory": [{"memory_id": "useful", "revision": 1,
+                        "text": "verification timeout " * 125}],
+        }
+        activities = [
+            {"step": i, "decision_id": f"failed-{i}",
+             "capability": "test.run", "result": {"status": "FAILED"}}
+            for i in range(45)
+        ]
+        activities.append({
+            "step": 45, "decision_id": "pending",
+            "capability": "artifact.write", "result": {"status": "UNKNOWN"},
+        })
+        _, report = compile_conversation_context(
+            "test", snapshot, snapshot["messages"], activities,
+            max_bytes=9000,
+        )
+        self.assertIn("causal-guard", report["selected"])
+        self.assertIn("memory:useful@1", report["selected"])
+        self.assertEqual(report["governance"]["causal_active_risk_count"], 1)
+        self.assertEqual(report["governance"]["causal_archived_activity_demoted"], 37)
+        self.assertIn("activity:0", report["dropped"])
+
     def test_runtime_receipt_retires_stale_activity_unknown_not_child_unknown(self):
         """同 Run RESOLVED 只校准原工具 UNKNOWN，不能凭父收据消除子委派风险。"""
         activities = [
