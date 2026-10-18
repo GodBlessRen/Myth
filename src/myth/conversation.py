@@ -46,6 +46,17 @@ _TOOL_ARGUMENTS = {
         },
         ["document_id", "resolution"],
     ),
+    "semantics.browse": object_schema(
+        {
+            "query": {"type": "string", "minLength": 1, "maxLength": 120},
+            "limit": {"type": "integer", "minimum": 1, "maximum": 8},
+        },
+        ["query"],
+    ),
+    "semantics.resolve": object_schema(
+        {"term_id": {"type": "string", "minLength": 3, "maxLength": 96}},
+        ["term_id"],
+    ),
     "memory.search": object_schema(
         {
             "query": _TEXT,
@@ -305,6 +316,13 @@ TOOL_CATALOG = {
         "cursor": "resolution-specific continuation cursor",
         "limit": "L0 preview units 1-20 (cursor=0), L1 chunks 1-20, L2 characters 1-12000",
     },
+    "semantics.browse": {
+        "query": "discover explicitly defined, scope-admitted semantic terms",
+        "limit": "1-8; bounded catalog scan, not exhaustive ontology discovery",
+    },
+    "semantics.resolve": {
+        "term_id": "exact dotted namespace term id from semantics.browse",
+    },
     "memory.search": {
         "query": "search long-term memory",
         "limit": "1-8 compact L0 memory index results",
@@ -532,6 +550,7 @@ def conversation_request(settings, snapshot, messages, activities, control=None)
         "你可以自行判断是否使用 agent.delegate。只有独立子任务、上下文隔离或独立复核明显有价值时才委派；简单任务直接完成。"
         "子 Agent 仅见显式 task/context/source_refs，可分页读取输入；不继承父历史/Memory，不能写入、递归或提问。其结果是建议，验收与交付仍由你负责。\n"
         "信息获取遵循 bounded live control：knowledge.search/memory.search/project.search/project.list 属于 SEEK，knowledge.resolve/memory.timeline/memory.resolve/project.read 属于 EXPAND。"
+        "semantics.browse/semantics.resolve 只在需要明确字段定义与结构化 JSON 求值时使用；映射与类型检查不等于独立事实验收。"
         "memory.recall 是有界多探针 SEEK：仅当已有明确的来源版本或不同检索线索时使用；"
         "evidence_gate 只核验来源身份，不证明答案正确；references_unavailable 时不能引用失效来源。"
         "只在当前任务确实缺信息时继续获取；相同请求不要重复，分页必须使用返回的 next_cursor/next_offset 前进，已有信息足够时直接继续任务或回答（KEEP）。"
