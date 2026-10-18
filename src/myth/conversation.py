@@ -532,6 +532,8 @@ def conversation_request(settings, snapshot, messages, activities, control=None)
         "你可以自行判断是否使用 agent.delegate。只有独立子任务、上下文隔离或独立复核明显有价值时才委派；简单任务直接完成。"
         "子 Agent 仅见显式 task/context/source_refs，可分页读取输入；不继承父历史/Memory，不能写入、递归或提问。其结果是建议，验收与交付仍由你负责。\n"
         "信息获取遵循 bounded live control：knowledge.search/memory.search/project.search/project.list 属于 SEEK，knowledge.resolve/memory.timeline/memory.resolve/project.read 属于 EXPAND。"
+        "memory.recall 是有界多探针 SEEK：仅当已有明确的来源版本或不同检索线索时使用；"
+        "evidence_gate 只核验来源身份，不证明答案正确；references_unavailable 时不能引用失效来源。"
         "只在当前任务确实缺信息时继续获取；相同请求不要重复，分页必须使用返回的 next_cursor/next_offset 前进，已有信息足够时直接继续任务或回答（KEEP）。"
         "Runtime 会在 Tool Ticket 前拒绝重复、停滞或超出本轮信息预算的请求；不要通过改写同义参数绕过预算。\n"
         "可用工具参数：" + canonical_json(visible_catalog)
