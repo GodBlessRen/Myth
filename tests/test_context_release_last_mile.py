@@ -297,6 +297,63 @@ class ContextReleaseLastMileTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "activation contradicts"):
             review_context_release(discovery, final)
 
+    # 对象本身的 SHA 路径可校验，仍必须核对该对象与 Ticket 的 canonical digest 是否相同。
+    def test_request_object_is_bound_to_ticket_digest(self):
+        discovery = self.bundle("discovery", "discovery")
+        final = self.bundle("heldout", "heldout")
+        report = json.loads((final / "report.json").read_text(encoding="utf-8"))
+        evidence = Path(report["trials"][0]["evidence_root"])
+        with closing(sqlite3.connect(evidence / "runtime.db")) as db, db:
+            attempt, old_ref = db.execute(
+                "SELECT model_attempt_id,request_ref FROM model_invocations"
+            ).fetchone()
+            old_path = evidence / "objects" / old_ref[:2] / old_ref[2:]
+            request = json.loads(old_path.read_text(encoding="utf-8"))
+            request["messages"][0]["content"] = "forged model-visible prompt"
+            raw = json.dumps(request, ensure_ascii=False).encode("utf-8")
+            new_ref = hashlib.sha256(raw).hexdigest()
+            new_path = evidence / "objects" / new_ref[:2] / new_ref[2:]
+            new_path.parent.mkdir(parents=True, exist_ok=True)
+            new_path.write_bytes(raw)
+            # 故意保留旧 Ticket/Receipt 所声称的 request_digest，模拟证据链断裂。
+            db.execute(
+                "UPDATE model_invocations SET request_ref=? WHERE model_attempt_id=?",
+                (new_ref, attempt),
+            )
+        with self.assertRaisesRegex(ValueError, "request digest differs"):
+            review_context_release(discovery, final)
+
+    # 即使同时更新 Ticket/Receipt 的自洽摘要，真实请求型号也必须和受控实验冻结型号一致。
+    def test_request_model_identity_cannot_be_changed(self):
+        discovery = self.bundle("discovery", "discovery")
+        final = self.bundle("heldout", "heldout")
+        report = json.loads((final / "report.json").read_text(encoding="utf-8"))
+        evidence = Path(report["trials"][0]["evidence_root"])
+        with closing(sqlite3.connect(evidence / "runtime.db")) as db, db:
+            attempt, old_ref = db.execute(
+                "SELECT model_attempt_id,request_ref FROM model_invocations"
+            ).fetchone()
+            old_path = evidence / "objects" / old_ref[:2] / old_ref[2:]
+            request = json.loads(old_path.read_text(encoding="utf-8"))
+            request["model"] = "different-model"
+            raw = json.dumps(request, ensure_ascii=False).encode("utf-8")
+            new_ref = hashlib.sha256(raw).hexdigest()
+            new_path = evidence / "objects" / new_ref[:2] / new_ref[2:]
+            new_path.parent.mkdir(parents=True, exist_ok=True)
+            new_path.write_bytes(raw)
+            new_digest = digest_json(request)
+            db.execute(
+                "UPDATE model_invocations SET request_ref=?,request_digest=? "
+                "WHERE model_attempt_id=?",
+                (new_ref, new_digest, attempt),
+            )
+            receipt_path = evidence / "model-receipts" / (attempt + ".json")
+            receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+            receipt["request_digest"] = new_digest
+            receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "request model differs"):
+            review_context_release(discovery, final)
+
     # 单次测试即使所有成本下降也不具备对照统计效力。
     def test_single_repeat_report_is_rejected(self):
         discovery = self.bundle("discovery", "discovery", repeats=1)
