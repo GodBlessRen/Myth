@@ -16,6 +16,7 @@ from typing import Any
 
 from .domain import digest_json
 from .task_benchmark import CONTEXT_BENCHMARK_ARMS, summarize_context_ablation
+from .platform.context_materiality import model_visible_digest
 from .session_statistics import usage_measurements
 
 
@@ -110,6 +111,41 @@ def _verify_trial_receipts(trial: dict[str, Any], evidence: Path, provider: str,
             "selected": len(context.get("selected") or []),
             "bytes_used": context.get("bytes_used"),
         }
+        if "material_probe" in activation[index]:
+            probe = context.get("material_probe")
+            expected["material_probe"] = probe
+            if not isinstance(probe, dict):
+                raise ValueError("benchmark material probe is missing from durable model request")
+            if probe.get("status") == "FROZEN_COMPILER_MEASURED":
+                # 可以独立确认真实 Ticket 请求的摘要，影子版本仍是本机 Compiler 见证。
+                actual = model_visible_digest(request)
+                digests = probe.get("variant_visible_digests")
+                contrasts = probe.get("material_contrasts")
+                comparisons = {
+                    "causal_without_relevance": ("context-baseline", "context-causal"),
+                    "causal_with_relevance": ("context-relevance", "context-full"),
+                    "relevance_without_causal": ("context-baseline", "context-relevance"),
+                    "relevance_with_causal": ("context-causal", "context-full"),
+                }
+                if (
+                    probe.get("current_arm") != trial["arm"]
+                    or probe.get("actual_visible_digest") != actual
+                    or not isinstance(digests, dict)
+                    or set(digests) != set(CONTEXT_BENCHMARK_ARMS)
+                    or any(
+                        not isinstance(digest, str) or not _SOURCE_DIGEST.fullmatch(digest)
+                        for digest in digests.values()
+                    )
+                    or digests.get(trial["arm"]) != actual
+                    or not isinstance(contrasts, dict)
+                    or contrasts != {
+                        label: digests[left] != digests[right]
+                        for label, (left, right) in comparisons.items()
+                    }
+                    or probe.get("provider_wire_verified") is not False
+                    or probe.get("causal_attribution") is not False
+                ):
+                    raise ValueError("benchmark material probe contradicts immutable model request")
         if activation[index] != expected:
             raise ValueError("benchmark Context activation contradicts frozen model request")
         facts.append({"model_attempt_id": row["model_attempt_id"], "usage": usage})
