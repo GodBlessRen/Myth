@@ -57,7 +57,7 @@ function MessageRow({message}:{message:Message}){
   const isUser=message.role==="user";
   return <article className={"message-row "+(isUser?"from-user":"from-myth")} data-message-id={message.id}>
     <div className="message-surface">
-      {!isUser?<div className="message-byline">MYTH <span>· Assistant</span></div>:null}
+      {!isUser?<div className="message-byline">Myth</div>:null}
       <div className="message-markdown">{isUser?<p className="preserved-text">{message.content}</p>:
         <Markdown remarkPlugins={[remarkGfm]} skipHtml>{message.content}</Markdown>}</div>
       {!isUser?<div className="message-foot">
@@ -98,7 +98,11 @@ function Thread({session}:{session:Session}){
         </div>;
       })}
       {session.artifacts.filter(a=>!seenArtifact.has(a.decision_id)).map(a=><ArtifactRow key={a.decision_id} artifact={a}/>)}
-      {last?.status==="RUNNING"?<div className="live-work"><span className={last.driver_active?"working-pulse":""}/>{last.driver_active?"正在执行当前 Run…":"Driver 已断连，等待核对持久状态"}</div>:null}
+      {last?.status==="RUNNING"&&last.reply_preview?.text?<article className="message-row from-myth reply-preview">
+        <div className="message-surface"><div className="message-byline">Myth · 正在生成</div>
+          <div className="message-markdown preserved-text">{last.reply_preview.text}</div></div>
+      </article>:null}
+      {last?.status==="RUNNING"?<div className="live-work"><span className={last.driver_active?"working-pulse":""}/>{last.driver_active?"正在处理…":"正在核对执行状态"}</div>:null}
     </div>
     {!follow.current?<button className="jump-latest" onClick={()=>{scrollRef.current?.scrollTo({top:scrollRef.current.scrollHeight,behavior:"smooth"});follow.current=true;}}><ArrowDown size={16}/>回到最新</button>:null}
   </div>;
@@ -228,7 +232,7 @@ export function Chat({bootstrap,session,sessionId,loading,loadError,notify}:Prop
     {sessionId && loading&&!session?<div className="center-loading">正在载入会话…</div>:
       loadError&&!session?<div className="center-loading error"><strong>读取会话失败</strong><p>{loadError}</p><button onClick={()=>void refresh(sessionId)}>重试</button></div>:
       session&&session.messages.length?<Thread session={session}/>:
-      <div className="chat-welcome"><div className="welcome-overline"><span className="mark-swatch"/> YOUR AGENT WORKSPACE</div>
+      <div className="chat-welcome">
         <h1>在这里，开始一段工作。</h1>
         <p>让 Myth 研究、执行并保留证据。每一步都可以查看、调整和恢复。</p>
         <div className="welcome-prompts">
@@ -275,7 +279,7 @@ export function Chat({bootstrap,session,sessionId,loading,loadError,notify}:Prop
               <option value="">未关联 Goal</option>{bootstrap.goals.filter(g=>g.state!=="ARCHIVED").map(g=><option value={g.goal_id} key={g.goal_id}>{g.title}</option>)}
             </select>
           </div>
-          <button className="send-action" type="submit" disabled={!canSend} title="Enter 发送 · Shift Enter 换行">{busy?"…":<Send size={17}/>}</button>
+          <button className="send-action" type="submit" aria-label="发送消息" disabled={!canSend} title="Enter 发送 · Shift Enter 换行">{busy?"…":<Send size={17}/>}</button>
         </div>
       </form>
       <input ref={filePicker} className="visually-hidden" aria-label="本地文本文件" type="file" multiple accept=".txt,.md,.py,.json,.csv,.yaml,.yml,.html,.js,.ts" onChange={e=>void importFiles(e)}/>

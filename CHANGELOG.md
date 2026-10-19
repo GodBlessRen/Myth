@@ -1,5 +1,14 @@
 # Changelog
 
+## 未发布 — 2026-10-19 · 日常对话减负
+
+- 澄清答复不再重复注入旧问题；近期原文与同源经历 Memory 去重。
+- 精简默认工具与决策空字段，稳定指令前缀；本地已知工具无需额外 describe 往返，真实授权与范围校验保留。
+- Ollama 窗口压力不再误判为截断，消费公开缓存计数；明确长度停止可在原整轮预算内增大一次输出，OAuth 不做无效重发。
+- DeepSeek / GPT OAuth / OpenAI Responses 与 Ollama 主对话接通生成中预览；预览不提交回答或执行决定。
+- 复用短期远端目录，发送不联网查询价格；准入避免逐轮加载历史执行详情。
+- 删除重复主题覆盖；React 用原生按钮替代唯一 HeroUI 控件，移除 HeroUI/Tailwind。证据与未测范围见 [审查](docs/USABILITY_REVIEW_20261019.md)。
+
 ## 未发布 — 2026-10-16 · 五轮稳定性、性能与发布验收
 
 - 修复 Windows 打包资源 CRLF、Legacy 按钮边框对比度：[#78](https://github.com/GodBlessRen/Myth/pull/78)。

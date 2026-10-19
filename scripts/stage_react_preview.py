@@ -35,7 +35,8 @@ def stage(dist: Path, dest: Path) -> dict:
     dest.mkdir(parents=True, exist_ok=True)
     manifest = {"format": 1, "files": {}}
     for name in FILES:
-        content = (dist / name).read_bytes()
+        # 三份产物都是文本，摘要必须与 Git checkout 后的 LF 字节一致。
+        content = (dist / name).read_bytes().replace(b"\r\n", b"\n")
         if not content:
             raise ValueError("empty built asset: " + name)
         (dest / name).write_bytes(content)
@@ -44,7 +45,8 @@ def stage(dist: Path, dest: Path) -> dict:
             "bytes": len(content),
         }
     (dest / "manifest.json").write_text(
-        json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8", newline="\n",
     )
     return manifest
 

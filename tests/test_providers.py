@@ -9,7 +9,6 @@ import unittest
 from unittest.mock import patch
 
 from myth.models import (
-    ContextTruncated,
     OutputTruncated,
     ModelMessage,
     ModelRequest,
@@ -107,24 +106,25 @@ class OllamaProviderTests(unittest.TestCase):
         self.assertEqual(result.usage["input_tokens"], 12)
         self.assertEqual(result.usage["output_tokens"], 7)
 
-    # 回归断言：供应商明确上下文拒绝作为已知失败，不能与超时 UNKNOWN 混用。
-    def test_context_ceiling_is_reported_as_known_failure(self) -> None:
+    # 输入计数接近窗口不是供应商的截断报告；保留压力与原始计量，正常决定继续交本地校验。
+    def test_context_pressure_is_observed_without_rejecting_complete_response(self) -> None:
         # 固定供应商传输夹具的局部夹具协作；只服务本测试调用链，真实行为仍由外层断言核对。
         def fake_urlopen(req, timeout):
             return FakeResponse(
                 {
-                    "message": {"role": "assistant", "content": "{}"},
+                    "message": {"role": "assistant", "content": '{"action":"reply","reason":"answer","claim":"完整答案"}'},
+                    "done": True, "done_reason": "stop",
                     "prompt_eval_count": 4090,
                     "eval_count": 2,
                 }
             )
 
         with patch("myth.providers.ollama.open_credential_request", side_effect=fake_urlopen):
-            with self.assertRaises(ContextTruncated) as caught:
-                OllamaProvider().invoke(request_obj())
-        self.assertEqual(caught.exception.usage["input_tokens"], 4090)
-        self.assertEqual(caught.exception.usage["output_tokens"], 2)
-        self.assertEqual(caught.exception.raw["prompt_eval_count"], 4090)
+            result = OllamaProvider().invoke(request_obj())
+        self.assertEqual(result.usage["input_tokens"], 4090)
+        self.assertEqual(result.usage["output_tokens"], 2)
+        self.assertFalse(result.raw["myth_context_pressure"]["truncation_confirmed"])
+        self.assertIn("完整答案", result.text)
 
     # 回归断言：供应商明确输出达到长度上限时保留计量并拒绝半截答案作为完成结果。
     def test_length_stop_is_known_failure_and_preserves_usage(self):

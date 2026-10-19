@@ -48,6 +48,11 @@ class FixtureProvider(ChatProvider):
     def invoke(self, request):
         """短暂固定等待使真实 Driver 的在途状态可观察，不冒充供应商首 Token 时间。"""
         text = "\n".join(message.content for message in request.messages)
+        output = json.loads(self.outputs[min(len(self.calls), len(self.outputs) - 1)])
+        if output.get("decision_type") == "request_completion":
+            claim = output.get("claim", "")
+            request.preview_text(json.dumps({"decision_type": "request_completion",
+                "claim": claim[:max(1, len(claim) // 2)]}, ensure_ascii=False)[:-2])
         time.sleep(3 if "等待反馈" in text else 0.1)
         return super().invoke(request)
 

@@ -160,7 +160,7 @@ class ContextGovernanceTests(unittest.TestCase):
                 })
                 sid = repository.create_session()["id"]
             web = ConversationWebService(root)
-            web.model_catalog.quote_settings = lambda settings: settings
+            web.model_catalog.quote_settings = lambda settings, **kwargs: settings
             web._spawn = lambda run_id: None
             profile = {
                 "id": "fixture", "provider": "openai",

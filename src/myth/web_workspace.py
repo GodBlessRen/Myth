@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import copy
+import json
 import logging
 import threading
 import time
@@ -32,6 +34,8 @@ class ConversationWebService:
         self.root = root
         # active：本进程正在管理的 Run 身份集合；只防重复线程，跨进程资格由 Lease/物理锁决定。
         self.active = set()
+        # reply_previews：本进程主回答的临时文本；不进 DB/Context，不是消息、决定、完成或执行授权。
+        self.reply_previews = {}
         # lock：当前互斥资源句柄；按上下文/finally 释放，不能表示业务成功。
         self.lock = threading.Lock()
         # driver_id：当前本机 Driver 的 owner 身份；释放/续期须匹配所有者。
@@ -46,7 +50,7 @@ class ConversationWebService:
         self.scheduler_thread = None
         # scheduler_state：本进程调度状态投影；真实机会和拒绝原因另存数据库。
         self.scheduler_state = {"running": False, "last_tick": None, "last_error": None}
-        # _connection_cache：最多十六个 Ollama 端点的五秒公开目录缓存；失败不缓存，不保存认证信息。
+        # _connection_cache：最多十六个公开目录快照；Ollama 五秒、远端六十秒，失败不缓存。
         self._connection_cache = {}
         # _connection_lock：目录检查串行化避免同时刷新；不与 Runtime 写事务组合。
         self._connection_lock = threading.Lock()
@@ -276,34 +280,76 @@ class ConversationWebService:
     # 在数据库事务外检查固定供应商/model 可用性；ready 不代替真实调用结果。
     def connection(self, payload=None, *, force=False):
         settings = payload or self._use("settings")
-        if settings.get("provider", "ollama") == "ollama":
-            key = settings.get("ollama_url", "http://127.0.0.1:11434")
-            with self._connection_lock:
-                cached = self._connection_cache.get(key)
-                if not force and cached and time.monotonic() - cached[0] < 5:
-                    return {**cached[1], "details": {**cached[1]["details"], "models": list(cached[1]["details"].get("models", []))}}
-                status = OllamaProvider(key, timeout=5).check()
-                value = {"ready": status.ready, "provider": status.provider_id, "details": status.details or {}}
-                if status.ready:
-                    if len(self._connection_cache) >= 16:
-                        self._connection_cache.clear()
-                    self._connection_cache[key] = (time.monotonic(), value)
-                else:
-                    self._connection_cache.pop(key, None)
-                return {**value, "details": {**value["details"], "models": list(value["details"].get("models", []))}}
-        provider = (
-            OllamaProvider(
-                settings.get("ollama_url", "http://127.0.0.1:11434"), timeout=5
-            )
-            if settings.get("provider", "ollama") == "ollama"
-            else self.provider(settings)
-        )
-        status = provider.check()
-        return {
-            "ready": status.ready,
-            "provider": status.provider_id,
-            "details": status.details or {},
-        }
+        provider_id = settings.get("provider", "ollama")
+        endpoint = settings.get("ollama_url", "http://127.0.0.1:11434") if provider_id == "ollama" else "official"
+        key = (provider_id, endpoint)
+        ttl = 5 if provider_id == "ollama" else 60
+        with self._connection_lock:
+            cached = self._connection_cache.get(key)
+            if not force and cached and time.monotonic() - cached[0] < ttl:
+                return copy.deepcopy(cached[1])
+            provider = OllamaProvider(endpoint, timeout=5) if provider_id == "ollama" else self.provider(settings)
+            status = provider.check()
+            value = {"ready": status.ready, "provider": status.provider_id, "details": status.details or {}}
+            if status.ready:
+                if len(self._connection_cache) >= 16:
+                    self._connection_cache.clear()
+                self._connection_cache[key] = (time.monotonic(), copy.deepcopy(value))
+            else:
+                self._connection_cache.pop(key, None)
+            return value
+
+    def invalidate_connection(self, provider_id):
+        """登录、退出、切换账号或轮换密钥后清除公开目录；缓存不代替下一次调用的认证。"""
+        with self._connection_lock:
+            for key in list(self._connection_cache):
+                if key[0] == provider_id:
+                    self._connection_cache.pop(key)
+
+    def _preview_reply(self, rid, text):
+        """只提取顶层 reply/completion 的 claim 字符串；局部 JSON 从不进入决定解析或工具执行。"""
+        decoder = json.JSONDecoder()
+        values = {}
+        offset = 0
+        preview = None
+        try:
+            text = text[:256000]
+            offset = len(text) - len(text.lstrip())
+            if text[offset:offset + 1] != "{":
+                raise ValueError("no object")
+            offset += 1
+            while offset < len(text):
+                offset += len(text[offset:]) - len(text[offset:].lstrip(" \t\r\n,"))
+                if text[offset:offset + 1] == "}":
+                    break
+                key, offset = decoder.raw_decode(text, offset)
+                offset += len(text[offset:]) - len(text[offset:].lstrip())
+                if not isinstance(key, str) or text[offset:offset + 1] != ":":
+                    break
+                offset += 1
+                offset += len(text[offset:]) - len(text[offset:].lstrip())
+                if key == "claim" and (values.get("decision_type") == "request_completion"
+                        or (values.get("decision_type") is None and values.get("action") == "reply")):
+                    # 最多回退一个未完成的 JSON escape（六字符），不修补对象或推断任何工具决定。
+                    for tail in range(7):
+                        fragment = text[offset:len(text) - tail] if tail else text[offset:]
+                        try:
+                            value, _ = decoder.raw_decode(fragment + '"')
+                            if isinstance(value, str):
+                                preview = value.encode("utf-8", errors="ignore").decode()[:64000]
+                            break
+                        except (ValueError, UnicodeError):
+                            continue
+                    break
+                value, offset = decoder.raw_decode(text, offset)
+                values[key] = value
+        except (ValueError, UnicodeError):
+            pass
+        with self.lock:
+            if preview:
+                self.reply_previews[rid] = {"text": preview, "state": "generating"}
+            else:
+                self.reply_previews.pop(rid, None)
 
     # 三条真实准入路径共用同一目录验证；网络与能力检查严格位于 SQLite 短事务外。
     def _require_model_preflight(self, settings, *, entry):
@@ -333,9 +379,9 @@ class ConversationWebService:
         profile = profiles.get(str(settings.get("model"))) if isinstance(profiles, dict) else None
         window = profile.get("context_window") if isinstance(profile, dict) else None
         if (
-            details.get("capability_source") == "provider"
+            details.get("capability_source") in {"provider", "remote"}
             and isinstance(profile, dict)
-            and profile.get("source") == "provider"
+            and profile.get("source") in {"provider", "remote"}
             and type(window) is int and 2048 <= window <= 8_000_000
         ):
             return {
@@ -343,6 +389,8 @@ class ConversationWebService:
                 "id": str(settings.get("model")),
                 "context_window": window,
                 "source": "provider-preflight",
+                **({"max_output_tokens": profile["max_output_tokens"]}
+                   if type(profile.get("max_output_tokens")) is int else {}),
             }
         return None
 
@@ -490,6 +538,8 @@ class ConversationWebService:
                 turn["driver_local"] = bool(turn["run_id"] in active)
                 turn["driver_lease"] = lease
                 turn["reply_timing"] = reply_timings.get(turn["run_id"])
+                with self.lock:
+                    turn["reply_preview"] = copy.deepcopy(self.reply_previews.get(turn["run_id"])) if turn["status"] == "RUNNING" else None
                 # turn() 已在同次会话读取中取出 Cursor；不能为活性观测重复装载整个历史 Turn。
                 cursor = turn["execution_cursor"]
                 if cursor is None:
@@ -599,7 +649,7 @@ class ConversationWebService:
                 heartbeat.start()
                 heartbeat_started = True
                 with MythRuntime(self.root) as runtime:
-                    workspace = Workspace(runtime)
+                    workspace = Workspace(runtime, reply_observer=lambda text: self._preview_reply(rid, text))
                     turn = workspace.repository.turn(rid)
                     settings = turn["settings"]
                     workspace.run(rid, self.provider(settings))
@@ -628,6 +678,8 @@ class ConversationWebService:
                             ),
                         )
             finally:
+                with self.lock:
+                    self.reply_previews.pop(rid, None)
                 stop_heartbeat.set()
                 try:
                     if heartbeat_started:
@@ -659,7 +711,7 @@ class ConversationWebService:
             if previous["status"] == "RUNNING":
                 self._spawn(previous["run_id"])
             return {"run_id": previous["run_id"], "session_id": sid}
-        settings = self.model_catalog.quote_settings(current_settings)
+        settings = self.model_catalog.quote_settings(current_settings, refresh=False)
         pick = RuleIntentPicker().pick(str(text or ""), {})
         model_profile = None
         if pick.route.value != "deterministic":

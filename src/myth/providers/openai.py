@@ -15,7 +15,7 @@ from ..auth.transport import (
     MAX_RESPONSE_BYTES, open_credential_request, read_bounded,
     public_error_code, redact_response,
 )
-from ..models import ModelRequest, ModelResult, ProviderStatus, ProviderKnownFailure, ProviderUnavailable
+from ..models import ModelRequest, ModelResult, ProviderStatus, ProviderKnownFailure, ProviderUnavailable, OutputTruncated
 from ..network_recovery import is_pre_dispatch_disconnect
 from ..model_capabilities import model_capability, reasoning_capability
 
@@ -213,6 +213,9 @@ def _usage(value: dict, *, provider_id: str | None = None) -> dict[str, int]:
     cached_tokens = input_details.get("cached_tokens")
     if type(cached_tokens) is int and cached_tokens >= 0:
         result["cached_input_tokens"] = cached_tokens
+    cache_write = input_details.get("cache_write_tokens")
+    if type(cache_write) is int and cache_write >= 0:
+        result["cache_write_input_tokens"] = cache_write
     # 兼容部分 Responses-compatible Provider 的公开缓存计量；仅保留明确整数，不推导价格或命中收益。
     for source_key, target_key in (
         ("cache_creation_input_tokens", "cache_write_input_tokens"),
@@ -417,7 +420,9 @@ class OpenAIResponsesProvider:
                 content_type = getattr(response, "headers", {}).get("Content-Type", "")
                 if self.chatgpt_plan or "text/event-stream" in content_type:
                     value, streamed_text, first_token_ms = self._read_stream(
-                        response, started, self.timeout, self.provider_name
+                        response, started, self.timeout, self.provider_name,
+                        on_text_delta=(lambda text: model_request.preview_text(redact_response(text, token)))
+                        if model_request.on_text_delta is not None else None,
                     )
                 else:
                     raw = read_bounded(response)
@@ -457,6 +462,10 @@ class OpenAIResponsesProvider:
         # 一旦收到完整终态响应，先记录真实用量；本地解析失败不能退化为效果未知。
         usage = _usage(value, provider_id=self.provider_id)
         status = value.get("status")
+        incomplete = value.get("incomplete_details") or {}
+        if status == "incomplete" and isinstance(incomplete, dict) and incomplete.get("reason") == "max_output_tokens":
+            raise OutputTruncated(f"{self.provider_name} output reached max_output_tokens", usage=usage,
+                raw={"status": status, "incomplete_details": {"reason": "max_output_tokens"}})
         if status in {"failed", "incomplete", "cancelled"}:
             error_value = value.get("error")
             error_code = public_error_code(
@@ -503,12 +512,13 @@ class OpenAIResponsesProvider:
 
     # 逐 SSE data 消费文本增量，只有 response.completed 才返回；失败/中断不能伪造完整响应。
     @staticmethod
-    def _read_stream(response, started=None, timeout=180.0, provider_name="OpenAI"):
+    def _read_stream(response, started=None, timeout=180.0, provider_name="OpenAI", *, on_text_delta=None):
         completed = None
         text_chunks = []
         first_token_ms = None
         started = time.monotonic() if started is None else started
         total_bytes = 0
+        last_preview_at = 0.0
         # 每事件/整次流都有字节上限；只保留数据字段，不信任服务端自定义错误描述。
         for data, size in _sse_events(response, deadline=started + timeout):
             if time.monotonic() - started > timeout:
@@ -528,6 +538,11 @@ class OpenAIResponsesProvider:
                 if event_value["delta"] and first_token_ms is None:
                     first_token_ms = max(0, int((time.monotonic() - started) * 1000))
                 text_chunks.append(event_value["delta"])
+                # UI 最多每秒收到五次累计预览，不逐 token 重建页面；收据仍等 completed。
+                now = time.monotonic()
+                if on_text_delta is not None and now - last_preview_at >= 0.2:
+                    on_text_delta("".join(text_chunks))
+                    last_preview_at = now
             elif event_type == "response.completed" and isinstance(
                 event_value.get("response"), dict
             ):
@@ -545,6 +560,11 @@ class OpenAIResponsesProvider:
                     else {}
                 )
                 code = public_error_code(error_value.get("code"), event_type)
+                incomplete = response_value.get("incomplete_details") or {}
+                if event_type == "response.incomplete" and isinstance(incomplete, dict) and incomplete.get("reason") == "max_output_tokens":
+                    raise OutputTruncated(f"{provider_name} output reached max_output_tokens",
+                        usage=_usage(response_value), raw={"status": "incomplete",
+                            "incomplete_details": {"reason": "max_output_tokens"}})
                 raise ProviderKnownFailure(f"{provider_name} Responses stream failed: {code}",
                     usage=_usage(response_value), raw={"status": event_type, "error": {"code": code}})
             elif event_type == "error":
@@ -553,6 +573,8 @@ class OpenAIResponsesProvider:
             raise RuntimeError(
                 f"{provider_name} Responses stream ended without response.completed"
             )
+        if on_text_delta is not None:
+            on_text_delta("".join(text_chunks))
         return completed, "".join(text_chunks), first_token_ms
 
 

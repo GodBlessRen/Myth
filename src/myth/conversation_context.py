@@ -153,12 +153,15 @@ def compile_conversation_context(
     compact_requested = bool(control.get("compact_requested"))
     compact = compact_requested if compact_mode is None else bool(compact_mode)
     project = snapshot.get("project") or {}
-    system += ("\n隔离子任务只可展开本次明确传入的输入；没有父对话、Memory、项目或写权限。" if snapshot.get("is_subagent") else (
+    stable_system = system
+    project_instructions = ("隔离子任务只可展开明确传入的输入；没有父对话、Memory、项目或写权限。" if snapshot.get("is_subagent") else (
         "\n项目："
         + project.get("name", "")
         + "\n项目指令："
         + project.get("instructions", "")
     ))
+    # 变化的控制、Goal 和策略不能改写首条系统消息；它们是本步数据，排在稳定历史之后。
+    system = ""
     # Continuity 是 Runtime 复用事实；只进入报告/观测，不重复塞进 System Prompt 消耗预算。
     continuity = snapshot.get("continuity") or {}
     if control.get("steering_note"):
@@ -278,7 +281,20 @@ def compile_conversation_context(
         )
         items.append(ContextItem(source_ref, encoded, priority, required))
 
-    add("instructions", "system", system, required=True)
+    add("instructions", "system", stable_system, required=True)
+    add("project-instructions", "system", project_instructions, required=True)
+    start = snapshot.get("turn_message_start", 0)
+    start = max(0, min(start, max(0, len(messages) - 1)))
+    excluded = []
+    # 历史原文先于本轮动态召回；相邻请求可复用同一前缀，预算选择仍由原优先级负责。
+    for index, message in enumerate(messages[:start]):
+        ref = f"message:{index}"
+        if compact and index < max(0, start - 8):
+            excluded.append(ref)
+            continue
+        add(ref, message["role"], message["content"], priority=10_000 + index)
+    if snapshot.get("tool_context"):
+        add("tool-catalog", "user", canonical_json(snapshot["tool_context"]), required=True)
     feedback = snapshot.get("model_pool_feedback") or []
     if feedback:
         # 经验是可裁剪的意见投影；不膨胀必留指令，也不替代路由时查询的权威评分。
@@ -344,8 +360,9 @@ def compile_conversation_context(
         )
 
     # 准入快照固定本轮消息边界；独立构造的输入没有边界时，从第一条消息开始。
-    excluded = []
     for index, message in enumerate(messages):
+        if index < start:
+            continue
         ref = f"message:{index}"
         if compact and index < max(0, start - 8):
             excluded.append(ref)
@@ -357,6 +374,8 @@ def compile_conversation_context(
             priority=10_000 + index,
             required=index >= start,
         )
+
+    add("runtime-context", "user", system, required=True)
 
     folded = []
     # Guard 的历史归档仅降低旧已知故障预览的优先级；真实执行事实和来源绝不删除。

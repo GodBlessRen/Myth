@@ -70,7 +70,7 @@ class ConversationContextTests(unittest.TestCase):
         self.assertIn("CURRENT-TASK", text)
         self.assertIn("MEMORY-0", text)
         self.assertTrue(request.context_report["dropped"])
-        self.assertLessEqual(request.context_report["bytes_used"], 42000)
+        self.assertLessEqual(request.context_report["bytes_used"], request.context_report["max_bytes"])
 
     # 回归断言：折叠旧工具展示保留来源，最新工具结果继续精确进入请求。
     def test_old_git_and_search_results_fold_but_latest_remains_exact(self):
@@ -236,7 +236,7 @@ class ConversationContextTests(unittest.TestCase):
         for snapshot, activities in [
             (
                 {
-                    "project": {"instructions": "x" * 42000},
+                    "project": {"instructions": "x" * 50000},
                     "messages": [{"role": "user", "content": "task"}],
                 },
                 [],

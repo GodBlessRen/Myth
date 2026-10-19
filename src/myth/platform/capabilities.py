@@ -74,11 +74,11 @@ class CapabilityRegistry:
 # 登记已接入工具及其效果合同；执行由适配器承担，test.run 仍需显式受信 profile。
 def default_capabilities() -> CapabilityRegistry:
     executable = [
-        ("skill.list", "skill", "Discover local bounded SKILL.md resources without executing scripts.", "read"),
-        ("skill.load", "skill", "Read one discovered skill under its fixed source digest.", "read"),
-        ("mcp.servers", "mcp", "Inspect operator-configured MCP servers without connecting.", "read"),
-        ("mcp.tools", "mcp", "Initialize one enabled stdio MCP server and discover a bounded tool page after Ticket.", "execute"),
-        ("mcp.call", "mcp", "Call one operator-allowed discovered MCP tool after Ticket; unresolved effects require reconciliation.", "execute"),
+        ("skill.list", "skill", "查找本地技能。Discover local bounded SKILL.md resources without executing scripts.", "read"),
+        ("skill.load", "skill", "读取已发现的技能正文。Read one discovered skill under its fixed source digest.", "read"),
+        ("mcp.servers", "mcp", "查看外部服务配置。Inspect operator-configured MCP servers without connecting.", "read"),
+        ("mcp.tools", "mcp", "发现外部服务工具。Initialize one enabled stdio MCP server and discover a bounded tool page after Ticket.", "execute"),
+        ("mcp.call", "mcp", "调用已允许的外部工具。Call one operator-allowed discovered MCP tool after Ticket; unresolved effects require reconciliation.", "execute"),
         (
             "knowledge.search",
             "knowledge",
@@ -94,13 +94,13 @@ def default_capabilities() -> CapabilityRegistry:
         (
             "semantics.browse",
             "knowledge",
-            "Find versioned and scope-admitted typed term mappings; discovery does not verify their claims.",
+            "查找语义术语映射。Find versioned and scope-admitted typed term mappings; discovery does not verify their claims.",
             "read",
         ),
         (
             "semantics.resolve",
             "knowledge",
-            "Execute a bounded JSON term mapping with pinned Memory evidence, type/unit and constraint checks.",
+            "展开语义映射与约束。Execute a bounded JSON term mapping with pinned Memory evidence, type/unit and constraint checks.",
             "read",
         ),
         (
@@ -112,19 +112,19 @@ def default_capabilities() -> CapabilityRegistry:
         (
             "memory.recall",
             "memory",
-            "Bounded multi-query recall with exact Memory revision anchors and explicit evidence gate.",
+            "使用多条线索召回记忆。Bounded multi-query recall with exact Memory revision anchors and explicit evidence gate.",
             "read",
         ),
         (
             "memory.timeline",
             "memory",
-            "Navigate visible memories around one admitted anchor without changing source facts.",
+            "记忆时间线与相邻经历。Navigate visible memories around one admitted anchor without changing source facts.",
             "read",
         ),
         (
             "memory.resolve",
             "memory",
-            "Expand one visible memory at L0/L1/L2 while preserving memory identity and revision.",
+            "展开记忆完整正文。Expand one visible memory at L0/L1/L2 while preserving memory identity and revision.",
             "read",
         ),
         (
@@ -207,19 +207,19 @@ def default_capabilities() -> CapabilityRegistry:
         (
             "diff.preview",
             "file",
-            "Render a bounded unified diff without writing the source file.",
+            "预览文件差异。Render a bounded unified diff without writing the source file.",
             "read",
         ),
         (
             "git.status",
             "git",
-            "Inspect repository status through fixed read-only argv.",
+            "查看 Git 仓库状态。Inspect repository status through fixed read-only argv.",
             "read",
         ),
         (
             "git.diff",
             "git",
-            "Inspect repository diff through fixed read-only argv.",
+            "查看 Git 文件差异。Inspect repository diff through fixed read-only argv.",
             "read",
         ),
     ]

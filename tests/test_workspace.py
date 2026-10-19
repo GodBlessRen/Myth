@@ -238,7 +238,9 @@ class WorkspaceTests(unittest.TestCase):
         rid = self.turn(sid, "之前的数字是什么？", "next")
         provider = ChatProvider()
         self.workspace.run(rid, provider)
-        conversation = provider.calls[0].messages[1:]
+        request = provider.calls[0]
+        conversation = [message for ref, message in zip(request.context_report["selected"], request.messages)
+                        if ref.startswith("message:")]
         self.assertEqual(len(conversation), 3)
         self.assertIn("928", conversation[0].content)
 

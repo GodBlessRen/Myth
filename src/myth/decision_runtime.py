@@ -21,6 +21,7 @@ from .domain import (
 )
 from .models import (
     ContextTruncated,
+    OutputTruncated,
     ProviderKnownFailure,
     ProviderUnavailable,
     DecisionValidationError,
@@ -362,6 +363,7 @@ class DecisionRuntime:
         reason: str,
         usage: dict[str, int],
         retryable: bool = False,
+        failure_type: str | None = None,
     ) -> dict[str, Any]:
         receipt = {
             "model_attempt_id": attempt_id,
@@ -372,6 +374,7 @@ class DecisionRuntime:
             "reason": reason,
             "usage": usage,
             "retryable": retryable,
+            **({"failure_type": failure_type} if failure_type else {}),
         }
         encoded = json.dumps(receipt, ensure_ascii=False, sort_keys=True).encode(
             "utf-8"
@@ -671,6 +674,8 @@ class DecisionRuntime:
                 if receipt.get("outcome") == "FAILED":
                     if receipt.get("retryable") is True:
                         raise ProviderUnavailable()
+                    if receipt.get("failure_type") == "output_truncated":
+                        raise OutputTruncated(receipt["reason"], usage=receipt.get("usage"))
                     raise ProviderKnownFailure(receipt["reason"], usage=receipt.get("usage"))
                 decision = parse_step_decision(receipt["text"])
                 return (
@@ -749,6 +754,7 @@ class DecisionRuntime:
                 reason=str(exc),
                 usage={**exc.usage, "provider_wall_ms": provider_wall_ms},
                 retryable=isinstance(exc, ProviderUnavailable),
+                failure_type="output_truncated" if isinstance(exc, OutputTruncated) else None,
             )
             self._settle_failed(attempt_id, receipt)
             if isinstance(exc, ContextTruncated):

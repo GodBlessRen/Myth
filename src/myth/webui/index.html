@@ -24,7 +24,7 @@
 <button class="command-trigger" id="commandToggle" title="搜索与快捷操作"><span data-icon="search"></span><span class="nav-text">搜索与快捷操作</span><kbd>Ctrl K</kbd></button>
 <div class="sidebar-library"><details class="nav-group" data-nav-group="work" open><summary>工作<svg aria-hidden="true" class="icon fold-chevron" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"></path></svg></summary><nav aria-label="工作" class="navigation primary-nav"><a data-page="chat" href="#chat" title="对话"><span data-icon="chat"></span><span class="nav-text">对话</span></a><a data-page="goals" href="#goals" title="目标与计划"><span data-icon="target"></span><span class="nav-text">目标与计划</span></a></nav></details><details class="nav-group" data-nav-group="library" open><summary>资料<svg aria-hidden="true" class="icon fold-chevron" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"></path></svg></summary><nav aria-label="资料" class="navigation primary-nav"><a data-page="projects" href="#projects" title="项目"><span data-icon="folder"></span><span class="nav-text">项目</span></a><a data-page="knowledge" href="#knowledge" title="知识库"><span data-icon="book"></span><span class="nav-text">知识库</span></a><a data-page="sessions" href="#sessions" title="会话"><span data-icon="history"></span><span class="nav-text">会话</span></a></nav></details><details class="nav-group recent-group" data-nav-group="recent" open><summary>最近对话<span class="nav-count" id="recentCount"></span><svg aria-hidden="true" class="icon fold-chevron" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"></path></svg></summary><div class="recent-sessions" id="recentSessions"></div><a class="all-sessions" href="#sessions">查看全部会话<span aria-hidden="true">↗</span></a></details></div>
 <div class="sidebar-bottom"><nav aria-label="系统" class="navigation secondary-nav"><a data-page="runtime" href="#runtime" title="Runtime"><span data-icon="activity"></span><span class="nav-text">Runtime</span></a><a data-page="settings" href="#settings" title="设置"><span data-icon="settings"></span><span class="nav-text">设置</span></a></nav><div class="local-profile"><span aria-hidden="true" class="workspace-avatar"><img class="brand-mark" data-brand="main" src="/logo.svg" alt="" width="48" height="30"/></span><div><strong>个人工作空间</strong><small>本地工作区</small></div></div></div>
-<div class="split-handle split-handle-left" id="sidebarResize" role="separator" aria-orientation="vertical" aria-label="调整导航宽度" aria-valuemin="210" aria-valuemax="370" aria-valuenow="248" tabindex="0"></div>
+<div class="split-handle split-handle-left" id="sidebarResize" role="separator" aria-orientation="vertical" aria-label="调整导航宽度" aria-valuemin="210" aria-valuemax="370" aria-valuenow="228" tabindex="0"></div>
 </aside>
 <button aria-label="关闭导航" class="sidebar-shade hidden" id="sidebarShade"></button>
 <main class="main" id="mainContent" tabindex="-1">
@@ -72,7 +72,7 @@
 </select></label><label class="project-select-label"><span data-icon="spark"></span><select aria-label="长期 Goal" id="chatGoal">
 <option value="">关联 Goal</option>
 </select></label><button aria-label="创建长期 Goal" class="icon-button" id="quickGoal" type="button">
-<span data-icon="plus"></span></button><span class="agent-mode"><span class="agent-dot"></span>Agent</span>
+<span data-icon="plus"></span></button>
 </div>
 <div class="send-area">
 <span id="inputHint">Enter 发送 · Shift Enter 换行</span><button aria-label="停止当前轮次" class="stop-button hidden" id="stopTurn" type="button"><svg aria-hidden="true" class="icon" viewBox="0 0 24 24"><path d="M7 7h10v10H7Z"></path></svg></button><button aria-label="发送消息" class="send-button" id="send" type="submit">
@@ -325,7 +325,7 @@
 <label for="maxSteps">每轮最多步骤</label><input id="maxSteps" max="32" min="2" type="number" value="12" required=""/>
 </div>
 <div>
-<label for="maxTokens">每步输出 Token</label><input id="maxTokens" max="393216" min="128" type="number" value="2048" required=""/>
+<label for="maxTokens">初始输出 Token</label><input id="maxTokens" title="达到长度上限后，可在整轮预算与窗口内增大一次；GPT OAuth 由远端控制。" max="393216" min="128" type="number" value="2048" required=""/>
 </div>
 </div>
 <div class="two-fields">
@@ -357,7 +357,7 @@
 </div>
 </section>
 </main>
-<aside aria-label="Runtime Observatory" class="inspector" id="runtimeInspector"><div class="split-handle split-handle-right" id="inspectorResize" role="separator" aria-orientation="vertical" aria-label="调整观测宽度" aria-valuemin="285" aria-valuemax="480" aria-valuenow="340" tabindex="0"></div>
+<aside aria-label="Runtime Observatory" class="inspector" id="runtimeInspector"><div class="split-handle split-handle-right" id="inspectorResize" role="separator" aria-orientation="vertical" aria-label="调整观测宽度" aria-valuemin="285" aria-valuemax="480" aria-valuenow="300" tabindex="0"></div>
 <div class="inspector-head"><span class="inspector-title">运行观测</span><button aria-expanded="true" aria-label="收起观测栏" class="icon-button inspector-dock" id="inspectorDock" title="收起观测栏" type="button"><svg aria-hidden="true" class="icon" viewBox="0 0 24 24"><path d="M4 4h16v16H4Zm11 0v16M8 8l4 4-4 4"></path></svg></button><div class="inspector-status"><span class="inspector-pulse" id="inspectorPulse"></span><div class="inspector-status-copy"><strong id="inspectorState">空闲</strong><span class="inspector-acceptance hidden" id="inspectorAcceptance"></span></div></div></div>
 <div aria-label="观测角度" class="inspector-lenses" id="inspectorLenses" role="tablist"><button aria-controls="lens-overview" aria-selected="false" id="lens-tab-overview" data-inspector-lens="overview" role="tab" type="button">概览</button><button aria-controls="lens-execution" aria-selected="false" id="lens-tab-execution" data-inspector-lens="execution" role="tab" type="button">执行</button><button aria-controls="lens-resources" aria-selected="false" id="lens-tab-resources" data-inspector-lens="resources" role="tab" type="button">资源</button></div><div class="inspector-scroll"><details class="observatory-group" id="lens-overview" data-lens-panel="overview" aria-labelledby="lens-tab-overview" open><summary><span>概览</span><svg aria-hidden="true" class="icon" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"></path></svg></summary><details class="inspector-section session-statistics" data-evidence-section="1" open><summary class="inspector-section-heading"><h2 class="inspector-label">会话统计</h2><svg aria-hidden="true" class="icon fold-chevron" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"></path></svg></summary><div class="inspector-section-body"><div aria-live="polite" class="context-facts" id="sessionStatistics">
 <div class="inspector-empty">选择会话后显示统计</div>

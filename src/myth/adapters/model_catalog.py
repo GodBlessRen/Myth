@@ -54,7 +54,7 @@ class PublicModelCatalog:
         # attempted：单调时钟控制失败/强制刷新十秒节流。
         self.attempted = -10.0
 
-    def info(self, provider, model, *, force=False):
+    def info(self, provider, model, *, force=False, refresh=True):
         """返回精确匹配的标价和来源；零占位、未知模型、订阅/本地渠道均不伪造免费。"""
         # 先区分无需报价渠道，再有界刷新公开目录，最后核对精确型号/数值；失败可保留带 stale 的旧报价。
         if provider not in (*PROVIDER_KEYS, "ollama", "chatgpt", "claude_oauth") or not isinstance(model, str) or len(model) > 200:
@@ -72,7 +72,7 @@ class PublicModelCatalog:
             return {**result, "status": status}
         with self.lock:
             now = time.monotonic()
-            if (force or not self.data or now - self.refreshed >= 3600) and now - self.attempted >= 10:
+            if refresh and (force or not self.data or now - self.refreshed >= 3600) and now - self.attempted >= 10:
                 self.attempted = now
                 try:
                     data = self.loader()
@@ -103,19 +103,23 @@ class PublicModelCatalog:
                 "checked_at": self.checked_at, "stale": stale})
             return result
 
-    def quote_settings(self, settings):
-        """在保存/准入前解析公开标价；自定义合同单价保持显式覆盖，执行快照不会中途更新。"""
+    def quote_settings(self, settings, *, refresh=True):
+        """保存/手动查询可刷新价格；发送消息只读取缓存，不为报价额外等待网络。"""
         result = copy.deepcopy(settings)
         pool = result.setdefault("model_pool", {"enabled": True, "adaptive": True, "children": []})
         profiles = [(result, pool, "main_pricing")]
         profiles.extend((child, child, "pricing") for child in pool.get("children", []))
         for profile, owner, key in profiles:
             rates = owner.get(key)
-            info = self.info(profile["provider"], profile.get("model", ""))
+            info = self.info(profile["provider"], profile.get("model", ""), refresh=refresh)
             ceiling = info.get("max_output_tokens")
             if ceiling and profile.get("max_output_tokens", 2048) > ceiling:
                 raise ValueError(f"{profile.get('model')} 的输出 Token 上限为 {ceiling}")
             if rates and rates.get("source") != "models.dev":
+                continue
+            if not refresh and info["pricing"] is None and rates and rates.get("provider") == profile["provider"] and rates.get("model") == profile.get("model"):
+                # 重启后的内存目录为空；保留设置中同模型旧报价并明确标记过期，不能把已知报价抹成免费。
+                owner[key] = {**rates, "stale": True}
                 continue
             owner[key] = info["pricing"]
         return result

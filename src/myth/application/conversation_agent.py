@@ -5,7 +5,7 @@ from ..acceptance import ContextBudgetError
 from ..domain import BudgetExceeded, RecoveryRequired, PatchContractError, ExecutionDeferred
 from ..failures import failure_result, observe_failure
 from ..domains.conversation_state import is_drivable
-from ..models import StepDecision, DecisionValidationError, ProviderKnownFailure, ProviderUnavailable
+from ..models import StepDecision, DecisionValidationError, ProviderKnownFailure, ProviderUnavailable, OutputTruncated
 from ..platform.completion import CompletionGuard
 from ..conversation_ports import (
     ConversationRepository,
@@ -75,6 +75,36 @@ class ConversationAgent:
     # 查询控制安全点并返回是否停止规划；控制不会撤销已签发外部调用。
     def _gate(self, run_id: str) -> bool:
         return self.control.gate(run_id) is not None
+
+    def _retry_output(self, run_id, step):
+        """有终态失败收据才安排一次更大输出；总预算、步数和窗口仍限制下一次 Ticket。"""
+        turn = self.repository.turn(run_id)
+        settings = turn["settings"]
+        if settings["provider"] == "chatgpt" or turn["current_step"] >= turn["max_steps"]:
+            # 订阅端点不接受输出上限；重发同一 wire 不能声称已修复长度问题。
+            return False
+        if any((item.get("result") or {}).get("output_retry_tokens") for item in turn["activities"]):
+            return False
+        original = settings["max_output_tokens"]
+        limit = min(original * 2, 32768)
+        profile = settings.get("admitted_model_profile") or {}
+        ceiling = profile.get("max_output_tokens")
+        if type(ceiling) is int:
+            limit = min(limit, ceiling)
+        window = settings.get("num_ctx", 8192) if settings["provider"] == "ollama" else profile.get("context_window")
+        if type(window) is int:
+            limit = min(limit, window // 2)
+        output_account = next((a for a in turn["budgets"] if a["meter"] == "output_tokens"), None)
+        if output_account:
+            limit = min(limit, output_account["limit_units"] - output_account["settled"]
+                        - output_account["reserved"] - output_account["unknown_held"])
+        if limit <= original:
+            return False
+        self.repository.finish_observation(run_id, step, {
+            "observation_kind": "model_output_truncated", "output_retry_tokens": limit,
+            "message": "上一次生成达到输出上限，未产生可执行决定；本次用更大预算重新给出完整回答。",
+        })
+        return True
 
     # 锁定一个 Run，先核对旧机会，逐步复用/绑定决定；效果后保留收据，回答后分别记录经历和 Goal 进度。
     def run(self, run_id, provider):
@@ -242,6 +272,18 @@ class ConversationAgent:
                         self._checkpoint_goal(run_id, status="INTERRUPTED",
                             summary="Provider disconnected before dispatch; checkpoint preserved.",
                             next_action="Wait for the scheduled reconnection check.")
+                    return
+                except OutputTruncated as exc:
+                    if self._gate(run_id):
+                        return
+                    if self._retry_output(run_id, step["step"]):
+                        continue
+                    provider_id = self.repository.turn(run_id)["settings"]["provider"]
+                    message = ("服务端回复达到输出上限。请把任务分成较短的部分；GPT OAuth 不支持本地调整生成上限。"
+                               if provider_id == "chatgpt" else "回复达到输出上限。请提高生成预算，或把任务分成较短的部分。")
+                    self.repository.block(run_id, "FAILED", message)
+                    self._checkpoint_goal(run_id, status="FAILED", summary=str(exc),
+                        next_action="Adjust output budget or split the response before a new turn.")
                     return
                 except (ContextBudgetError, ProviderKnownFailure) as exc:
                     self.repository.block(run_id, "FAILED", str(exc))

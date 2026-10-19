@@ -12,7 +12,7 @@ from urllib import request, error
 
 from ..auth.transport import open_credential_request, read_bounded, redact_response
 from ..model_capabilities import model_capability, reasoning_capability
-from ..models import ModelResult, ProviderStatus, ProviderKnownFailure, ProviderUnavailable
+from ..models import ModelResult, ProviderStatus, ProviderKnownFailure, ProviderUnavailable, OutputTruncated
 from ..network_recovery import ConnectionNotDispatched, is_pre_dispatch_disconnect
 from ..auth.claude import OAUTH_BETA
 from ..platform.handoff import public_metadata
@@ -118,10 +118,14 @@ class MessagesProvider:
                 "tools": [{"name": "myth_decision", "description": "Return the required Myth decision.",
                            "input_schema": model_request.response_schema}],
                 "tool_choice": {"type": "tool", "name": "myth_decision", "disable_parallel_tool_use": True}}
+            # 官方自动缓存把断点放在最后一个可缓存内容块，随对话增长复用前缀；是否命中只认 Usage。
+            payload["cache_control"] = {"type": "ephemeral"}
             if _claude_temperature_supported(model_request.model):
                 payload["temperature"] = model_request.temperature
             value = self._request("/messages", payload)
             usage = self._usage(value.get("usage") or {})
+            if value.get("stop_reason") == "max_tokens":
+                raise OutputTruncated("Claude output reached max_tokens", usage=usage, raw=public_metadata(value))
             content = value.get("content")
             blocks = [x for x in content if isinstance(x, dict) and x.get("type") == "tool_use" and x.get("name") == "myth_decision"] if isinstance(content, list) else []
             if (len(blocks) != 1 or value.get("stop_reason") != "tool_use"
@@ -141,6 +145,8 @@ class MessagesProvider:
             value = self._request("/chat/completions", payload)
             usage = self._usage(value.get("usage") or {})
             choices = value.get("choices") or []
+            if isinstance(choices, list) and len(choices) == 1 and isinstance(choices[0], dict) and choices[0].get("finish_reason") == "length":
+                raise OutputTruncated("Kimi output reached max_tokens", usage=usage, raw=public_metadata(value))
             if not isinstance(choices, list) or len(choices) != 1 or not isinstance(choices[0], dict) or choices[0].get("finish_reason") != "stop":
                 raise ProviderKnownFailure("Kimi did not return a complete decision", usage=usage, raw=public_metadata(value))
             message = choices[0].get("message")

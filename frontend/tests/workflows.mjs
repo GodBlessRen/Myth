@@ -9,7 +9,7 @@ const root=path.resolve(process.cwd(),"..");
 const fixture=JSON.parse(fs.readFileSync(path.join(root,".work/browser-fixture.json"),"utf8"));
 const base=process.env.MYTH_FRONTEND_URL||"http://127.0.0.1:5173/next/";
 const mode=process.env.MYTH_FRONTEND_MODE||"dev";
-const browser=await chromium.launch({headless:true});
+const browser=await chromium.launch({headless:true,channel:process.env.MYTH_BROWSER_CHANNEL||undefined});
 const facts={mode,states:[],serverSession:null,errors:[]};
 try{
   const context=await browser.newContext({viewport:{width:1440,height:900}});
