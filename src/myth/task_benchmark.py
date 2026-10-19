@@ -17,24 +17,11 @@ from .domain import canonical_json, digest_json
 from .domains.information import IntentPick, IntentRoute
 from .models import ModelResult
 from .platform.trial_statistics import case_clustered_sign_test
+from .platform.context_materiality import CONTEXT_BENCHMARK_ARMS
 from .providers import create_provider
 from .runtime import MythRuntime
 from .session_statistics import usage_measurements
 from .workspace import Workspace
-
-
-# 四种 Context 受控组保留同一组基础 Harness 能力，只消融因果和相关性。
-# 命名属于 disposable Benchmark，不进入产品设置或授予新的执行许可。
-_COMMON_CONTEXT_MECHANISMS = (
-    "action_fusion", "context_compaction", "observation_recall",
-)
-CONTEXT_BENCHMARK_ARMS = {
-    "context-baseline": _COMMON_CONTEXT_MECHANISMS,
-    "context-causal": _COMMON_CONTEXT_MECHANISMS + ("context_causal_guard",),
-    "context-relevance": _COMMON_CONTEXT_MECHANISMS + ("context_relevance_ranking",),
-    "context-full": _COMMON_CONTEXT_MECHANISMS
-    + ("context_causal_guard", "context_relevance_ranking"),
-}
 
 
 # 路由消融策略；所有任务选择 Agent，其他 Runtime、工具和预算保持相同。
@@ -621,6 +608,8 @@ def _trial(root, case, arm, settings, provider, *, context_mechanisms=None):
                     "context_mode": report.get("context_mode"),
                     "selected": len(report.get("selected") or []),
                     "bytes_used": report.get("bytes_used"),
+                    # 只带规范化摘要与差分，不把影子 Prompt 的原文复制进报告。
+                    "material_probe": report.get("material_probe"),
                 })
             for t in turns:
                 for activity in t["activities"]:
