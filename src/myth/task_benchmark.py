@@ -415,7 +415,7 @@ def summarize_context_ablation(trials, arms, case_ids, repeats, *, kind, complet
             valid = all(
                 trial.get("status") != "RUNNER_ERROR"
                 and type(trial.get("model_calls")) is int
-                and trial["model_calls"] >= 0
+                and trial["model_calls"] > 0
                 and all(
                     type((trial.get("usage_measured") or {}).get(meter)) is int
                     and trial["usage_measured"][meter] >= 0
@@ -480,7 +480,8 @@ def summarize_context_ablation(trials, arms, case_ids, repeats, *, kind, complet
         and evidence_full and metrics_full and no_quality_regression
         and full_oracle_floor and no_safety_regression and activation_mismatch == 0
         and variant_measurement_pairs == expected_blocks
-        and context_activation_pairs > 0
+        and context_activation_pairs == expected_blocks
+        and len(factorial_blocks) == expected_blocks
         and all(delta <= 0 for delta in deltas)
         and any(delta < 0 for delta in deltas)
         and statistics["passed"]
