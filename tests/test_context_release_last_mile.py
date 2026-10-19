@@ -299,8 +299,10 @@ class ContextReleaseLastMileTests(unittest.TestCase):
 
     # 对象本身的 SHA 路径可校验，仍必须核对该对象与 Ticket 的 canonical digest 是否相同。
     def test_request_object_is_bound_to_ticket_digest(self):
-        discovery = self.bundle("discovery", "discovery")
-        final = self.bundle("heldout", "heldout")
+        # 本例只检查单请求身份：每套 1 Case × 3 Repeat × 4 Arm 足以触发同一复核链。
+        # 避免重复生成 7 Case 的上百套 SQLite，特别是 Windows 的同步写开销。
+        discovery = self.bundle("discovery", "discovery", case_count=1)
+        final = self.bundle("heldout", "heldout", case_count=1)
         report = json.loads((final / "report.json").read_text(encoding="utf-8"))
         evidence = Path(report["trials"][0]["evidence_root"])
         with closing(sqlite3.connect(evidence / "runtime.db")) as db, db:
@@ -325,8 +327,10 @@ class ContextReleaseLastMileTests(unittest.TestCase):
 
     # 即使同时更新 Ticket/Receipt 的自洽摘要，真实请求型号也必须和受控实验冻结型号一致。
     def test_request_model_identity_cannot_be_changed(self):
-        discovery = self.bundle("discovery", "discovery")
-        final = self.bundle("heldout", "heldout")
+        # 本例只检查单请求身份：每套 1 Case × 3 Repeat × 4 Arm 足以触发同一复核链。
+        # 避免重复生成 7 Case 的上百套 SQLite，特别是 Windows 的同步写开销。
+        discovery = self.bundle("discovery", "discovery", case_count=1)
+        final = self.bundle("heldout", "heldout", case_count=1)
         report = json.loads((final / "report.json").read_text(encoding="utf-8"))
         evidence = Path(report["trials"][0]["evidence_root"])
         with closing(sqlite3.connect(evidence / "runtime.db")) as db, db:
