@@ -39,6 +39,7 @@ class FrozenContextMaterialityTests(unittest.TestCase):
 
     # 正控：同一编译输入下两个开关确实改变模型消息时，记录四个准确的方向差分。
     def test_both_switches_materially_change_model_input(self):
+        # 按开关构造同状态 Prompt；只有内容差异才能形成材料反证。
         def compile_arm(mechanisms):
             enabled = set(mechanisms)
             return self.request(
@@ -65,6 +66,7 @@ class FrozenContextMaterialityTests(unittest.TestCase):
 
     # 影子分支的上下文溢出或错误必须显式缺测，但不得阻止当前正常模型机会。
     def test_shadow_compile_failure_does_not_raise(self):
+        # 故意模拟影子编译失败，验证异常正文不会复制到持久报告。
         def invalid(_mechanisms):
             raise ValueError("private message should not be copied to benchmark report")
         probe = frozen_context_material_probe(
@@ -94,6 +96,7 @@ class FrozenContextMaterialityTests(unittest.TestCase):
         }
         messages = [{"role": "user", "content": "继续核对未知执行结果"}]
 
+        # 同一真实编译器、同一持久风险快照，仅替换两种 Context 机制开关。
         def compile_arm(mechanisms):
             return build_context_request(
                 settings,
