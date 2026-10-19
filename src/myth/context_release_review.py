@@ -97,8 +97,22 @@ def _verify_trial_receipts(trial: dict[str, Any], evidence: Path, provider: str,
             raise ValueError("benchmark model receipt journal conflicts with SQLite")
 
         request = json.loads(_read_object(evidence, row["request_ref"]))
+        # 证据闭环：Ticket 所称的 canonical request_digest 必须由持久请求原文重新计算；
+        # SQLite 与 Receipt 相互复述相同谎言，不构成独立的内容身份检查。
+        if not isinstance(request, dict) or digest_json(request) != row["request_digest"]:
+            raise ValueError("benchmark request digest differs from durable request content")
+        if request.get("model") != model:
+            raise ValueError("benchmark frozen request model differs from declared provider model")
+        messages = request.get("messages")
+        if (
+            not isinstance(messages, list) or not messages
+            or any(not isinstance(item, dict) or item.get("role") not in
+                   {"system", "user", "assistant"} or not isinstance(item.get("content"), str)
+                   for item in messages)
+        ):
+            raise ValueError("benchmark frozen request has no valid model-visible messages")
         _read_object(evidence, row["response_ref"])
-        context = request.get("context_report") if isinstance(request, dict) else None
+        context = request.get("context_report")
         if not isinstance(context, dict):
             raise ValueError("benchmark frozen model request has no Context report")
         governance = context.get("governance") or {}
