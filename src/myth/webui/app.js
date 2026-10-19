@@ -1213,6 +1213,17 @@ function indexThread(session) {
   return {turns, artifacts};
 }
 // 按消息/步骤签名增量重建讨论与工具展示；滚动位置只属于本地视图。
+function renderReplyPreview(turn) {
+  const node = $("thread").querySelector("[data-reply-preview]");
+  if (!node) return;
+  const scroll = $("chatScroll");
+  const following = scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 130;
+  const text = turn?.reply_preview?.text || "";
+  node.hidden = !text;
+  node.querySelector(".message-content").textContent = text;
+  if (following) scroll.scrollTop = scroll.scrollHeight;
+}
+// 回答预览只更新独立文本节点，不能让每个增量重建历史、丢失选择或提前显示完成操作。
 function renderThread(session) {
   // 先核对持久内容签名；RUNNING计时不在签名中，心跳只能改末尾标签，不能打断历史阅读。
   const signature = JSON.stringify([
@@ -1231,6 +1242,7 @@ function renderThread(session) {
     const label = $("thread").querySelector("[data-live-run]");
     const turn = session.turns.at(-1);
     if (label && label.dataset.liveRun === turn?.run_id) label.textContent = liveTurnLabel(turn);
+    renderReplyPreview(turn);
     return;
   }
   state.threadKey = signature;
@@ -1333,6 +1345,14 @@ function renderThread(session) {
         $("thread").append(group);
       }
     }
+    const preview = el("article", "message assistant reply-preview");
+    preview.dataset.replyPreview = last.run_id;
+    preview.hidden = true;
+    const main = el("div", "message-main");
+    main.append(el("div", "message-label", "Myth · 正在生成"), el("div", "message-content"));
+    preview.append(main);
+    $("thread").append(preview);
+    renderReplyPreview(last);
     const typing = el("div", "typing");
     // 动态点仅对应在线 Driver；断连保持静态说明，不伪装任务继续推进。
     if (last.driver_active) typing.append(brandMark(true));

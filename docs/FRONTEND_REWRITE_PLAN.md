@@ -8,7 +8,7 @@ Status: **implementation in progress; React preview is not a production cutover*
 - `src/myth/web_workspace.py:bootstrap/session/send/control/get/post` owns public projections and command dispatch. `src/myth/web.py` owns the local HTTP boundary and origin/host checks.
 - `src/myth/web_assets.py:PUBLIC_ASSETS` is a closed asset whitelist; wheel packaging depends on explicit files. Never expose arbitrary build paths or add remote CDN.
 - `tests/browser_matrix.cjs` covers five widths, both themes, 13 state views, accessibility and offline assets. Previous #71 Browser CI failed because of *exact palette expectations*, repaired separately by #72; UI acceptance still requires real screenshots and functional flows.
-- Current UI reads HTTP session snapshots on a reconnecting timer; do not mislabel this as SSE or token-level streaming.
+- The UI reads HTTP session snapshots on a reconnecting timer, including a transient answer preview from Responses/Ollama streams. Preview text is never a committed answer or tool decision. The browser transport remains polling rather than SSE.
 - Unknown outcome is a real state. A network timeout does not imply a rejected POST, nor does Stop erase late effects.
 
 ## Risk register (priority / mitigation / gate)
@@ -22,7 +22,7 @@ Status: **implementation in progress; React preview is not a production cutover*
 | Password/token exposure | Critical | OAuth/API keys remain in host's OS credential vault; never in localStorage or React logging | Security audit + CSP/offline gate |
 | Lost session/focus on polling | High | Stable query keys by session ID, abort stale requests, preserve draft/scroll/focus | Keyboard, IME, rapid navigation and reconnect tests |
 | Feature regression | High | Page-by-page parity ledger, block route cutover until core+settings+knowledge+goal+runtime all covered | All items green in parity matrix |
-| UI accessibility/perf degradation | High | HeroUI v3 for vetted primitives, semantic domain views, measured viewport/layout | 5 widths × 2 themes × 13 states and keyboard tests |
+| UI accessibility/perf degradation | High | Native semantic controls, domain views, measured viewport/layout | 5 widths × 2 themes × 13 states and keyboard tests |
 | Broken release / wheel | Critical | Build Vite offline static assets before allowlisting; pinned dependency lockfile; verify package bytes | install-wheel + HTTP asset checks |
 | API schema drift | High | Typed narrow adapter and run/session fixtures; no destructive backend schema migration | API contract tests against real Python fixture |
 
@@ -65,4 +65,4 @@ Preconditions: old static files and the exact previous wheel/release are preserv
 
 ## Engineering choice
 
-React 19, TypeScript strict, Vite (packaged static SPA, no Next.js server), HeroUI v3/Tailwind v4 for ordinary accessible controls, domain-built Agent components. Python and command contracts are not rewritten merely to introduce React. No new SSE endpoint until there is a justified event cursor and crash-replay specification.
+React 19, TypeScript strict, Vite (packaged static SPA, no Next.js server), native form controls and domain-built Agent components. HeroUI/Tailwind were removed because only one save button used them; the native button submits the same form. Python and command contracts are not rewritten merely to introduce React. No new SSE endpoint until there is a justified event cursor and crash-replay specification.

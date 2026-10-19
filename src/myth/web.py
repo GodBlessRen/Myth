@@ -80,6 +80,7 @@ class AgentWebService:
         if not check.ready:
             raise ValueError("API Key 验证失败；原有连接保持不变。")
         status = self.provider_keys.save(provider, secret)
+        self.workspace.invalidate_connection(provider)
         return {
             **status,
             "ready": True,
@@ -89,7 +90,9 @@ class AgentWebService:
     # 删除 Myth 管理的 API Key；环境变量配置不由网页静默修改。
     def provider_key_delete(self, payload: dict[str, Any]) -> dict[str, Any]:
         provider = str(payload.get("provider") or "").strip().lower()
-        return self.provider_keys.delete(provider)
+        result = self.provider_keys.delete(provider)
+        self.workspace.invalidate_connection(provider)
+        return result
 
     # 返回脱敏账号状态和目录；token 不进入 HTTP JSON。
     def chatgpt_status(self) -> dict[str, Any]:
@@ -109,18 +112,23 @@ class AgentWebService:
     # 把回调参数交独立认证管理器校验，响应只含脱敏状态。
     def chatgpt_complete(self, query: str) -> dict[str, Any]:
         status = self.chatgpt_auth.complete_callback(parse_qs(query, keep_blank_values=True, max_num_fields=20))
+        self.workspace.invalidate_connection("chatgpt")
         return status.serializable()
 
     # 显式执行远端撤销尝试及本机清理，返回各步事实；网络异常不伪造远端成功。
     def chatgpt_logout(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return self.chatgpt_auth.logout(payload.get("profile_id") or None)
+        result = self.chatgpt_auth.logout(payload.get("profile_id") or None)
+        self.workspace.invalidate_connection("chatgpt")
+        return result
 
     # 切换用户明确选择的现有认证 profile；不扩大 scope。
     def chatgpt_select(self, payload: dict[str, Any]) -> dict[str, Any]:
         profile_id = str(payload.get("profile_id") or "").strip()
         if not profile_id:
             raise ValueError("profile_id is required")
-        return self.chatgpt_auth.select_profile(profile_id).serializable()
+        result = self.chatgpt_auth.select_profile(profile_id).serializable()
+        self.workspace.invalidate_connection("chatgpt")
+        return result
 
     # 返回 Claude OAuth 的脱敏状态；client_id 可见但 token 永不进入 Web JSON。
     def claude_status(self) -> dict[str, Any]:
@@ -128,7 +136,9 @@ class AgentWebService:
 
     # 保存 Myth 自己的 Claude OAuth client_id；更换客户端时旧 refresh token 会被清除。
     def claude_configure(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return {"status": self.claude_auth.configure(payload.get("client_id")).serializable()}
+        result = {"status": self.claude_auth.configure(payload.get("client_id")).serializable()}
+        self.workspace.invalidate_connection("claude_oauth")
+        return result
 
     # 创建 Claude authorization-code + PKCE 登录挑战；只接受本机精确 callback。
     def claude_begin(self, redirect_uri: str) -> dict[str, Any]:
@@ -139,11 +149,14 @@ class AgentWebService:
         status = self.claude_auth.complete_callback(
             parse_qs(query, keep_blank_values=True, max_num_fields=20)
         )
+        self.workspace.invalidate_connection("claude_oauth")
         return status.serializable()
 
     # Claude 当前公开流程未在这里宣称远端 revocation；退出只撤销 Myth 本机使用权。
     def claude_logout(self) -> dict[str, Any]:
-        return self.claude_auth.logout()
+        result = self.claude_auth.logout()
+        self.workspace.invalidate_connection("claude_oauth")
+        return result
 
     # 读取有界 Run 列表供产品/CLI 展示；这是历史投影，不重新驱动任何 Run。
     def list_runs(self) -> list[dict[str, Any]]:

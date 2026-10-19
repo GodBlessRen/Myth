@@ -7,36 +7,23 @@ import re
 from typing import Any
 
 
-# 常用能力默认可见；专门 Git/Diff 工具延迟加载，避免整个目录长期占用 Prompt。
+# 常用读写与发现入口默认可见；专门工具按需展示参数，不把整套目录放进每个问候。
 DEFAULT_VISIBLE_TOOL_IDS = (
     "knowledge.search",
     "knowledge.resolve",
     "memory.search",
-    "memory.recall",
-    "memory.timeline",
-    "memory.resolve",
     "project.list",
     "project.read",
     "observation.read",
     "project.search",
-    "git.status",
-    "git.diff",
     "artifact.write",
     "project.patch_exact",
     "test.run",
     "math.calculate",
     "agent.delegate",
     "agent.parallel",
-    "agent.evaluate",
-    "agent.result",
-    "agent.resolve",
     "tool.search",
     "tool.describe",
-    "skill.list",
-    "skill.load",
-    "mcp.servers",
-    "mcp.tools",
-    "mcp.call",
 )
 
 # 目录小于等于该规模时无需延迟加载；当前目录超过阈值后才启用渐进披露。
@@ -57,7 +44,7 @@ def visible_tool_ids(
         decision = activity.get("decision") or {}
         result = activity.get("result") or {}
         capability = decision.get("capability_id")
-        # 只有真正成功观察到的能力才因“已使用”保持可见；请求隐藏能力后被拒绝不能绕过 discovery。
+        # 已成功使用的能力继续展示参数；失败请求不扩张提示目录，展示集合本身不承担授权。
         if (
             capability in catalog
             and result
@@ -90,6 +77,9 @@ def search_tools(
     if type(limit) is not int or not 1 <= limit <= 8:
         raise ValueError("tool.search limit must be 1-8")
     terms = set(re.findall(r"[a-z0-9_.-]+", text))
+    # 中文目录查询没有空格；按相邻双字匹配已有说明，不引入模型或新的语义检索依赖。
+    for word in re.findall(r"[\u4e00-\u9fff]+", text):
+        terms.update(word[index:index + 2] for index in range(max(1, len(word) - 1)))
     ranked = []
     for index, (tool_id, arguments) in enumerate(catalog.items()):
         if tool_id in {"tool.search", "tool.describe"}:

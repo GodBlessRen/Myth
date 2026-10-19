@@ -13,6 +13,8 @@ Open `http://127.0.0.1:8765/next/`. Open `http://127.0.0.1:8765/` for the legacy
 
 ## Develop locally (separate Vite, only during frontend development)
 
+The workbench uses semantic native controls and local CSS; HeroUI/Tailwind are no longer dependencies. For local browser checks with an existing Chrome installation, set `MYTH_BROWSER_CHANNEL=chrome`; CI uses its installed Playwright Chromium by default.
+
 ```bash
 cd frontend
 npm ci

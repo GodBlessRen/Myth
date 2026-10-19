@@ -12,7 +12,7 @@ fs.mkdirSync(out,{recursive:true});
 const base=process.env.MYTH_FRONTEND_URL||"http://127.0.0.1:5173/next/";
 const widths=[1440,1280,1024,768,390], themes=["light","dark"];
 const report={revision:process.env.GITHUB_SHA||"local",fixture:"real Python HTTP/SQLite; fixed Provider",cases:[],errors:[]};
-const browser=await chromium.launch({headless:true});
+const browser=await chromium.launch({headless:true,channel:process.env.MYTH_BROWSER_CHANNEL||undefined});
 try{
   for(const width of widths)for(const theme of themes){
     const context=await browser.newContext({viewport:{width,height:width>=1024?900:844},colorScheme:theme});

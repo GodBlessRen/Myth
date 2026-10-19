@@ -4,11 +4,12 @@
 from __future__ import annotations
 
 import json
+import time
 from urllib import error, request, parse
 
-from ..models import ContextTruncated, OutputTruncated, ModelRequest, ModelResult, ProviderStatus, ProviderKnownFailure, ProviderUnavailable
+from ..models import OutputTruncated, ModelRequest, ModelResult, ProviderStatus, ProviderKnownFailure, ProviderUnavailable
 from ..network_recovery import is_pre_dispatch_disconnect
-from ..auth.transport import open_credential_request, read_bounded
+from ..auth.transport import open_credential_request, read_bounded, MAX_RESPONSE_BYTES
 
 
 # Ollama HTTP 适配器；timeout 以秒计，num_ctx 与 ContextCompiler 窗口一致，结果不明不内部重发。
@@ -36,7 +37,7 @@ class OllamaProvider:
 
     # 单次有界传输；派发前断连交 Runtime 持久退避，响应开始后异常保留不明结果。
     def _json_request(
-        self, method: str, path: str, payload: dict | None = None
+        self, method: str, path: str, payload: dict | None = None, *, on_text_delta=None
     ) -> dict:
         # 派发前断连有明确零派发证据才可退避；HTTP 拒绝是已知失败，响应开始后的异常保持未知。
         body = (
@@ -51,9 +52,12 @@ class OllamaProvider:
             headers={"content-type": "application/json", "accept": "application/json"},
         )
         response_started = False
+        started = time.monotonic()
         try:
             with open_credential_request(req, timeout=self.timeout) as response:
                 response_started = True
+                if payload and payload.get("stream"):
+                    return self._read_stream(response, on_text_delta, started=started)
                 raw = read_bounded(response)
         except error.HTTPError as exc:
             exc.close()
@@ -72,6 +76,41 @@ class OllamaProvider:
         if not isinstance(value, dict):
             raise RuntimeError("Ollama response must be a JSON object")
         return value
+
+    def _read_stream(self, response, on_text_delta, *, started=None):
+        """读取 Ollama NDJSON，预览可丢失；没有 done 终态时保留 UNKNOWN，不能提交局部决定。"""
+        started = time.monotonic() if started is None else started
+        last_preview_at = 0.0
+        first_token_ms = None
+        size = 0
+        chunks = []
+        while True:
+            line = response.readline(MAX_RESPONSE_BYTES + 1)
+            if not line:
+                raise RuntimeError("Ollama stream ended without done=true")
+            size += len(line)
+            if size > MAX_RESPONSE_BYTES or time.monotonic() - started > self.timeout:
+                raise RuntimeError("Ollama stream exceeded its response limit")
+            value = json.loads(line)
+            if not isinstance(value, dict):
+                raise RuntimeError("Ollama stream returned invalid data")
+            message = value.get("message") or {}
+            delta = message.get("content") if isinstance(message, dict) else None
+            if isinstance(delta, str) and delta:
+                chunks.append(delta)
+                if first_token_ms is None:
+                    first_token_ms = max(0, int((time.monotonic() - started) * 1000))
+            now = time.monotonic()
+            if on_text_delta is not None and now - last_preview_at >= 0.2 and chunks:
+                on_text_delta("".join(chunks))
+                last_preview_at = now
+            if value.get("done") is True:
+                value["message"] = {**message, "content": "".join(chunks)}
+                if first_token_ms is not None:
+                    value["myth_time_to_first_token_ms"] = first_token_ms
+                if on_text_delta is not None:
+                    on_text_delta(value["message"]["content"])
+                return value
 
     # 观察供应商认证/服务是否可用；返回状态而不签发模型 Ticket。
     def check(self) -> ProviderStatus:
@@ -92,7 +131,7 @@ class OllamaProvider:
 
     # 将已准入统一请求交给具体传输实现，返回模型结果/用量；不拥有业务状态或完成验收。
     def invoke(self, model_request: ModelRequest) -> ModelResult:
-        # 固定请求设置后派发；只采纳供应商明确报告的非负计量，并拒绝达到上下文上限的截断结果。
+        # 固定请求设置后派发；只采纳明确计量，Token 数量接近窗口只是压力信息，不是截断证明。
         payload: dict = {
             "model": model_request.model,
             "messages": [
@@ -100,7 +139,7 @@ class OllamaProvider:
                 for message in model_request.messages
             ],
             "format": model_request.response_schema,
-            "stream": False,
+            "stream": model_request.on_text_delta is not None,
             "keep_alive": self.keep_alive,
             "options": {
                 "num_predict": model_request.max_output_tokens,
@@ -115,14 +154,19 @@ class OllamaProvider:
         if model_request.thinking is not None:
             payload["think"] = model_request.thinking
 
-        value = self._json_request("POST", "/api/chat", payload)
+        value = (self._json_request("POST", "/api/chat", payload, on_text_delta=model_request.preview_text)
+                 if model_request.on_text_delta is not None else self._json_request("POST", "/api/chat", payload))
         message = value.get("message")
         if not isinstance(message, dict) or not isinstance(message.get("content"), str):
             raise RuntimeError("Ollama response is missing message.content")
         usage = {"model_calls": 1}
+        first_token_ms = value.pop("myth_time_to_first_token_ms", None)
+        if type(first_token_ms) is int and first_token_ms >= 0:
+            usage["time_to_first_token_ms"] = first_token_ms
         for source, meter in [
             ("prompt_eval_count", "input_tokens"),
             ("eval_count", "output_tokens"),
+            ("prompt_eval_cached_count", "cached_input_tokens"),
         ]:
             if type(value.get(source)) is int and value[source] >= 0:
                 usage[meter] = value[source]
@@ -135,11 +179,8 @@ class OllamaProvider:
             and type(used) is int
             and used >= model_request.num_ctx - 16
         ):
-            raise ContextTruncated(
-                f"prompt_eval_count={used} reached configured num_ctx={model_request.num_ctx}",
-                usage=usage,
-                raw=value,
-            )
+            value["myth_context_pressure"] = {"prompt_eval_count": used, "num_ctx": model_request.num_ctx,
+                "truncation_confirmed": False}
         # Ollama 的 length 表示输出预算耗尽，即使正文是合法 JSON 也不能证明自然语言完整。
         # 模型已返回结果与计量，属于已知失败；不能内部盲目重发同一 Ticket。
         done_reason = value.get("done_reason")

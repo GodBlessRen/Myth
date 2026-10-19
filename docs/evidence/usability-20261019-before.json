@@ -1,0 +1,44 @@
+{
+  "boundary": "fixed synthetic inputs, no provider inference; bytes are not tokens",
+  "samples": [
+    {
+      "input": "你好",
+      "message_bytes": 6968,
+      "instruction_bytes": 6589,
+      "visible_tools": 23,
+      "shared_prefix_bytes_after_steer": 6593,
+      "serialized_request_bytes": 20565
+    },
+    {
+      "input": "Python 的列表和元组有啥区别？",
+      "message_bytes": 7002,
+      "instruction_bytes": 6589,
+      "visible_tools": 23,
+      "shared_prefix_bytes_after_steer": 6593,
+      "serialized_request_bytes": 20599
+    },
+    {
+      "input": "帮我写一封请假信",
+      "message_bytes": 6986,
+      "instruction_bytes": 6589,
+      "visible_tools": 23,
+      "shared_prefix_bytes_after_steer": 6593,
+      "serialized_request_bytes": 20582
+    },
+    {
+      "input": "读取 README.md 并总结",
+      "message_bytes": 6988,
+      "instruction_bytes": 6589,
+      "visible_tools": 23,
+      "shared_prefix_bytes_after_steer": 6593,
+      "serialized_request_bytes": 20585
+    }
+  ],
+  "history": {
+    "historical_turns": 40,
+    "admission_sql_queries": 418,
+    "historical_step_queries": 80,
+    "prepare_median_ms": 11.525,
+    "repeats": 3
+  }
+}

@@ -10,4 +10,5 @@ output/** export-ignore
 .work-notes export-ignore
 .work-notes/** export-ignore
 # React 预览产物的 manifest 以原始字节校验；各系统 checkout 必须保留 LF。
+frontend/index.html text eol=lf
 src/myth/webui/react/* text eol=lf

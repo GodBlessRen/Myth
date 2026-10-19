@@ -22,7 +22,7 @@
   --sans: "Myth Latin", "Myth Sans", sans-serif;
   --serif: "Myth Serif", "Myth Sans", serif;
   --mono: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
-  --conversation-width: 720px; --conversation-inset: 40px;
+  --conversation-width: 800px; --conversation-inset: 40px;
   --sidebar: 232px; --inspector: 328px;
   --ease: cubic-bezier(.16,1,.3,1);
 }

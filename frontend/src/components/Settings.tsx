@@ -1,5 +1,4 @@
 import {FormEvent,useEffect,useState} from "react";
-import {Button} from "@heroui/react";
 import {CheckCircle2,Cpu,KeyRound,Link2,ShieldCheck} from "lucide-react";
 import {ModelPool,PricingEditor,poolProviders} from "./ModelPool";
 import {auth,workspace} from "../api";
@@ -93,7 +92,7 @@ export function SettingsPage({data,notify}:Props){
   };
   return <section className="content-page">
     <header className="page-header"><div><span className="micro-label">MYTH / CONFIGURATION</span><h1>模型与连接</h1><p>选择模型、配置推理能力和子模型池。更改不修改正在运行的历史调用。</p></div>
-      <Button variant="primary" isDisabled={busy} onPress={()=>document.querySelector<HTMLFormElement>("#modelSettingsForm")?.requestSubmit()}>{busy?"保存中…":"保存设置"}</Button>
+      <button type="submit" form="modelSettingsForm" className="solid-action" disabled={busy}>{busy?"保存中…":"保存设置"}</button>
     </header>
     <div className="settings-grid"><div className="settings-stack">
       <form id="modelSettingsForm" className="panel" onSubmit={e=>void save(e)}>
@@ -106,7 +105,7 @@ export function SettingsPage({data,notify}:Props){
             <label>上下文 Tokens<input type="number" min={2048} max={262144} value={form.num_ctx??8192} onChange={e=>updateForm(setForm,"num_ctx",Number(e.target.value))}/></label>
           </>:null}
           <label>最大步骤<input type="number" min={2} max={32} value={form.max_steps??12} onChange={e=>updateForm(setForm,"max_steps",Number(e.target.value))}/></label>
-          <label>输出 Token 上限<input type="number" min={128} max={393216} value={form.max_output_tokens??8192} onChange={e=>updateForm(setForm,"max_output_tokens",Number(e.target.value))}/></label>
+          <label>初始输出 Token<input title="达到长度上限后，可在整轮预算与窗口内增大一次；GPT OAuth 由远端控制。" type="number" min={128} max={393216} value={form.max_output_tokens??8192} onChange={e=>updateForm(setForm,"max_output_tokens",Number(e.target.value))}/></label>
           {profile.temperature!==undefined||form.provider==="ollama"?<label>Temperature<input type="number" min={0} max={2} step={0.1} value={form.temperature??0} onChange={e=>updateForm(setForm,"temperature",Number(e.target.value))}/></label>:null}
           {levels.length?<label>Thinking<select value={String(form.thinking??"default")} onChange={e=>updateForm(setForm,"thinking",e.target.value==="default"?null:e.target.value)}>
             <option value="default">默认</option><option value="none">关闭</option>{levels.map(l=><option value={l} key={l}>{l}</option>)}</select></label>:

@@ -35,6 +35,7 @@ class Workspace:
         evaluation_harness_mechanisms=None,
         child_provider_factory=None,
         tool_hooks=None,
+        reply_observer=None,
     ):
         # vector_index：可选 Milvus 派生索引；延迟连接/加载，缺失时词面检索保持完整可用。
         self.vector_index = create_milvus_vector_index(runtime)
@@ -104,6 +105,7 @@ class Workspace:
             skill_library=self.skills,
             mcp_gateway=self.mcp,
             tool_hooks=self.tool_hooks,
+            reply_observer=reply_observer,
         )
         # verification：与 execution 共用同一 profile 状态所有者，避免双写真相。
         self.verification = self.execution.verification

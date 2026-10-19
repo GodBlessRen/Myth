@@ -19,7 +19,7 @@ from ..domain import BudgetExceeded, RecoveryRequired, canonical_json, exact_pat
 from ..platform.capabilities import CapabilityState, default_capabilities
 from ..models import ModelMessage, ModelRequest, StepDecision, ProviderKnownFailure
 from ..platform.subagents import default_subagents
-from ..platform.tool_discovery import describe_tool, search_tools, visible_tool_ids
+from ..platform.tool_discovery import describe_tool, search_tools
 from ..platform.action_frontier import build_action_frontier, select_action_candidate
 from ..platform.context_materiality import frozen_context_material_probe
 from ..strategies import LiveInformationController, RuleIntentPicker
@@ -94,6 +94,7 @@ class LocalConversationExecution:
         skill_library: SkillLibrary | None = None,
         mcp_gateway: MCPGateway | None = None,
         tool_hooks: ToolHookRegistry | None = None,
+        reply_observer=None,
     ):
         # runtime：共享 Runtime 装配对象；其 SQLite 连接只在所属线程使用。
         # repository：用例仓储端口/实现；持久状态写入归此协作对象所有。
@@ -125,6 +126,8 @@ class LocalConversationExecution:
         self.mcp = mcp_gateway
         # tool_hooks：只拥有回调目录；执行身份、Ticket、收据与审计写入仍归仓储。
         self.tool_hooks = tool_hooks if tool_hooks is not None else ToolHookRegistry()
+        # reply_observer：仅主对话的临时展示回调；子任务另装配 Workspace，不继承父回答预览。
+        self.reply_observer = reply_observer
         # verification：显式受信项目的固定 Python unittest profile；不提供任意 shell。
         self.verification = SqliteVerificationProfiles(runtime, repository)
         # receipts：持久效果日志协作对象；不存在日志不自动证明调用未发出。
@@ -142,6 +145,9 @@ class LocalConversationExecution:
             if not item.get("decision") and not item.get("result"):
                 continue
             decision = item.get("decision") or {}
+            # 问题与答复已经保存在 messages；再次追加旧问题会把已回答的澄清伪装成最新任务。
+            if decision.get("decision_type") == "ask_user":
+                continue
             result = dict(item.get("result") or {})
             activities.append(
                 {
@@ -215,8 +221,14 @@ class LocalConversationExecution:
                 "metrics": view.get("metrics") or {},
                 "champion_costs": view.get("champion_costs") or {},
             }
+        settings = dict(turn["settings"])
+        # 仅消费应用已持久安排的长度修复；初始配置和 Run 总预算不变，恢复继续同一次修复。
+        retry_limit = next((a["result"]["output_retry_tokens"] for a in reversed(turn["activities"])
+                            if (a.get("result") or {}).get("output_retry_tokens")), None)
+        if retry_limit is not None:
+            settings["max_output_tokens"] = retry_limit
         request = conversation_request(
-            turn["settings"],
+            settings,
             snapshot,
             turn["snapshot"]["messages"],
             activities,
@@ -242,13 +254,16 @@ class LocalConversationExecution:
                     request,
                     context_report={**(request.context_report or {}), "material_probe": material},
                 )
+        if self.reply_observer is not None:
+            # 新模型步骤先撤去上一决定的临时文本；展示异常不能阻止真实请求。
+            replace(request, on_text_delta=self.reply_observer).preview_text("")
         return self.repository.decisions.request_decision(
             run_id=turn["run_id"],
             provider=provider,
             model=turn["settings"]["model"],
-            max_output_tokens=turn["settings"]["max_output_tokens"],
+            max_output_tokens=request.max_output_tokens,
             request_key=f"conversation:{turn['run_id']}:{step}",
-            model_request_override=request,
+            model_request_override=replace(request, on_text_delta=self.reply_observer),
         )
 
     # 拒绝绝对路径、上跳、驱动器/流、秘钥目录和配置文件；路径校验与实际 resolve 后根范围双重检查。
@@ -814,12 +829,10 @@ class LocalConversationExecution:
             # 快照或审计异常仅影响观察，不遮蔽执行器要返回的 Receipt/要抛出的原异常。
 
     def _admit_tool(self, turn, capability, args):
-        """复用现有能力可见性、注册状态和信息读取准入；Hook 继续不等于授权。"""
+        """按真实能力、注册状态和信息读取合同准入；提示目录只是展示，不是另一层权限。"""
         if capability not in TOOL_CATALOG:
             raise PermissionError("tool is not admitted")
-        currently_visible = set(visible_tool_ids(TOOL_CATALOG, turn.get("activities") or []))
-        if capability not in currently_visible:
-            raise ValueError(f"tool is deferred: {capability}; use tool.search/tool.describe before requesting it")
+        # 已知合法参数可直接申请；路径、Capability、MCP 发现与 Ticket 检查仍由各自状态所有者执行。
         spec = self.registry.get(capability)
         if spec.state is not CapabilityState.EXECUTABLE:
             raise PermissionError(f"capability is not executable: {capability}")

@@ -19,6 +19,7 @@ export type Turn = {
   execution_graph?: unknown; model_usage?: UnknownRecord; provider_evidence?: UnknownRecord;
   information_control?: UnknownRecord; delivery?: UnknownRecord; sota_route?: UnknownRecord;
   liveness?: UnknownRecord; execution_cursor?: UnknownRecord; reply_timing?: UnknownRecord;
+  reply_preview?: {text:string;state:"generating"} | null;
   snapshot?: {goal?: {goal_id?: string}; knowledge?: Array<{document_id:string;title:string}>};
   goal_current?: Goal | null;
 };

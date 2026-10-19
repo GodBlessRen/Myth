@@ -1,0 +1,186 @@
+{
+  "date": "2026-10-19",
+  "base_commit": "2d67edf16c40bc7443c10fa5687a2ccfbf596723",
+  "branch": "codex/usability-runtime-20261019",
+  "boundary": "Local software validation with deterministic providers; no live paid-model or OAuth inference.",
+  "environment": {
+    "os": "Windows",
+    "python": "3.13.9",
+    "node": "24.16.0",
+    "browser": "system Chrome via Playwright"
+  },
+  "python": {
+    "command": "python -m unittest discover -s tests -v",
+    "status": "PASS",
+    "run": 897,
+    "passed": 895,
+    "skipped": 2,
+    "duration_seconds": 186.512,
+    "skip_reason": "Two platform symlink-creation permission checks",
+    "new_usability_cases": 20,
+    "new_crlf_staging_cases": 1
+  },
+  "quality": {
+    "compileall": "PASS",
+    "test_discovery_cases": 897,
+    "chinese_guidance": "PASS",
+    "guidance_counts": {
+      "files": 227,
+      "classes": 369,
+      "functions": 2489,
+      "properties": 720
+    },
+    "known_secret_pattern_scan": {
+      "status": "PASS",
+      "working_files": 464,
+      "history_blobs": 2162,
+      "findings": 0,
+      "boundary": "Known patterns only, no values printed"
+    },
+    "git_diff_check": "PASS"
+  },
+  "native_js": {
+    "command": "node scripts/check_web.cjs",
+    "passed": 77,
+    "failures": 0
+  },
+  "react": {
+    "typecheck": "PASS",
+    "unit_cases": 6,
+    "production_build": "PASS",
+    "vendored_manifest": {
+      "files": {
+        "index.html": {
+          "bytes": 450,
+          "sha256": "b597799ae8d79f8cd00f0d088740b0563906e313edf7c4e6e451cfe9009a100b"
+        },
+        "workbench.css": {
+          "bytes": 35964,
+          "sha256": "ddff6bb7ffc80d303db6f30f2d8a818f4c820dce2df46ade5926048c6869fab8"
+        },
+        "workbench.js": {
+          "bytes": 509656,
+          "sha256": "47258a717324dd41f0b0c741ab3c3dbe940ef8c385cb0c1ab27720a02c4c5895"
+        }
+      },
+      "format": 1
+    },
+    "crlf_hash_regression": "PASS"
+  },
+  "browser": {
+    "legacy_matrix": {
+      "widths": [
+        1440,
+        1280,
+        1024,
+        768,
+        390
+      ],
+      "themes": [
+        "light",
+        "dark"
+      ],
+      "states_per_combination": 13,
+      "cases": 130,
+      "failures": 0,
+      "assets": 26,
+      "command": "python tests/check_browser_matrix.py"
+    },
+    "react_packaged": {
+      "cases": 10,
+      "errors": [],
+      "command": "npm --prefix frontend run test:browser"
+    },
+    "react_workflows": {
+      "states": [
+        "full-draft-cross-route",
+        "explicit-new-chat",
+        "file-import-as-durable-document",
+        "one-turn-and-cited-document",
+        "reload-read-only",
+        "project-file-only-prepares-draft"
+      ],
+      "errors": []
+    },
+    "precommit_streaming": [
+      {
+        "mode": "legacy",
+        "run_id": "run_376b109ec94e4bfda03918c44f6917e6",
+        "preview_before_commit": true,
+        "final_messages": 2,
+        "errors": []
+      },
+      {
+        "mode": "react",
+        "run_id": "run_5cd7f0b227b34203a5117079f3cec0a0",
+        "preview_before_commit": true,
+        "final_messages": 2,
+        "errors": []
+      }
+    ],
+    "screenshots": {
+      "usability-20261019-desktop.png": {
+        "bytes": 75759,
+        "sha256": "2fde802de8f7b73f46280ad4029da625f8b8b510aee8a799896b7c9964ab51de"
+      },
+      "usability-20261019-mobile.png": {
+        "bytes": 57949,
+        "sha256": "d046b737b56ccd679b5e56eba45b7ea7d56c09afef1755c2be74dd55a4a58205"
+      },
+      "usability-20261019-react.png": {
+        "bytes": 99714,
+        "sha256": "9c4daa600b377dbeec72957076fc8724269bcba89f7ecdf137e8f21604b064ec"
+      }
+    }
+  },
+  "optional_mcp": {
+    "command": "python -m unittest discover -s tests -p test_extensions.py -v",
+    "cases": 3,
+    "status": "PASS",
+    "boundary": "Real local stdio service; no external MCP server"
+  },
+  "packaging": {
+    "archive_validation": {
+      "status": "PASS",
+      "archives": [
+        {
+          "archive": "myth_runtime-0.27.0-py3-none-any.whl",
+          "entries": 151,
+          "status": "PASS",
+          "verified_files": 146,
+          "verified_bytes": 10327298,
+          "git_eol_files": 0
+        },
+        {
+          "archive": "myth_runtime-0.27.0.tar.gz",
+          "entries": 378,
+          "status": "PASS",
+          "verified_files": 282,
+          "verified_bytes": 11714408,
+          "git_eol_files": 0
+        }
+      ]
+    },
+    "installed_wheel_http_api": {
+      "status": "PASS",
+      "public_asset_routes": 26,
+      "checks": [
+        "installed import",
+        "HTTP assets",
+        "Goal/session",
+        "schedule persistence/pause"
+      ]
+    }
+  },
+  "synthetic_benchmark": {
+    "before": "usability-20261019-before.json",
+    "after": "usability-20261019-after.json",
+    "command": "python scripts/probe_conversation_usability.py --history-turns 40 --output result.json",
+    "boundary": "Bytes are not provider tokens. Local preparation timings are milliseconds."
+  },
+  "unverified": [
+    "Real DeepSeek/Ollama/GPT OAuth inference and answer quality",
+    "Real TTFT, cache hit rate, billed tokens and cost",
+    "General multi-hour task reliability and all-line repository correctness"
+  ]
+}

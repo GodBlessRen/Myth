@@ -360,7 +360,7 @@ class SqliteWorkspaceRepository:
         return self.session(sid)
 
     # 读取会话及其消息/轮次投影；持久状态仍由仓储操作修改。
-    def session(self, sid):
+    def session(self, sid, *, include_turns=True):
         row = self.store.db.execute(
             "SELECT s.*,p.name project_name FROM workspace_sessions s LEFT JOIN workspace_projects p ON p.id=s.project_id WHERE s.id=?",
             (sid,),
@@ -381,7 +381,7 @@ class SqliteWorkspaceRepository:
                 "SELECT run_id FROM workspace_turns WHERE session_id=? ORDER BY rowid",
                 (sid,),
             )
-        ]
+        ] if include_turns else []
         return result
 
     # 保存会话标题/项目/置顶/归档元数据；有未完成工作时不允许归档。
@@ -477,10 +477,14 @@ class SqliteWorkspaceRepository:
     def _admission_inputs(self, sid, goal_id, *, current_settings):
         """只读 SQL 构建准入版本；跨聚合仍调用各状态所有者，不写他人表。"""
         # 先拒绝归档/活跃工作，再固定 Goal、来源水位和设置；摘要只用于提交 CAS，不授予外部效果权限。
-        session = self.session(sid)
+        session = self.session(sid, include_turns=False)
+        # 准入 CAS 仍绑定原来的身份、状态与完整快照；无需为此逐轮装载步骤、账户、游标和重连投影。
+        turns = [{"run_id": row["run_id"], "status": row["status"], "snapshot": json.loads(row["snapshot_json"])}
+                 for row in self.store.db.execute(
+                     "SELECT run_id,status,snapshot_json FROM workspace_turns WHERE session_id=? ORDER BY rowid", (sid,))]
         if session["archived"]:
             raise ValueError("restore the archived conversation first")
-        if any(t["status"] in ACTIVE_TURN_STATUSES for t in session["turns"]):
+        if any(t["status"] in ACTIVE_TURN_STATUSES for t in turns):
             raise ValueError("本会话仍有未完成一轮，请先继续、答复或停止。")
         project = self.project(session["project_id"]) if session["project_id"] else None
         goal = {}
@@ -503,7 +507,7 @@ class SqliteWorkspaceRepository:
         memory_revision = self.memory_state.current_change_seq() if self.memory_state is not None else None
         basis = {
             "session": {key: value for key, value in session.items() if key != "turns"},
-            "turns": [{"run_id": t["run_id"], "status": t["status"], "snapshot": t["snapshot"]} for t in session["turns"]],
+            "turns": turns,
             "project": project, "goal": goal, "current_facts": facts,
             "knowledge_revision": self.knowledge.admission_revision(session["project_id"]),
             "memory_revision": memory_revision,
@@ -672,6 +676,15 @@ class SqliteWorkspaceRepository:
         recent_history = (
             history_messages[-8:] if context_anchor else history_messages[-30:]
         )
+        # 最近原文已含这些 Run 的完整问答，不再把同源 episodic 摘录重复注入为长期记忆。
+        # 其他会话/更早经历与独立语义记忆继续保留，持久 Memory 不删除。
+        recent_refs = {f"run:{item['run_id']}" for item in history_records[-len(recent_history):]
+                       if item.get("run_id")} if recent_history else set()
+        repeated = [m for m in memory_records
+                    if m.get("kind") == "episodic" and m.get("provenance_ref") in recent_refs]
+        if repeated:
+            memory_records = [m for m in memory_records if m not in repeated]
+            memory_retrieval_report = {**(memory_retrieval_report or {}), "already_in_recent_history": len(repeated)}
         snapshot = {
             "project": project,
             "knowledge": projected_knowledge,

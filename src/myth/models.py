@@ -3,9 +3,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import json
-from typing import Any, Literal
+from typing import Any, Literal, Callable
 
 
 # DecisionType：允许的下一步种类类型别名；形状合法不表示执行授权。
@@ -45,7 +45,7 @@ class ProviderUnavailable(ProviderKnownFailure):
 
 
 class ContextTruncated(ProviderKnownFailure):
-    """已准入提示达到供应商窗口上限的已知失败；不能信任被截断上下文产生的决定。"""
+    """供应商明确报告上下文被截断或拒绝；输入计数接近窗口不足以证明截断。"""
 
 
 class OutputTruncated(ProviderKnownFailure):
@@ -81,6 +81,16 @@ class ModelRequest:
     # 本地 selected/folded/dropped 证据随固定请求保存；供应商只传输其支持的字段。
     # context_report：selected/folded/dropped 与字节预算的本地投影证据；不是 Token 真值。
     context_report: dict[str, Any] | None = None
+    # on_text_delta：本次调用的可选展示观察器，收到累计 JSON 正文；不进入请求身份、收据或授权。
+    on_text_delta: Callable[[str], None] | None = field(default=None, repr=False, compare=False)
+
+    def preview_text(self, text: str) -> None:
+        """展示失败不能改变模型结果；未完成文本只供 UI 预览，不能形成决定或执行工具。"""
+        if self.on_text_delta is not None:
+            try:
+                self.on_text_delta(text)
+            except Exception:
+                pass
 
     # 在合同构造时校验输入边界；非法值提前拒绝，避免进入后续执行或比较。
     def __post_init__(self) -> None:

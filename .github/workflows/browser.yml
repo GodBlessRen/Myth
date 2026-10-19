@@ -42,6 +42,7 @@ jobs:
           done
           test -f .work/browser-fixture.json
           python tests/check_browser_matrix.py
+          node tests/check_streaming_browser.cjs
       # 只留存合成截图和检测结果；不上传 Runtime、用户目录或认证存储。
       - name: Retain exact-revision browser evidence
         if: always()

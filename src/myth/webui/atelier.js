@@ -49,8 +49,8 @@
   // 拖拽时只更改 CSS 宽度变量；键盘方向键亦可精细调整。
   const limits = {sidebar: [210, 370], inspector: [285, 480]};
   const handles = [
-    {node: byId("sidebarResize"), kind: "sidebar", property: "--myth-sidebar-width", fallback: 248},
-    {node: byId("inspectorResize"), kind: "inspector", property: "--myth-inspector-width", fallback: 340},
+    {node: byId("sidebarResize"), kind: "sidebar", property: "--myth-sidebar-width", fallback: 228},
+    {node: byId("inspectorResize"), kind: "inspector", property: "--myth-inspector-width", fallback: 300},
   ];
   function applyWidth(item, width) {
     const [min, max] = limits[item.kind];
