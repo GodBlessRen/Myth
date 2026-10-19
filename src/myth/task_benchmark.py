@@ -17,24 +17,11 @@ from .domain import canonical_json, digest_json
 from .domains.information import IntentPick, IntentRoute
 from .models import ModelResult
 from .platform.trial_statistics import case_clustered_sign_test
+from .platform.context_materiality import CONTEXT_BENCHMARK_ARMS
 from .providers import create_provider
 from .runtime import MythRuntime
 from .session_statistics import usage_measurements
 from .workspace import Workspace
-
-
-# 四种 Context 受控组保留同一组基础 Harness 能力，只消融因果和相关性。
-# 命名属于 disposable Benchmark，不进入产品设置或授予新的执行许可。
-_COMMON_CONTEXT_MECHANISMS = (
-    "action_fusion", "context_compaction", "observation_recall",
-)
-CONTEXT_BENCHMARK_ARMS = {
-    "context-baseline": _COMMON_CONTEXT_MECHANISMS,
-    "context-causal": _COMMON_CONTEXT_MECHANISMS + ("context_causal_guard",),
-    "context-relevance": _COMMON_CONTEXT_MECHANISMS + ("context_relevance_ranking",),
-    "context-full": _COMMON_CONTEXT_MECHANISMS
-    + ("context_causal_guard", "context_relevance_ranking"),
-}
 
 
 # 路由消融策略；所有任务选择 Agent，其他 Runtime、工具和预算保持相同。
@@ -449,6 +436,72 @@ def summarize_context_ablation(trials, arms, case_ids, repeats, *, kind, complet
         pair["case_id"] for pair in factorial_blocks
         if pair["falsification"]["quality_interaction"] != 0
     })
+    # 影子材料证据按模型机会而非模型文字统计；重复同 Case 不增加独立样本数。
+    frozen_measured = 0
+    frozen_expected = 0
+    frozen_denominator_known = True
+    causal_material_cases: set[str] = set()
+    relevance_material_cases: set[str] = set()
+    unchanged_material_calls = 0
+    for case_id in case_ids:
+        for repeat in range(1, repeats + 1):
+            group = by_block.get((case_id, repeat)) or {}
+            if (case_id, repeat) in duplicate_blocks:
+                frozen_denominator_known = False
+                continue
+            for arm in expected:
+                trial = group.get(arm)
+                if not isinstance(trial, dict):
+                    frozen_denominator_known = False
+                    continue
+                calls = trial.get("model_calls")
+                if type(calls) is not int or calls < 0:
+                    frozen_denominator_known = False
+                    continue
+                frozen_expected += calls
+                records = trial.get("context_activation") or []
+                if not isinstance(records, list):
+                    continue
+                for record in records:
+                    probe = record.get("material_probe") if isinstance(record, dict) else None
+                    if (
+                        not isinstance(probe, dict)
+                        or probe.get("status") != "FROZEN_COMPILER_MEASURED"
+                        or probe.get("current_arm") != arm
+                    ):
+                        continue
+                    comparisons = probe.get("material_contrasts")
+                    if not isinstance(comparisons, dict) or any(
+                        type(value) is not bool for value in comparisons.values()
+                    ) or set(comparisons) != {
+                        "causal_without_relevance", "causal_with_relevance",
+                        "relevance_without_causal", "relevance_with_causal",
+                    }:
+                        continue
+                    frozen_measured += 1
+                    if comparisons["causal_without_relevance"] or comparisons["causal_with_relevance"]:
+                        causal_material_cases.add(case_id)
+                    if comparisons["relevance_without_causal"] or comparisons["relevance_with_causal"]:
+                        relevance_material_cases.add(case_id)
+                    if not any(comparisons.values()):
+                        unchanged_material_calls += 1
+    frozen_materiality = {
+        "method": "frozen-state-4arm-request-material-v1",
+        "scope": "local_provider_neutral_request_compiler_only",
+        "measured_model_opportunities": frozen_measured,
+        "expected_model_opportunities": frozen_expected if frozen_denominator_known else None,
+        "coverage_complete": frozen_denominator_known and frozen_measured == frozen_expected
+        and frozen_expected > 0,
+        "unchanged_model_opportunities": unchanged_material_calls,
+        "causal_material_case_count": len(causal_material_cases),
+        "causal_material_case_ids": sorted(causal_material_cases),
+        "relevance_material_case_count": len(relevance_material_cases),
+        "relevance_material_case_ids": sorted(relevance_material_cases),
+        "provider_wire_verified": False,
+        "causal_attribution": False,
+        "note": "Within one frozen State, shadow-compiled prompt digests isolate local compiler changes. "
+                "This is not an external provider-wire trace or evidence of task-quality causality.",
+    }
     falsification = {
         "method": "observed-2x2-quality-factorial-v1",
         "hypothesis": "each enabled mechanism is non-regressing on the independent oracle",
@@ -467,6 +520,7 @@ def summarize_context_ablation(trials, arms, case_ids, repeats, *, kind, complet
             for pair in factorial_blocks
         ),
         "material_intervention_verified": None,
+        "frozen_compiler_materiality": frozen_materiality,
         "causal_attribution": False,
         "note": (
             "Activation proves only frozen mechanism configuration, not that the model-visible "
@@ -621,6 +675,8 @@ def _trial(root, case, arm, settings, provider, *, context_mechanisms=None):
                     "context_mode": report.get("context_mode"),
                     "selected": len(report.get("selected") or []),
                     "bytes_used": report.get("bytes_used"),
+                    # 只带规范化摘要与差分，不把影子 Prompt 的原文复制进报告。
+                    "material_probe": report.get("material_probe"),
                 })
             for t in turns:
                 for activity in t["activities"]:

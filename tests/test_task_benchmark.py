@@ -117,10 +117,16 @@ class TaskBenchmarkTests(unittest.TestCase):
             self.assertEqual(ablation["cost"]["input_tokens"]["paired_samples"], 2)
             self.assertIsNone(ablation["cost"]["input_tokens"]["delta"])
             self.assertEqual(ablation["activation_mismatch_count"], 0)
+            # 完整夹具的每次模型机会均需留下同状态影子编译证据。
+            self.assertTrue(ablation["falsification"]["frozen_compiler_materiality"]["coverage_complete"])
             for trial in report["trials"]:
                 self.assertEqual(trial["harness_mechanisms"], list(CONTEXT_BENCHMARK_ARMS[trial["arm"]]))
                 self.assertEqual(trial["usage_samples"]["input_tokens"], trial["model_calls"])
                 self.assertGreater(trial["serialized_request_bytes"], 0)
+                self.assertTrue(all(
+                    record["material_probe"]["status"] == "FROZEN_COMPILER_MEASURED"
+                    for record in trial["context_activation"]
+                ))
                 self.assertTrue(all(
                     record["causality"] == (
                         "causal-active-set-v2"

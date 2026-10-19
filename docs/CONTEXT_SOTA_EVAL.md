@@ -68,6 +68,21 @@ python -m myth.cli task-benchmark --context-ablation --suite evals/context-heldo
 
 `Provider` 的 `input_tokens` 是派发后计量，不是预调接口的精确 tokenizer。当前 Context 预算继续使用保守软字节预算；`context_cost_calibration` 是实测历史比例，不能据此无条件扩容。若真实 Token 窗口预检仍缺测，必须保持原 fallback。
 
+## FRAMEBREAKER · 冻结态模型材料反证
+
+先前四臂 Context 实验只证明配置生效，不能证明开关在当前任务里真的改变了
+模型可见信息。现在每次**实际模型决策前**，仅对四臂实验在**同一 State、
+Settings、Activities、Control** 上进行四次纯 Context 编译（影子编译），
+比较去掉本地 `context_report` 后的规范模型请求 SHA-256。
+
+- `context_activation[].material_probe` 保存四臂摘要、实际 Arm 一致性及四方向差分；不保存额外 Prompt 原文，不派发影子请求，也不创建 Ticket/Receipt。
+- `context_ablation.falsification.frozen_compiler_materiality` 按模型机会统计观测覆盖、无差异机会，以及按**独立 Case**去重的 Causality/Relevance 材料变化。影子编译失败为 `UNVERIFIED`，不妨碍原正常执行。
+- 原始请求对象由内容寻址仓库存放。离线复核可重新计算**实际请求**的模型可见摘要并检查报告自洽；其他三份反事实请求摘要仍属于本机 Compiler 记录，非可独立核对的 Provider wire capture。
+- 本阶段**不修改** `ready_for_separate_heldout_review` / Promote 条件；`material_intervention_verified` 仍为 `null`，`causal_attribution=false`。观察到请求字节变化，不代表该变化改善独立任务 Oracle，更不意味着确认神经元因果解释。
+
+由此可以识别「开关打开但输入没变化」的空干预，以及真正改变请求材料的 Case，
+下一阶段应据此筛选最有辨别力的真实 Provider 配对实验，而不是扩大样本量掩盖空干预。
+
 ## The Last Mile：Case-Clustered 与双阶段复核
 
 单次 `input_tokens` 下降不再足以通过研究候选门槛。`context_ablation.paired_significance` 将同一 Case 的全部重复试次视作**一个**比较单元，事先指定 `input_tokens` 为唯一显著性主指标，使用单侧精确符号检验（Exact Sign Test）：
