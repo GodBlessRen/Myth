@@ -21,6 +21,7 @@ from ..models import ModelMessage, ModelRequest, StepDecision, ProviderKnownFail
 from ..platform.subagents import default_subagents
 from ..platform.tool_discovery import describe_tool, search_tools, visible_tool_ids
 from ..platform.action_frontier import build_action_frontier, select_action_candidate
+from ..platform.context_materiality import frozen_context_material_probe
 from ..strategies import LiveInformationController, RuleIntentPicker
 from ..verification import SqliteVerificationProfiles
 from ..failures import failure_result, observe_failure
@@ -221,6 +222,26 @@ class LocalConversationExecution:
             activities,
             control=turn.get("control"),
         )
+        # 仅四臂基准使用影子编译：冻结同一 State，变化两项 Context 策略。
+        # 实际 Provider 请求只派发一次，诊断失败不会创造额外模型 Ticket。
+        if snapshot.get("evaluation_harness_mechanisms") is not None:
+            material = frozen_context_material_probe(
+                request,
+                snapshot["evaluation_harness_mechanisms"],
+                lambda mechanisms: conversation_request(
+                    turn["settings"],
+                    {**snapshot, "evaluation_harness_mechanisms": list(mechanisms)},
+                    turn["snapshot"]["messages"],
+                    activities,
+                    control=turn.get("control"),
+                ),
+            )
+            if material is not None:
+                # ModelRequest 为 frozen dataclass；替换报告而非修改请求字段/共享快照。
+                request = replace(
+                    request,
+                    context_report={**(request.context_report or {}), "material_probe": material},
+                )
         return self.repository.decisions.request_decision(
             run_id=turn["run_id"],
             provider=provider,
