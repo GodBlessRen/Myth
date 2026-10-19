@@ -35,6 +35,13 @@ class ContextReleaseLastMileTests(unittest.TestCase):
     # 在临时 SQLite、不可变对象和模型收据中写入同一次虚拟调用，测试核对不依赖报告自述。
     def synthetic_receipt(self, evidence, run_id, attempt, activation, usage):
         request = {
+            "model": "test-model:exact",
+            "messages": [{"role": "user", "content": "synthetic request fixture"}],
+            "response_schema": {},
+            "max_output_tokens": 128,
+            "thinking": False,
+            "num_ctx": 8192,
+            "temperature": 0.0,
             "context_report": {
                 "governance": {
                     "causality": activation["causality"],
@@ -55,7 +62,8 @@ class ContextReleaseLastMileTests(unittest.TestCase):
 
         request_ref = write_object(request)
         response_ref = write_object({"status": "synthetic"})
-        request_digest = hashlib.sha256(attempt.encode("utf-8")).hexdigest()
+        # 合成票据也必须绑定真实冻结请求内容；随机尝试身份不能替代模型请求摘要。
+        request_digest = digest_json(request)
         with closing(sqlite3.connect(evidence / "runtime.db")) as db, db:
             db.execute("CREATE TABLE workspace_turns(run_id TEXT PRIMARY KEY,status TEXT)")
             db.execute(
